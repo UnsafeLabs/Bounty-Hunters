@@ -256,9 +256,8 @@ class TLSHandshake:
             self._derive_master_secret()
             return True
 
-        # BUG 4: bare except with pass silently swallows all errors
-        except:
-            pass
+        except (ValueError, struct.error):
+            return False
         return False
 
     def _derive_master_secret(self) -> None:
