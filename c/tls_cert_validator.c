@@ -75,7 +75,7 @@ static int compute_fingerprint(X509 *cert, unsigned char *out, size_t out_len)
 
 static int match_fingerprint(const unsigned char *fp1, const unsigned char *fp2)
 {
-    return memcmp(fp1, fp2, FINGERPRINT_LEN) == 0;
+    return CRYPTO_memcmp(fp1, fp2, FINGERPRINT_LEN) == 0;
 }
 
 static int check_expiry(X509 *cert)
@@ -189,9 +189,9 @@ static void cleanup_cert_store(cert_store_t *store)
     while (entry) {
         next = entry->next;
         X509_free(entry->cert);
+        log_cert_event(LOG_LEVEL_DEBUG, "freed cert store entry: %s", entry->issuer);
         free(entry->subject);
         free(entry->issuer);
-        log_cert_event(LOG_LEVEL_DEBUG, "freed cert store entry: %s", entry->issuer);
         free(entry);
         entry = next;
     }
