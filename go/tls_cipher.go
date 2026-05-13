@@ -204,9 +204,6 @@ func (r *SuiteRegistry) FilterWeakSuites(suites []*CipherSuite) []*CipherSuite {
 // SortByPreference returns a copy of the slice ordered by server
 // preference. AEAD suites should be preferred over non-AEAD, and
 // higher strength suites should come first within each group.
-//
-// BUG(4): The AEAD comparison is inverted — non-AEAD suites end up
-// ranked above AEAD suites.
 func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 	sorted := make([]*CipherSuite, len(suites))
 	copy(sorted, suites)
@@ -214,9 +211,8 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 	sort.SliceStable(sorted, func(i, j int) bool {
 		si, sj := sorted[i], sorted[j]
 
-		// BUG(4): operator is flipped; should be si.IsAEAD && !sj.IsAEAD
 		if si.IsAEAD != sj.IsAEAD {
-			return !si.IsAEAD && sj.IsAEAD
+			return si.IsAEAD && !sj.IsAEAD
 		}
 
 		// Higher strength first
