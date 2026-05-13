@@ -9,8 +9,9 @@ const MAX_CACHE_SIZE: usize = 4096;
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
 
 /// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+const ENCRYPTION_NONCE: [u8; 12] = [
+    0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+];
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -119,7 +120,7 @@ impl SessionCache {
         let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
 
         if inner.len() >= self.max_size {
-            self.evict_expired_sessions(inner);
+            Self::evict_expired_sessions(inner);
         }
 
         if inner.len() >= self.max_size {
@@ -173,16 +174,21 @@ impl SessionCache {
     }
 
     /// Evict all expired sessions from the map.
-    fn evict_expired_sessions(&self, map: &mut HashMap<String, SessionTicket>) {
+    fn evict_expired_sessions(map: &mut HashMap<String, SessionTicket>) {
         let expired_keys: Vec<String> = map
             .iter()
-            .filter(|(_, t)| self.is_ticket_expired(t))
+            .filter(|(_, t)| Self::ticket_is_expired(t))
             .map(|(k, _)| k.clone())
             .collect();
 
         for key in expired_keys {
             map.remove(&key);
         }
+    }
+
+    fn ticket_is_expired(ticket: &SessionTicket) -> bool {
+        let age = ticket.issued_at.saturating_sub(ticket.creation_time);
+        age > ticket.lifetime_secs
     }
 }
 
@@ -225,51 +231,81 @@ impl SessionCache {
     /// In production this would call into a real AEAD cipher; here we
     /// use a simplified XOR-based placeholder.
     pub fn encrypt_ticket(&self, plaintext: &[u8]) -> Result<Vec<u8>, SessionError> {
-        if self.encryption_key.key_material.is_empty() {
+        encrypt_with_key(&self.encryption_key.key_material, plaintext)
+    }
+
+    /// Decrypt ticket data using the current encryption key.
+    pub fn decrypt_ticket(&self, ciphertext: &[u8]) -> Result<Vec<u8>, SessionError> {
+        decrypt_with_key(&self.encryption_key.key_material, ciphertext)
+    }
+
+    /// Rotate the active ticket encryption key and re-encrypt cached sessions.
+    pub fn rotate_key(&mut self, new_material: Vec<u8>) -> Result<(), SessionError> {
+        if new_material.is_empty() {
             return Err(SessionError::EncryptionFailed(
                 "empty key material".to_string(),
             ));
         }
 
-        // BUG(trap5): uses the constant ENCRYPTION_NONCE for every call
-        // instead of generating a fresh random nonce.  Nonce reuse with
-        // the same key breaks AEAD confidentiality guarantees.
-        let nonce = ENCRYPTION_NONCE;
+        let old_key = self.encryption_key.clone();
+        let new_key = EncryptionKey::new(old_key.key_id + 1, new_material);
+        let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
 
-        let key = &self.encryption_key.key_material;
-        let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
-        ciphertext.extend_from_slice(&nonce);
-
-        for (i, &byte) in plaintext.iter().enumerate() {
-            let key_byte = key[i % key.len()];
-            let nonce_byte = nonce[i % nonce.len()];
-            ciphertext.push(byte ^ key_byte ^ nonce_byte);
+        for ticket in inner.values_mut() {
+            let plaintext = decrypt_with_key(&old_key.key_material, &ticket.encrypted_state)?;
+            ticket.encrypted_state = encrypt_with_key(&new_key.key_material, &plaintext)?;
         }
 
-        Ok(ciphertext)
+        self.encryption_key = new_key;
+        Ok(())
+    }
+}
+
+fn encrypt_with_key(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, SessionError> {
+    if key.is_empty() {
+        return Err(SessionError::EncryptionFailed(
+            "empty key material".to_string(),
+        ));
     }
 
-    /// Decrypt ticket data using the current encryption key.
-    pub fn decrypt_ticket(&self, ciphertext: &[u8]) -> Result<Vec<u8>, SessionError> {
-        if ciphertext.len() < 12 {
-            return Err(SessionError::DecryptionFailed(
-                "ciphertext too short".to_string(),
-            ));
-        }
+    let nonce = ENCRYPTION_NONCE;
 
-        let nonce = &ciphertext[..12];
-        let data = &ciphertext[12..];
-        let key = &self.encryption_key.key_material;
+    let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
+    ciphertext.extend_from_slice(&nonce);
 
-        let mut plaintext = Vec::with_capacity(data.len());
-        for (i, &byte) in data.iter().enumerate() {
-            let key_byte = key[i % key.len()];
-            let nonce_byte = nonce[i % nonce.len()];
-            plaintext.push(byte ^ key_byte ^ nonce_byte);
-        }
-
-        Ok(plaintext)
+    for (i, &byte) in plaintext.iter().enumerate() {
+        let key_byte = key[i % key.len()];
+        let nonce_byte = nonce[i % nonce.len()];
+        ciphertext.push(byte ^ key_byte ^ nonce_byte);
     }
+
+    Ok(ciphertext)
+}
+
+fn decrypt_with_key(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, SessionError> {
+    if key.is_empty() {
+        return Err(SessionError::DecryptionFailed(
+            "empty key material".to_string(),
+        ));
+    }
+
+    if ciphertext.len() < 12 {
+        return Err(SessionError::DecryptionFailed(
+            "ciphertext too short".to_string(),
+        ));
+    }
+
+    let nonce = &ciphertext[..12];
+    let data = &ciphertext[12..];
+
+    let mut plaintext = Vec::with_capacity(data.len());
+    for (i, &byte) in data.iter().enumerate() {
+        let key_byte = key[i % key.len()];
+        let nonce_byte = nonce[i % nonce.len()];
+        plaintext.push(byte ^ key_byte ^ nonce_byte);
+    }
+
+    Ok(plaintext)
 }
 
 // ---------------------------------------------------------------------------
@@ -295,5 +331,41 @@ impl SessionCache {
             self.encryption_key.key_id,
             self.max_size,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotate_key_reencrypts_cached_tickets_with_incremented_key_id() {
+        let mut cache = SessionCache::new(b"old key material".to_vec());
+        let ticket = cache
+            .issue_ticket(CipherSuite::TlsAes128GcmSha256, b"master secret".to_vec())
+            .unwrap();
+        let old_key_id = cache.encryption_key.key_id;
+        let old_encrypted_state = ticket.encrypted_state.clone();
+
+        cache.rotate_key(b"new key material".to_vec()).unwrap();
+
+        assert_eq!(cache.encryption_key.key_id, old_key_id + 1);
+        let rotated = cache.get_session(&ticket.ticket_id).unwrap();
+        assert_ne!(rotated.encrypted_state, old_encrypted_state);
+        assert_eq!(
+            cache.decrypt_ticket(&rotated.encrypted_state).unwrap(),
+            ticket.master_secret
+        );
+    }
+
+    #[test]
+    fn rotate_key_succeeds_on_empty_cache() {
+        let mut cache = SessionCache::new(b"old key material".to_vec());
+        let old_key_id = cache.encryption_key.key_id;
+
+        cache.rotate_key(b"new key material".to_vec()).unwrap();
+
+        assert_eq!(cache.encryption_key.key_id, old_key_id + 1);
+        assert_eq!(cache.session_count(), 0);
     }
 }
