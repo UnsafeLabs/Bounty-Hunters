@@ -2,15 +2,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rand::rngs::OsRng;
+use rand::RngCore;
+
 /// Maximum number of cached sessions before eviction kicks in.
 const MAX_CACHE_SIZE: usize = 4096;
 
 /// Default ticket lifetime in seconds (2 hours).
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
-
-/// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -119,7 +118,7 @@ impl SessionCache {
         let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
 
         if inner.len() >= self.max_size {
-            self.evict_expired_sessions(inner);
+            Self::evict_expired_sessions(inner);
         }
 
         if inner.len() >= self.max_size {
@@ -173,16 +172,25 @@ impl SessionCache {
     }
 
     /// Evict all expired sessions from the map.
-    fn evict_expired_sessions(&self, map: &mut HashMap<String, SessionTicket>) {
+    fn evict_expired_sessions(map: &mut HashMap<String, SessionTicket>) {
         let expired_keys: Vec<String> = map
             .iter()
-            .filter(|(_, t)| self.is_ticket_expired(t))
+            .filter(|(_, t)| Self::is_ticket_expired_at_current_time(t))
             .map(|(k, _)| k.clone())
             .collect();
 
         for key in expired_keys {
             map.remove(&key);
         }
+    }
+
+    fn is_ticket_expired_at_current_time(ticket: &SessionTicket) -> bool {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
+
+        now.saturating_sub(ticket.issued_at) > ticket.lifetime_secs
     }
 }
 
@@ -231,10 +239,10 @@ impl SessionCache {
             ));
         }
 
-        // BUG(trap5): uses the constant ENCRYPTION_NONCE for every call
-        // instead of generating a fresh random nonce.  Nonce reuse with
-        // the same key breaks AEAD confidentiality guarantees.
-        let nonce = ENCRYPTION_NONCE;
+        let mut nonce = [0u8; 12];
+        OsRng
+            .try_fill_bytes(&mut nonce)
+            .map_err(|err| SessionError::EncryptionFailed(err.to_string()))?;
 
         let key = &self.encryption_key.key_material;
         let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
@@ -269,6 +277,41 @@ impl SessionCache {
         }
 
         Ok(plaintext)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encrypt_ticket_uses_fresh_nonce_for_each_call() {
+        let cache = SessionCache::new(b"test-key".to_vec());
+
+        let first = cache
+            .encrypt_ticket(b"same_data")
+            .expect("first encryption should succeed");
+        let second = cache
+            .encrypt_ticket(b"same_data")
+            .expect("second encryption should succeed");
+
+        assert_ne!(first, second);
+        assert_ne!(&first[..12], &second[..12]);
+    }
+
+    #[test]
+    fn decrypt_ticket_round_trips_encrypted_payload() {
+        let cache = SessionCache::new(b"test-key".to_vec());
+        let plaintext = b"session master secret bytes";
+
+        let ciphertext = cache
+            .encrypt_ticket(plaintext)
+            .expect("encryption should succeed");
+        let decrypted = cache
+            .decrypt_ticket(&ciphertext)
+            .expect("decryption should succeed");
+
+        assert_eq!(decrypted, plaintext);
     }
 }
 
