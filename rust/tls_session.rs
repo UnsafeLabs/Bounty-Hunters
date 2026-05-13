@@ -134,9 +134,7 @@ impl SessionCache {
     ///
     /// Returns the ticket if it exists **and** has not expired.
     pub fn get_session(&self, ticket_id: &str) -> Option<&SessionTicket> {
-        // BUG(trap1): `.unwrap()` panics when the ticket_id is not present
-        // in the map.  Should use `?` or a match instead.
-        let ticket = self.cache.get(ticket_id).unwrap();
+        let ticket = self.cache.get(ticket_id)?;
 
         if self.is_ticket_expired(ticket) {
             return None;
@@ -295,5 +293,99 @@ impl SessionCache {
             self.encryption_key.key_id,
             self.max_size,
         )
+    }
+}
+// Test suite for issue #22: Fix get_session() unwrap panic on missing ticket
+//
+// Acceptance Criteria:
+// - get_session("nonexistent_ticket") returns None instead of panicking
+// - get_session("tkt_1_12345") still returns Some(&ticket) when the ticket exists and is not expired
+// - get_session() returns None for an existing but expired ticket without panicking
+// - All existing tests still pass
+// - Add new tests covering the fixed bugs
+
+#[cfg(test)]
+mod test_issue_22 {
+    use super::*;
+
+    fn create_test_cache() -> SessionCache {
+        SessionCache::new(vec![0x42; 32])
+    }
+
+    #[test]
+    fn test_get_session_nonexistent_returns_none() {
+        let cache = create_test_cache();
+        
+        let result = cache.get_session("nonexistent_ticket");
+        
+        assert!(result.is_none(), "get_session() should return None for nonexistent ticket");
+        println!("✓ get_session(\"nonexistent_ticket\") returns None without panic");
+    }
+
+    #[test]
+    fn test_get_session_existing_valid_ticket_returns_some() {
+        let mut cache = create_test_cache();
+        
+        let ticket = SessionTicket {
+            ticket_id: "tkt_1_12345".to_string(),
+            cipher_suite: 0x1301,
+            master_secret: vec![0x01; 48],
+            issued_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_secs(),
+            lifetime_secs: 7200,
+            encrypted_state: vec![],
+            creation_time: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_secs(),
+        };
+        
+        cache.store_session(ticket).unwrap();
+        
+        let result = cache.get_session("tkt_1_12345");
+        
+        assert!(result.is_some(), "get_session() should return Some for existing valid ticket");
+        println!("✓ get_session(\"tkt_1_12345\") returns Some(&ticket) for valid ticket");
+    }
+
+    #[test]
+    fn test_get_session_expired_ticket_returns_none() {
+        let mut cache = create_test_cache();
+        
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
+        
+        // Create ticket issued 7201 seconds ago (expired)
+        let ticket = SessionTicket {
+            ticket_id: "tkt_expired".to_string(),
+            cipher_suite: 0x1301,
+            master_secret: vec![0x01; 48],
+            issued_at: now.saturating_sub(7201),
+            lifetime_secs: 7200,
+            encrypted_state: vec![],
+            creation_time: now.saturating_sub(7201),
+        };
+        
+        cache.store_session(ticket).unwrap();
+        
+        let result = cache.get_session("tkt_expired");
+        
+        assert!(result.is_none(), "get_session() should return None for expired ticket");
+        println!("✓ get_session() returns None for expired ticket without panic");
+    }
+
+    #[test]
+    fn test_get_session_multiple_missing_tickets() {
+        let cache = create_test_cache();
+        
+        assert!(cache.get_session("missing_1").is_none());
+        assert!(cache.get_session("missing_2").is_none());
+        assert!(cache.get_session("").is_none());
+        
+        println!("✓ Multiple get_session() calls with missing tickets return None");
     }
 }
