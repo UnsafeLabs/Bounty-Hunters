@@ -105,6 +105,7 @@ parse_tls_record:
     jle .type_ok                ; BUG: should be jl, not jle -- but wait,
                                 ; 0x18 (heartbeat) is valid so jle is needed...
                                 ; actually TLS_CT_MAX is 0x18 and we want <= 0x18
+    jg .invalid_type
 
     ; --- Actually the check above is wrong for a different reason ---
     ; Content type 0x17 is application_data which is VALID, and 0x18
