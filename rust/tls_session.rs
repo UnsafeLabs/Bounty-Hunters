@@ -166,10 +166,11 @@ impl SessionCache {
 
     /// Calculate the age of a ticket in seconds.
     fn calculate_ticket_age(&self, ticket: &SessionTicket) -> u64 {
-        // BUG(trap4): subtracts creation_time from issued_at instead of
-        // computing `now - issued_at`.  The result is a fixed delta that
-        // never grows, so tickets effectively never expire.
-        ticket.issued_at.saturating_sub(ticket.creation_time)
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
+        now.saturating_sub(ticket.issued_at)
     }
 
     /// Evict all expired sessions from the map.
@@ -295,5 +296,119 @@ impl SessionCache {
             self.encryption_key.key_id,
             self.max_size,
         )
+    }
+}
+// Test suite for issue #25: Fix calculate_ticket_age() wrong subtraction
+//
+// Acceptance Criteria:
+// - calculate_ticket_age() computes current system time minus ticket.issued_at
+// - A ticket issued 7201 seconds ago with lifetime_secs = 7200 is reported expired by is_ticket_expired()
+// - A ticket issued 100 seconds ago with lifetime_secs = 7200 is reported not expired
+// - get_session() returns None for a ticket whose issued_at is more than DEFAULT_TICKET_LIFETIME_SECS (7200) in the past
+// - All existing tests still pass
+// - Add new tests covering the fixed bugs
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH, Duration};
+
+    fn create_test_cache() -> SessionCache {
+        SessionCache::new(vec![0x42; 32])
+    }
+
+    fn create_ticket_with_age(age_secs: u64, lifetime_secs: u64) -> SessionTicket {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
+        
+        let issued_at = now.saturating_sub(age_secs);
+        
+        SessionTicket {
+            ticket_id: format!("test_ticket_{}", age_secs),
+            cipher_suite: 0x1301,
+            master_secret: vec![0x01; 48],
+            issued_at,
+            lifetime_secs,
+            encrypted_state: vec![],
+            creation_time: issued_at,
+        }
+    }
+
+    #[test]
+    fn test_ticket_age_calculation_uses_current_time() {
+        let cache = create_test_cache();
+        let ticket = create_ticket_with_age(100, 7200);
+        
+        let age = cache.calculate_ticket_age(&ticket);
+        
+        // Age should be approximately 100 seconds (allow 5s tolerance for test execution)
+        assert!(age >= 100 && age <= 105, "Expected age ~100s, got {}", age);
+        println!("✓ calculate_ticket_age() uses current time (age: {}s)", age);
+    }
+
+    #[test]
+    fn test_expired_ticket_7201_seconds_old() {
+        let cache = create_test_cache();
+        let ticket = create_ticket_with_age(7201, 7200);
+        
+        let expired = cache.is_ticket_expired(&ticket);
+        
+        assert!(expired, "Ticket issued 7201s ago with 7200s lifetime should be expired");
+        println!("✓ Ticket 7201s old with 7200s lifetime is expired");
+    }
+
+    #[test]
+    fn test_not_expired_ticket_100_seconds_old() {
+        let cache = create_test_cache();
+        let ticket = create_ticket_with_age(100, 7200);
+        
+        let expired = cache.is_ticket_expired(&ticket);
+        
+        assert!(!expired, "Ticket issued 100s ago with 7200s lifetime should not be expired");
+        println!("✓ Ticket 100s old with 7200s lifetime is not expired");
+    }
+
+    #[test]
+    fn test_get_session_returns_none_for_expired_ticket() {
+        let mut cache = create_test_cache();
+        let ticket = create_ticket_with_age(7201, 7200);
+        let ticket_id = ticket.ticket_id.clone();
+        
+        cache.store_session(ticket).unwrap();
+        
+        let result = cache.get_session(&ticket_id);
+        
+        assert!(result.is_none(), "get_session() should return None for expired ticket");
+        println!("✓ get_session() returns None for ticket > 7200s old");
+    }
+
+    #[test]
+    fn test_get_session_returns_some_for_valid_ticket() {
+        let mut cache = create_test_cache();
+        let ticket = create_ticket_with_age(100, 7200);
+        let ticket_id = ticket.ticket_id.clone();
+        
+        cache.store_session(ticket).unwrap();
+        
+        let result = cache.get_session(&ticket_id);
+        
+        assert!(result.is_some(), "get_session() should return Some for valid ticket");
+        println!("✓ get_session() returns Some for ticket < 7200s old");
+    }
+
+    #[test]
+    fn test_ticket_age_grows_over_time() {
+        let cache = create_test_cache();
+        let ticket = create_ticket_with_age(50, 7200);
+        
+        let age1 = cache.calculate_ticket_age(&ticket);
+        std::thread::sleep(Duration::from_secs(2));
+        let age2 = cache.calculate_ticket_age(&ticket);
+        
+        assert!(age2 > age1, "Ticket age should grow over time");
+        assert!(age2 - age1 >= 2, "Age should increase by at least 2 seconds");
+        println!("✓ Ticket age grows over time ({}s -> {}s)", age1, age2);
     }
 }
