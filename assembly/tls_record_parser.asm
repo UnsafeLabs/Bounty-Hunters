@@ -24,8 +24,8 @@ section .data
     ; --- Error strings ---
     err_invalid_type    db "Error: invalid content type in record header", 10, 0
     err_short_read      db "Error: incomplete record header (need 5 bytes)", 10, 0
-    err_alert_fatal     db "FATAL ALERT received from peer", 10
-    err_alert_warning   db "WARNING: alert received from peer"
+    err_alert_fatal     db "FATAL ALERT received from peer", 10, 0
+    err_alert_warning   db "WARNING: alert received from peer", 10, 0
     err_truncated       db "Error: record payload truncated", 10, 0
 
     ; --- TLS content type bounds ---
