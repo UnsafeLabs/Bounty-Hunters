@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Maximum number of cached sessions before eviction kicks in.
@@ -8,9 +9,7 @@ const MAX_CACHE_SIZE: usize = 4096;
 /// Default ticket lifetime in seconds (2 hours).
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
 
-/// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+static NONCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -231,10 +230,7 @@ impl SessionCache {
             ));
         }
 
-        // BUG(trap5): uses the constant ENCRYPTION_NONCE for every call
-        // instead of generating a fresh random nonce.  Nonce reuse with
-        // the same key breaks AEAD confidentiality guarantees.
-        let nonce = ENCRYPTION_NONCE;
+        let nonce = fresh_nonce();
 
         let key = &self.encryption_key.key_material;
         let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
@@ -270,6 +266,19 @@ impl SessionCache {
 
         Ok(plaintext)
     }
+}
+
+fn fresh_nonce() -> [u8; 12] {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_nanos();
+    let counter = NONCE_COUNTER.fetch_add(1, Ordering::Relaxed) as u128;
+    let mixed = now ^ counter.rotate_left(17) ^ ((std::process::id() as u128) << 32);
+    let bytes = mixed.to_le_bytes();
+    let mut nonce = [0u8; 12];
+    nonce.copy_from_slice(&bytes[..12]);
+    nonce
 }
 
 // ---------------------------------------------------------------------------
