@@ -43,8 +43,8 @@ type SuiteRegistry struct {
 	knownSuites []*CipherSuite
 	minStrength CipherStrength
 	preferredID uint16
-	suiteCache  map[uint16]*CipherSuite // BUG(5): unprotected shared cache
-	mu          sync.Mutex              // guards knownSuites only
+	suiteCache  map[uint16]*CipherSuite
+	mu          sync.RWMutex // guards knownSuites and suiteCache
 }
 
 // NewSuiteRegistry creates a registry pre-loaded with common cipher suites.
@@ -137,8 +137,17 @@ func (r *SuiteRegistry) loadDefaults() {
 
 // lookupSuite retrieves a suite from the cache, falling back to a linear
 // scan of knownSuites. Results are cached for faster repeated lookups.
-// BUG(5): suiteCache is read/written without holding r.mu.
 func (r *SuiteRegistry) lookupSuite(id uint16) *CipherSuite {
+	r.mu.RLock()
+	if cached, ok := r.suiteCache[id]; ok {
+		r.mu.RUnlock()
+		return cached
+	}
+	r.mu.RUnlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if cached, ok := r.suiteCache[id]; ok {
 		return cached
 	}
@@ -232,10 +241,8 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 }
 
 // ConcurrentLookup demonstrates a batch lookup of suite IDs from
-// multiple goroutines. Each goroutine writes to the shared suiteCache
-// without synchronization.
-// BUG(5): data race — multiple goroutines call lookupSuite which reads
-// and writes r.suiteCache without locking.
+// multiple goroutines. lookupSuite synchronizes cache reads and writes,
+// so this method can safely be used under the race detector.
 func (r *SuiteRegistry) ConcurrentLookup(ids []uint16) ([]*CipherSuite, error) {
 	results := make([]*CipherSuite, len(ids))
 	var wg sync.WaitGroup
