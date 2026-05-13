@@ -12,10 +12,20 @@ static char *tracked_issuer = NULL;
 
 static int append_log(const char *fmt, va_list ap)
 {
-    int written = vsnprintf(captured_log + captured_log_len,
-                            sizeof(captured_log) - captured_log_len,
-                            fmt, ap);
-    if (written > 0)
+    size_t remaining = 0;
+    int written = 0;
+
+    if (captured_log_len >= sizeof(captured_log))
+        return 0;
+
+    remaining = sizeof(captured_log) - captured_log_len;
+    written = vsnprintf(captured_log + captured_log_len, remaining, fmt, ap);
+    if (written <= 0)
+        return written;
+
+    if ((size_t)written >= remaining)
+        captured_log_len = sizeof(captured_log) - 1;
+    else
         captured_log_len += (size_t)written;
     return written;
 }
