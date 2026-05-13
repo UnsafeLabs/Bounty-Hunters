@@ -90,10 +90,10 @@ class TLSHandshakeClient {
 
     const extensions = Buffer.concat([
       this._buildSNIExtension(this.hostname),
-      this._buildSupportedVersionsExtension(),
       this._buildSupportedGroupsExtension(),
       this._buildSignatureAlgorithmsExtension(),
       this._buildKeyShareExtension(),
+      this._buildSupportedVersionsExtension(),
     ]);
 
     const body = Buffer.concat([
