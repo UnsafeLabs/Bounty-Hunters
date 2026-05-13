@@ -270,6 +270,38 @@ impl SessionCache {
 
         Ok(plaintext)
     }
+
+    /// Rotate the encryption key and re-encrypt all cached tickets.
+    ///
+    /// Creates a new EncryptionKey with key_id incremented by 1, then
+    /// decrypts and re-encrypts every ticket's encrypted_state with the new key.
+    pub fn rotate_key(&mut self, new_material: Vec<u8>) -> Result<(), SessionError> {
+        let old_key = self.encryption_key.clone();
+        let new_key = EncryptionKey::new(old_key.key_id + 1, new_material);
+        
+        // Temporarily swap to new key for re-encryption
+        self.encryption_key = new_key;
+        
+        let inner = Arc::get_mut(&mut self.cache)
+            .ok_or(SessionError::InvalidTicket("cache locked during rotation".to_string()))?;
+        
+        // Re-encrypt all tickets
+        for ticket in inner.values_mut() {
+            // Decrypt with old key
+            let old_encryption_key = self.encryption_key.clone();
+            self.encryption_key = old_key.clone();
+            
+            let plaintext = self.decrypt_ticket(&ticket.encrypted_state)?;
+            
+            // Re-encrypt with new key
+            self.encryption_key = old_encryption_key;
+            let new_ciphertext = self.encrypt_ticket(&plaintext)?;
+            
+            ticket.encrypted_state = new_ciphertext;
+        }
+        
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,5 +327,118 @@ impl SessionCache {
             self.encryption_key.key_id,
             self.max_size,
         )
+    }
+}
+
+#[cfg(test)]
+mod test_issue_24 {
+    use super::*;
+
+    fn create_test_cache() -> SessionCache {
+        SessionCache::new(vec![0x42; 32])
+    }
+
+    #[test]
+    fn test_rotate_key_increments_key_id() {
+        let mut cache = create_test_cache();
+        let old_key_id = cache.encryption_key.key_id;
+        
+        cache.rotate_key(vec![0x99; 32]).unwrap();
+        
+        assert_eq!(cache.encryption_key.key_id, old_key_id + 1);
+        println!("✓ rotate_key() increments key_id by 1");
+    }
+
+    #[test]
+    fn test_rotate_key_re_encrypts_all_tickets() {
+        let mut cache = create_test_cache();
+        
+        // Issue a ticket with old key
+        let ticket = cache.issue_ticket(CipherSuite::TlsAes128GcmSha256, vec![0x01; 48]).unwrap();
+        let old_encrypted = ticket.encrypted_state.clone();
+        
+        // Rotate key
+        cache.rotate_key(vec![0x99; 32]).unwrap();
+        
+        // Get ticket and check encrypted_state changed
+        let updated_ticket = cache.get_session(&ticket.ticket_id).unwrap();
+        assert_ne!(updated_ticket.encrypted_state, old_encrypted);
+        println!("✓ rotate_key() re-encrypts all cached tickets");
+    }
+
+    #[test]
+    fn test_decrypt_after_rotation_returns_original_master_secret() {
+        let mut cache = create_test_cache();
+        
+        let original_master_secret = vec![0x01; 48];
+        let ticket = cache.issue_ticket(CipherSuite::TlsAes128GcmSha256, original_master_secret.clone()).unwrap();
+        
+        // Rotate key
+        cache.rotate_key(vec![0x99; 32]).unwrap();
+        
+        // Get ticket and decrypt its encrypted_state
+        let updated_ticket = cache.get_session(&ticket.ticket_id).unwrap();
+        let decrypted = cache.decrypt_ticket(&updated_ticket.encrypted_state).unwrap();
+        
+        assert_eq!(decrypted, original_master_secret);
+        println!("✓ decrypt_ticket() after rotation returns original master_secret");
+    }
+
+    #[test]
+    fn test_rotate_key_on_empty_cache_succeeds() {
+        let mut cache = create_test_cache();
+        
+        let result = cache.rotate_key(vec![0x99; 32]);
+        
+        assert!(result.is_ok());
+        assert_eq!(cache.encryption_key.key_id, 2);
+        println!("✓ rotate_key() on empty cache succeeds without error");
+    }
+
+    #[test]
+    fn test_multiple_rotations() {
+        let mut cache = create_test_cache();
+        
+        let original_master_secret = vec![0xAB; 48];
+        let ticket = cache.issue_ticket(CipherSuite::TlsAes128GcmSha256, original_master_secret.clone()).unwrap();
+        
+        // Rotate twice
+        cache.rotate_key(vec![0x11; 32]).unwrap();
+        cache.rotate_key(vec![0x22; 32]).unwrap();
+        
+        assert_eq!(cache.encryption_key.key_id, 3);
+        
+        let updated_ticket = cache.get_session(&ticket.ticket_id).unwrap();
+        let decrypted = cache.decrypt_ticket(&updated_ticket.encrypted_state).unwrap();
+        
+        assert_eq!(decrypted, original_master_secret);
+        println!("✓ Multiple rotations preserve master_secret integrity");
+    }
+
+    #[test]
+    fn test_rotate_key_with_multiple_tickets() {
+        let mut cache = create_test_cache();
+        
+        let secrets: Vec<Vec<u8>> = vec![
+            vec![0x01; 48],
+            vec![0x02; 48],
+            vec![0x03; 48],
+        ];
+        
+        let mut ticket_ids = vec![];
+        for secret in &secrets {
+            let ticket = cache.issue_ticket(CipherSuite::TlsAes128GcmSha256, secret.clone()).unwrap();
+            ticket_ids.push(ticket.ticket_id);
+        }
+        
+        cache.rotate_key(vec![0xFF; 32]).unwrap();
+        
+        for (i, ticket_id) in ticket_ids.iter().enumerate() {
+            let ticket = cache.get_session(ticket_id).unwrap();
+            let decrypted = cache.decrypt_ticket(&ticket.encrypted_state).unwrap();
+            assert_eq!(decrypted, secrets[i]);
+        }
+        
+        println!("✓ rotate_key() correctly re-encrypts multiple tickets");
     }
 }
