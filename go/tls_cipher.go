@@ -47,6 +47,8 @@ type SuiteRegistry struct {
 	mu          sync.Mutex              // guards knownSuites only
 }
 
+var hasAESNI = HasAESNI
+
 // NewSuiteRegistry creates a registry pre-loaded with common cipher suites.
 func NewSuiteRegistry(minStrength CipherStrength) *SuiteRegistry {
 	reg := &SuiteRegistry{
@@ -222,6 +224,14 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 		// Higher strength first
 		if si.Strength != sj.Strength {
 			return si.Strength > sj.Strength
+		}
+
+		if si.Strength == sj.Strength && !hasAESNI() {
+			siChaCha := strings.Contains(si.Name, "CHACHA20")
+			sjChaCha := strings.Contains(sj.Name, "CHACHA20")
+			if siChaCha != sjChaCha {
+				return siChaCha
+			}
 		}
 
 		// Larger key size breaks ties
