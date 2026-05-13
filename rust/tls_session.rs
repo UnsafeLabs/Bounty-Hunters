@@ -134,9 +134,7 @@ impl SessionCache {
     ///
     /// Returns the ticket if it exists **and** has not expired.
     pub fn get_session(&self, ticket_id: &str) -> Option<&SessionTicket> {
-        // BUG(trap1): `.unwrap()` panics when the ticket_id is not present
-        // in the map.  Should use `?` or a match instead.
-        let ticket = self.cache.get(ticket_id).unwrap();
+        let ticket = self.cache.get(ticket_id)?;
 
         if self.is_ticket_expired(ticket) {
             return None;
