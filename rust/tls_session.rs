@@ -257,19 +257,62 @@ impl SessionCache {
             ));
         }
 
-        let nonce = &ciphertext[..12];
-        let data = &ciphertext[12..];
-        let key = &self.encryption_key.key_material;
+        xor_ticket_state(ciphertext, &self.encryption_key.key_material)
+            .map_err(SessionError::DecryptionFailed)
+    }
 
-        let mut plaintext = Vec::with_capacity(data.len());
-        for (i, &byte) in data.iter().enumerate() {
-            let key_byte = key[i % key.len()];
-            let nonce_byte = nonce[i % nonce.len()];
-            plaintext.push(byte ^ key_byte ^ nonce_byte);
+    /// Rotate the ticket encryption key and re-encrypt cached sessions.
+    pub fn rotate_key(&mut self, new_material: Vec<u8>) -> Result<(), SessionError> {
+        if new_material.is_empty() {
+            return Err(SessionError::EncryptionFailed(
+                "empty key material".to_string(),
+            ));
         }
 
-        Ok(plaintext)
+        let old_key = self.encryption_key.clone();
+        let new_key = EncryptionKey::new(old_key.key_id + 1, new_material);
+        let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
+
+        for ticket in inner.values_mut() {
+            let plaintext = xor_ticket_state(&ticket.encrypted_state, &old_key.key_material)
+                .map_err(SessionError::DecryptionFailed)?;
+            ticket.encrypted_state = encrypt_with_key(&plaintext, &new_key.key_material);
+        }
+
+        self.encryption_key = new_key;
+        Ok(())
     }
+}
+
+fn encrypt_with_key(plaintext: &[u8], key: &[u8]) -> Vec<u8> {
+    let nonce = ENCRYPTION_NONCE;
+    let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
+    ciphertext.extend_from_slice(&nonce);
+    for (i, &byte) in plaintext.iter().enumerate() {
+        let key_byte = key[i % key.len()];
+        let nonce_byte = nonce[i % nonce.len()];
+        ciphertext.push(byte ^ key_byte ^ nonce_byte);
+    }
+    ciphertext
+}
+
+fn xor_ticket_state(ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
+    if ciphertext.len() < 12 {
+        return Err("ciphertext too short".to_string());
+    }
+    if key.is_empty() {
+        return Err("empty key material".to_string());
+    }
+
+    let nonce = &ciphertext[..12];
+    let data = &ciphertext[12..];
+    let mut plaintext = Vec::with_capacity(data.len());
+    for (i, &byte) in data.iter().enumerate() {
+        let key_byte = key[i % key.len()];
+        let nonce_byte = nonce[i % nonce.len()];
+        plaintext.push(byte ^ key_byte ^ nonce_byte);
+    }
+    Ok(plaintext)
 }
 
 // ---------------------------------------------------------------------------
