@@ -216,7 +216,7 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 
 		// BUG(4): operator is flipped; should be si.IsAEAD && !sj.IsAEAD
 		if si.IsAEAD != sj.IsAEAD {
-			return !si.IsAEAD && sj.IsAEAD
+			return si.IsAEAD && !sj.IsAEAD
 		}
 
 		// Higher strength first
