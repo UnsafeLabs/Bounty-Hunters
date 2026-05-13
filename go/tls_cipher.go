@@ -194,11 +194,16 @@ func (r *SuiteRegistry) FilterWeakSuites(suites []*CipherSuite) []*CipherSuite {
 
 	result := make([]*CipherSuite, 0, len(suites))
 	for _, s := range suites {
-		if s.KeySize >= minKeyBits {
+		if s.KeySize >= minKeyBits && !isBrokenCipherSuite(s) {
 			result = append(result, s)
 		}
 	}
 	return result
+}
+
+func isBrokenCipherSuite(s *CipherSuite) bool {
+	name := strings.ToUpper(s.Name)
+	return strings.Contains(name, "RC4") || strings.Contains(name, "3DES")
 }
 
 // SortByPreference returns a copy of the slice ordered by server
