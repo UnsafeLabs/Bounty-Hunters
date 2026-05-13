@@ -1,0 +1,1 @@
+@tmp/bh_assembly/split/1/assembly/test_version_big_endian_source.py
