@@ -203,9 +203,11 @@ class TLSHandshake:
 
             ext = TLSExtension(ext_type, ext_data)
 
-            # BUG 2: SNI extension (type 0x0000) is parsed but the server_name
-            # field is never extracted from the extension data
-            if ext_type == EXT_EXTENDED_MASTER_SECRET:
+            if ext_type == EXT_SNI:
+                ext.server_name = self._parse_sni_hostname(ext_data)
+                if ext.server_name is not None:
+                    self.server_name = ext.server_name
+            elif ext_type == EXT_EXTENDED_MASTER_SECRET:
                 self.negotiated_ems = True
             elif ext_type == EXT_SIGNATURE_ALGORITHMS:
                 pass  # stored in ext.data for later use
@@ -216,6 +218,31 @@ class TLSHandshake:
             extensions.append(ext)
 
         return extensions
+
+    def _parse_sni_hostname(self, data: bytes) -> Optional[str]:
+        """Decode the first host_name entry from a TLS SNI extension."""
+        if len(data) < 2:
+            return None
+
+        list_len = struct.unpack("!H", data[:2])[0]
+        offset = 2
+        end = min(len(data), offset + list_len)
+
+        while offset + 3 <= end:
+            name_type = data[offset]
+            name_len = struct.unpack("!H", data[offset + 1:offset + 3])[0]
+            offset += 3
+            name_end = offset + name_len
+            if name_end > end:
+                return None
+            if name_type == 0x00:
+                try:
+                    return data[offset:name_end].decode("utf-8")
+                except UnicodeDecodeError:
+                    return None
+            offset = name_end
+
+        return None
 
     def verify_finished(self, received_verify: bytes, label: str) -> bool:
         """
@@ -233,8 +260,7 @@ class TLSHandshake:
             12,
         )
 
-        # BUG 3: uses == instead of hmac.compare_digest(), enabling timing attacks
-        return computed_verify == received_verify
+        return hmac.compare_digest(computed_verify, received_verify)
 
     def process_key_exchange(self, message: HandshakeMessage) -> bool:
         """Process a ClientKeyExchange or ServerKeyExchange message."""
@@ -271,9 +297,7 @@ class TLSHandshake:
         seed = self.client_random + self.server_random
 
         if self.negotiated_ems:
-            # BUG 5: should use "extended master secret" label per RFC 7627,
-            # but incorrectly uses the standard "master secret" label
-            label = b"master secret"
+            label = b"extended master secret"
         else:
             label = b"master secret"
 

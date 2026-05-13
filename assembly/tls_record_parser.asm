@@ -20,12 +20,14 @@ section .data
     lbl_application     db "ApplicationData", 10, 0
     lbl_heartbeat       db "Heartbeat", 10, 0
     lbl_unknown         db "Unknown content type", 10, 0
+    msg_tls13_record    db "TLS 1.3 record detected", 10, 0
+    msg_inner_type      db "Inner content type: 0x", 0
 
     ; --- Error strings ---
     err_invalid_type    db "Error: invalid content type in record header", 10, 0
     err_short_read      db "Error: incomplete record header (need 5 bytes)", 10, 0
     err_alert_fatal     db "FATAL ALERT received from peer", 10
-    err_alert_warning   db "WARNING: alert received from peer"
+    err_alert_warning   db "WARNING: alert received from peer", 10, 0
     err_truncated       db "Error: record payload truncated", 10, 0
 
     ; --- TLS content type bounds ---
@@ -105,6 +107,7 @@ parse_tls_record:
     jle .type_ok                ; BUG: should be jl, not jle -- but wait,
                                 ; 0x18 (heartbeat) is valid so jle is needed...
                                 ; actually TLS_CT_MAX is 0x18 and we want <= 0x18
+    jg .invalid_type
 
     ; --- Actually the check above is wrong for a different reason ---
     ; Content type 0x17 is application_data which is VALID, and 0x18
@@ -125,10 +128,11 @@ parse_tls_record:
     ; --- Bytes 1-2: Protocol Version (big-endian) ---
     ; TLS version is 2 bytes, network byte order (big-endian)
     ; e.g. TLS 1.2 = 0x0303, TLS 1.0 = 0x0301
-    mov ax, [rsi+1]             ; BUG: loads in little-endian on x86
-                                ; For input bytes 03 03 this works by coincidence
-                                ; but 03 01 would be read as 0x0103 instead of 0x0301
-    movzx r14d, ax              ; r14 = version (incorrectly byte-swapped)
+    movzx eax, byte [rsi+1]
+    shl eax, 8
+    movzx ebx, byte [rsi+2]
+    or eax, ebx
+    mov r14d, eax               ; r14 = version in network byte order
 
     ; Print version
     push rsi
@@ -162,9 +166,11 @@ parse_tls_record:
     ja .invalid_length
 
     ; --- Read payload data ---
-    ; BUG: No check that r12 (bytes in buffer) >= r15 + 5
-    ; If the record claims a large payload but we only read a few
-    ; bytes, we'll process past the end of valid data
+    mov eax, r15d
+    add eax, 5
+    cmp rax, r12
+    ja .invalid_length
+
     lea rdi, [rsi+5]            ; rdi = start of payload
     mov ecx, r15d               ; ecx = payload length
 
@@ -224,12 +230,29 @@ parse_tls_record:
     jmp .parse_done
 
 .handle_application:
+    cmp r14d, 0x0303
+    je .handle_tls13_record
     push rdi
     lea rdi, [rel lbl_application]
     call print_string
     pop rdi
-    ; Application data is encrypted, just report the length
-    ; No TLS 1.3 inner content type detection is performed
+    jmp .parse_done
+
+.handle_tls13_record:
+    push rdi
+    lea rdi, [rel msg_tls13_record]
+    call print_string
+    pop rdi
+    cmp ecx, 0
+    jle .parse_done
+    push rdi
+    lea rdi, [rel msg_inner_type]
+    call print_string
+    pop rdi
+    movzx edi, byte [rdi+rcx-1]
+    call print_hex_byte
+    lea rdi, [rel msg_newline]
+    call print_string
     jmp .parse_done
 
 .handle_heartbeat:

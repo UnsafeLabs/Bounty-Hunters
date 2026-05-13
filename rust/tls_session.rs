@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Maximum number of cached sessions before eviction kicks in.
@@ -8,9 +10,7 @@ const MAX_CACHE_SIZE: usize = 4096;
 /// Default ticket lifetime in seconds (2 hours).
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
 
-/// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+static NONCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -66,9 +66,7 @@ pub struct EncryptionKey {
 #[derive(Debug, Clone)]
 pub struct SessionCache {
     /// Thread-safe reference to the inner cache map.
-    // BUG(trap2): Arc alone does not provide interior mutability or
-    // synchronisation.  Concurrent callers can race on the HashMap.
-    cache: Arc<HashMap<String, SessionTicket>>,
+    cache: Arc<RwLock<HashMap<String, SessionTicket>>>,
     encryption_key: EncryptionKey,
     max_size: usize,
 }
@@ -108,18 +106,20 @@ impl SessionCache {
     pub fn new(key_material: Vec<u8>) -> Self {
         let key = EncryptionKey::new(1, key_material);
         SessionCache {
-            cache: Arc::new(HashMap::new()),
+            cache: Arc::new(RwLock::new(HashMap::new())),
             encryption_key: key,
             max_size: MAX_CACHE_SIZE,
         }
     }
 
     /// Store a session ticket in the cache.
-    pub fn store_session(&mut self, ticket: SessionTicket) -> Result<(), SessionError> {
-        let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
+    pub fn store_session(&self, ticket: SessionTicket) -> Result<(), SessionError> {
+        let mut inner = self.cache.write().map_err(|_| {
+            SessionError::InvalidTicket("session cache lock poisoned".to_string())
+        })?;
 
         if inner.len() >= self.max_size {
-            self.evict_expired_sessions(inner);
+            self.evict_expired_sessions(&mut inner);
         }
 
         if inner.len() >= self.max_size {
@@ -133,27 +133,26 @@ impl SessionCache {
     /// Look up a session by ticket id.
     ///
     /// Returns the ticket if it exists **and** has not expired.
-    pub fn get_session(&self, ticket_id: &str) -> Option<&SessionTicket> {
-        // BUG(trap1): `.unwrap()` panics when the ticket_id is not present
-        // in the map.  Should use `?` or a match instead.
-        let ticket = self.cache.get(ticket_id).unwrap();
+    pub fn get_session(&self, ticket_id: &str) -> Option<SessionTicket> {
+        let inner = self.cache.read().ok()?;
+        let ticket = inner.get(ticket_id)?;
 
         if self.is_ticket_expired(ticket) {
             return None;
         }
 
-        Some(ticket)
+        Some(ticket.clone())
     }
 
     /// Remove a specific ticket from the cache.
-    pub fn remove_session(&mut self, ticket_id: &str) -> Option<SessionTicket> {
-        let inner = Arc::get_mut(&mut self.cache)?;
+    pub fn remove_session(&self, ticket_id: &str) -> Option<SessionTicket> {
+        let mut inner = self.cache.write().ok()?;
         inner.remove(ticket_id)
     }
 
     /// Return the number of cached sessions.
     pub fn session_count(&self) -> usize {
-        self.cache.len()
+        self.cache.read().map(|inner| inner.len()).unwrap_or(0)
     }
 
     // -- internal helpers ---------------------------------------------------
@@ -166,10 +165,11 @@ impl SessionCache {
 
     /// Calculate the age of a ticket in seconds.
     fn calculate_ticket_age(&self, ticket: &SessionTicket) -> u64 {
-        // BUG(trap4): subtracts creation_time from issued_at instead of
-        // computing `now - issued_at`.  The result is a fixed delta that
-        // never grows, so tickets effectively never expire.
-        ticket.issued_at.saturating_sub(ticket.creation_time)
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
+        now.saturating_sub(ticket.issued_at)
     }
 
     /// Evict all expired sessions from the map.
@@ -231,10 +231,7 @@ impl SessionCache {
             ));
         }
 
-        // BUG(trap5): uses the constant ENCRYPTION_NONCE for every call
-        // instead of generating a fresh random nonce.  Nonce reuse with
-        // the same key breaks AEAD confidentiality guarantees.
-        let nonce = ENCRYPTION_NONCE;
+        let nonce = fresh_nonce();
 
         let key = &self.encryption_key.key_material;
         let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
@@ -256,20 +253,83 @@ impl SessionCache {
                 "ciphertext too short".to_string(),
             ));
         }
-
-        let nonce = &ciphertext[..12];
-        let data = &ciphertext[12..];
-        let key = &self.encryption_key.key_material;
-
-        let mut plaintext = Vec::with_capacity(data.len());
-        for (i, &byte) in data.iter().enumerate() {
-            let key_byte = key[i % key.len()];
-            let nonce_byte = nonce[i % nonce.len()];
-            plaintext.push(byte ^ key_byte ^ nonce_byte);
+        if self.encryption_key.key_material.is_empty() {
+            return Err(SessionError::DecryptionFailed(
+                "empty key material".to_string(),
+            ));
         }
 
-        Ok(plaintext)
+        xor_crypt_ticket(ciphertext, &self.encryption_key.key_material)
+            .map_err(SessionError::DecryptionFailed)
     }
+
+    /// Rotate the ticket encryption key and re-encrypt cached tickets.
+    pub fn rotate_key(&mut self, new_material: Vec<u8>) -> Result<(), SessionError> {
+        if new_material.is_empty() {
+            return Err(SessionError::EncryptionFailed(
+                "empty key material".to_string(),
+            ));
+        }
+
+        let old_key = self.encryption_key.clone();
+        let new_key = EncryptionKey::new(old_key.key_id + 1, new_material);
+        let mut inner = self.cache.write().map_err(|_| {
+            SessionError::InvalidTicket("session cache lock poisoned".to_string())
+        })?;
+
+        for ticket in inner.values_mut() {
+            let plaintext = xor_crypt_ticket(&ticket.encrypted_state, &old_key.key_material)
+                .map_err(SessionError::DecryptionFailed)?;
+            ticket.encrypted_state = encrypt_with_key(&plaintext, &new_key.key_material);
+        }
+
+        self.encryption_key = new_key;
+        Ok(())
+    }
+}
+
+fn fresh_nonce() -> [u8; 12] {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_nanos();
+    let counter = NONCE_COUNTER.fetch_add(1, Ordering::Relaxed) as u128;
+    let mixed = now ^ counter.rotate_left(17) ^ ((std::process::id() as u128) << 32);
+    let bytes = mixed.to_le_bytes();
+    let mut nonce = [0u8; 12];
+    nonce.copy_from_slice(&bytes[..12]);
+    nonce
+}
+
+fn encrypt_with_key(plaintext: &[u8], key: &[u8]) -> Vec<u8> {
+    let nonce = fresh_nonce();
+    let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
+    ciphertext.extend_from_slice(&nonce);
+    for (i, &byte) in plaintext.iter().enumerate() {
+        let key_byte = key[i % key.len()];
+        let nonce_byte = nonce[i % nonce.len()];
+        ciphertext.push(byte ^ key_byte ^ nonce_byte);
+    }
+    ciphertext
+}
+
+fn xor_crypt_ticket(ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
+    if ciphertext.len() < 12 {
+        return Err("ciphertext too short".to_string());
+    }
+    if key.is_empty() {
+        return Err("empty key material".to_string());
+    }
+
+    let nonce = &ciphertext[..12];
+    let data = &ciphertext[12..];
+    let mut plaintext = Vec::with_capacity(data.len());
+    for (i, &byte) in data.iter().enumerate() {
+        let key_byte = key[i % key.len()];
+        let nonce_byte = nonce[i % nonce.len()];
+        plaintext.push(byte ^ key_byte ^ nonce_byte);
+    }
+    Ok(plaintext)
 }
 
 // ---------------------------------------------------------------------------
@@ -291,9 +351,91 @@ impl SessionCache {
     pub fn summary(&self) -> String {
         format!(
             "SessionCache {{ sessions: {}, key_id: {}, max: {} }}",
-            self.cache.len(),
+            self.session_count(),
             self.encryption_key.key_id,
             self.max_size,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    fn ticket(id: &str, issued_at: u64, lifetime_secs: u64) -> SessionTicket {
+        SessionTicket {
+            ticket_id: id.to_string(),
+            cipher_suite: CipherSuite::TlsAes128GcmSha256 as u16,
+            master_secret: b"secret".to_vec(),
+            issued_at,
+            lifetime_secs,
+            encrypted_state: Vec::new(),
+            creation_time: issued_at,
+        }
+    }
+
+    #[test]
+    fn get_missing_session_returns_none() {
+        let cache = SessionCache::new(b"key".to_vec());
+        assert!(cache.get_session("missing").is_none());
+    }
+
+    #[test]
+    fn get_session_filters_expired_tickets() {
+        let cache = SessionCache::new(b"key".to_vec());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        cache.store_session(ticket("fresh", now - 100, DEFAULT_TICKET_LIFETIME_SECS)).unwrap();
+        cache.store_session(ticket("expired", now - 7201, DEFAULT_TICKET_LIFETIME_SECS)).unwrap();
+        assert!(cache.get_session("fresh").is_some());
+        assert!(cache.get_session("expired").is_none());
+    }
+
+    #[test]
+    fn concurrent_store_and_lookup_is_synchronized() {
+        let cache = Arc::new(SessionCache::new(b"key".to_vec()));
+        let mut handles = Vec::new();
+        for idx in 0..10 {
+            let cache = Arc::clone(&cache);
+            handles.push(thread::spawn(move || {
+                let id = format!("tkt_{}", idx);
+                cache.store_session(ticket(&id, 1, u64::MAX)).unwrap();
+                assert!(cache.get_session(&id).is_some());
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(cache.session_count(), 10);
+    }
+
+    #[test]
+    fn rotate_key_reencrypts_cached_tickets() {
+        let mut cache = SessionCache::new(b"old-key".to_vec());
+        let ticket = cache.issue_ticket(
+            CipherSuite::TlsAes128GcmSha256,
+            b"master-secret".to_vec(),
+        ).unwrap();
+        let old_encrypted = ticket.encrypted_state.clone();
+
+        cache.rotate_key(b"new-key".to_vec()).unwrap();
+        let rotated = cache.get_session(&ticket.ticket_id).unwrap();
+
+        assert_eq!(cache.encryption_key.key_id, 2);
+        assert_ne!(rotated.encrypted_state, old_encrypted);
+        assert_eq!(cache.decrypt_ticket(&rotated.encrypted_state).unwrap(), b"master-secret");
+    }
+
+    #[test]
+    fn encrypt_ticket_uses_fresh_nonce() {
+        let cache = SessionCache::new(b"key".to_vec());
+        let first = cache.encrypt_ticket(b"same_data").unwrap();
+        let second = cache.encrypt_ticket(b"same_data").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(cache.decrypt_ticket(&first).unwrap(), b"same_data");
+        assert_eq!(cache.decrypt_ticket(&second).unwrap(), b"same_data");
     }
 }
