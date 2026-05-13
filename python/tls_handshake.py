@@ -110,6 +110,7 @@ class TLSHandshake:
         self.negotiated_ems: bool = False
         self.server_name: Optional[str] = None
         self._pre_master_secret: Optional[bytes] = None
+        self.last_error: Optional[str] = None
         self.transcript: bytearray = bytearray()
 
     def transition_to(self, new_state: HandshakeState) -> bool:
@@ -254,11 +255,12 @@ class TLSHandshake:
                 raise ValueError("Failed to decrypt pre-master secret")
 
             self._derive_master_secret()
+            self.last_error = None
             return True
 
-        # BUG 4: bare except with pass silently swallows all errors
-        except:
-            pass
+        except ValueError as exc:
+            self.last_error = str(exc)
+            return False
         return False
 
     def _derive_master_secret(self) -> None:
