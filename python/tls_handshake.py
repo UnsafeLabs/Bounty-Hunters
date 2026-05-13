@@ -111,6 +111,7 @@ class TLSHandshake:
         self.server_name: Optional[str] = None
         self._pre_master_secret: Optional[bytes] = None
         self.transcript: bytearray = bytearray()
+        self.key_exchange_error: Optional[str] = None
 
     def transition_to(self, new_state: HandshakeState) -> bool:
         """Attempt a state transition. Returns True if valid."""
@@ -238,6 +239,7 @@ class TLSHandshake:
 
     def process_key_exchange(self, message: HandshakeMessage) -> bool:
         """Process a ClientKeyExchange or ServerKeyExchange message."""
+        self.key_exchange_error = None
         try:
             payload = message.payload
             if len(payload) < 2:
@@ -256,9 +258,8 @@ class TLSHandshake:
             self._derive_master_secret()
             return True
 
-        # BUG 4: bare except with pass silently swallows all errors
-        except:
-            pass
+        except (struct.error, ValueError) as exc:
+            self.key_exchange_error = str(exc)
         return False
 
     def _derive_master_secret(self) -> None:
@@ -341,6 +342,8 @@ class TLSHandshake:
                 return False, "Invalid state for KeyExchange"
             success = self.process_key_exchange(message)
             if not success:
+                if self.key_exchange_error:
+                    return False, f"Key exchange failed: {self.key_exchange_error}"
                 return False, "Key exchange failed"
             return True, "Key exchange processed"
 
