@@ -47,6 +47,8 @@ typedef struct chain_context {
     cert_store_t   *trusted_store;
     unsigned char  *pinned_fingerprint;
     int             verify_ocsp;
+    const unsigned char *ocsp_response_der;
+    size_t          ocsp_response_len;
 } chain_context_t;
 
 static int g_log_level = LOG_LEVEL_INFO;
@@ -75,7 +77,7 @@ static int compute_fingerprint(X509 *cert, unsigned char *out, size_t out_len)
 
 static int match_fingerprint(const unsigned char *fp1, const unsigned char *fp2)
 {
-    return memcmp(fp1, fp2, FINGERPRINT_LEN) == 0;
+    return CRYPTO_memcmp(fp1, fp2, FINGERPRINT_LEN) == 0;
 }
 
 static int check_expiry(X509 *cert)
@@ -83,7 +85,7 @@ static int check_expiry(X509 *cert)
     const ASN1_TIME *not_before = X509_get0_notBefore(cert);
     const ASN1_TIME *not_after  = X509_get0_notAfter(cert);
     int day_diff, sec_diff;
-    int remaining_seconds;
+    int64_t remaining_seconds;
     if (!not_before || !not_after) {
         log_cert_event(LOG_LEVEL_ERROR, "certificate missing validity dates");
         return CERT_STATUS_INVALID;
@@ -99,9 +101,10 @@ static int check_expiry(X509 *cert)
     if (!ASN1_TIME_diff(&day_diff, &sec_diff, NULL, not_after))
         return CERT_STATUS_INVALID;
 
-    remaining_seconds = day_diff * 86400 + sec_diff;
+    remaining_seconds = (int64_t)day_diff * 86400 + sec_diff;
     if (remaining_seconds < 86400 * 30)
-        log_cert_event(LOG_LEVEL_WARN, "certificate expires in %d seconds", remaining_seconds);
+        log_cert_event(LOG_LEVEL_WARN, "certificate expires in %lld seconds",
+                       (long long)remaining_seconds);
     return CERT_STATUS_OK;
 }
 
@@ -132,9 +135,58 @@ static cert_entry_t *find_issuer(cert_store_t *store, X509 *cert)
     return NULL;
 }
 
+static int check_ocsp_stapling(X509 *leaf, X509 *issuer,
+                               const unsigned char *resp_der, size_t resp_len)
+{
+    const unsigned char *cursor = resp_der;
+    OCSP_RESPONSE *response = NULL;
+    OCSP_BASICRESP *basic = NULL;
+    int rc = CERT_STATUS_INVALID;
+
+    (void)leaf;
+    (void)issuer;
+
+    if (!resp_der || resp_len == 0)
+        return CERT_STATUS_INVALID;
+
+    response = d2i_OCSP_RESPONSE(NULL, &cursor, (long)resp_len);
+    if (!response)
+        goto cleanup;
+
+    if (OCSP_response_status(response) != OCSP_RESPONSE_STATUS_SUCCESSFUL)
+        goto cleanup;
+
+    basic = OCSP_response_get1_basic(response);
+    if (!basic)
+        goto cleanup;
+
+    rc = CERT_STATUS_OK;
+    for (int i = 0; i < OCSP_resp_count(basic); i++) {
+        OCSP_SINGLERESP *single = OCSP_resp_get0(basic, i);
+        int status = V_OCSP_CERTSTATUS_UNKNOWN;
+
+        if (!single)
+            continue;
+
+        status = OCSP_single_get0_status(single, NULL, NULL, NULL, NULL);
+        if (status == V_OCSP_CERTSTATUS_REVOKED) {
+            rc = CERT_STATUS_REVOKED;
+            goto cleanup;
+        }
+    }
+
+cleanup:
+    if (basic)
+        OCSP_BASICRESP_free(basic);
+    if (response)
+        OCSP_RESPONSE_free(response);
+    return rc;
+}
+
 static int validate_chain(chain_context_t *ctx)
 {
     int             i, rc;
+    int             status = CERT_STATUS_INVALID;
     unsigned char   fp[FINGERPRINT_LEN];
     cert_entry_t   *trusted_issuer;
 
@@ -147,36 +199,53 @@ static int validate_chain(chain_context_t *ctx)
         rc = check_expiry(ctx->chain[i]);
         if (rc != CERT_STATUS_OK) {
             log_cert_event(LOG_LEVEL_ERROR, "cert at depth %d failed expiry check", i);
-            return rc;
+            status = rc;
+            goto cleanup;
         }
         rc = verify_signature(ctx->chain[i], ctx->chain[i + 1]);
         if (rc != CERT_STATUS_OK) {
             log_cert_event(LOG_LEVEL_ERROR, "signature invalid at depth %d", i);
-            return rc;
+            status = rc;
+            goto cleanup;
         }
     }
 
     trusted_issuer = find_issuer(ctx->trusted_store, ctx->chain[ctx->chain_len - 1]);
     if (!trusted_issuer) {
         log_cert_event(LOG_LEVEL_ERROR, "root not found in trusted store");
-        return CERT_STATUS_UNTRUSTED;
+        status = CERT_STATUS_UNTRUSTED;
+        goto cleanup;
     }
     rc = verify_signature(ctx->chain[ctx->chain_len - 1], trusted_issuer->cert);
     if (rc != CERT_STATUS_OK)
-        return rc;
+        { status = rc; goto cleanup; }
+
+    if (ctx->verify_ocsp) {
+        X509 *issuer = (ctx->chain_len > 1) ? ctx->chain[1] : trusted_issuer->cert;
+        rc = check_ocsp_stapling(ctx->chain[0], issuer,
+                                 ctx->ocsp_response_der, ctx->ocsp_response_len);
+        if (rc != CERT_STATUS_OK) {
+            status = rc;
+            goto cleanup;
+        }
+    }
 
     /* Fingerprint pinning on leaf */
     if (ctx->pinned_fingerprint) {
         if (compute_fingerprint(ctx->chain[0], fp, sizeof(fp)) != 0)
-            return CERT_STATUS_INVALID;
+            { status = CERT_STATUS_INVALID; goto cleanup; }
         if (!match_fingerprint(fp, ctx->pinned_fingerprint)) {
             log_cert_event(LOG_LEVEL_ERROR, "leaf fingerprint mismatch");
-            return CERT_STATUS_UNTRUSTED;
+            status = CERT_STATUS_UNTRUSTED;
+            goto cleanup;
         }
     }
 
     log_cert_event(LOG_LEVEL_INFO, "chain validated successfully (%d certs)", ctx->chain_len);
-    return CERT_STATUS_OK;
+    status = CERT_STATUS_OK;
+
+cleanup:
+    return status;
 }
 
 static void cleanup_cert_store(cert_store_t *store)
@@ -188,10 +257,10 @@ static void cleanup_cert_store(cert_store_t *store)
     entry = store->head;
     while (entry) {
         next = entry->next;
+        log_cert_event(LOG_LEVEL_DEBUG, "freed cert store entry: %s", entry->issuer);
         X509_free(entry->cert);
         free(entry->subject);
         free(entry->issuer);
-        log_cert_event(LOG_LEVEL_DEBUG, "freed cert store entry: %s", entry->issuer);
         free(entry);
         entry = next;
     }
