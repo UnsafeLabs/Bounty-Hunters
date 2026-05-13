@@ -39,7 +39,7 @@ This will install the core package and all required dependencies.
 cp .env.example .env
 ```
 
-### Step 5: Configure the Database
+### Step 6: Configure the Database
 
 Create a `config.yml` file in the project root:
 
@@ -62,13 +62,13 @@ server:
   debug: true
 ```
 
-### Step 6: Run Migrations
+### Step 7: Run Migrations
 
 ```bash
 python manage.py migrate
 ```
 
-### Step 7: Start the Development Server
+### Step 8: Start the Development Server
 
 ```bash
 python manage.py runserver
