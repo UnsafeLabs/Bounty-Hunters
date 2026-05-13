@@ -134,9 +134,7 @@ impl SessionCache {
     ///
     /// Returns the ticket if it exists **and** has not expired.
     pub fn get_session(&self, ticket_id: &str) -> Option<&SessionTicket> {
-        // BUG(trap1): `.unwrap()` panics when the ticket_id is not present
-        // in the map.  Should use `?` or a match instead.
-        let ticket = self.cache.get(ticket_id).unwrap();
+        let ticket = self.cache.get(ticket_id)?;
 
         if self.is_ticket_expired(ticket) {
             return None;
@@ -183,6 +181,51 @@ impl SessionCache {
         for key in expired_keys {
             map.remove(&key);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ticket(ticket_id: &str, issued_at: u64, lifetime_secs: u64) -> SessionTicket {
+        SessionTicket {
+            ticket_id: ticket_id.to_string(),
+            cipher_suite: CipherSuite::TlsAes128GcmSha256 as u16,
+            master_secret: vec![1, 2, 3, 4],
+            issued_at,
+            lifetime_secs,
+            encrypted_state: vec![5, 6, 7, 8],
+            creation_time: issued_at,
+        }
+    }
+
+    #[test]
+    fn get_session_returns_none_for_missing_ticket() {
+        let cache = SessionCache::new(vec![0xaa; 16]);
+
+        assert!(cache.get_session("nonexistent_ticket").is_none());
+    }
+
+    #[test]
+    fn get_session_returns_existing_unexpired_ticket() {
+        let mut cache = SessionCache::new(vec![0xaa; 16]);
+        let ticket = ticket("tkt_1_12345", 1, u64::MAX);
+        cache.store_session(ticket).unwrap();
+
+        let found = cache.get_session("tkt_1_12345").unwrap();
+
+        assert_eq!(found.ticket_id, "tkt_1_12345");
+    }
+
+    #[test]
+    fn get_session_returns_none_for_expired_ticket_without_panicking() {
+        let mut cache = SessionCache::new(vec![0xaa; 16]);
+        let mut expired = ticket("tkt_1_expired", 10, 1);
+        expired.creation_time = 0;
+        cache.store_session(expired).unwrap();
+
+        assert!(cache.get_session("tkt_1_expired").is_none());
     }
 }
 
