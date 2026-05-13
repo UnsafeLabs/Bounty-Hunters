@@ -3,6 +3,8 @@
 # deploy.sh - Application deployment script
 # Pulls latest code, builds, and deploys to production
 #
+set -e
+
 
 APP_NAME="webapp"
 DEPLOY_DIR=""
