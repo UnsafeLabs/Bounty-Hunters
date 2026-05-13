@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -8,9 +10,23 @@ const MAX_CACHE_SIZE: usize = 4096;
 /// Default ticket lifetime in seconds (2 hours).
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
 
-/// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+/// Ticket encryption nonce size in bytes.
+const TICKET_NONCE_LEN: usize = 12;
+
+fn current_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs()
+}
+
+fn random_nonce() -> Result<[u8; TICKET_NONCE_LEN], SessionError> {
+    let mut nonce = [0u8; TICKET_NONCE_LEN];
+    File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut nonce))
+        .map_err(|err| SessionError::EncryptionFailed(format!("random nonce failed: {err}")))?;
+    Ok(nonce)
+}
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -86,10 +102,7 @@ pub enum CipherSuite {
 
 impl EncryptionKey {
     pub fn new(key_id: u32, material: Vec<u8>) -> Self {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_secs();
+        let now = current_unix_secs();
 
         EncryptionKey {
             key_id,
@@ -134,9 +147,7 @@ impl SessionCache {
     ///
     /// Returns the ticket if it exists **and** has not expired.
     pub fn get_session(&self, ticket_id: &str) -> Option<&SessionTicket> {
-        // BUG(trap1): `.unwrap()` panics when the ticket_id is not present
-        // in the map.  Should use `?` or a match instead.
-        let ticket = self.cache.get(ticket_id).unwrap();
+        let ticket = self.cache.get(ticket_id)?;
 
         if self.is_ticket_expired(ticket) {
             return None;
@@ -166,10 +177,7 @@ impl SessionCache {
 
     /// Calculate the age of a ticket in seconds.
     fn calculate_ticket_age(&self, ticket: &SessionTicket) -> u64 {
-        // BUG(trap4): subtracts creation_time from issued_at instead of
-        // computing `now - issued_at`.  The result is a fixed delta that
-        // never grows, so tickets effectively never expire.
-        ticket.issued_at.saturating_sub(ticket.creation_time)
+        current_unix_secs().saturating_sub(ticket.issued_at)
     }
 
     /// Evict all expired sessions from the map.
@@ -197,10 +205,7 @@ impl SessionCache {
         cipher_suite: CipherSuite,
         master_secret: Vec<u8>,
     ) -> Result<SessionTicket, SessionError> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_secs();
+        let now = current_unix_secs();
 
         let ticket_id = format!("tkt_{}_{}", self.encryption_key.key_id, now);
 
@@ -231,10 +236,7 @@ impl SessionCache {
             ));
         }
 
-        // BUG(trap5): uses the constant ENCRYPTION_NONCE for every call
-        // instead of generating a fresh random nonce.  Nonce reuse with
-        // the same key breaks AEAD confidentiality guarantees.
-        let nonce = ENCRYPTION_NONCE;
+        let nonce = random_nonce()?;
 
         let key = &self.encryption_key.key_material;
         let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
@@ -269,6 +271,76 @@ impl SessionCache {
         }
 
         Ok(plaintext)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_cache() -> SessionCache {
+        SessionCache::new(vec![0x11, 0x22, 0x33, 0x44])
+    }
+
+    fn ticket(ticket_id: &str, issued_at: u64, lifetime_secs: u64) -> SessionTicket {
+        SessionTicket {
+            ticket_id: ticket_id.to_string(),
+            cipher_suite: CipherSuite::TlsAes128GcmSha256 as u16,
+            master_secret: vec![1, 2, 3, 4],
+            issued_at,
+            lifetime_secs,
+            encrypted_state: vec![9, 8, 7],
+            creation_time: issued_at,
+        }
+    }
+
+    #[test]
+    fn get_session_returns_none_for_missing_ticket() {
+        let cache = test_cache();
+
+        assert!(cache.get_session("tkt_1_999999").is_none());
+    }
+
+    #[test]
+    fn get_session_returns_unexpired_ticket() {
+        let mut cache = test_cache();
+        let now = current_unix_secs();
+        cache
+            .store_session(ticket("tkt_1_12345", now.saturating_sub(100), 7200))
+            .unwrap();
+
+        let stored = cache.get_session("tkt_1_12345");
+
+        assert!(stored.is_some());
+        assert_eq!(stored.unwrap().ticket_id, "tkt_1_12345");
+    }
+
+    #[test]
+    fn expired_ticket_age_is_measured_from_current_time() {
+        let mut cache = test_cache();
+        let now = current_unix_secs();
+        let expired = ticket("tkt_1_expired", now.saturating_sub(7201), 7200);
+        let fresh = ticket("tkt_1_fresh", now.saturating_sub(100), 7200);
+
+        assert!(cache.is_ticket_expired(&expired));
+        assert!(!cache.is_ticket_expired(&fresh));
+
+        cache.store_session(expired).unwrap();
+        assert!(cache.get_session("tkt_1_expired").is_none());
+    }
+
+    #[test]
+    fn encrypt_ticket_uses_fresh_prepended_nonce() {
+        let cache = test_cache();
+        let plaintext = b"same_data";
+
+        let first = cache.encrypt_ticket(plaintext).unwrap();
+        let second = cache.encrypt_ticket(plaintext).unwrap();
+
+        assert_ne!(first, second);
+        assert_ne!(&first[..TICKET_NONCE_LEN], &second[..TICKET_NONCE_LEN]);
+        assert_eq!(cache.decrypt_ticket(&first).unwrap(), plaintext.to_vec());
+        assert_eq!(cache.decrypt_ticket(&second).unwrap(), plaintext.to_vec());
     }
 }
 
