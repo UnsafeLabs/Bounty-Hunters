@@ -255,11 +255,12 @@ class TLSHandshake:
 
             self._derive_master_secret()
             return True
-
-        # BUG 4: bare except with pass silently swallows all errors
-        except:
-            pass
-        return False
+        except (ValueError, struct.error) as error:
+            # Log expected protocol-level failures so they are diagnosable,
+            # then surface them to callers as a False return value. Anything
+            # else (TypeError, KeyboardInterrupt, etc.) propagates normally.
+            print(f"process_key_exchange failed: {error}")
+            return False
 
     def _derive_master_secret(self) -> None:
         """Derive the master secret from pre-master secret and randoms."""
