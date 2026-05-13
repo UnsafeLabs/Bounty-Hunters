@@ -271,9 +271,7 @@ class TLSHandshake:
         seed = self.client_random + self.server_random
 
         if self.negotiated_ems:
-            # BUG 5: should use "extended master secret" label per RFC 7627,
-            # but incorrectly uses the standard "master secret" label
-            label = b"master secret"
+            label = b"extended master secret"
         else:
             label = b"master secret"
 
