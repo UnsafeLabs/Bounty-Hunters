@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -7,10 +9,6 @@ const MAX_CACHE_SIZE: usize = 4096;
 
 /// Default ticket lifetime in seconds (2 hours).
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
-
-/// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -119,7 +117,7 @@ impl SessionCache {
         let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
 
         if inner.len() >= self.max_size {
-            self.evict_expired_sessions(inner);
+            Self::evict_expired_sessions(inner);
         }
 
         if inner.len() >= self.max_size {
@@ -160,12 +158,12 @@ impl SessionCache {
 
     /// Check whether a ticket has exceeded its lifetime.
     fn is_ticket_expired(&self, ticket: &SessionTicket) -> bool {
-        let age = self.calculate_ticket_age(ticket);
+        let age = Self::calculate_ticket_age(ticket);
         age > ticket.lifetime_secs
     }
 
     /// Calculate the age of a ticket in seconds.
-    fn calculate_ticket_age(&self, ticket: &SessionTicket) -> u64 {
+    fn calculate_ticket_age(ticket: &SessionTicket) -> u64 {
         // BUG(trap4): subtracts creation_time from issued_at instead of
         // computing `now - issued_at`.  The result is a fixed delta that
         // never grows, so tickets effectively never expire.
@@ -173,16 +171,27 @@ impl SessionCache {
     }
 
     /// Evict all expired sessions from the map.
-    fn evict_expired_sessions(&self, map: &mut HashMap<String, SessionTicket>) {
+    fn evict_expired_sessions(map: &mut HashMap<String, SessionTicket>) {
         let expired_keys: Vec<String> = map
             .iter()
-            .filter(|(_, t)| self.is_ticket_expired(t))
+            .filter(|(_, t)| Self::calculate_ticket_age(t) > t.lifetime_secs)
             .map(|(k, _)| k.clone())
             .collect();
 
         for key in expired_keys {
             map.remove(&key);
         }
+    }
+
+    fn fresh_nonce() -> Result<[u8; 12], SessionError> {
+        let mut nonce = [0u8; 12];
+        let mut random = File::open("/dev/urandom").map_err(|err| {
+            SessionError::EncryptionFailed(format!("failed to open random source: {}", err))
+        })?;
+        random.read_exact(&mut nonce).map_err(|err| {
+            SessionError::EncryptionFailed(format!("failed to read nonce: {}", err))
+        })?;
+        Ok(nonce)
     }
 }
 
@@ -231,10 +240,7 @@ impl SessionCache {
             ));
         }
 
-        // BUG(trap5): uses the constant ENCRYPTION_NONCE for every call
-        // instead of generating a fresh random nonce.  Nonce reuse with
-        // the same key breaks AEAD confidentiality guarantees.
-        let nonce = ENCRYPTION_NONCE;
+        let nonce = Self::fresh_nonce()?;
 
         let key = &self.encryption_key.key_material;
         let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
@@ -269,6 +275,34 @@ impl SessionCache {
         }
 
         Ok(plaintext)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encrypt_ticket_uses_a_fresh_nonce_each_call() {
+        let cache = SessionCache::new(b"key".to_vec());
+
+        let first = cache.encrypt_ticket(b"same_data").unwrap();
+        let second = cache.encrypt_ticket(b"same_data").unwrap();
+
+        assert_ne!(first, second);
+        assert_ne!(&first[..12], &second[..12]);
+    }
+
+    #[test]
+    fn nonce_is_prepended_and_decrypt_round_trips() {
+        let cache = SessionCache::new(b"key".to_vec());
+        let plaintext = b"arbitrary input";
+
+        let ciphertext = cache.encrypt_ticket(plaintext).unwrap();
+        let decrypted = cache.decrypt_ticket(&ciphertext).unwrap();
+
+        assert_eq!(ciphertext.len(), 12 + plaintext.len());
+        assert_eq!(decrypted, plaintext);
     }
 }
 
