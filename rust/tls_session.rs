@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -8,9 +9,7 @@ const MAX_CACHE_SIZE: usize = 4096;
 /// Default ticket lifetime in seconds (2 hours).
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
 
-/// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+static NONCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -231,10 +230,16 @@ impl SessionCache {
             ));
         }
 
-        // BUG(trap5): uses the constant ENCRYPTION_NONCE for every call
-        // instead of generating a fresh random nonce.  Nonce reuse with
-        // the same key breaks AEAD confidentiality guarantees.
-        let nonce = ENCRYPTION_NONCE;
+        // Generate a fresh random nonce for each encryption
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_nanos() as u64;
+        let counter = NONCE_COUNTER.fetch_add(1, Ordering::SeqCst);
+        
+        let mut nonce = [0u8; 12];
+        nonce[0..8].copy_from_slice(&now.to_le_bytes());
+        nonce[8..12].copy_from_slice(&(counter as u32).to_le_bytes());
 
         let key = &self.encryption_key.key_material;
         let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
@@ -295,5 +300,77 @@ impl SessionCache {
             self.encryption_key.key_id,
             self.max_size,
         )
+    }
+}
+
+#[cfg(test)]
+mod test_issue_26 {
+    use super::*;
+
+    fn create_test_cache() -> SessionCache {
+        SessionCache::new(vec![0x42; 32])
+    }
+
+    #[test]
+    fn test_encrypt_ticket_generates_different_ciphertexts() {
+        let cache = create_test_cache();
+        let plaintext = b"same_data";
+        
+        let ciphertext1 = cache.encrypt_ticket(plaintext).unwrap();
+        let ciphertext2 = cache.encrypt_ticket(plaintext).unwrap();
+        
+        assert_ne!(ciphertext1, ciphertext2, "Consecutive encryptions should differ");
+        println!("✓ Two consecutive encrypt_ticket() calls produce different ciphertexts");
+    }
+
+    #[test]
+    fn test_nonce_is_prepended_to_ciphertext() {
+        let cache = create_test_cache();
+        let plaintext = b"test plaintext";
+        
+        let ciphertext = cache.encrypt_ticket(plaintext).unwrap();
+        
+        assert_eq!(ciphertext.len(), 12 + plaintext.len(), "Ciphertext should include 12-byte nonce prefix");
+        println!("✓ Random nonce is prepended to ciphertext");
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_round_trip() {
+        let cache = create_test_cache();
+        let plaintext = b"arbitrary input data for ticket encryption";
+        
+        let ciphertext = cache.encrypt_ticket(plaintext).unwrap();
+        let decrypted = cache.decrypt_ticket(&ciphertext).unwrap();
+        
+        assert_eq!(decrypted, plaintext, "decrypt_ticket(encrypt_ticket(plaintext)) should round-trip");
+        println!("✓ decrypt_ticket(encrypt_ticket(plaintext)) round-trips correctly");
+    }
+
+    #[test]
+    fn test_empty_plaintext_round_trip() {
+        let cache = create_test_cache();
+        let plaintext = b"";
+        
+        let ciphertext = cache.encrypt_ticket(plaintext).unwrap();
+        let decrypted = cache.decrypt_ticket(&ciphertext).unwrap();
+        
+        assert_eq!(decrypted, plaintext, "Empty plaintext should round-trip");
+        assert_eq!(ciphertext.len(), 12, "Empty plaintext ciphertext should contain nonce only");
+        println!("✓ Empty plaintext round-trips correctly");
+    }
+
+    #[test]
+    fn test_nonces_are_different() {
+        let cache = create_test_cache();
+        let plaintext = b"same_data";
+        
+        let ciphertext1 = cache.encrypt_ticket(plaintext).unwrap();
+        let ciphertext2 = cache.encrypt_ticket(plaintext).unwrap();
+        
+        let nonce1 = &ciphertext1[..12];
+        let nonce2 = &ciphertext2[..12];
+        
+        assert_ne!(nonce1, nonce2, "Nonces should be different for consecutive encryptions");
+        println!("✓ Consecutive encryptions use different 12-byte nonces");
     }
 }
