@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   api:
-    image: iw7cefblyt34586bof6bf5434b6t534o78fty456bi73li734y5y974asdcsasdwqc 24r34:lastest
+    image: bounty-hunters-api:latest
     build:
       context: .
       dockerfile: Dockerfile
