@@ -268,14 +268,16 @@ class TLSHandshake:
         if self.client_random is None or self.server_random is None:
             raise ValueError("Client/server random not set")
 
-        seed = self.client_random + self.server_random
-
         if self.negotiated_ems:
-            # BUG 5: should use "extended master secret" label per RFC 7627,
-            # but incorrectly uses the standard "master secret" label
-            label = b"master secret"
+            # RFC 7627 §4: master_secret = PRF(pre_master_secret,
+            #   "extended master secret", session_hash)
+            label = b"extended master secret"
+            seed = self.handshake_hash.copy().digest()
         else:
+            # RFC 5246 §8.1: master_secret = PRF(pre_master_secret,
+            #   "master secret", ClientHello.random + ServerHello.random)
             label = b"master secret"
+            seed = self.client_random + self.server_random
 
         self.master_secret = self._prf(
             self._pre_master_secret, label, seed, 48
