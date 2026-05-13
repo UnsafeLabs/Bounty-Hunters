@@ -1,0 +1,10 @@
+[package]
+name = "bounty-hunters"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aes-gcm = { version = "0.10", features = ["std"] }
+
+[dev-dependencies]
+# No extra dev deps needed; all test utilities come from the standard library.
