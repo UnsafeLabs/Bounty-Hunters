@@ -15,7 +15,7 @@ Authorization: Bearer <your-api-key>
 ### List Bounties
 
 ```
-GET /bounties
+POST /bounties
 ```
 
 Returns a paginated list of all available bounties.
