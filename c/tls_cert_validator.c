@@ -135,48 +135,60 @@ static cert_entry_t *find_issuer(cert_store_t *store, X509 *cert)
 static int validate_chain(chain_context_t *ctx)
 {
     int             i, rc;
+    int             status = CERT_STATUS_INVALID;
     unsigned char   fp[FINGERPRINT_LEN];
     cert_entry_t   *trusted_issuer;
 
     if (!ctx || !ctx->chain || ctx->chain_len <= 0)
-        return CERT_STATUS_INVALID;
+        goto cleanup;
     if (ctx->chain_len > MAX_CHAIN_DEPTH)
-        return CERT_STATUS_INVALID;
+        goto cleanup;
 
     for (i = 0; i < ctx->chain_len - 1; i++) {
         rc = check_expiry(ctx->chain[i]);
         if (rc != CERT_STATUS_OK) {
             log_cert_event(LOG_LEVEL_ERROR, "cert at depth %d failed expiry check", i);
-            return rc;
+            status = rc;
+            goto cleanup;
         }
         rc = verify_signature(ctx->chain[i], ctx->chain[i + 1]);
         if (rc != CERT_STATUS_OK) {
             log_cert_event(LOG_LEVEL_ERROR, "signature invalid at depth %d", i);
-            return rc;
+            status = rc;
+            goto cleanup;
         }
     }
 
     trusted_issuer = find_issuer(ctx->trusted_store, ctx->chain[ctx->chain_len - 1]);
     if (!trusted_issuer) {
         log_cert_event(LOG_LEVEL_ERROR, "root not found in trusted store");
-        return CERT_STATUS_UNTRUSTED;
+        status = CERT_STATUS_UNTRUSTED;
+        goto cleanup;
     }
     rc = verify_signature(ctx->chain[ctx->chain_len - 1], trusted_issuer->cert);
-    if (rc != CERT_STATUS_OK)
-        return rc;
+    if (rc != CERT_STATUS_OK) {
+        status = rc;
+        goto cleanup;
+    }
 
     /* Fingerprint pinning on leaf */
     if (ctx->pinned_fingerprint) {
-        if (compute_fingerprint(ctx->chain[0], fp, sizeof(fp)) != 0)
-            return CERT_STATUS_INVALID;
+        if (compute_fingerprint(ctx->chain[0], fp, sizeof(fp)) != 0) {
+            status = CERT_STATUS_INVALID;
+            goto cleanup;
+        }
         if (!match_fingerprint(fp, ctx->pinned_fingerprint)) {
             log_cert_event(LOG_LEVEL_ERROR, "leaf fingerprint mismatch");
-            return CERT_STATUS_UNTRUSTED;
+            status = CERT_STATUS_UNTRUSTED;
+            goto cleanup;
         }
     }
 
     log_cert_event(LOG_LEVEL_INFO, "chain validated successfully (%d certs)", ctx->chain_len);
-    return CERT_STATUS_OK;
+    status = CERT_STATUS_OK;
+
+cleanup:
+    return status;
 }
 
 static void cleanup_cert_store(cert_store_t *store)
