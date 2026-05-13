@@ -189,9 +189,9 @@ static void cleanup_cert_store(cert_store_t *store)
     while (entry) {
         next = entry->next;
         X509_free(entry->cert);
+        log_cert_event(LOG_LEVEL_DEBUG, "freed cert store entry: %s", entry->issuer);
         free(entry->subject);
         free(entry->issuer);
-        log_cert_event(LOG_LEVEL_DEBUG, "freed cert store entry: %s", entry->issuer);
         free(entry);
         entry = next;
     }
