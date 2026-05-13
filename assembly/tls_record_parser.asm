@@ -162,9 +162,11 @@ parse_tls_record:
     ja .invalid_length
 
     ; --- Read payload data ---
-    ; BUG: No check that r12 (bytes in buffer) >= r15 + 5
-    ; If the record claims a large payload but we only read a few
-    ; bytes, we'll process past the end of valid data
+    ; Ensure the declared payload length is fully present in read_buf.
+    mov eax, r15d
+    add eax, 5
+    cmp eax, r12d
+    ja .err_truncated
     lea rdi, [rsi+5]            ; rdi = start of payload
     mov ecx, r15d               ; ecx = payload length
 
@@ -250,6 +252,7 @@ parse_tls_record:
     jmp .parse_done
 
 .invalid_length:
+.err_truncated:
     lea rdi, [rel err_truncated]
     call print_string
 
