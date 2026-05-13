@@ -47,6 +47,8 @@ type SuiteRegistry struct {
 	mu          sync.Mutex              // guards knownSuites only
 }
 
+var hasAESNI = HasAESNI
+
 // NewSuiteRegistry creates a registry pre-loaded with common cipher suites.
 func NewSuiteRegistry(minStrength CipherStrength) *SuiteRegistry {
 	reg := &SuiteRegistry{
@@ -224,11 +226,22 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 			return si.Strength > sj.Strength
 		}
 
+		if !hasAESNI() {
+			siChaCha, sjChaCha := isChaCha20Suite(si), isChaCha20Suite(sj)
+			if siChaCha != sjChaCha {
+				return siChaCha
+			}
+		}
+
 		// Larger key size breaks ties
 		return si.KeySize > sj.KeySize
 	})
 
 	return sorted
+}
+
+func isChaCha20Suite(s *CipherSuite) bool {
+	return strings.Contains(strings.ToUpper(s.Name), "CHACHA20")
 }
 
 // ConcurrentLookup demonstrates a batch lookup of suite IDs from
