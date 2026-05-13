@@ -46,6 +46,8 @@ typedef struct chain_context {
     int             chain_len;
     cert_store_t   *trusted_store;
     unsigned char  *pinned_fingerprint;
+    const unsigned char *ocsp_response_der;
+    size_t          ocsp_response_len;
     int             verify_ocsp;
 } chain_context_t;
 
@@ -120,6 +122,72 @@ static int verify_signature(X509 *cert, X509 *issuer)
     return CERT_STATUS_OK;
 }
 
+static int check_ocsp_stapling(X509 *leaf, X509 *issuer,
+                               const unsigned char *resp_der, size_t resp_len)
+{
+    const unsigned char *p = resp_der;
+    OCSP_RESPONSE *resp = NULL;
+    OCSP_BASICRESP *basic = NULL;
+    OCSP_CERTID *cert_id = NULL;
+    int status = V_OCSP_CERTSTATUS_UNKNOWN;
+    int reason = 0;
+    ASN1_GENERALIZEDTIME *revtime = NULL;
+    ASN1_GENERALIZEDTIME *thisupd = NULL;
+    ASN1_GENERALIZEDTIME *nextupd = NULL;
+    int rc = CERT_STATUS_INVALID;
+
+    if (!leaf || !issuer || !resp_der || resp_len == 0) {
+        log_cert_event(LOG_LEVEL_ERROR, "missing OCSP stapling response");
+        goto cleanup;
+    }
+
+    resp = d2i_OCSP_RESPONSE(NULL, &p, (long)resp_len);
+    if (!resp) {
+        log_cert_event(LOG_LEVEL_ERROR, "failed to parse OCSP response");
+        goto cleanup;
+    }
+
+    if (OCSP_response_status(resp) != OCSP_RESPONSE_STATUS_SUCCESSFUL) {
+        log_cert_event(LOG_LEVEL_ERROR, "OCSP responder returned unsuccessful status");
+        goto cleanup;
+    }
+
+    basic = OCSP_response_get1_basic(resp);
+    if (!basic) {
+        log_cert_event(LOG_LEVEL_ERROR, "failed to extract basic OCSP response");
+        goto cleanup;
+    }
+
+    cert_id = OCSP_cert_to_id(NULL, leaf, issuer);
+    if (!cert_id) {
+        log_cert_event(LOG_LEVEL_ERROR, "failed to build OCSP certificate id");
+        goto cleanup;
+    }
+
+    if (!OCSP_resp_find_status(basic, cert_id, &status, &reason, &revtime,
+                               &thisupd, &nextupd)) {
+        log_cert_event(LOG_LEVEL_ERROR, "OCSP response does not include leaf status");
+        goto cleanup;
+    }
+
+    if (status == V_OCSP_CERTSTATUS_REVOKED) {
+        log_cert_event(LOG_LEVEL_ERROR, "OCSP response marks leaf certificate revoked");
+        rc = CERT_STATUS_REVOKED;
+        goto cleanup;
+    }
+
+    rc = (status == V_OCSP_CERTSTATUS_GOOD) ? CERT_STATUS_OK : CERT_STATUS_INVALID;
+
+cleanup:
+    if (cert_id)
+        OCSP_CERTID_free(cert_id);
+    if (basic)
+        OCSP_BASICRESP_free(basic);
+    if (resp)
+        OCSP_RESPONSE_free(resp);
+    return rc;
+}
+
 static cert_entry_t *find_issuer(cert_store_t *store, X509 *cert)
 {
     X509_NAME *issuer_name = X509_get_issuer_name(cert);
@@ -164,6 +232,14 @@ static int validate_chain(chain_context_t *ctx)
     rc = verify_signature(ctx->chain[ctx->chain_len - 1], trusted_issuer->cert);
     if (rc != CERT_STATUS_OK)
         return rc;
+
+    if (ctx->verify_ocsp) {
+        X509 *leaf_issuer = (ctx->chain_len > 1) ? ctx->chain[1] : trusted_issuer->cert;
+        rc = check_ocsp_stapling(ctx->chain[0], leaf_issuer,
+                                 ctx->ocsp_response_der, ctx->ocsp_response_len);
+        if (rc != CERT_STATUS_OK)
+            return rc;
+    }
 
     /* Fingerprint pinning on leaf */
     if (ctx->pinned_fingerprint) {
