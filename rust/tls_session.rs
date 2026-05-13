@@ -9,8 +9,9 @@ const MAX_CACHE_SIZE: usize = 4096;
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
 
 /// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+const ENCRYPTION_NONCE: [u8; 12] = [
+    0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+];
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -134,9 +135,7 @@ impl SessionCache {
     ///
     /// Returns the ticket if it exists **and** has not expired.
     pub fn get_session(&self, ticket_id: &str) -> Option<&SessionTicket> {
-        // BUG(trap1): `.unwrap()` panics when the ticket_id is not present
-        // in the map.  Should use `?` or a match instead.
-        let ticket = self.cache.get(ticket_id).unwrap();
+        let ticket = self.cache.get(ticket_id)?;
 
         if self.is_ticket_expired(ticket) {
             return None;
@@ -295,5 +294,61 @@ impl SessionCache {
             self.encryption_key.key_id,
             self.max_size,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic;
+
+    fn test_ticket(
+        ticket_id: &str,
+        issued_at: u64,
+        creation_time: u64,
+        lifetime_secs: u64,
+    ) -> SessionTicket {
+        SessionTicket {
+            ticket_id: ticket_id.to_string(),
+            cipher_suite: CipherSuite::TlsAes128GcmSha256 as u16,
+            master_secret: b"secret".to_vec(),
+            issued_at,
+            lifetime_secs,
+            encrypted_state: b"encrypted".to_vec(),
+            creation_time,
+        }
+    }
+
+    #[test]
+    fn get_session_returns_none_for_missing_ticket_without_panic() {
+        let cache = SessionCache::new(b"key material".to_vec());
+
+        let result = panic::catch_unwind(|| cache.get_session("missing_ticket"));
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn get_session_returns_existing_unexpired_ticket() {
+        let mut cache = SessionCache::new(b"key material".to_vec());
+        let ticket = test_ticket("tkt_1_12345", 100, 100, DEFAULT_TICKET_LIFETIME_SECS);
+
+        cache.store_session(ticket).unwrap();
+
+        assert_eq!(
+            cache.get_session("tkt_1_12345").unwrap().ticket_id,
+            "tkt_1_12345"
+        );
+    }
+
+    #[test]
+    fn get_session_returns_none_for_existing_expired_ticket() {
+        let mut cache = SessionCache::new(b"key material".to_vec());
+        let ticket = test_ticket("expired", 10, 0, 1);
+
+        cache.store_session(ticket).unwrap();
+
+        assert!(cache.get_session("expired").is_none());
     }
 }
