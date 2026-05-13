@@ -47,6 +47,8 @@ typedef struct chain_context {
     cert_store_t   *trusted_store;
     unsigned char  *pinned_fingerprint;
     int             verify_ocsp;
+    const unsigned char *ocsp_response_der;
+    size_t          ocsp_response_len;
 } chain_context_t;
 
 static int g_log_level = LOG_LEVEL_INFO;
@@ -120,6 +122,52 @@ static int verify_signature(X509 *cert, X509 *issuer)
     return CERT_STATUS_OK;
 }
 
+static int check_ocsp_stapling(X509 *leaf, X509 *issuer,
+                               const unsigned char *resp_der, size_t resp_len)
+{
+    const unsigned char *p = resp_der;
+    OCSP_RESPONSE *resp = NULL;
+    OCSP_BASICRESP *basic = NULL;
+    OCSP_CERTID *cert_id = NULL;
+    ASN1_GENERALIZEDTIME *revtime = NULL, *thisupd = NULL, *nextupd = NULL;
+    int cert_status = V_OCSP_CERTSTATUS_UNKNOWN;
+    int reason = 0;
+    int rc = CERT_STATUS_INVALID;
+
+    if (!leaf || !issuer || !resp_der || resp_len == 0)
+        return CERT_STATUS_INVALID;
+
+    resp = d2i_OCSP_RESPONSE(NULL, &p, (long)resp_len);
+    if (!resp)
+        goto cleanup;
+
+    if (OCSP_response_status(resp) != OCSP_RESPONSE_STATUS_SUCCESSFUL)
+        goto cleanup;
+
+    basic = OCSP_response_get1_basic(resp);
+    if (!basic)
+        goto cleanup;
+
+    cert_id = OCSP_cert_to_id(EVP_sha1(), leaf, issuer);
+    if (!cert_id)
+        goto cleanup;
+
+    if (!OCSP_resp_find_status(basic, cert_id, &cert_status, &reason,
+                               &revtime, &thisupd, &nextupd))
+        goto cleanup;
+
+    if (cert_status == V_OCSP_CERTSTATUS_REVOKED)
+        rc = CERT_STATUS_REVOKED;
+    else if (cert_status == V_OCSP_CERTSTATUS_GOOD)
+        rc = CERT_STATUS_OK;
+
+cleanup:
+    OCSP_CERTID_free(cert_id);
+    OCSP_BASICRESP_free(basic);
+    OCSP_RESPONSE_free(resp);
+    return rc;
+}
+
 static cert_entry_t *find_issuer(cert_store_t *store, X509 *cert)
 {
     X509_NAME *issuer_name = X509_get_issuer_name(cert);
@@ -164,6 +212,15 @@ static int validate_chain(chain_context_t *ctx)
     rc = verify_signature(ctx->chain[ctx->chain_len - 1], trusted_issuer->cert);
     if (rc != CERT_STATUS_OK)
         return rc;
+
+    if (ctx->verify_ocsp) {
+        X509 *leaf_issuer = (ctx->chain_len > 1) ? ctx->chain[1] : trusted_issuer->cert;
+
+        rc = check_ocsp_stapling(ctx->chain[0], leaf_issuer,
+                                 ctx->ocsp_response_der, ctx->ocsp_response_len);
+        if (rc != CERT_STATUS_OK)
+            return rc;
+    }
 
     /* Fingerprint pinning on leaf */
     if (ctx->pinned_fingerprint) {
