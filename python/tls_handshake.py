@@ -6,6 +6,7 @@ Reference: RFC 5246, RFC 7627 (Extended Master Secret)
 
 import hashlib
 import hmac
+import logging
 import struct
 import os
 from enum import Enum, auto
@@ -53,10 +54,7 @@ EXT_KEY_SHARE = 0x0033
 
 VALID_TRANSITIONS: Dict[HandshakeState, List[HandshakeState]] = {
     HandshakeState.IDLE: [HandshakeState.CLIENT_HELLO],
-    HandshakeState.CLIENT_HELLO: [
-        HandshakeState.SERVER_HELLO,
-        HandshakeState.FINISHED,       # BUG 1: allows skipping key exchange
-    ],
+    HandshakeState.CLIENT_HELLO: [HandshakeState.SERVER_HELLO],
     HandshakeState.SERVER_HELLO: [HandshakeState.CERTIFICATE],
     HandshakeState.CERTIFICATE: [HandshakeState.KEY_EXCHANGE],
     HandshakeState.KEY_EXCHANGE: [HandshakeState.CHANGE_CIPHER_SPEC],
@@ -203,9 +201,10 @@ class TLSHandshake:
 
             ext = TLSExtension(ext_type, ext_data)
 
-            # BUG 2: SNI extension (type 0x0000) is parsed but the server_name
-            # field is never extracted from the extension data
-            if ext_type == EXT_EXTENDED_MASTER_SECRET:
+            if ext_type == EXT_SNI:
+                ext.server_name = self._parse_sni_hostname(ext_data)
+                self.server_name = ext.server_name
+            elif ext_type == EXT_EXTENDED_MASTER_SECRET:
                 self.negotiated_ems = True
             elif ext_type == EXT_SIGNATURE_ALGORITHMS:
                 pass  # stored in ext.data for later use
@@ -216,6 +215,29 @@ class TLSHandshake:
             extensions.append(ext)
 
         return extensions
+
+    def _parse_sni_hostname(self, data: bytes) -> Optional[str]:
+        """Return the first RFC 6066 host_name entry from SNI extension data."""
+        if len(data) < 2:
+            return None
+
+        list_len = struct.unpack("!H", data[:2])[0]
+        offset = 2
+        end = min(len(data), 2 + list_len)
+
+        while offset + 3 <= end:
+            name_type = data[offset]
+            name_len = struct.unpack("!H", data[offset + 1:offset + 3])[0]
+            offset += 3
+            if offset + name_len > end:
+                return None
+            name = data[offset:offset + name_len]
+            offset += name_len
+
+            if name_type == 0x00 and len(name) == name_len:
+                return name.decode("ascii")
+
+        return None
 
     def verify_finished(self, received_verify: bytes, label: str) -> bool:
         """
@@ -233,8 +255,7 @@ class TLSHandshake:
             12,
         )
 
-        # BUG 3: uses == instead of hmac.compare_digest(), enabling timing attacks
-        return computed_verify == received_verify
+        return hmac.compare_digest(computed_verify, received_verify)
 
     def process_key_exchange(self, message: HandshakeMessage) -> bool:
         """Process a ClientKeyExchange or ServerKeyExchange message."""
@@ -256,9 +277,8 @@ class TLSHandshake:
             self._derive_master_secret()
             return True
 
-        # BUG 4: bare except with pass silently swallows all errors
-        except:
-            pass
+        except (ValueError, struct.error) as error:
+            logging.debug("Key exchange failed: %s", error)
         return False
 
     def _derive_master_secret(self) -> None:
@@ -271,9 +291,7 @@ class TLSHandshake:
         seed = self.client_random + self.server_random
 
         if self.negotiated_ems:
-            # BUG 5: should use "extended master secret" label per RFC 7627,
-            # but incorrectly uses the standard "master secret" label
-            label = b"master secret"
+            label = b"extended master secret"
         else:
             label = b"master secret"
 
