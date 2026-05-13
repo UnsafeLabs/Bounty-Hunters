@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Maximum number of cached sessions before eviction kicks in.
@@ -66,9 +66,7 @@ pub struct EncryptionKey {
 #[derive(Debug, Clone)]
 pub struct SessionCache {
     /// Thread-safe reference to the inner cache map.
-    // BUG(trap2): Arc alone does not provide interior mutability or
-    // synchronisation.  Concurrent callers can race on the HashMap.
-    cache: Arc<HashMap<String, SessionTicket>>,
+    cache: Arc<RwLock<HashMap<String, SessionTicket>>>,
     encryption_key: EncryptionKey,
     max_size: usize,
 }
@@ -108,7 +106,7 @@ impl SessionCache {
     pub fn new(key_material: Vec<u8>) -> Self {
         let key = EncryptionKey::new(1, key_material);
         SessionCache {
-            cache: Arc::new(HashMap::new()),
+            cache: Arc::new(RwLock::new(HashMap::new())),
             encryption_key: key,
             max_size: MAX_CACHE_SIZE,
         }
@@ -116,10 +114,12 @@ impl SessionCache {
 
     /// Store a session ticket in the cache.
     pub fn store_session(&mut self, ticket: SessionTicket) -> Result<(), SessionError> {
-        let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
+        let mut inner = self.cache
+            .write()
+            .map_err(|_| SessionError::InvalidTicket("cache lock poisoned".to_string()))?;
 
         if inner.len() >= self.max_size {
-            self.evict_expired_sessions(inner);
+            self.evict_expired_sessions(&mut inner);
         }
 
         if inner.len() >= self.max_size {
@@ -133,27 +133,26 @@ impl SessionCache {
     /// Look up a session by ticket id.
     ///
     /// Returns the ticket if it exists **and** has not expired.
-    pub fn get_session(&self, ticket_id: &str) -> Option<&SessionTicket> {
-        // BUG(trap1): `.unwrap()` panics when the ticket_id is not present
-        // in the map.  Should use `?` or a match instead.
-        let ticket = self.cache.get(ticket_id).unwrap();
+    pub fn get_session(&self, ticket_id: &str) -> Option<SessionTicket> {
+        let inner = self.cache.read().ok()?;
+        let ticket = inner.get(ticket_id)?;
 
         if self.is_ticket_expired(ticket) {
             return None;
         }
 
-        Some(ticket)
+        Some(ticket.clone())
     }
 
     /// Remove a specific ticket from the cache.
     pub fn remove_session(&mut self, ticket_id: &str) -> Option<SessionTicket> {
-        let inner = Arc::get_mut(&mut self.cache)?;
+        let mut inner = self.cache.write().ok()?;
         inner.remove(ticket_id)
     }
 
     /// Return the number of cached sessions.
     pub fn session_count(&self) -> usize {
-        self.cache.len()
+        self.cache.read().map(|inner| inner.len()).unwrap_or(0)
     }
 
     // -- internal helpers ---------------------------------------------------
@@ -291,9 +290,124 @@ impl SessionCache {
     pub fn summary(&self) -> String {
         format!(
             "SessionCache {{ sessions: {}, key_id: {}, max: {} }}",
-            self.cache.len(),
+            self.session_count(),
             self.encryption_key.key_id,
             self.max_size,
         )
+    }
+}
+
+#[cfg(test)]
+mod test_issue_23 {
+    use super::*;
+    use std::sync::Arc;
+    use std::thread;
+
+    fn create_test_cache() -> SessionCache {
+        SessionCache::new(vec![0x42; 32])
+    }
+
+    #[test]
+    fn test_concurrent_store_and_get() {
+        let cache = Arc::new(std::sync::Mutex::new(create_test_cache()));
+        let mut handles = vec![];
+
+        // Spawn 10 threads that each store and get sessions
+        for i in 0..10 {
+            let cache_clone = Arc::clone(&cache);
+            let handle = thread::spawn(move || {
+                let mut cache = cache_clone.lock().unwrap();
+                
+                let ticket = SessionTicket {
+                    ticket_id: format!("ticket_{}", i),
+                    cipher_suite: 0x1301,
+                    master_secret: vec![0x01; 48],
+                    issued_at: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or(Duration::ZERO)
+                        .as_secs(),
+                    lifetime_secs: 7200,
+                    encrypted_state: vec![],
+                    creation_time: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or(Duration::ZERO)
+                        .as_secs(),
+                };
+                
+                cache.store_session(ticket).unwrap();
+                
+                let retrieved = cache.get_session(&format!("ticket_{}", i));
+                assert!(retrieved.is_some(), "Thread {} failed to retrieve ticket", i);
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let cache = cache.lock().unwrap();
+        assert_eq!(cache.session_count(), 10);
+        println!("✓ 10 threads calling store_session() and get_session() completed without panics");
+    }
+
+    #[test]
+    fn test_concurrent_reads() {
+        let mut cache = create_test_cache();
+        
+        // Store a ticket first
+        let ticket = SessionTicket {
+            ticket_id: "shared_ticket".to_string(),
+            cipher_suite: 0x1301,
+            master_secret: vec![0x01; 48],
+            issued_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_secs(),
+            lifetime_secs: 7200,
+            encrypted_state: vec![],
+            creation_time: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_secs(),
+        };
+        cache.store_session(ticket).unwrap();
+        
+        let cache = Arc::new(cache);
+        let mut handles = vec![];
+
+        // Spawn 10 threads that all read the same ticket
+        for i in 0..10 {
+            let cache_clone = Arc::clone(&cache);
+            let handle = thread::spawn(move || {
+                let retrieved = cache_clone.get_session("shared_ticket");
+                assert!(retrieved.is_some(), "Thread {} failed to read ticket", i);
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        println!("✓ Multiple concurrent readers can access the same ticket");
+    }
+
+    #[test]
+    fn test_rwlock_allows_concurrent_reads() {
+        let cache = Arc::new(create_test_cache());
+        
+        // RwLock should allow multiple concurrent read locks
+        let read1 = cache.cache.read().unwrap();
+        let read2 = cache.cache.read().unwrap();
+        
+        assert_eq!(read1.len(), 0);
+        assert_eq!(read2.len(), 0);
+        
+        drop(read1);
+        drop(read2);
+        
+        println!("✓ RwLock allows multiple concurrent read locks");
     }
 }
