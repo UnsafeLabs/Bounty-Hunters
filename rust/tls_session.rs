@@ -8,10 +8,6 @@ const MAX_CACHE_SIZE: usize = 4096;
 /// Default ticket lifetime in seconds (2 hours).
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
 
-/// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
-
 // ---------------------------------------------------------------------------
 // Error types
 // ---------------------------------------------------------------------------
@@ -222,8 +218,8 @@ impl SessionCache {
 
     /// Encrypt ticket data using the current encryption key.
     ///
-    /// In production this would call into a real AEAD cipher; here we
-    /// use a simplified XOR-based placeholder.
+    /// Generates a fresh random 12-byte nonce on every call and prepends it
+    /// to the ciphertext so that `decrypt_ticket()` can extract it.
     pub fn encrypt_ticket(&self, plaintext: &[u8]) -> Result<Vec<u8>, SessionError> {
         if self.encryption_key.key_material.is_empty() {
             return Err(SessionError::EncryptionFailed(
@@ -231,10 +227,8 @@ impl SessionCache {
             ));
         }
 
-        // BUG(trap5): uses the constant ENCRYPTION_NONCE for every call
-        // instead of generating a fresh random nonce.  Nonce reuse with
-        // the same key breaks AEAD confidentiality guarantees.
-        let nonce = ENCRYPTION_NONCE;
+        let nonce = Self::generate_random_nonce()
+            .map_err(|e| SessionError::EncryptionFailed(format!("rng failed: {}", e)))?;
 
         let key = &self.encryption_key.key_material;
         let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
@@ -270,6 +264,14 @@ impl SessionCache {
 
         Ok(plaintext)
     }
+
+    /// Generate a fresh cryptographically random 12-byte nonce via the OS.
+    fn generate_random_nonce() -> Result<[u8; 12], std::io::Error> {
+        use std::io::Read;
+        let mut nonce = [0u8; 12];
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+        Ok(nonce)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,5 +297,59 @@ impl SessionCache {
             self.encryption_key.key_id,
             self.max_size,
         )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_cache() -> SessionCache {
+        SessionCache::new(vec![0xabu8; 32])
+    }
+
+    #[test]
+    fn test_unique_nonces_per_call() {
+        let cache = make_cache();
+        let plaintext = b"same_data";
+        let ct1 = cache.encrypt_ticket(plaintext).unwrap();
+        let ct2 = cache.encrypt_ticket(plaintext).unwrap();
+        assert_ne!(ct1, ct2, "consecutive encryptions must produce different ciphertext");
+    }
+
+    #[test]
+    fn test_nonce_is_prepended() {
+        let cache = make_cache();
+        let plaintext = b"hello";
+        let ct = cache.encrypt_ticket(plaintext).unwrap();
+        assert_eq!(ct.len(), 12 + plaintext.len(), "output must be 12-byte nonce + ciphertext");
+    }
+
+    #[test]
+    fn test_roundtrip() {
+        let cache = make_cache();
+        let plaintext = b"arbitrary ticket data 1234";
+        let ct = cache.encrypt_ticket(plaintext).unwrap();
+        let recovered = cache.decrypt_ticket(&ct).unwrap();
+        assert_eq!(recovered, plaintext.to_vec());
+    }
+
+    #[test]
+    fn test_roundtrip_empty_plaintext() {
+        let cache = make_cache();
+        let ct = cache.encrypt_ticket(b"").unwrap();
+        let recovered = cache.decrypt_ticket(&ct).unwrap();
+        assert_eq!(recovered, b"");
+    }
+
+    #[test]
+    fn test_decrypt_too_short_returns_error() {
+        let cache = make_cache();
+        let result = cache.decrypt_ticket(&[0u8; 5]);
+        assert!(result.is_err());
     }
 }
