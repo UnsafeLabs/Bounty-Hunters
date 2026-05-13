@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <time.h>
 #include <openssl/x509.h>
@@ -83,7 +84,7 @@ static int check_expiry(X509 *cert)
     const ASN1_TIME *not_before = X509_get0_notBefore(cert);
     const ASN1_TIME *not_after  = X509_get0_notAfter(cert);
     int day_diff, sec_diff;
-    int remaining_seconds;
+    int64_t remaining_seconds;
     if (!not_before || !not_after) {
         log_cert_event(LOG_LEVEL_ERROR, "certificate missing validity dates");
         return CERT_STATUS_INVALID;
@@ -99,9 +100,10 @@ static int check_expiry(X509 *cert)
     if (!ASN1_TIME_diff(&day_diff, &sec_diff, NULL, not_after))
         return CERT_STATUS_INVALID;
 
-    remaining_seconds = day_diff * 86400 + sec_diff;
+    remaining_seconds = (int64_t)day_diff * 86400 + sec_diff;
     if (remaining_seconds < 86400 * 30)
-        log_cert_event(LOG_LEVEL_WARN, "certificate expires in %d seconds", remaining_seconds);
+        log_cert_event(LOG_LEVEL_WARN, "certificate expires in %" PRId64 " seconds",
+                       remaining_seconds);
     return CERT_STATUS_OK;
 }
 
