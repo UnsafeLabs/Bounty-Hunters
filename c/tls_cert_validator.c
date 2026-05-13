@@ -75,7 +75,7 @@ static int compute_fingerprint(X509 *cert, unsigned char *out, size_t out_len)
 
 static int match_fingerprint(const unsigned char *fp1, const unsigned char *fp2)
 {
-    return memcmp(fp1, fp2, FINGERPRINT_LEN) == 0;
+    return CRYPTO_memcmp(fp1, fp2, FINGERPRINT_LEN);
 }
 
 static int check_expiry(X509 *cert)
@@ -169,7 +169,7 @@ static int validate_chain(chain_context_t *ctx)
     if (ctx->pinned_fingerprint) {
         if (compute_fingerprint(ctx->chain[0], fp, sizeof(fp)) != 0)
             return CERT_STATUS_INVALID;
-        if (!match_fingerprint(fp, ctx->pinned_fingerprint)) {
+        if (match_fingerprint(fp, ctx->pinned_fingerprint) != 0) {
             log_cert_event(LOG_LEVEL_ERROR, "leaf fingerprint mismatch");
             return CERT_STATUS_UNTRUSTED;
         }
