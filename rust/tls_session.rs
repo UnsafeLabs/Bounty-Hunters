@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Maximum number of cached sessions before eviction kicks in.
@@ -9,8 +9,9 @@ const MAX_CACHE_SIZE: usize = 4096;
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
 
 /// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+const ENCRYPTION_NONCE: [u8; 12] = [
+    0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+];
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -66,9 +67,7 @@ pub struct EncryptionKey {
 #[derive(Debug, Clone)]
 pub struct SessionCache {
     /// Thread-safe reference to the inner cache map.
-    // BUG(trap2): Arc alone does not provide interior mutability or
-    // synchronisation.  Concurrent callers can race on the HashMap.
-    cache: Arc<HashMap<String, SessionTicket>>,
+    cache: Arc<RwLock<HashMap<String, SessionTicket>>>,
     encryption_key: EncryptionKey,
     max_size: usize,
 }
@@ -108,18 +107,21 @@ impl SessionCache {
     pub fn new(key_material: Vec<u8>) -> Self {
         let key = EncryptionKey::new(1, key_material);
         SessionCache {
-            cache: Arc::new(HashMap::new()),
+            cache: Arc::new(RwLock::new(HashMap::new())),
             encryption_key: key,
             max_size: MAX_CACHE_SIZE,
         }
     }
 
     /// Store a session ticket in the cache.
-    pub fn store_session(&mut self, ticket: SessionTicket) -> Result<(), SessionError> {
-        let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
+    pub fn store_session(&self, ticket: SessionTicket) -> Result<(), SessionError> {
+        let mut inner = self
+            .cache
+            .write()
+            .map_err(|_| SessionError::InvalidTicket("cache lock poisoned".to_string()))?;
 
         if inner.len() >= self.max_size {
-            self.evict_expired_sessions(inner);
+            Self::evict_expired_sessions(&mut inner);
         }
 
         if inner.len() >= self.max_size {
@@ -133,27 +135,26 @@ impl SessionCache {
     /// Look up a session by ticket id.
     ///
     /// Returns the ticket if it exists **and** has not expired.
-    pub fn get_session(&self, ticket_id: &str) -> Option<&SessionTicket> {
-        // BUG(trap1): `.unwrap()` panics when the ticket_id is not present
-        // in the map.  Should use `?` or a match instead.
-        let ticket = self.cache.get(ticket_id).unwrap();
+    pub fn get_session(&self, ticket_id: &str) -> Option<SessionTicket> {
+        let inner = self.cache.read().ok()?;
+        let ticket = inner.get(ticket_id)?;
 
         if self.is_ticket_expired(ticket) {
             return None;
         }
 
-        Some(ticket)
+        Some(ticket.clone())
     }
 
     /// Remove a specific ticket from the cache.
-    pub fn remove_session(&mut self, ticket_id: &str) -> Option<SessionTicket> {
-        let inner = Arc::get_mut(&mut self.cache)?;
+    pub fn remove_session(&self, ticket_id: &str) -> Option<SessionTicket> {
+        let mut inner = self.cache.write().ok()?;
         inner.remove(ticket_id)
     }
 
     /// Return the number of cached sessions.
     pub fn session_count(&self) -> usize {
-        self.cache.len()
+        self.cache.read().map(|inner| inner.len()).unwrap_or(0)
     }
 
     // -- internal helpers ---------------------------------------------------
@@ -173,16 +174,25 @@ impl SessionCache {
     }
 
     /// Evict all expired sessions from the map.
-    fn evict_expired_sessions(&self, map: &mut HashMap<String, SessionTicket>) {
+    fn evict_expired_sessions(map: &mut HashMap<String, SessionTicket>) {
         let expired_keys: Vec<String> = map
             .iter()
-            .filter(|(_, t)| self.is_ticket_expired(t))
+            .filter(|(_, t)| Self::is_ticket_expired_at_current_time(t))
             .map(|(k, _)| k.clone())
             .collect();
 
         for key in expired_keys {
             map.remove(&key);
         }
+    }
+
+    fn is_ticket_expired_at_current_time(ticket: &SessionTicket) -> bool {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
+
+        now.saturating_sub(ticket.issued_at) > ticket.lifetime_secs
     }
 }
 
@@ -291,9 +301,57 @@ impl SessionCache {
     pub fn summary(&self) -> String {
         format!(
             "SessionCache {{ sessions: {}, key_id: {}, max: {} }}",
-            self.cache.len(),
+            self.session_count(),
             self.encryption_key.key_id,
             self.max_size,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    fn test_ticket(id: usize) -> SessionTicket {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
+
+        SessionTicket {
+            ticket_id: format!("tkt_thread_{id}"),
+            cipher_suite: CipherSuite::TlsAes128GcmSha256 as u16,
+            master_secret: vec![id as u8; 8],
+            issued_at: now,
+            lifetime_secs: DEFAULT_TICKET_LIFETIME_SECS,
+            encrypted_state: Vec::new(),
+            creation_time: now,
+        }
+    }
+
+    #[test]
+    fn concurrent_store_and_get_sessions_are_synchronized() {
+        let cache = Arc::new(SessionCache::new(b"key".to_vec()));
+        let mut handles = Vec::new();
+
+        for idx in 0..10 {
+            let cache = Arc::clone(&cache);
+            handles.push(thread::spawn(move || {
+                let ticket = test_ticket(idx);
+                let ticket_id = ticket.ticket_id.clone();
+
+                cache.store_session(ticket).expect("store session");
+                let loaded = cache.get_session(&ticket_id).expect("load session");
+
+                assert_eq!(loaded.ticket_id, ticket_id);
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("worker should not panic");
+        }
+
+        assert_eq!(cache.session_count(), 10);
     }
 }
