@@ -161,6 +161,10 @@ parse_tls_record:
     cmp r15d, TLS_MAX_RECORD_LEN
     ja .invalid_length
 
+    lea eax, [r15 + 5]
+    cmp eax, r12d
+    ja .invalid_length
+
     ; --- Read payload data ---
     ; BUG: No check that r12 (bytes in buffer) >= r15 + 5
     ; If the record claims a large payload but we only read a few
