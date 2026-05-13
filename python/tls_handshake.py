@@ -6,10 +6,13 @@ Reference: RFC 5246, RFC 7627 (Extended Master Secret)
 
 import hashlib
 import hmac
+import logging
 import struct
 import os
 from enum import Enum, auto
 from typing import Optional, Dict, List, Tuple, Any
+
+logger = logging.getLogger(__name__)
 
 
 class HandshakeState(Enum):
@@ -256,10 +259,9 @@ class TLSHandshake:
             self._derive_master_secret()
             return True
 
-        # BUG 4: bare except with pass silently swallows all errors
-        except:
-            pass
-        return False
+        except (ValueError, struct.error) as exc:
+            logger.warning("Failed to process key exchange: %s", exc)
+            return False
 
     def _derive_master_secret(self) -> None:
         """Derive the master secret from pre-master secret and randoms."""
