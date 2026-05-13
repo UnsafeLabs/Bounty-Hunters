@@ -8,10 +8,6 @@ const MAX_CACHE_SIZE: usize = 4096;
 /// Default ticket lifetime in seconds (2 hours).
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
 
-/// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
-
 // ---------------------------------------------------------------------------
 // Error types
 // ---------------------------------------------------------------------------
@@ -65,7 +61,6 @@ pub struct EncryptionKey {
 
 #[derive(Debug, Clone)]
 pub struct SessionCache {
-    /// Thread-safe reference to the inner cache map.
     // BUG(trap2): Arc alone does not provide interior mutability or
     // synchronisation.  Concurrent callers can race on the HashMap.
     cache: Arc<HashMap<String, SessionTicket>>,
@@ -90,12 +85,7 @@ impl EncryptionKey {
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_secs();
-
-        EncryptionKey {
-            key_id,
-            key_material: material,
-            created_at: now,
-        }
+        EncryptionKey { key_id, key_material: material, created_at: now }
     }
 }
 
@@ -104,7 +94,6 @@ impl EncryptionKey {
 // ---------------------------------------------------------------------------
 
 impl SessionCache {
-    /// Create a new, empty session cache with a default encryption key.
     pub fn new(key_material: Vec<u8>) -> Self {
         let key = EncryptionKey::new(1, key_material);
         SessionCache {
@@ -114,75 +103,52 @@ impl SessionCache {
         }
     }
 
-    /// Store a session ticket in the cache.
     pub fn store_session(&mut self, ticket: SessionTicket) -> Result<(), SessionError> {
         let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
-
         if inner.len() >= self.max_size {
             self.evict_expired_sessions(inner);
         }
-
         if inner.len() >= self.max_size {
             return Err(SessionError::CacheFull);
         }
-
         inner.insert(ticket.ticket_id.clone(), ticket);
         Ok(())
     }
 
-    /// Look up a session by ticket id.
-    ///
-    /// Returns the ticket if it exists **and** has not expired.
     pub fn get_session(&self, ticket_id: &str) -> Option<&SessionTicket> {
         // BUG(trap1): `.unwrap()` panics when the ticket_id is not present
-        // in the map.  Should use `?` or a match instead.
         let ticket = self.cache.get(ticket_id).unwrap();
-
         if self.is_ticket_expired(ticket) {
             return None;
         }
-
         Some(ticket)
     }
 
-    /// Remove a specific ticket from the cache.
     pub fn remove_session(&mut self, ticket_id: &str) -> Option<SessionTicket> {
         let inner = Arc::get_mut(&mut self.cache)?;
         inner.remove(ticket_id)
     }
 
-    /// Return the number of cached sessions.
     pub fn session_count(&self) -> usize {
         self.cache.len()
     }
 
-    // -- internal helpers ---------------------------------------------------
-
-    /// Check whether a ticket has exceeded its lifetime.
     fn is_ticket_expired(&self, ticket: &SessionTicket) -> bool {
-        let age = self.calculate_ticket_age(ticket);
-        age > ticket.lifetime_secs
+        self.calculate_ticket_age(ticket) > ticket.lifetime_secs
     }
 
-    /// Calculate the age of a ticket in seconds.
     fn calculate_ticket_age(&self, ticket: &SessionTicket) -> u64 {
-        // BUG(trap4): subtracts creation_time from issued_at instead of
-        // computing `now - issued_at`.  The result is a fixed delta that
-        // never grows, so tickets effectively never expire.
+        // BUG(trap4): subtracts creation_time from issued_at instead of now - issued_at
         ticket.issued_at.saturating_sub(ticket.creation_time)
     }
 
-    /// Evict all expired sessions from the map.
     fn evict_expired_sessions(&self, map: &mut HashMap<String, SessionTicket>) {
-        let expired_keys: Vec<String> = map
+        let expired: Vec<String> = map
             .iter()
             .filter(|(_, t)| self.is_ticket_expired(t))
             .map(|(k, _)| k.clone())
             .collect();
-
-        for key in expired_keys {
-            map.remove(&key);
-        }
+        for key in expired { map.remove(&key); }
     }
 }
 
@@ -191,7 +157,6 @@ impl SessionCache {
 // ---------------------------------------------------------------------------
 
 impl SessionCache {
-    /// Issue a new session ticket for the given cipher suite and secret.
     pub fn issue_ticket(
         &mut self,
         cipher_suite: CipherSuite,
@@ -201,11 +166,8 @@ impl SessionCache {
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_secs();
-
         let ticket_id = format!("tkt_{}_{}", self.encryption_key.key_id, now);
-
         let encrypted = self.encrypt_ticket(&master_secret)?;
-
         let ticket = SessionTicket {
             ticket_id,
             cipher_suite: cipher_suite as u16,
@@ -215,60 +177,46 @@ impl SessionCache {
             encrypted_state: encrypted,
             creation_time: now,
         };
-
         self.store_session(ticket.clone())?;
         Ok(ticket)
     }
 
-    /// Encrypt ticket data using the current encryption key.
-    ///
-    /// In production this would call into a real AEAD cipher; here we
-    /// use a simplified XOR-based placeholder.
     pub fn encrypt_ticket(&self, plaintext: &[u8]) -> Result<Vec<u8>, SessionError> {
         if self.encryption_key.key_material.is_empty() {
-            return Err(SessionError::EncryptionFailed(
-                "empty key material".to_string(),
-            ));
+            return Err(SessionError::EncryptionFailed("empty key material".to_string()));
         }
 
-        // BUG(trap5): uses the constant ENCRYPTION_NONCE for every call
-        // instead of generating a fresh random nonce.  Nonce reuse with
-        // the same key breaks AEAD confidentiality guarantees.
-        let nonce = ENCRYPTION_NONCE;
+        let nonce = Self::random_nonce()
+            .map_err(|e| SessionError::EncryptionFailed(format!("rng error: {}", e)))?;
 
         let key = &self.encryption_key.key_material;
-        let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
-        ciphertext.extend_from_slice(&nonce);
-
+        let mut output = Vec::with_capacity(12 + plaintext.len());
+        output.extend_from_slice(&nonce);
         for (i, &byte) in plaintext.iter().enumerate() {
-            let key_byte = key[i % key.len()];
-            let nonce_byte = nonce[i % nonce.len()];
-            ciphertext.push(byte ^ key_byte ^ nonce_byte);
+            output.push(byte ^ key[i % key.len()] ^ nonce[i % 12]);
         }
-
-        Ok(ciphertext)
+        Ok(output)
     }
 
-    /// Decrypt ticket data using the current encryption key.
     pub fn decrypt_ticket(&self, ciphertext: &[u8]) -> Result<Vec<u8>, SessionError> {
         if ciphertext.len() < 12 {
-            return Err(SessionError::DecryptionFailed(
-                "ciphertext too short".to_string(),
-            ));
+            return Err(SessionError::DecryptionFailed("ciphertext too short".to_string()));
         }
-
         let nonce = &ciphertext[..12];
-        let data = &ciphertext[12..];
-        let key = &self.encryption_key.key_material;
-
+        let data  = &ciphertext[12..];
+        let key   = &self.encryption_key.key_material;
         let mut plaintext = Vec::with_capacity(data.len());
         for (i, &byte) in data.iter().enumerate() {
-            let key_byte = key[i % key.len()];
-            let nonce_byte = nonce[i % nonce.len()];
-            plaintext.push(byte ^ key_byte ^ nonce_byte);
+            plaintext.push(byte ^ key[i % key.len()] ^ nonce[i % 12]);
         }
-
         Ok(plaintext)
+    }
+
+    fn random_nonce() -> std::io::Result<[u8; 12]> {
+        use std::io::Read;
+        let mut buf = [0u8; 12];
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut buf)?;
+        Ok(buf)
     }
 }
 
@@ -287,13 +235,59 @@ impl std::fmt::Display for SessionTicket {
 }
 
 impl SessionCache {
-    /// Return a summary line for logging / diagnostics.
     pub fn summary(&self) -> String {
         format!(
             "SessionCache {{ sessions: {}, key_id: {}, max: {} }}",
-            self.cache.len(),
-            self.encryption_key.key_id,
-            self.max_size,
+            self.cache.len(), self.encryption_key.key_id, self.max_size,
         )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cache() -> SessionCache {
+        SessionCache::new(vec![0x42u8; 32])
+    }
+
+    #[test]
+    fn encrypt_ticket_uses_unique_nonce_per_call() {
+        let c = cache();
+        let ct1 = c.encrypt_ticket(b"same_data").unwrap();
+        let ct2 = c.encrypt_ticket(b"same_data").unwrap();
+        assert_ne!(ct1, ct2, "two encryptions of the same plaintext must differ");
+    }
+
+    #[test]
+    fn nonce_is_prepended_to_ciphertext() {
+        let c = cache();
+        let ct = c.encrypt_ticket(b"hello").unwrap();
+        assert_eq!(ct.len(), 12 + 5);
+    }
+
+    #[test]
+    fn decrypt_ticket_roundtrip() {
+        let c = cache();
+        let plaintext = b"session secret data";
+        let ct = c.encrypt_ticket(plaintext).unwrap();
+        assert_eq!(c.decrypt_ticket(&ct).unwrap(), plaintext.to_vec());
+    }
+
+    #[test]
+    fn decrypt_ticket_roundtrip_empty() {
+        let c = cache();
+        let ct = c.encrypt_ticket(b"").unwrap();
+        assert_eq!(c.decrypt_ticket(&ct).unwrap(), b"".to_vec());
+    }
+
+    #[test]
+    fn decrypt_ticket_rejects_short_input() {
+        let c = cache();
+        assert!(c.decrypt_ticket(&[0u8; 11]).is_err());
     }
 }
