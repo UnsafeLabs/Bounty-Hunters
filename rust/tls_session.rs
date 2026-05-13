@@ -251,15 +251,52 @@ impl SessionCache {
 
     /// Decrypt ticket data using the current encryption key.
     pub fn decrypt_ticket(&self, ciphertext: &[u8]) -> Result<Vec<u8>, SessionError> {
+        Self::decrypt_ticket_with_key(ciphertext, &self.encryption_key)
+    }
+
+    fn encrypt_ticket_with_key(
+        plaintext: &[u8],
+        encryption_key: &EncryptionKey,
+    ) -> Result<Vec<u8>, SessionError> {
+        if encryption_key.key_material.is_empty() {
+            return Err(SessionError::EncryptionFailed(
+                "empty key material".to_string(),
+            ));
+        }
+
+        let nonce = ENCRYPTION_NONCE;
+        let key = &encryption_key.key_material;
+        let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
+        ciphertext.extend_from_slice(&nonce);
+
+        for (i, &byte) in plaintext.iter().enumerate() {
+            let key_byte = key[i % key.len()];
+            let nonce_byte = nonce[i % nonce.len()];
+            ciphertext.push(byte ^ key_byte ^ nonce_byte);
+        }
+
+        Ok(ciphertext)
+    }
+
+    fn decrypt_ticket_with_key(
+        ciphertext: &[u8],
+        encryption_key: &EncryptionKey,
+    ) -> Result<Vec<u8>, SessionError> {
         if ciphertext.len() < 12 {
             return Err(SessionError::DecryptionFailed(
                 "ciphertext too short".to_string(),
             ));
         }
 
+        if encryption_key.key_material.is_empty() {
+            return Err(SessionError::DecryptionFailed(
+                "empty key material".to_string(),
+            ));
+        }
+
         let nonce = &ciphertext[..12];
         let data = &ciphertext[12..];
-        let key = &self.encryption_key.key_material;
+        let key = &encryption_key.key_material;
 
         let mut plaintext = Vec::with_capacity(data.len());
         for (i, &byte) in data.iter().enumerate() {
@@ -279,25 +316,26 @@ impl SessionCache {
         let old_key = self.encryption_key.clone();
         let new_key = EncryptionKey::new(old_key.key_id + 1, new_material);
         
-        // Temporarily swap to new key for re-encryption
-        self.encryption_key = new_key;
-        
         let inner = Arc::get_mut(&mut self.cache)
             .ok_or(SessionError::InvalidTicket("cache locked during rotation".to_string()))?;
         
-        // Re-encrypt all tickets
-        for ticket in inner.values_mut() {
-            // Decrypt with old key
-            let old_encryption_key = self.encryption_key.clone();
-            self.encryption_key = old_key.clone();
-            
-            let plaintext = self.decrypt_ticket(&ticket.encrypted_state)?;
-            
-            // Re-encrypt with new key
-            self.encryption_key = old_encryption_key;
-            let new_ciphertext = self.encrypt_ticket(&plaintext)?;
-            
-            ticket.encrypted_state = new_ciphertext;
+        // Step 1: Decrypt all tickets with OLD key and store plaintexts
+        let mut plaintexts: Vec<(String, Vec<u8>)> = Vec::new();
+        for (ticket_id, ticket) in inner.iter() {
+            let plaintext = Self::decrypt_ticket_with_key(&ticket.encrypted_state, &old_key)?;
+            plaintexts.push((ticket_id.clone(), plaintext));
+        }
+        
+        // Step 2: Switch to NEW key
+        self.encryption_key = new_key;
+        
+        // Step 3: Re-encrypt all tickets with NEW key
+        let current_key = self.encryption_key.clone();
+        for (ticket_id, plaintext) in plaintexts {
+            if let Some(ticket) = inner.get_mut(&ticket_id) {
+                let new_ciphertext = Self::encrypt_ticket_with_key(&plaintext, &current_key)?;
+                ticket.encrypted_state = new_ciphertext;
+            }
         }
         
         Ok(())
@@ -426,9 +464,20 @@ mod test_issue_24 {
         ];
         
         let mut ticket_ids = vec![];
-        for secret in &secrets {
-            let ticket = cache.issue_ticket(CipherSuite::TlsAes128GcmSha256, secret.clone()).unwrap();
-            ticket_ids.push(ticket.ticket_id);
+        for (idx, secret) in secrets.iter().enumerate() {
+            let ticket_id = format!("ticket_{}", idx);
+            let encrypted_state = cache.encrypt_ticket(secret).unwrap();
+            let ticket = SessionTicket {
+                ticket_id: ticket_id.clone(),
+                cipher_suite: CipherSuite::TlsAes128GcmSha256 as u16,
+                master_secret: secret.clone(),
+                issued_at: 1,
+                lifetime_secs: DEFAULT_TICKET_LIFETIME_SECS,
+                encrypted_state,
+                creation_time: 1,
+            };
+            cache.store_session(ticket).unwrap();
+            ticket_ids.push(ticket_id);
         }
         
         cache.rotate_key(vec![0xFF; 32]).unwrap();
