@@ -120,7 +120,7 @@ impl SessionCache {
         let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
 
         if inner.len() >= self.max_size {
-            self.evict_expired_sessions(inner);
+            Self::evict_expired_sessions(inner);
         }
 
         if inner.len() >= self.max_size {
@@ -159,8 +159,7 @@ impl SessionCache {
 
     /// Check whether a ticket has exceeded its lifetime.
     fn is_ticket_expired(&self, ticket: &SessionTicket) -> bool {
-        let age = self.calculate_ticket_age(ticket);
-        age > ticket.lifetime_secs
+        Self::ticket_is_expired(ticket)
     }
 
     /// Calculate the age of a ticket in seconds.
@@ -172,16 +171,21 @@ impl SessionCache {
     }
 
     /// Evict all expired sessions from the map.
-    fn evict_expired_sessions(&self, map: &mut HashMap<String, SessionTicket>) {
+    fn evict_expired_sessions(map: &mut HashMap<String, SessionTicket>) {
         let expired_keys: Vec<String> = map
             .iter()
-            .filter(|(_, t)| self.is_ticket_expired(t))
+            .filter(|(_, t)| Self::ticket_is_expired(t))
             .map(|(k, _)| k.clone())
             .collect();
 
         for key in expired_keys {
             map.remove(&key);
         }
+    }
+
+    fn ticket_is_expired(ticket: &SessionTicket) -> bool {
+        let age = ticket.issued_at.saturating_sub(ticket.creation_time);
+        age > ticket.lifetime_secs
     }
 }
 
