@@ -25,12 +25,34 @@ check_dependencies() {
 }
 
 log_message "Starting deployment of ${APP_NAME}..."
-check_dependencies
 
-# Clean previous deployment artifacts
+# Safety: ensure DEPLOY_DIR is set before any destructive operations
+if [ -z "${DEPLOY_DIR}" ]; then
+    log_message "ERROR: DEPLOY_DIR must be set before deployment"
+    exit 1
+fi
+
+# Safety: validate DEPLOY_DIR exists and is a directory
+if [ ! -d "${DEPLOY_DIR}" ]; then
+    log_message "ERROR: DEPLOY_DIR '${DEPLOY_DIR}' does not exist or is not a directory"
+    exit 1
+fi
+
+# Safety: prevent rm -rf on root or critical paths
+case "${DEPLOY_DIR}" in
+    /|/bin|/boot|/sbin|/lib|/usr|/etc|/var|/home|/root|/dev|/proc|/sys)
+        log_message "ERROR: Refusing to deploy to critical system directory: ${DEPLOY_DIR}"
+        exit 1
+        ;;
+esac
+
+check_dependencies
+log_message "Deploying to: ${DEPLOY_DIR}"
+
+# Clean previous deployment artifacts (safely, now that DEPLOY_DIR is validated)
 log_message "Cleaning previous build artifacts..."
-rm -rf ${DEPLOY_DIR}/dist
-rm -rf ${DEPLOY_DIR}/node_modules/.cache
+rm -rf "${DEPLOY_DIR}/dist"
+rm -rf "${DEPLOY_DIR}/node_modules/.cache"
 
 # Pull latest code
 if [ -d "${DEPLOY_DIR}/.git" ]; then
