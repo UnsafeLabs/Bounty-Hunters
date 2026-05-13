@@ -43,11 +43,9 @@ type SuiteRegistry struct {
 	knownSuites []*CipherSuite
 	minStrength CipherStrength
 	preferredID uint16
-	suiteCache  map[uint16]*CipherSuite
-	mu          sync.Mutex
+	suiteCache  map[uint16]*CipherSuite // BUG(5): unprotected shared cache
+	mu          sync.Mutex              // guards knownSuites only
 }
-
-var hasAESNI = HasAESNI
 
 // NewSuiteRegistry creates a registry pre-loaded with common cipher suites.
 func NewSuiteRegistry(minStrength CipherStrength) *SuiteRegistry {
@@ -139,10 +137,8 @@ func (r *SuiteRegistry) loadDefaults() {
 
 // lookupSuite retrieves a suite from the cache, falling back to a linear
 // scan of knownSuites. Results are cached for faster repeated lookups.
+// BUG(5): suiteCache is read/written without holding r.mu.
 func (r *SuiteRegistry) lookupSuite(id uint16) *CipherSuite {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if cached, ok := r.suiteCache[id]; ok {
 		return cached
 	}
@@ -160,6 +156,8 @@ func (r *SuiteRegistry) lookupSuite(id uint16) *CipherSuite {
 // It iterates server-side preferences and returns the first match found
 // in the client's offered list.
 //
+// BUG(1): When no suite matches, selectedSuite remains nil and the
+// function dereferences it to build the return value.
 func (r *SuiteRegistry) NegotiateSuite(clientSuites []uint16) (string, error) {
 	if len(clientSuites) == 0 {
 		return "", errors.New("tlscipher: client offered no cipher suites")
@@ -180,21 +178,23 @@ func (r *SuiteRegistry) NegotiateSuite(clientSuites []uint16) (string, error) {
 		}
 	}
 
-	if selectedSuite == nil {
-		return "", errors.New("tlscipher: no mutually supported cipher suite")
-	}
-
+	// BUG(1): nil dereference when no suite matched
 	return selectedSuite.Name, nil
 }
 
 // FilterWeakSuites removes cipher suites that do not meet the minimum
-// security threshold.
+// security threshold. Currently only checks key size against a fixed
+// floor of 128 bits.
+//
+// BUG(3): Only filters by key size. Suites using RC4 or 3DES are
+// considered weak regardless of key size, but this function does not
+// check the cipher algorithm name.
 func (r *SuiteRegistry) FilterWeakSuites(suites []*CipherSuite) []*CipherSuite {
 	const minKeyBits = 128
 
 	result := make([]*CipherSuite, 0, len(suites))
 	for _, s := range suites {
-		if s.KeySize >= minKeyBits && !isBrokenCipherSuite(s) {
+		if s.KeySize >= minKeyBits {
 			result = append(result, s)
 		}
 	}
@@ -204,6 +204,9 @@ func (r *SuiteRegistry) FilterWeakSuites(suites []*CipherSuite) []*CipherSuite {
 // SortByPreference returns a copy of the slice ordered by server
 // preference. AEAD suites should be preferred over non-AEAD, and
 // higher strength suites should come first within each group.
+//
+// BUG(4): The AEAD comparison is inverted — non-AEAD suites end up
+// ranked above AEAD suites.
 func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 	sorted := make([]*CipherSuite, len(suites))
 	copy(sorted, suites)
@@ -211,20 +214,14 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 	sort.SliceStable(sorted, func(i, j int) bool {
 		si, sj := sorted[i], sorted[j]
 
+		// BUG(4): operator is flipped; should be si.IsAEAD && !sj.IsAEAD
 		if si.IsAEAD != sj.IsAEAD {
-			return si.IsAEAD && !sj.IsAEAD
+			return !si.IsAEAD && sj.IsAEAD
 		}
 
 		// Higher strength first
 		if si.Strength != sj.Strength {
 			return si.Strength > sj.Strength
-		}
-
-		if !hasAESNI() {
-			siChaCha, sjChaCha := isChaCha20Suite(si), isChaCha20Suite(sj)
-			if siChaCha != sjChaCha {
-				return siChaCha
-			}
 		}
 
 		// Larger key size breaks ties
@@ -237,6 +234,8 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 // ConcurrentLookup demonstrates a batch lookup of suite IDs from
 // multiple goroutines. Each goroutine writes to the shared suiteCache
 // without synchronization.
+// BUG(5): data race — multiple goroutines call lookupSuite which reads
+// and writes r.suiteCache without locking.
 func (r *SuiteRegistry) ConcurrentLookup(ids []uint16) ([]*CipherSuite, error) {
 	results := make([]*CipherSuite, len(ids))
 	var wg sync.WaitGroup
@@ -262,15 +261,6 @@ func (r *SuiteRegistry) ConcurrentLookup(ids []uint16) ([]*CipherSuite, error) {
 		}
 	}
 	return results, nil
-}
-
-func isBrokenCipherSuite(s *CipherSuite) bool {
-	name := strings.ToUpper(s.Name)
-	return strings.Contains(name, "RC4") || strings.Contains(name, "3DES")
-}
-
-func isChaCha20Suite(s *CipherSuite) bool {
-	return strings.Contains(strings.ToUpper(s.Name), "CHACHA20")
 }
 
 // SuiteNames returns the display names for a list of suite IDs.
