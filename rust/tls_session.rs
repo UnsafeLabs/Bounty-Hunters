@@ -159,7 +159,8 @@ impl SessionCache {
 
     /// Check whether a ticket has exceeded its lifetime.
     fn is_ticket_expired(&self, ticket: &SessionTicket) -> bool {
-        Self::ticket_is_expired(ticket)
+        let age = self.calculate_ticket_age(ticket);
+        age > ticket.lifetime_secs
     }
 
     /// Calculate the age of a ticket in seconds.
