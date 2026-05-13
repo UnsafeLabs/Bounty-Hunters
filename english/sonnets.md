@@ -13,13 +13,16 @@ A whispered prayer dissolving in the cloud.
 
 The moon ascends her throne of silver light,
 And casts her gaze upon the sleeping earth,
-[TODO: write lines 7-8 — must rhyme with "light" and "earth", ~10 syllables each, iambic pentameter]
+She threads my shadow through the fields of night,
+And names the hush that gave my longing birth.
 
 The rivers carry secrets to the sea,
 And mountains hold the memories of rain,
-[TODO: write lines 11-12 — must rhyme with "sea" and "rain", ~10 syllables each]
+Yet every tide returns those names to me,
+And every summit answers pain with pain.
 
-[TODO: write closing couplet (lines 13-14) — must rhyme with each other, provide resolution to the theme of cosmic solitude]
+So though the heavens set my soul apart,
+Their far-off fires keep vigil in my heart.
 
 ---
 
