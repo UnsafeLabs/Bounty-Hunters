@@ -194,6 +194,9 @@ func (r *SuiteRegistry) FilterWeakSuites(suites []*CipherSuite) []*CipherSuite {
 
 	result := make([]*CipherSuite, 0, len(suites))
 	for _, s := range suites {
+		if strings.Contains(s.Name, "RC4") || strings.Contains(s.Name, "3DES") {
+			continue
+		}
 		if s.KeySize >= minKeyBits {
 			result = append(result, s)
 		}
