@@ -32,6 +32,14 @@ class TLSCertValidatorStaticTests(unittest.TestCase):
 
         self.assertLess(log_index, issuer_free_index)
 
+    def test_remaining_seconds_uses_64_bit_overflow_safe_math(self):
+        self.assertIn("int64_t remaining_seconds;", self.source)
+        self.assertIn(
+            "remaining_seconds = (int64_t)day_diff * 86400 + sec_diff;",
+            self.source,
+        )
+        self.assertIn("(long long)remaining_seconds", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()
