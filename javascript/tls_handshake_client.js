@@ -236,6 +236,8 @@ class TLSHandshakeClient {
       throw new TLSError('Empty certificate chain', 42);
     }
 
+    const now = new Date();
+
     for (let i = 0; i < certChain.length; i++) {
       const cert = certChain[i];
 
@@ -244,7 +246,6 @@ class TLSHandshakeClient {
       }
 
       // Check certificate expiry — both notBefore and notAfter
-      const now = new Date();
       if (cert.notBefore && now < new Date(cert.notBefore)) {
         throw new TLSError(`Certificate at index ${i} is not yet valid`, 45);
       }
