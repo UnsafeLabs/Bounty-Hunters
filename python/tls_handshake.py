@@ -1,7 +1,13 @@
-"""
-TLS 1.2 Handshake State Machine
-Implements message parsing and state transitions for TLS handshake protocol.
-Reference: RFC 5246, RFC 7627 (Extended Master Secret)
+"""TLS 1.2 handshake parsing and state-management helpers.
+
+This module models the handshake portion of a TLS connection. It parses TLS
+record and handshake headers, tracks transcript hashes, extracts selected
+ClientHello extensions, and derives or verifies handshake secrets for the rest
+of the TLS stack. The implementation is intentionally small and test-oriented,
+so private-key operations are represented by deterministic placeholders rather
+than production cryptography.
+
+Reference: RFC 5246 and RFC 7627 (Extended Master Secret).
 """
 
 import hashlib
@@ -13,6 +19,8 @@ from typing import Optional, Dict, List, Tuple, Any
 
 
 class HandshakeState(Enum):
+    """High-level states used by the TLS handshake state machine."""
+
     IDLE = auto()
     CLIENT_HELLO = auto()
     SERVER_HELLO = auto()
@@ -25,6 +33,8 @@ class HandshakeState(Enum):
 
 
 class ContentType(Enum):
+    """TLS record-layer content type codes used by this parser."""
+
     CHANGE_CIPHER_SPEC = 20
     ALERT = 21
     HANDSHAKE = 22
@@ -32,6 +42,8 @@ class ContentType(Enum):
 
 
 class HandshakeType(Enum):
+    """Handshake message type codes defined by TLS 1.2."""
+
     CLIENT_HELLO = 1
     SERVER_HELLO = 2
     CERTIFICATE = 11
@@ -71,11 +83,22 @@ class TLSExtension:
     """Represents a parsed TLS extension."""
 
     def __init__(self, ext_type: int, data: bytes):
+        """Initialize a parsed extension container.
+
+        Args:
+            ext_type: Numeric TLS extension type identifier.
+            data: Raw extension payload bytes without the type/length header.
+        """
         self.ext_type = ext_type
         self.data = data
         self.server_name: Optional[str] = None
 
     def __repr__(self) -> str:
+        """Return a concise debugging representation of the extension.
+
+        Returns:
+            String containing the extension type and payload length.
+        """
         return f"TLSExtension(type=0x{self.ext_type:04x}, len={len(self.data)})"
 
 
@@ -83,6 +106,12 @@ class HandshakeMessage:
     """Parsed TLS handshake message."""
 
     def __init__(self, msg_type: HandshakeType, payload: bytes):
+        """Initialize a parsed handshake message.
+
+        Args:
+            msg_type: TLS handshake message type.
+            payload: Message body bytes without the handshake header.
+        """
         self.msg_type = msg_type
         self.payload = payload
         self.extensions: List[TLSExtension] = []
@@ -98,6 +127,12 @@ class TLSHandshake:
     """
 
     def __init__(self, is_server: bool = False):
+        """Create a new handshake tracker.
+
+        Args:
+            is_server: Whether this instance should verify peer Finished
+                messages using the server-side label. Defaults to client mode.
+        """
         self.state: HandshakeState = HandshakeState.IDLE
         self.is_server = is_server
         self.client_random: Optional[bytes] = None
@@ -113,7 +148,15 @@ class TLSHandshake:
         self.transcript: bytearray = bytearray()
 
     def transition_to(self, new_state: HandshakeState) -> bool:
-        """Attempt a state transition. Returns True if valid."""
+        """Attempt to advance the handshake state machine.
+
+        Args:
+            new_state: Candidate next state.
+
+        Returns:
+            True when the transition is allowed; otherwise False and the
+            state is changed to ERROR.
+        """
         allowed = VALID_TRANSITIONS.get(self.state, [])
         if new_state in allowed:
             self.state = new_state
@@ -122,7 +165,16 @@ class TLSHandshake:
         return False
 
     def parse_record(self, data: bytes) -> Optional[HandshakeMessage]:
-        """Parse a TLS record layer and extract the handshake message."""
+        """Parse a TLS record and extract a handshake message.
+
+        Args:
+            data: Complete TLS record bytes, including the five-byte record
+                header.
+
+        Returns:
+            Parsed HandshakeMessage when the record is a supported handshake
+            record; otherwise None.
+        """
         if len(data) < 5:
             return None
 
@@ -157,7 +209,16 @@ class TLSHandshake:
         return message
 
     def parse_client_hello(self, message: HandshakeMessage) -> bool:
-        """Parse ClientHello message fields."""
+        """Parse key ClientHello fields and advertised extensions.
+
+        Args:
+            message: HandshakeMessage whose payload contains a ClientHello
+                body.
+
+        Returns:
+            True when mandatory fields were present and parsed; False when the
+            payload is too short or malformed.
+        """
         payload = message.payload
         if len(payload) < 38:
             return False
@@ -191,7 +252,15 @@ class TLSHandshake:
         return True
 
     def parse_extensions(self, data: bytes) -> List[TLSExtension]:
-        """Parse TLS extensions from raw bytes."""
+        """Parse a sequence of TLS extension records.
+
+        Args:
+            data: Concatenated extension records from a ClientHello.
+
+        Returns:
+            List of parsed extensions. Recognized extensions also update the
+            handshake object's negotiation fields.
+        """
         extensions = []
         offset = 0
 
@@ -219,8 +288,15 @@ class TLSHandshake:
 
     def verify_finished(self, received_verify: bytes, label: str) -> bool:
         """
-        Verify the Finished message using HMAC-based PRF.
-        Compares received verify_data against locally computed value.
+        Verify the Finished message using the TLS PRF.
+
+        Args:
+            received_verify: Verify-data bytes received from the peer.
+            label: PRF label, typically ``client finished`` or
+                ``server finished``.
+
+        Returns:
+            True when the computed verify data matches the received value.
         """
         if self.master_secret is None:
             return False
@@ -237,7 +313,16 @@ class TLSHandshake:
         return computed_verify == received_verify
 
     def process_key_exchange(self, message: HandshakeMessage) -> bool:
-        """Process a ClientKeyExchange or ServerKeyExchange message."""
+        """Process key-exchange payload and derive the master secret.
+
+        Args:
+            message: Key-exchange handshake message containing the encoded
+                pre-master secret.
+
+        Returns:
+            True when the pre-master secret was recovered and the master
+            secret was derived; otherwise False.
+        """
         try:
             payload = message.payload
             if len(payload) < 2:
@@ -262,7 +347,11 @@ class TLSHandshake:
         return False
 
     def _derive_master_secret(self) -> None:
-        """Derive the master secret from pre-master secret and randoms."""
+        """Derive the TLS master secret from pre-master secret and randoms.
+
+        Raises:
+            ValueError: If the pre-master secret or either random is missing.
+        """
         if self._pre_master_secret is None:
             raise ValueError("No pre-master secret available")
         if self.client_random is None or self.server_random is None:
@@ -283,7 +372,17 @@ class TLSHandshake:
 
     def _prf(self, secret: bytes, label: bytes, seed: bytes,
              output_len: int) -> bytes:
-        """TLS 1.2 PRF using HMAC-SHA256 (P_SHA256)."""
+        """Run the TLS 1.2 HMAC-SHA256 PRF.
+
+        Args:
+            secret: Secret keying material for HMAC.
+            label: ASCII PRF label.
+            seed: PRF seed bytes.
+            output_len: Number of bytes to produce.
+
+        Returns:
+            Pseudo-random output truncated to ``output_len`` bytes.
+        """
         combined_seed = label + seed
         result = b""
         a_value = combined_seed  # A(0) = seed
@@ -299,8 +398,18 @@ class TLSHandshake:
 
     def _decrypt_pre_master_secret(self, encrypted: bytes) -> Optional[bytes]:
         """
-        Placeholder for RSA decryption of the pre-master secret.
-        In production, this would use the server's private key.
+        Recover the pre-master secret from an encrypted key-exchange blob.
+
+        Args:
+            encrypted: Encrypted pre-master secret bytes from the peer.
+
+        Returns:
+            A 48-byte pre-master secret for test inputs, or None when the
+            input cannot contain a valid TLS 1.2 pre-master secret.
+
+        Note:
+            In production, this placeholder would perform RSA or ECDHE secret
+            agreement using the configured server private key.
         """
         # Stub: return a deterministic value for testing
         if len(encrypted) < 48:
@@ -309,8 +418,13 @@ class TLSHandshake:
 
     def process_message(self, data: bytes) -> Tuple[bool, str]:
         """
-        Main entry point: parse a TLS record and advance the state machine.
-        Returns (success, status_message).
+        Parse one TLS record and advance the handshake state machine.
+
+        Args:
+            data: Complete TLS record bytes.
+
+        Returns:
+            Tuple of success flag and a human-readable status message.
         """
         message = self.parse_record(data)
         if message is None:
@@ -357,7 +471,12 @@ class TLSHandshake:
         return False, f"Unhandled message type: {message.msg_type}"
 
     def get_state_info(self) -> Dict[str, Any]:
-        """Return current handshake state for diagnostics."""
+        """Return diagnostic information about the current handshake.
+
+        Returns:
+            Dictionary containing state, negotiated parameters, extension IDs,
+            and whether a master secret has been derived.
+        """
         return {
             "state": self.state.name,
             "cipher_suite": self.cipher_suite,

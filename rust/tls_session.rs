@@ -1,3 +1,11 @@
+//! TLS session-ticket cache and placeholder ticket-protection helpers.
+//!
+//! This module represents the session-resumption component of a TLS stack. It
+//! stores issued session tickets, checks ticket lifetime, serializes ticket
+//! metadata for logging, and wraps ticket secrets with a simplified encryption
+//! routine used by the repository examples. Production code would replace the
+//! XOR placeholder with an AEAD construction and synchronize shared cache state.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -9,13 +17,15 @@ const MAX_CACHE_SIZE: usize = 4096;
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
 
 /// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+const ENCRYPTION_NONCE: [u8; 12] = [
+    0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+];
 
 // ---------------------------------------------------------------------------
 // Error types
 // ---------------------------------------------------------------------------
 
+/// Errors returned by session-cache and ticket-protection operations.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionError {
     TicketExpired { ticket_id: String },
@@ -45,6 +55,7 @@ impl std::error::Error for SessionError {}
 // Core data structures
 // ---------------------------------------------------------------------------
 
+/// Resumable TLS session state issued to a client as a ticket.
 #[derive(Debug, Clone)]
 pub struct SessionTicket {
     pub ticket_id: String,
@@ -56,6 +67,7 @@ pub struct SessionTicket {
     pub creation_time: u64,
 }
 
+/// Key metadata and raw material used to protect session tickets.
 #[derive(Debug, Clone)]
 pub struct EncryptionKey {
     pub key_id: u32,
@@ -63,6 +75,7 @@ pub struct EncryptionKey {
     pub created_at: u64,
 }
 
+/// In-memory cache of issued TLS session tickets.
 #[derive(Debug, Clone)]
 pub struct SessionCache {
     /// Thread-safe reference to the inner cache map.
@@ -73,6 +86,7 @@ pub struct SessionCache {
     max_size: usize,
 }
 
+/// TLS 1.3 cipher suites supported by the ticket issuer.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CipherSuite {
     TlsAes128GcmSha256 = 0x1301,
@@ -85,6 +99,10 @@ pub enum CipherSuite {
 // ---------------------------------------------------------------------------
 
 impl EncryptionKey {
+    /// Construct a new encryption key with the current timestamp.
+    ///
+    /// The key is tagged with `key_id` so tickets can be associated with the
+    /// material that protected them.
     pub fn new(key_id: u32, material: Vec<u8>) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -105,6 +123,9 @@ impl EncryptionKey {
 
 impl SessionCache {
     /// Create a new, empty session cache with a default encryption key.
+    ///
+    /// The cache uses `key_material` to initialize key id 1 and applies the
+    /// module default maximum cache size.
     pub fn new(key_material: Vec<u8>) -> Self {
         let key = EncryptionKey::new(1, key_material);
         SessionCache {
@@ -115,6 +136,9 @@ impl SessionCache {
     }
 
     /// Store a session ticket in the cache.
+    ///
+    /// Expired tickets are evicted before insertion. If the cache is still at
+    /// capacity after eviction, `SessionError::CacheFull` is returned.
     pub fn store_session(&mut self, ticket: SessionTicket) -> Result<(), SessionError> {
         let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
 
@@ -146,12 +170,16 @@ impl SessionCache {
     }
 
     /// Remove a specific ticket from the cache.
+    ///
+    /// Returns the removed ticket when it existed and the cache can be mutated.
     pub fn remove_session(&mut self, ticket_id: &str) -> Option<SessionTicket> {
         let inner = Arc::get_mut(&mut self.cache)?;
         inner.remove(ticket_id)
     }
 
     /// Return the number of cached sessions.
+    ///
+    /// This count includes expired tickets until an eviction pass runs.
     pub fn session_count(&self) -> usize {
         self.cache.len()
     }
@@ -192,6 +220,10 @@ impl SessionCache {
 
 impl SessionCache {
     /// Issue a new session ticket for the given cipher suite and secret.
+    ///
+    /// The generated ticket id embeds the key id and issue timestamp, the
+    /// master secret is encrypted, and the resulting ticket is inserted into
+    /// the cache before being returned.
     pub fn issue_ticket(
         &mut self,
         cipher_suite: CipherSuite,
@@ -250,6 +282,9 @@ impl SessionCache {
     }
 
     /// Decrypt ticket data using the current encryption key.
+    ///
+    /// The first 12 bytes are interpreted as the nonce prefix and the remaining
+    /// bytes are XOR-decoded with the configured key material.
     pub fn decrypt_ticket(&self, ciphertext: &[u8]) -> Result<Vec<u8>, SessionError> {
         if ciphertext.len() < 12 {
             return Err(SessionError::DecryptionFailed(
@@ -288,6 +323,8 @@ impl std::fmt::Display for SessionTicket {
 
 impl SessionCache {
     /// Return a summary line for logging / diagnostics.
+    ///
+    /// The summary intentionally excludes key material and ticket secrets.
     pub fn summary(&self) -> String {
         format!(
             "SessionCache {{ sessions: {}, key_id: {}, max: {} }}",

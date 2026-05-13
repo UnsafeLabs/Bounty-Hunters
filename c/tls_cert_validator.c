@@ -1,5 +1,15 @@
-/* tls_cert_validator.c - TLS Certificate Chain Validator
- * Copyright (c) 2024 SecureNet Systems */
+/**
+ * @file tls_cert_validator.c
+ * @brief TLS certificate-chain validation support for the TLS stack.
+ *
+ * This component manages a small trusted-certificate store, verifies leaf and
+ * intermediate certificate lifetimes and signatures, optionally enforces leaf
+ * fingerprint pinning, and emits diagnostics for certificate validation paths.
+ * It is intended to sit between the TLS handshake parser and OpenSSL's X.509
+ * primitives.
+ *
+ * Copyright (c) 2024 SecureNet Systems
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,6 +60,14 @@ typedef struct chain_context {
 } chain_context_t;
 
 static int g_log_level = LOG_LEVEL_INFO;
+/**
+ * @brief Emit a certificate-validation log message.
+ *
+ * @param level Severity level; messages below the global threshold are ignored.
+ * @param fmt printf-style format string followed by matching arguments.
+ *
+ * @return Nothing.
+ */
 static void log_cert_event(int level, const char *fmt, ...)
 {
     if (level < g_log_level)
@@ -63,6 +81,15 @@ static void log_cert_event(int level, const char *fmt, ...)
     fprintf(stderr, "\n");
 }
 
+/**
+ * @brief Compute a SHA-256 fingerprint for a certificate.
+ *
+ * @param cert Certificate whose DER encoding should be hashed.
+ * @param out Destination buffer for the fingerprint bytes.
+ * @param out_len Length of the destination buffer in bytes.
+ *
+ * @return 0 on success, or -1 when the input is invalid or the buffer is too small.
+ */
 static int compute_fingerprint(X509 *cert, unsigned char *out, size_t out_len)
 {
     unsigned int len = 0;
@@ -73,11 +100,27 @@ static int compute_fingerprint(X509 *cert, unsigned char *out, size_t out_len)
     return (len == FINGERPRINT_LEN) ? 0 : -1;
 }
 
+/**
+ * @brief Compare two fixed-size SHA-256 certificate fingerprints.
+ *
+ * @param fp1 First fingerprint buffer.
+ * @param fp2 Second fingerprint buffer.
+ *
+ * @return Non-zero when the fingerprints are byte-for-byte equal, otherwise 0.
+ */
 static int match_fingerprint(const unsigned char *fp1, const unsigned char *fp2)
 {
     return memcmp(fp1, fp2, FINGERPRINT_LEN) == 0;
 }
 
+/**
+ * @brief Validate the certificate validity window against the current time.
+ *
+ * @param cert Certificate to inspect.
+ *
+ * @return CERT_STATUS_OK for a currently valid certificate, or a negative
+ * status code describing the validity failure.
+ */
 static int check_expiry(X509 *cert)
 {
     const ASN1_TIME *not_before = X509_get0_notBefore(cert);
@@ -105,6 +148,14 @@ static int check_expiry(X509 *cert)
     return CERT_STATUS_OK;
 }
 
+/**
+ * @brief Verify that an issuer certificate signed a child certificate.
+ *
+ * @param cert Child certificate whose signature should be checked.
+ * @param issuer Candidate issuer certificate providing the public key.
+ *
+ * @return CERT_STATUS_OK when verification succeeds, otherwise CERT_STATUS_INVALID.
+ */
 static int verify_signature(X509 *cert, X509 *issuer)
 {
     EVP_PKEY *issuer_key = X509_get0_pubkey(issuer);
@@ -120,6 +171,14 @@ static int verify_signature(X509 *cert, X509 *issuer)
     return CERT_STATUS_OK;
 }
 
+/**
+ * @brief Find a trusted-store entry whose subject matches a certificate issuer.
+ *
+ * @param store Trusted certificate store to search.
+ * @param cert Certificate requiring an issuer.
+ *
+ * @return Pointer to the matching store entry, or NULL when no issuer matches.
+ */
 static cert_entry_t *find_issuer(cert_store_t *store, X509 *cert)
 {
     X509_NAME *issuer_name = X509_get_issuer_name(cert);
@@ -132,6 +191,14 @@ static cert_entry_t *find_issuer(cert_store_t *store, X509 *cert)
     return NULL;
 }
 
+/**
+ * @brief Validate a certificate chain against the configured trust context.
+ *
+ * @param ctx Chain validation context containing the presented chain, trusted
+ * store, optional pinned fingerprint, and OCSP configuration flag.
+ *
+ * @return CERT_STATUS_OK when the chain is trusted, otherwise a negative status code.
+ */
 static int validate_chain(chain_context_t *ctx)
 {
     int             i, rc;
@@ -179,6 +246,13 @@ static int validate_chain(chain_context_t *ctx)
     return CERT_STATUS_OK;
 }
 
+/**
+ * @brief Free all entries in a certificate store.
+ *
+ * @param store Store whose entries should be released. NULL is accepted.
+ *
+ * @return Nothing.
+ */
 static void cleanup_cert_store(cert_store_t *store)
 {
     cert_entry_t *entry, *next;
@@ -199,6 +273,14 @@ static void cleanup_cert_store(cert_store_t *store)
     store->count = 0;
 }
 
+/**
+ * @brief Add a certificate to the trusted certificate store.
+ *
+ * @param store Store that receives the duplicated certificate entry.
+ * @param cert OpenSSL certificate to duplicate and index by subject/issuer.
+ *
+ * @return 0 on success, or -1 on invalid input or allocation/fingerprint failure.
+ */
 int add_trusted_cert(cert_store_t *store, X509 *cert)
 {
     if (!store || !cert)
@@ -236,6 +318,15 @@ int add_trusted_cert(cert_store_t *store, X509 *cert)
     return 0;
 }
 
+/**
+ * @brief Allocate and initialize an empty certificate store.
+ *
+ * @param max_depth Maximum allowed certificate-chain depth; out-of-range values
+ * fall back to MAX_CHAIN_DEPTH.
+ * @param log_level Minimum severity emitted by the certificate logger.
+ *
+ * @return Newly allocated certificate store, or NULL on allocation failure.
+ */
 cert_store_t *init_cert_store(int max_depth, int log_level)
 {
     cert_store_t *store = calloc(1, sizeof(cert_store_t));

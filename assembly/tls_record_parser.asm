@@ -1,6 +1,13 @@
 ; tls_record_parser.asm
 ; TLS Record Layer Parser - x86_64 NASM
-; Parses TLS record headers and dispatches by content type
+;
+; Module role:
+;   This source file implements the TLS record-layer parsing entry point used by
+;   the example TLS stack. It reads one record from stdin, decodes the record
+;   header, validates the content type and payload length, dispatches to a
+;   content-type-specific handler, and provides small printing helpers for
+;   diagnostics.
+;
 ; Build: nasm -f elf64 tls_record_parser.asm -o tls_record_parser.o
 ;        ld tls_record_parser.o -o tls_record_parser
 
@@ -48,6 +55,16 @@ section .text
 ; ============================================================
 ; _start - entry point
 ; ============================================================
+; ---------------------------------------------------------------------------
+; _start
+; Purpose:
+;   Process entry point. Prints the banner, reads a TLS record into read_buf,
+;   verifies that at least the five-byte header is present, and invokes the
+;   record parser.
+; Register usage:
+;   rax = syscall number / read byte count, rdi = syscall fd or string pointer,
+;   rsi = input buffer pointer, rdx = read size, r12 = total bytes read.
+; ---------------------------------------------------------------------------
 _start:
     ; Print banner
     lea rdi, [rel msg_banner]
@@ -74,6 +91,9 @@ _start:
     xor rdi, rdi
     syscall
 
+; .err_short
+; Purpose: Report that stdin did not contain a complete TLS record header.
+; Register usage: rdi points to err_short_read; rax/rdi are then reused for exit.
 .err_short:
     lea rdi, [rel err_short_read]
     call print_string
@@ -87,6 +107,16 @@ _start:
 ;           r12 = total bytes available in buffer
 ;   Parses content type, version, length and dispatches
 ; ============================================================
+; ---------------------------------------------------------------------------
+; parse_tls_record
+; Purpose:
+;   Decode the TLS record header at rsi, print the parsed fields, validate the
+;   content type and payload length, and dispatch to the matching handler label.
+; Register usage:
+;   Input rsi = record buffer, r12 = total bytes available. Uses r13d for the
+;   content type, r14d for the version, r15d for payload length, rdi for the
+;   payload pointer, and ecx for payload length during handler dispatch.
+; ---------------------------------------------------------------------------
 parse_tls_record:
     push rbp
     mov rbp, rsp
@@ -111,6 +141,9 @@ parse_tls_record:
     ; is heartbeat. The jle here means we accept up to AND including
     ; 0x18 which is correct. But see the LOWER bound check below...
 
+; .type_ok
+; Purpose: Continue after content-type validation and print the type byte.
+; Register usage: r13d holds the content type; rsi is preserved across printing.
 .type_ok:
     ; Print content type
     push rsi
@@ -181,6 +214,9 @@ parse_tls_record:
     je .handle_heartbeat
     jmp .unknown_type
 
+; .handle_change_cipher
+; Purpose: Handle ChangeCipherSpec records and print the matching label.
+; Register usage: rdi is temporarily used for the output string and then restored.
 .handle_change_cipher:
     push rdi
     lea rdi, [rel lbl_change_cipher]
@@ -189,6 +225,9 @@ parse_tls_record:
     ; ChangeCipherSpec payload is 1 byte (value 0x01)
     jmp .parse_done
 
+; .handle_alert
+; Purpose: Handle Alert records, distinguishing fatal alerts from warnings.
+; Register usage: rdi points to alert payload, ecx holds payload length, eax is scratch.
 .handle_alert:
     push rdi
     lea rdi, [rel lbl_alert]
@@ -205,11 +244,17 @@ parse_tls_record:
     call print_string                  ; will print into err_truncated
     jmp .parse_done
 
+; .alert_fatal
+; Purpose: Print the fatal-alert diagnostic for alert level 2.
+; Register usage: rdi points to err_alert_fatal before calling print_string.
 .alert_fatal:
     lea rdi, [rel err_alert_fatal]
     call print_string
     jmp .parse_done
 
+; .handle_handshake
+; Purpose: Handle Handshake records and read the handshake message type byte.
+; Register usage: rdi points to the handshake payload, ecx holds payload length, eax is scratch.
 .handle_handshake:
     push rdi
     lea rdi, [rel lbl_handshake]
@@ -223,6 +268,9 @@ parse_tls_record:
     ; 0x01=ClientHello, 0x02=ServerHello, 0x0b=Certificate, etc.
     jmp .parse_done
 
+; .handle_application
+; Purpose: Handle encrypted application-data records by reporting their type.
+; Register usage: rdi is temporarily used for the output string and then restored.
 .handle_application:
     push rdi
     lea rdi, [rel lbl_application]
@@ -232,6 +280,9 @@ parse_tls_record:
     ; No TLS 1.3 inner content type detection is performed
     jmp .parse_done
 
+; .handle_heartbeat
+; Purpose: Handle heartbeat records by reporting their content type.
+; Register usage: rdi is temporarily used for the output string and then restored.
 .handle_heartbeat:
     push rdi
     lea rdi, [rel lbl_heartbeat]
@@ -239,20 +290,32 @@ parse_tls_record:
     pop rdi
     jmp .parse_done
 
+; .unknown_type
+; Purpose: Fallback handler for a content type with no explicit dispatch branch.
+; Register usage: rdi points to lbl_unknown before calling print_string.
 .unknown_type:
     lea rdi, [rel lbl_unknown]
     call print_string
     jmp .parse_done
 
+; .invalid_type
+; Purpose: Report a record content type outside the accepted TLS type range.
+; Register usage: rdi points to err_invalid_type before calling print_string.
 .invalid_type:
     lea rdi, [rel err_invalid_type]
     call print_string
     jmp .parse_done
 
+; .invalid_length
+; Purpose: Report a record whose declared payload length exceeds the TLS limit.
+; Register usage: rdi points to err_truncated before calling print_string.
 .invalid_length:
     lea rdi, [rel err_truncated]
     call print_string
 
+; .parse_done
+; Purpose: Common parser epilogue that restores saved registers and returns.
+; Register usage: pops r14, r13, rbx, and rbp saved by parse_tls_record.
 .parse_done:
     pop r14
     pop r13
@@ -264,17 +327,31 @@ parse_tls_record:
 ; print_string - write null-terminated string to stdout
 ;   Input: rdi = pointer to string
 ; ============================================================
+; ---------------------------------------------------------------------------
+; print_string
+; Purpose:
+;   Write a null-terminated string to stdout by first computing its length.
+; Register usage:
+;   Input rdi = string pointer. Uses rsi for traversal, rdx for length, rax/rdi
+;   for sys_write, and preserves rsi, rdx, and rcx for the caller.
+; ---------------------------------------------------------------------------
 print_string:
     push rsi
     push rdx
     push rcx
     mov rsi, rdi
     xor rdx, rdx
+; .strlen
+; Purpose: Count bytes until the terminating NUL byte of the current string.
+; Register usage: rsi points to string base, rdx accumulates length.
 .strlen:
     cmp byte [rsi + rdx], 0
     je .do_write
     inc rdx
     jmp .strlen
+; .do_write
+; Purpose: Issue sys_write for the string counted by .strlen.
+; Register usage: rax = SYS_write, rdi = stdout fd, rsi = buffer, rdx = length.
 .do_write:
     mov rax, 1                  ; sys_write
     mov rdi, 1                  ; stdout
@@ -288,6 +365,14 @@ print_string:
 ; print_hex_byte - print a byte value as 2 hex digits
 ;   Input: edi = byte value (low 8 bits used)
 ; ============================================================
+; ---------------------------------------------------------------------------
+; print_hex_byte
+; Purpose:
+;   Print the low byte of edi as two lowercase hexadecimal characters.
+; Register usage:
+;   Input edi = byte value. Uses eax for nibble extraction, rcx for hex table,
+;   rsi for hex_out, and rax/rdi/rdx for sys_write.
+; ---------------------------------------------------------------------------
 print_hex_byte:
     push rsi
     push rdx
@@ -315,6 +400,14 @@ print_hex_byte:
 ; print_hex_word - print a 16-bit value as 4 hex digits
 ;   Input: edi = word value (low 16 bits used)
 ; ============================================================
+; ---------------------------------------------------------------------------
+; print_hex_word
+; Purpose:
+;   Print the low 16 bits of edi as four hexadecimal characters.
+; Register usage:
+;   Input edi = word value. Calls print_hex_byte for high and low bytes while
+;   preserving the original edi on the stack between calls.
+; ---------------------------------------------------------------------------
 print_hex_word:
     push rdi
     mov eax, edi
@@ -331,6 +424,15 @@ print_hex_word:
 ; print_decimal - print a 32-bit unsigned integer in decimal
 ;   Input: edi = value
 ; ============================================================
+; ---------------------------------------------------------------------------
+; print_decimal
+; Purpose:
+;   Convert the unsigned integer in edi to decimal ASCII and write it to stdout.
+; Register usage:
+;   Input edi = value. Uses stack scratch space for digits, eax/edx/ecx for
+;   repeated division by 10, rsi for the output pointer, and rax/rdi/rdx for
+;   sys_write.
+; ---------------------------------------------------------------------------
 print_decimal:
     push rbp
     mov rbp, rsp
@@ -339,6 +441,10 @@ print_decimal:
     mov byte [rsi], 10          ; newline at end
     mov eax, edi
     mov ecx, 10
+; .dec_loop
+; Purpose: Generate decimal digits from least significant to most significant.
+; Register usage: eax holds the remaining quotient, edx receives the remainder,
+; ecx is the divisor 10, and rsi moves backward through the stack buffer.
 .dec_loop:
     xor edx, edx
     div ecx

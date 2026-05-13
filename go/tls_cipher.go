@@ -1,3 +1,9 @@
+// Package tlscipher implements TLS cipher-suite selection helpers.
+//
+// The package models the cipher-negotiation component of a TLS stack. It keeps
+// metadata for common suites, filters suites against a configured security
+// threshold, orders suites by server preference, and exposes helper functions
+// for diagnostics and platform capability reporting.
 package tlscipher
 
 import (
