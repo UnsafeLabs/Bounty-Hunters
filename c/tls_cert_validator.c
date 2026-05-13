@@ -79,11 +79,24 @@ static int match_fingerprint(const unsigned char *fp1, const unsigned char *fp2)
     return memcmp(fp1, fp2, FINGERPRINT_LEN) == 0;
 }
 
+static int get_remaining_seconds(const ASN1_TIME *not_after, int64_t *remaining_seconds)
+{
+    int day_diff = 0;
+    int sec_diff = 0;
+
+    if (!not_after || !remaining_seconds)
+        return 0;
+    if (!ASN1_TIME_diff(&day_diff, &sec_diff, NULL, not_after))
+        return 0;
+
+    *remaining_seconds = (int64_t)day_diff * 86400 + sec_diff;
+    return 1;
+}
+
 static int check_expiry(X509 *cert)
 {
     const ASN1_TIME *not_before = X509_get0_notBefore(cert);
     const ASN1_TIME *not_after  = X509_get0_notAfter(cert);
-    int day_diff, sec_diff;
     int64_t remaining_seconds;
     if (!not_before || !not_after) {
         log_cert_event(LOG_LEVEL_ERROR, "certificate missing validity dates");
@@ -97,10 +110,9 @@ static int check_expiry(X509 *cert)
         log_cert_event(LOG_LEVEL_WARN, "certificate has expired");
         return CERT_STATUS_EXPIRED;
     }
-    if (!ASN1_TIME_diff(&day_diff, &sec_diff, NULL, not_after))
+    if (!get_remaining_seconds(not_after, &remaining_seconds))
         return CERT_STATUS_INVALID;
 
-    remaining_seconds = (int64_t)day_diff * 86400 + sec_diff;
     if (remaining_seconds < (int64_t)86400 * 30)
         log_cert_event(LOG_LEVEL_WARN, "certificate expires in %" PRId64 " seconds", remaining_seconds);
     return CERT_STATUS_OK;
