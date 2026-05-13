@@ -43,9 +43,11 @@ type SuiteRegistry struct {
 	knownSuites []*CipherSuite
 	minStrength CipherStrength
 	preferredID uint16
-	suiteCache  map[uint16]*CipherSuite // BUG(5): unprotected shared cache
-	mu          sync.Mutex              // guards knownSuites only
+	suiteCache  map[uint16]*CipherSuite
+	mu          sync.RWMutex
 }
+
+var hasAESNI = HasAESNI
 
 // NewSuiteRegistry creates a registry pre-loaded with common cipher suites.
 func NewSuiteRegistry(minStrength CipherStrength) *SuiteRegistry {
@@ -137,12 +139,20 @@ func (r *SuiteRegistry) loadDefaults() {
 
 // lookupSuite retrieves a suite from the cache, falling back to a linear
 // scan of knownSuites. Results are cached for faster repeated lookups.
-// BUG(5): suiteCache is read/written without holding r.mu.
 func (r *SuiteRegistry) lookupSuite(id uint16) *CipherSuite {
+	r.mu.RLock()
+	if cached, ok := r.suiteCache[id]; ok {
+		r.mu.RUnlock()
+		return cached
+	}
+	r.mu.RUnlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if cached, ok := r.suiteCache[id]; ok {
 		return cached
 	}
-
 	for _, s := range r.knownSuites {
 		if s.ID == id {
 			r.suiteCache[id] = s
@@ -178,7 +188,10 @@ func (r *SuiteRegistry) NegotiateSuite(clientSuites []uint16) (string, error) {
 		}
 	}
 
-	// BUG(1): nil dereference when no suite matched
+	if selectedSuite == nil {
+		return "", errors.New("tlscipher: no mutually supported cipher suite")
+	}
+
 	return selectedSuite.Name, nil
 }
 
@@ -194,7 +207,9 @@ func (r *SuiteRegistry) FilterWeakSuites(suites []*CipherSuite) []*CipherSuite {
 
 	result := make([]*CipherSuite, 0, len(suites))
 	for _, s := range suites {
-		if s.KeySize >= minKeyBits {
+		if s.KeySize >= minKeyBits &&
+			!strings.Contains(s.Name, "RC4") &&
+			!strings.Contains(s.Name, "3DES") {
 			result = append(result, s)
 		}
 	}
@@ -214,14 +229,21 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 	sort.SliceStable(sorted, func(i, j int) bool {
 		si, sj := sorted[i], sorted[j]
 
-		// BUG(4): operator is flipped; should be si.IsAEAD && !sj.IsAEAD
 		if si.IsAEAD != sj.IsAEAD {
-			return !si.IsAEAD && sj.IsAEAD
+			return si.IsAEAD && !sj.IsAEAD
 		}
 
 		// Higher strength first
 		if si.Strength != sj.Strength {
 			return si.Strength > sj.Strength
+		}
+
+		if si.Strength == sj.Strength && !hasAESNI() {
+			siChaCha := strings.Contains(si.Name, "CHACHA20")
+			sjChaCha := strings.Contains(sj.Name, "CHACHA20")
+			if siChaCha != sjChaCha {
+				return siChaCha
+			}
 		}
 
 		// Larger key size breaks ties
