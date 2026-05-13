@@ -125,10 +125,11 @@ parse_tls_record:
     ; --- Bytes 1-2: Protocol Version (big-endian) ---
     ; TLS version is 2 bytes, network byte order (big-endian)
     ; e.g. TLS 1.2 = 0x0303, TLS 1.0 = 0x0301
-    mov ax, [rsi+1]             ; BUG: loads in little-endian on x86
-                                ; For input bytes 03 03 this works by coincidence
-                                ; but 03 01 would be read as 0x0103 instead of 0x0301
-    movzx r14d, ax              ; r14 = version (incorrectly byte-swapped)
+    movzx eax, byte [rsi+1]
+    shl eax, 8
+    movzx ebx, byte [rsi+2]
+    or eax, ebx
+    mov r14d, eax               ; r14 = version in network byte order
 
     ; Print version
     push rsi
@@ -161,10 +162,13 @@ parse_tls_record:
     cmp r15d, TLS_MAX_RECORD_LEN
     ja .invalid_length
 
+    ; Ensure the declared payload is present in the input buffer.
+    mov eax, r15d
+    add rax, 5
+    cmp r12, rax
+    jb .invalid_length
+
     ; --- Read payload data ---
-    ; BUG: No check that r12 (bytes in buffer) >= r15 + 5
-    ; If the record claims a large payload but we only read a few
-    ; bytes, we'll process past the end of valid data
     lea rdi, [rsi+5]            ; rdi = start of payload
     mov ecx, r15d               ; ecx = payload length
 
