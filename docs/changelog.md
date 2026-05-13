@@ -18,18 +18,7 @@ All notable changes to BountyHunters will be documented in this file.
 - Memory leak in background worker process
 - Rate limiter not resetting correctly at midnight UTC
 
-## [v2.1.0] - 2025-08-15
-
-### Added
-- Team bounties with shared rewards
-- Export bounty data to CSV
-- Webhook support for bounty status changes
-
-### Fixed
-- Search not returning results for hyphenated terms
-- Pagination offset calculation error on filtered queries
-
-## [v2.0.0] - 2025-09-30
+## [v2.1.0] - 2025-09-30
 
 ### Breaking Changes
 - API response format changed to JSON:API specification
@@ -43,6 +32,17 @@ All notable changes to BountyHunters will be documented in this file.
 ### Fixed
 - Fixed XSS vulnerability in bounty descriptions
 - Corrected timezone handling for deadline calculations
+
+## [v2.0.0] - 2025-08-15
+
+### Added
+- Team bounties with shared rewards
+- Export bounty data to CSV
+- Webhook support for bounty status changes
+
+### Fixed
+- Search not returning results for hyphenated terms
+- Pagination offset calculation error on filtered queries
 
 ## [v1.2.0] - 2025-05-10
 
@@ -65,16 +65,6 @@ All notable changes to BountyHunters will be documented in this file.
 ### Fixed
 - Fixed duplicate bounty creation on double-click
 
-## [v1.1.0] - 2025-03-20
-
-### Added
-- Search functionality for bounties
-- User profile pages
-- Basic analytics dashboard
-
-### Fixed
-- Fixed duplicate bounty creation on double-click
-
 ## [v1.0.0] - 2025-01-15
 
 ### Added
@@ -85,4 +75,4 @@ All notable changes to BountyHunters will be documented in this file.
 
 ---
 
-For upgrade instructions between major versions, see the v2.0.1 upgrade guide.
+For upgrade instructions between major versions, see the upgrade guide.
