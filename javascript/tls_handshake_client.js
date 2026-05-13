@@ -289,6 +289,10 @@ class TLSHandshakeClient {
 
     // Use the negotiated hash algorithm, not a hardcoded one
     const hash = this.negotiatedHash;
+    if (hash !== 'sha256' && hash !== 'sha384') {
+      throw new TLSError(`Unsupported negotiated hash algorithm: ${hash}`);
+    }
+
     const hashLen = hash === 'sha384' ? 48 : 32;
 
     const finishedKey = this._hkdfExpandLabel(
