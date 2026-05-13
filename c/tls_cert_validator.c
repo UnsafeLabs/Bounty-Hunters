@@ -47,6 +47,8 @@ typedef struct chain_context {
     cert_store_t   *trusted_store;
     unsigned char  *pinned_fingerprint;
     int             verify_ocsp;
+    const unsigned char *ocsp_response_der;
+    size_t          ocsp_response_len;
 } chain_context_t;
 
 static int g_log_level = LOG_LEVEL_INFO;
@@ -120,6 +122,72 @@ static int verify_signature(X509 *cert, X509 *issuer)
     return CERT_STATUS_OK;
 }
 
+static int check_ocsp_stapling(X509 *leaf, X509 *issuer,
+                               const unsigned char *resp_der,
+                               size_t resp_len)
+{
+    const unsigned char *p = resp_der;
+    OCSP_RESPONSE *resp = NULL;
+    OCSP_BASICRESP *basic = NULL;
+    OCSP_CERTID *cert_id = NULL;
+    int cert_status = V_OCSP_CERTSTATUS_UNKNOWN;
+    int reason = -1;
+    ASN1_GENERALIZEDTIME *revtime = NULL;
+    ASN1_GENERALIZEDTIME *thisupd = NULL;
+    ASN1_GENERALIZEDTIME *nextupd = NULL;
+    int rc = CERT_STATUS_INVALID;
+
+    if (!leaf || !issuer || !resp_der || resp_len == 0) {
+        log_cert_event(LOG_LEVEL_ERROR, "missing OCSP stapling response");
+        return CERT_STATUS_INVALID;
+    }
+
+    resp = d2i_OCSP_RESPONSE(NULL, &p, (long)resp_len);
+    if (!resp) {
+        log_cert_event(LOG_LEVEL_ERROR, "failed to parse OCSP response");
+        goto cleanup;
+    }
+
+    if (OCSP_response_status(resp) != OCSP_RESPONSE_STATUS_SUCCESSFUL) {
+        log_cert_event(LOG_LEVEL_ERROR, "OCSP response was not successful");
+        goto cleanup;
+    }
+
+    basic = OCSP_response_get1_basic(resp);
+    if (!basic) {
+        log_cert_event(LOG_LEVEL_ERROR, "OCSP response missing basic response");
+        goto cleanup;
+    }
+
+    cert_id = OCSP_cert_to_id(NULL, leaf, issuer);
+    if (!cert_id) {
+        log_cert_event(LOG_LEVEL_ERROR, "failed to build OCSP cert id");
+        goto cleanup;
+    }
+
+    if (!OCSP_resp_find_status(basic, cert_id, &cert_status, &reason,
+                               &revtime, &thisupd, &nextupd)) {
+        log_cert_event(LOG_LEVEL_ERROR, "OCSP response missing leaf status");
+        goto cleanup;
+    }
+
+    if (cert_status == V_OCSP_CERTSTATUS_GOOD) {
+        rc = CERT_STATUS_OK;
+    } else if (cert_status == V_OCSP_CERTSTATUS_REVOKED) {
+        log_cert_event(LOG_LEVEL_ERROR, "leaf certificate revoked by OCSP");
+        rc = CERT_STATUS_REVOKED;
+    } else {
+        log_cert_event(LOG_LEVEL_ERROR, "OCSP response returned unknown cert status");
+        rc = CERT_STATUS_INVALID;
+    }
+
+cleanup:
+    OCSP_CERTID_free(cert_id);
+    OCSP_BASICRESP_free(basic);
+    OCSP_RESPONSE_free(resp);
+    return rc;
+}
+
 static cert_entry_t *find_issuer(cert_store_t *store, X509 *cert)
 {
     X509_NAME *issuer_name = X509_get_issuer_name(cert);
@@ -135,48 +203,72 @@ static cert_entry_t *find_issuer(cert_store_t *store, X509 *cert)
 static int validate_chain(chain_context_t *ctx)
 {
     int             i, rc;
+    int             status = CERT_STATUS_INVALID;
     unsigned char   fp[FINGERPRINT_LEN];
     cert_entry_t   *trusted_issuer;
+    X509           *leaf_issuer;
 
     if (!ctx || !ctx->chain || ctx->chain_len <= 0)
-        return CERT_STATUS_INVALID;
+        goto cleanup;
     if (ctx->chain_len > MAX_CHAIN_DEPTH)
-        return CERT_STATUS_INVALID;
+        goto cleanup;
 
     for (i = 0; i < ctx->chain_len - 1; i++) {
         rc = check_expiry(ctx->chain[i]);
         if (rc != CERT_STATUS_OK) {
             log_cert_event(LOG_LEVEL_ERROR, "cert at depth %d failed expiry check", i);
-            return rc;
+            status = rc;
+            goto cleanup;
         }
         rc = verify_signature(ctx->chain[i], ctx->chain[i + 1]);
         if (rc != CERT_STATUS_OK) {
             log_cert_event(LOG_LEVEL_ERROR, "signature invalid at depth %d", i);
-            return rc;
+            status = rc;
+            goto cleanup;
         }
     }
 
     trusted_issuer = find_issuer(ctx->trusted_store, ctx->chain[ctx->chain_len - 1]);
     if (!trusted_issuer) {
         log_cert_event(LOG_LEVEL_ERROR, "root not found in trusted store");
-        return CERT_STATUS_UNTRUSTED;
+        status = CERT_STATUS_UNTRUSTED;
+        goto cleanup;
     }
     rc = verify_signature(ctx->chain[ctx->chain_len - 1], trusted_issuer->cert);
-    if (rc != CERT_STATUS_OK)
-        return rc;
+    if (rc != CERT_STATUS_OK) {
+        status = rc;
+        goto cleanup;
+    }
+
+    if (ctx->verify_ocsp) {
+        leaf_issuer = (ctx->chain_len > 1) ? ctx->chain[1] : trusted_issuer->cert;
+        rc = check_ocsp_stapling(ctx->chain[0], leaf_issuer,
+                                 ctx->ocsp_response_der,
+                                 ctx->ocsp_response_len);
+        if (rc != CERT_STATUS_OK) {
+            status = rc;
+            goto cleanup;
+        }
+    }
 
     /* Fingerprint pinning on leaf */
     if (ctx->pinned_fingerprint) {
-        if (compute_fingerprint(ctx->chain[0], fp, sizeof(fp)) != 0)
-            return CERT_STATUS_INVALID;
+        if (compute_fingerprint(ctx->chain[0], fp, sizeof(fp)) != 0) {
+            status = CERT_STATUS_INVALID;
+            goto cleanup;
+        }
         if (!match_fingerprint(fp, ctx->pinned_fingerprint)) {
             log_cert_event(LOG_LEVEL_ERROR, "leaf fingerprint mismatch");
-            return CERT_STATUS_UNTRUSTED;
+            status = CERT_STATUS_UNTRUSTED;
+            goto cleanup;
         }
     }
 
     log_cert_event(LOG_LEVEL_INFO, "chain validated successfully (%d certs)", ctx->chain_len);
-    return CERT_STATUS_OK;
+    status = CERT_STATUS_OK;
+
+cleanup:
+    return status;
 }
 
 static void cleanup_cert_store(cert_store_t *store)
