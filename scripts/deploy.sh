@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 #
 # deploy.sh - Application deployment script
 # Pulls latest code, builds, and deploys to production
@@ -27,10 +28,15 @@ check_dependencies() {
 log_message "Starting deployment of ${APP_NAME}..."
 check_dependencies
 
+if [ -z "${DEPLOY_DIR}" ] || [ "${DEPLOY_DIR}" = "/" ]; then
+    log_message "ERROR: DEPLOY_DIR must be set to a non-root directory"
+    exit 1
+fi
+
 # Clean previous deployment artifacts
 log_message "Cleaning previous build artifacts..."
-rm -rf ${DEPLOY_DIR}/dist
-rm -rf ${DEPLOY_DIR}/node_modules/.cache
+rm -rf "${DEPLOY_DIR}/dist"
+rm -rf "${DEPLOY_DIR}/node_modules/.cache"
 
 # Pull latest code
 if [ -d "${DEPLOY_DIR}/.git" ]; then
