@@ -166,10 +166,12 @@ impl SessionCache {
 
     /// Calculate the age of a ticket in seconds.
     fn calculate_ticket_age(&self, ticket: &SessionTicket) -> u64 {
-        // BUG(trap4): subtracts creation_time from issued_at instead of
-        // computing `now - issued_at`.  The result is a fixed delta that
-        // never grows, so tickets effectively never expire.
-        ticket.issued_at.saturating_sub(ticket.creation_time)
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
+
+        now.saturating_sub(ticket.issued_at)
     }
 
     /// Evict all expired sessions from the map.
@@ -183,6 +185,57 @@ impl SessionCache {
         for key in expired_keys {
             map.remove(&key);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn now_secs() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs()
+    }
+
+    fn ticket(ticket_id: &str, issued_at: u64, lifetime_secs: u64) -> SessionTicket {
+        SessionTicket {
+            ticket_id: ticket_id.to_string(),
+            cipher_suite: CipherSuite::TlsAes128GcmSha256 as u16,
+            master_secret: vec![1, 2, 3, 4],
+            issued_at,
+            lifetime_secs,
+            encrypted_state: vec![5, 6, 7, 8],
+            creation_time: issued_at,
+        }
+    }
+
+    #[test]
+    fn calculate_ticket_age_uses_current_time() {
+        let cache = SessionCache::new(vec![0xaa; 16]);
+        let ticket = ticket("old", now_secs().saturating_sub(7201), 7200);
+
+        assert!(cache.calculate_ticket_age(&ticket) >= 7201);
+    }
+
+    #[test]
+    fn is_ticket_expired_detects_old_and_fresh_tickets() {
+        let cache = SessionCache::new(vec![0xaa; 16]);
+        let old_ticket = ticket("old", now_secs().saturating_sub(7201), 7200);
+        let fresh_ticket = ticket("fresh", now_secs().saturating_sub(100), 7200);
+
+        assert!(cache.is_ticket_expired(&old_ticket));
+        assert!(!cache.is_ticket_expired(&fresh_ticket));
+    }
+
+    #[test]
+    fn get_session_returns_none_for_expired_ticket() {
+        let mut cache = SessionCache::new(vec![0xaa; 16]);
+        let old_ticket = ticket("tkt_1_old", now_secs().saturating_sub(7201), 7200);
+        cache.store_session(old_ticket).unwrap();
+
+        assert!(cache.get_session("tkt_1_old").is_none());
     }
 }
 
