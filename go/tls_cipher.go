@@ -219,6 +219,14 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 			return !si.IsAEAD && sj.IsAEAD
 		}
 
+		if si.Strength == sj.Strength && !hasAESNI() {
+			siChaCha := strings.Contains(si.Name, "CHACHA20")
+			sjChaCha := strings.Contains(sj.Name, "CHACHA20")
+			if siChaCha != sjChaCha {
+				return siChaCha
+			}
+		}
+
 		// Higher strength first
 		if si.Strength != sj.Strength {
 			return si.Strength > sj.Strength
@@ -280,6 +288,8 @@ func (r *SuiteRegistry) SuiteNames(ids []uint16) []string {
 func HasAESNI() bool {
 	return runtime.GOARCH == "amd64"
 }
+
+var hasAESNI = HasAESNI
 
 // FormatSuite returns a human-readable summary string for a suite.
 func FormatSuite(s *CipherSuite) string {
