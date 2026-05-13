@@ -4,7 +4,7 @@
 #
 
 LOG_DIRS="/var/log/app /var/log/nginx /var/log/services"
-MAX_AGE_DAYS="14"
+MAX_AGE_DAYS=14
 COMPRESS_AGE_DAYS="3"
 TOTAL_CLEANED=0
 
