@@ -6,21 +6,21 @@
 
 ## Project Overview
 
-Bounty-Hunters is an open-source security research and vulnerability collection project by [UnsafeLabs](https://unsafelabs.com). The repository centralizes security-related code samples, vulnerability detection patterns, proof-of-concept implementations, and security tooling across multiple programming languages. It serves as an educational resource for security researchers, bug bounty hunters, and developers looking to understand common vulnerabilities and how they manifest in different languages.
+Bounty-Hunters is an open-source security research project by UnsafeLabs. The repository serves as a centralized resource for security researchers, bug bounty hunters, and developers. It contains vulnerability detection patterns, proof-of-concept implementations, and security tooling across multiple programming languages.
 
 ## Folder Structure
 
 | Directory      | Description |
 |----------------|-------------|
-| `assembly/`    | Low-level exploit payloads, shellcode, and TLS record parsing examples in x86/x64 assembly |
-| `c/`           | C language vulnerability exploits, TLS certificate validation issues, and memory corruption patterns |
-| `rust/`        | Rust-based security tools focusing on safe TLS session handling and memory-safe exploitation patterns |
-| `python/`      | Python scripts for TLS handshake analysis, vulnerability scanning, and security PoC implementations |
-| `go/`          | Go network security tools, including TLS cipher analysis and vulnerability detection utilities |
-| `english/`     | Creative security documentation written as haikus, sonnets, acrostics, songs, and limericks |
-| `docs/`        | Structured documentation including setup guides, API references, and changelogs |
-| `config/`      | Configuration files for containerized deployments (docker-compose.yaml), Nginx, and application settings |
-| `scripts/`     | Shell scripts for deployment, backup, and log cleanup with security best practices |
+| `assembly/`    | Low-level exploit payloads, shellcode, and TLS record parsing in x86/x64 assembly |
+| `c/`           | C language vulnerability exploits and memory corruption examples |
+| `rust/`        | Safe exploitation patterns and security testing in Rust |
+| `python/`      | Python security scripts, scanners, and PoC exploit tools |
+| `go/`          | Go network security tools and vulnerability detection |
+| `english/`     | Security documentation written as creative works (haikus, sonnets, songs) |
+| `docs/`        | Setup guides, API references, and changelogs |
+| `config/`      | Containerized deployment configs (Docker, Nginx, app settings) |
+| `scripts/`     | Shell scripts for deployment, backup, and log cleanup |
 
 ## Getting Started
 
@@ -28,16 +28,16 @@ Bounty-Hunters is an open-source security research and vulnerability collection 
 
 | Language   | Required Tools | Install Command |
 |------------|----------------|-----------------|
-| Assembly   | `nasm` (Netwide Assembler), `ld` (Linker) | `sudo apt install nasm binutils` |
+| Assembly   | `nasm`, `ld` | `sudo apt install nasm binutils` |
 | C          | `gcc` or `clang` | `sudo apt install build-essential` |
 | Rust       | `rustc` and `cargo` | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` |
-| Python     | `python3` (3.8+) and `pip` | `sudo apt install python3 python3-pip` |
+| Python     | `python3` (3.8+) | `sudo apt install python3 python3-pip` |
 | Go         | `go` (1.20+) | `sudo apt install golang-go` |
-| Shell      | `bash` (4.2+), `tar`, `gzip` | Pre-installed on most Linux/macOS systems |
+| Shell      | `bash` (4.2+) | Pre-installed on Linux/macOS |
 
 ### Quick Start
 
-```bash
+\`\`\`bash
 # Clone the repository
 git clone https://github.com/UnsafeLabs/Bounty-Hunters.git
 cd Bounty-Hunters
@@ -45,124 +45,84 @@ cd Bounty-Hunters
 # Explore by language
 ls assembly/    # TLS record parser in assembly
 ls c/           # TLS certificate validator
-ls rust/        # TLS session handler in Rust
 ls python/      # TLS handshake analyzer
-ls go/          # TLS cipher analysis tool
-ls scripts/     # Deployment and backup scripts
-ls config/      # Docker and Nginx configurations
+\`\`\`
 
-# Run Python security scanner
-cd python/
-python3 tls_handshake.py
+### Running and Testing by Language
 
-# Build Go security tool
-cd go/
-go build tls_cipher.go
-```
-
-## Running & Testing
-
-### Assembly
-
-```bash
+**Assembly:**
+\`\`\`bash
 cd assembly/
 nasm -f elf64 tls_record_parser.asm -o tls_record_parser.o
 ld tls_record_parser.o -o tls_record_parser
 ./tls_record_parser
-```
+\`\`\`
 
-### C
-
-```bash
+**C:**
+\`\`\`bash
 cd c/
 gcc tls_cert_validator.c -o tls_cert_validator -lssl -lcrypto
 ./tls_cert_validator
-```
+\`\`\`
 
-### Rust
-
-```bash
+**Rust:**
+\`\`\`bash
 cd rust/
 rustc tls_session.rs -o tls_session
 ./tls_session
-```
+\`\`\`
 
-### Python
-
-```bash
+**Python:**
+\`\`\`bash
 cd python/
-pip install -r requirements.txt 2>/dev/null || true
 python3 tls_handshake.py
-```
+\`\`\`
 
-### Go
-
-```bash
+**Go:**
+\`\`\`bash
 cd go/
 go build tls_cipher.go
 ./tls_cipher
-```
+\`\`\`
 
-### Containerized Environment
-
-```bash
+**Containerized:**
+\`\`\`bash
 cd config/
 docker-compose up -d
-```
+\`\`\`
 
 ## How the Bounty System Works
 
-Select issues in this repository carry monetary rewards, managed through [Algora](https://algora.io). Here is how to participate:
+Select issues in this repository carry monetary rewards through [Algora](https://algora.io):
 
-1. **Browse bounties**: Visit the [Issues](https://github.com/UnsafeLabs/Bounty-Hunters/issues) tab and look for issues with the `💎 Bounty` label.
-2. **Start working**: Comment `/attempt #<issue-number>` on the issue with your plan of action.
-3. **Submit your work**: Create a pull request and include `/claim #<issue-number>` in the PR body.
-4. **Receive payment**: Once your PR is reviewed, approved, and merged, the bounty reward is automatically distributed to you via Algora.
+1. **Browse bounties**: Visit [Issues](https://github.com/UnsafeLabs/Bounty-Hunters/issues) and look for the Bounty label.
+2. **Start working**: Comment `/attempt #<issue-number>` with your plan.
+3. **Submit work**: Create a pull request with `/claim #<issue-number>` in the PR body.
+4. **Receive payment**: Once merged, the bounty is automatically distributed via Algora.
 
-Payment is typically processed within minutes of merging. All bounties are denominated in USD and paid via Algora.
-
-### Current Active Bounties
-
-| Issue | Description | Reward |
-|-------|-------------|--------|
-| [#328](https://github.com/UnsafeLabs/Bounty-Hunters/issues/328) | Write comprehensive README.md | $150 |
-| [#319](https://github.com/UnsafeLabs/Bounty-Hunters/issues/319) | Fix string vs arithmetic comparison in cleanup.sh | $36 |
-| [#317](https://github.com/UnsafeLabs/Bounty-Hunters/issues/317) | Fix dangerous rm -rf with unset variable guard in deploy.sh | $33 |
-| [#315](https://github.com/UnsafeLabs/Bounty-Hunters/issues/315) | Fix unquoted variable in backup.sh | $26 |
-| [#312](https://github.com/UnsafeLabs/Bounty-Hunters/issues/312) | Fix port mapping in docker-compose.yml | — |
-| [#311](https://github.com/UnsafeLabs/Bounty-Hunters/issues/311) | Fix missing semicolon in nginx.conf | — |
-| [#310](https://github.com/UnsafeLabs/Bounty-Hunters/issues/310) | Fix image tag typo in docker-compose.yml | — |
-| [#309](https://github.com/UnsafeLabs/Bounty-Hunters/issues/309) | Fix misspelled database key in app.json | $10 |
-| [#308](https://github.com/UnsafeLabs/Bounty-Hunters/issues/308) | Fix trailing comma in app.json | — |
-| [#307](https://github.com/UnsafeLabs/Bounty-Hunters/issues/307) | Fix date ordering in changelog.md | — |
+Payment is processed within minutes of merging. All bounties are denominated in USD.
 
 ## Contributing
 
-We welcome contributions in all forms — bug fixes, new security tools, documentation, or creative writing in the `english/` directory.
+We welcome contributions in all forms. See our [Contributing Guide](CONTRIBUTING.md) for details.
 
-- Read our [Contributing Guide](CONTRIBUTING.md) for detailed guidelines.
-- Follow our [Security Policy](SECURITY.md) for reporting vulnerabilities.
-- Review our [Code of Conduct](CODE_OF_CONDUCT.md) for community standards.
+### Workflow
 
-### Contribution Workflow
-
-1. Fork the repository
+1. Fork it
 2. Create a feature branch: `git checkout -b my-feature`
 3. Make your changes and test them
-4. Commit with a descriptive message: `git commit -m "fix: resolve issue #X"`
-5. Push to your fork: `git push origin my-feature`
-6. Open a pull request referencing the relevant issue
+4. Commit: `git commit -m "fix: resolve issue #X"`
+5. Push and open a pull request
 
 ## Security
 
-If you discover a security vulnerability within this project, please do not open a public issue. Instead, refer to our [Security Policy](SECURITY.md) and report it responsibly.
+Please see [Security Policy](SECURITY.md) for responsible disclosure.
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+MIT License. See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- [UnsafeLabs](https://unsafelabs.com) for security research infrastructure and support.
-- The bug bounty and security research community for continuous contributions.
-- All contributors who've improved the security tools and documentation in this repository.
+- [UnsafeLabs](https://unsafelabs.com) for security research support.
+- The security research community for continuous contributions.
