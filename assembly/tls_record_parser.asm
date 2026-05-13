@@ -159,12 +159,13 @@ parse_tls_record:
 
     ; Validate length doesn't exceed TLS maximum
     cmp r15d, TLS_MAX_RECORD_LEN
-    ja .invalid_length
+    ja .err_truncated
 
     ; --- Read payload data ---
-    ; BUG: No check that r12 (bytes in buffer) >= r15 + 5
-    ; If the record claims a large payload but we only read a few
-    ; bytes, we'll process past the end of valid data
+    lea eax, [r15d+5]
+    cmp eax, r12d
+    ja .err_truncated
+
     lea rdi, [rsi+5]            ; rdi = start of payload
     mov ecx, r15d               ; ecx = payload length
 
@@ -249,7 +250,7 @@ parse_tls_record:
     call print_string
     jmp .parse_done
 
-.invalid_length:
+.err_truncated:
     lea rdi, [rel err_truncated]
     call print_string
 
