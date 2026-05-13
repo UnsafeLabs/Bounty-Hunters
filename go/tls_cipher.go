@@ -178,7 +178,10 @@ func (r *SuiteRegistry) NegotiateSuite(clientSuites []uint16) (string, error) {
 		}
 	}
 
-	// BUG(1): nil dereference when no suite matched
+	if selectedSuite == nil {
+		return "", errors.New("tlscipher: no mutually supported cipher suite")
+	}
+
 	return selectedSuite.Name, nil
 }
 
