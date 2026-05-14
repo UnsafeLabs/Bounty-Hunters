@@ -162,34 +162,53 @@
        2000-VALIDATE-CERT-CHAIN.
            IF WS-CHAIN-LENGTH = 0
                SET WS-CHAIN-IS-INVALID TO TRUE
-               GO TO 2000-EXIT
-           END-IF
-           PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
-               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH + 1
-               MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
-                   TO CS-CERT-SERIAL
+               MOVE 'SELF-SIGNED CERTIFICATE NOT TRUSTED'
+                   TO WS-VALIDATION-MSG
+               DISPLAY 'TLSVAL-E010: EMPTY CERT CHAIN '
+                   WS-CERT-SERIAL-NUM
+               MOVE WS-CERT-SERIAL-NUM TO CS-CERT-SERIAL
                READ CERT-STORE-FILE
                    INVALID KEY
-                       DISPLAY 'TLSVAL-E011: UNKNOWN CERT '
-                           WS-CHN-SERIAL(WS-CHAIN-INDEX)
-                       SET WS-CHAIN-IS-INVALID TO TRUE
                        GO TO 2000-EXIT
+                   NOT INVALID KEY
+                       IF CS-IS-TRUST-ANCHOR
+                           SET WS-CHAIN-IS-VALID TO TRUE
+                           MOVE 'SELF-SIGNED TRUST ANCHOR'
+                               TO WS-VALIDATION-MSG
+                           DISPLAY 'TLSVAL-I010: SELF-SIGNED TRUSTED '
+                               WS-CERT-SERIAL-NUM
+                       END-IF
                END-READ
-               IF WS-CHAIN-INDEX = WS-CHAIN-LENGTH
-                   IF NOT CS-IS-TRUST-ANCHOR
-                       SET WS-CHAIN-IS-INVALID TO TRUE
-                       GO TO 2000-EXIT
+               GO TO 2000-EXIT
+           END-IF
+           IF WS-CHAIN-LENGTH > 0
+               PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
+                   UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH
+                   MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
+                       TO CS-CERT-SERIAL
+                   READ CERT-STORE-FILE
+                       INVALID KEY
+                           DISPLAY 'TLSVAL-E011: UNKNOWN CERT '
+                               WS-CHN-SERIAL(WS-CHAIN-INDEX)
+                           SET WS-CHAIN-IS-INVALID TO TRUE
+                           GO TO 2000-EXIT
+                   END-READ
+                   IF WS-CHAIN-INDEX = WS-CHAIN-LENGTH
+                       IF NOT CS-IS-TRUST-ANCHOR
+                           SET WS-CHAIN-IS-INVALID TO TRUE
+                           GO TO 2000-EXIT
+                       END-IF
                    END-IF
-               END-IF
-               IF WS-CHAIN-INDEX > 1
-                   IF WS-CHN-ISSUER(WS-CHAIN-INDEX - 1)
-                       NOT = WS-CHN-SUBJECT(WS-CHAIN-INDEX)
-                       SET WS-CHAIN-IS-INVALID TO TRUE
-                       GO TO 2000-EXIT
+                   IF WS-CHAIN-INDEX > 1
+                       IF WS-CHN-ISSUER(WS-CHAIN-INDEX - 1)
+                           NOT = WS-CHN-SUBJECT(WS-CHAIN-INDEX)
+                           SET WS-CHAIN-IS-INVALID TO TRUE
+                           GO TO 2000-EXIT
+                       END-IF
                    END-IF
-               END-IF
-               SET WS-CHN-IS-VERIFIED(WS-CHAIN-INDEX) TO TRUE
-           END-PERFORM
+                   SET WS-CHN-IS-VERIFIED(WS-CHAIN-INDEX) TO TRUE
+               END-PERFORM
+           END-IF
            .
        2000-EXIT.
            EXIT.
@@ -309,11 +328,9 @@
                    NOT AT END
                        IF CRL-REVOKED-SERIAL =
                            WS-CERT-SERIAL-NUM
-                           IF WS-CRL-NOT-LOADED
-                               SET WS-CERT-IS-REVOKED TO TRUE
-                               MOVE 'CERTIFICATE ON CRL'
-                                   TO WS-VALIDATION-MSG
-                           END-IF
+                           SET WS-CERT-IS-REVOKED TO TRUE
+                           MOVE 'CERTIFICATE ON CRL'
+                               TO WS-VALIDATION-MSG
                        END-IF
                END-READ
            END-PERFORM
