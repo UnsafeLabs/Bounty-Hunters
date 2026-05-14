@@ -203,9 +203,11 @@ class TLSHandshake:
 
             ext = TLSExtension(ext_type, ext_data)
 
-            # BUG 2: SNI extension (type 0x0000) is parsed but the server_name
-            # field is never extracted from the extension data
-            if ext_type == EXT_EXTENDED_MASTER_SECRET:
+            if ext_type == EXT_SNI:
+                ext.server_name = self._parse_sni_server_name(ext_data)
+                if ext.server_name is not None:
+                    self.server_name = ext.server_name
+            elif ext_type == EXT_EXTENDED_MASTER_SECRET:
                 self.negotiated_ems = True
             elif ext_type == EXT_SIGNATURE_ALGORITHMS:
                 pass  # stored in ext.data for later use
@@ -216,6 +218,36 @@ class TLSHandshake:
             extensions.append(ext)
 
         return extensions
+
+    def _parse_sni_server_name(self, data: bytes) -> Optional[str]:
+        """Extract the first host_name entry from an RFC 6066 SNI extension."""
+        if len(data) < 2:
+            return None
+
+        list_len = struct.unpack("!H", data[:2])[0]
+        if list_len != len(data) - 2:
+            return None
+
+        offset = 2
+        end = 2 + list_len
+        while offset + 3 <= end:
+            name_type = data[offset]
+            name_len = struct.unpack("!H", data[offset + 1:offset + 3])[0]
+            offset += 3
+            if offset + name_len > end:
+                return None
+
+            name_bytes = data[offset:offset + name_len]
+            offset += name_len
+            if name_type == 0x00:
+                if not name_bytes:
+                    return None
+                try:
+                    return name_bytes.decode("idna")
+                except UnicodeError:
+                    return None
+
+        return None
 
     def verify_finished(self, received_verify: bytes, label: str) -> bool:
         """
