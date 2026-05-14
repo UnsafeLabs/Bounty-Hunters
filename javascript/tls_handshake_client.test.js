@@ -86,6 +86,27 @@ test('computeFinishedHash uses SHA-256 length for TLS_AES_128_GCM_SHA256', () =>
   assert.equal(verifyData.length, 32);
 });
 
+test('computeFinishedHash uses SHA-256 length for TLS_CHACHA20_POLY1305_SHA256', () => {
+  const client = new TLSHandshakeClient({
+    cipherSuites: [CIPHER_SUITES.TLS_CHACHA20_POLY1305_SHA256],
+  });
+
+  const parsed = client.parseServerHello(
+    buildServerHello(CIPHER_SUITES.TLS_CHACHA20_POLY1305_SHA256),
+  );
+
+  assert.equal(parsed.hash, 'sha256');
+  assert.equal(client.negotiatedHash, 'sha256');
+  assert.equal(typeof client.negotiatedHash, 'string');
+
+  const verifyData = client.computeFinishedHash(
+    Buffer.alloc(32, 0x33),
+    Buffer.from('finished transcript'),
+  );
+
+  assert.equal(verifyData.length, 32);
+});
+
 test('computeFinishedHash rejects numeric negotiated hash values', () => {
   const client = new TLSHandshakeClient();
   client.negotiatedHash = CIPHER_SUITES.TLS_AES_256_GCM_SHA384;
