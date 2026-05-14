@@ -83,3 +83,15 @@ test('verifyServerCertificate checks intermediate certificate validity', () => {
     /expired/,
   );
 });
+
+test('verifyServerCertificate rejects not-yet-valid intermediate certificates', () => {
+  const client = new TLSHandshakeClient({ hostname: 'example.com' });
+
+  assertValidityError(
+    () => client.verifyServerCertificate([
+      certificate(),
+      rootCertificate({ notBefore: '2999-01-01T00:00:00Z' }),
+    ]),
+    /not yet valid/,
+  );
+});
