@@ -1,6 +1,8 @@
-# Issue 270 Open PR Triage
+# Issue 270 Open PR Triage: 12 PRs Reviewed
 
 Snapshot time: 2026-05-14 15:23 UTC
+
+Follow-up time: 2026-05-14 15:29 UTC
 
 Reviewer: @sypham98-prog
 
@@ -9,9 +11,10 @@ Issue: 270
 ## Scope
 
 I reviewed every pull request that was open in `UnsafeLabs/Bounty-Hunters`
-at the snapshot time.
+at the snapshot time, then added a follow-up review pass for the two pull
+requests opened immediately after the report branch was created.
 
-Open pull requests reviewed:
+Snapshot pull requests reviewed:
 
 - PR 561 - Fix broken rate limits table row
 - PR 560 - Compare COBOL certificate fingerprints bytewise
