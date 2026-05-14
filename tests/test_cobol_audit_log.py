@@ -15,6 +15,7 @@ class CobolAuditLogTests(unittest.TestCase):
 
         self.assertRegex(source, r"AUDIT-LOG-RECORD\s+PIC\s+X\(512\)")
         self.assertRegex(source, r"WS-SUBJECT-COMMON-NAME\s+PIC\s+X\(300\)")
+        self.assertRegex(source, r"WS-VALIDATION-MSG\s+PIC\s+X\(300\)")
         self.assertIn("WS-AUDIT-PTR", source)
         self.assertIn("WS-AUDIT-RECORD-LENGTH", source)
         self.assertIn("ON OVERFLOW", source)

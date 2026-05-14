@@ -121,7 +121,7 @@
        01  WS-VALIDATION-RESULT        PIC X(1).
            88  WS-CERT-VALID           VALUE 'V'.
            88  WS-CERT-INVALID         VALUE 'I'.
-       01  WS-VALIDATION-MSG           PIC X(128).
+       01  WS-VALIDATION-MSG           PIC X(300).
        01  WS-AUDIT-TIMESTAMP          PIC X(26).
        01  WS-AUDIT-PTR                PIC 9(3) VALUE 1.
        01  WS-AUDIT-RECORD-LENGTH      PIC 9(3) VALUE 512.
