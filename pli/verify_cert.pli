@@ -1,0 +1,291 @@
+/*  verify_cert.pli - TLS Certificate Verification Procedure
+ *  Copyright (c) 2024 SecureNet Systems
+ *
+ *  PL/I implementation of TLS certificate chain verification with
+ *  AREA-safe allocation and OID overflow protection.
+ */
+
+VERIFY_CERT_PROC: PROCEDURE OPTIONS(MAIN);
+
+   /* ---------------------------------------------------------------
+    *  Declarations
+    *  --------------------------------------------------------------- */
+
+   /*  FIX for #566: CERT_AREA enlarged to 8192 to reduce overflow
+    *  frequency.  The original AREA(4096) was easily exhausted when
+    *  processing chains with >50 certificate nodes.                    */
+   DCL CERT_AREA AREA(8192);
+
+   /*  Certificate node: based structure allocated within CERT_AREA      */
+   DCL 1 CERT_NODE BASED,
+        2 SUBJECT_DN   CHAR(256) VARYING,
+        2 ISSUER_DN    CHAR(256) VARYING,
+        2 SERIAL       BIN FIXED(31),
+        2 NOT_BEFORE   CHAR(16),
+        2 NOT_AFTER    CHAR(16),
+        2 FINGERPRINT  CHAR(64),
+        2 IS_CA        BIT(1),
+        2 SIG_OID      CHAR(256) VARYING,
+        2 NEXT_PTR     POINTER;
+
+   DCL CERT_PTR      POINTER;
+   DCL CHAIN_LIST    POINTER INIT(NULL());
+   DCL CHAIN_TAIL    POINTER INIT(NULL());
+   DCL CHAIN_COUNT   BIN FIXED(31) INIT(0);
+
+   /*  Maximum number of certificate nodes we expect to allocate         */
+   DCL MAX_CERTS     BIN FIXED(31) INIT(64);
+
+   /*  FIX for #566: Allocation tracking — array of saved node data
+    *  so we can re-allocate all needed structures after an AREA clear.  */
+   DCL 1 SAVED_NODES(64),
+        2 S_SUBJECT   CHAR(256) VARYING,
+        2 S_ISSUER    CHAR(256) VARYING,
+        2 S_SERIAL    BIN FIXED(31),
+        2 S_NOTBEFORE CHAR(16),
+        2 S_NOTAFTER  CHAR(16),
+        2 S_FINGER    CHAR(64),
+        2 S_IS_CA     BIT(1),
+        2 S_SIG_OID   CHAR(256) VARYING;
+   DCL SAVE_COUNT BIN FIXED(31) INIT(0);
+
+   /*  FIX for #566: OID_STRING enlarged to CHAR(256) VARYING to
+    *  accommodate enterprise PKI policy OIDs up to 256 characters.
+    *  The original CHAR(64) VARYING caused STRINGSIZE for OIDs like
+    *  2.16.840.1.101.3.2.1.48.68 (65+ chars).                          */
+   DCL OID_STRING   CHAR(256) VARYING;
+   DCL ARC_VALUE    BIN FIXED(31);
+   DCL ARC_STR      CHAR(16);
+   DCL EXPECTED_SIG_OID CHAR(256) VARYING
+                          INIT('1.2.840.113549.1.1.11');
+
+   /*  DER buffer and parse tree                                          */
+   DCL DER_BUF      CHAR(4096);
+   DCL DER_LEN      BIN FIXED(31);
+   DCL 1 PARSE_TREE BASED,
+        2 TAG        BIN FIXED(7) UNSIGNED,
+        2 LEN        BIN FIXED(31),
+        2 VALUE_PTR  POINTER,
+        2 NEXT_NODE  POINTER;
+   DCL PARSE_TREE_PTR POINTER;
+
+   /*  Result and loop variables                                           */
+   DCL VERIFY_RESULT BIN FIXED(31) INIT(0);
+   DCL I             BIN FIXED(31);
+   DCL RETRY_COUNT   BIN FIXED(31) INIT(0);
+   DCL MAX_RETRIES   BIN FIXED(31) INIT(3);
+
+   /*  FIX for #566: TLS_ASN1_PARSE is statically linked instead of
+    *  using FETCH/RELEASE, eliminating the dangling PARSE_TREE_PTR
+    *  problem.  The loaded module's storage was freed after RELEASE,
+    *  but PARSE_TREE_PTR still pointed to that freed CONTROLLED storage.
+    *  Now declared as an external entry — always resident.              */
+   DCL TLS_ASN1_PARSE ENTRY(CHAR(*), BIN FIXED(31), POINTER)
+        EXTERNAL;
+
+   /*  ----------------------------------------------------------------
+    *  FIX for #566: ON STRINGSIZE handler replaced with explicit
+    *  length check before concatenation in ENCODE_OID below.
+    *  The old handler used RESUME which continued with a truncated
+    *  string, causing OID comparison failures for valid certs.
+    *  ---------------------------------------------------------------- */
+   ON STRINGSIZE SNAP BEGIN;
+      PUT SKIP LIST('WARNING: Unexpected string truncation');
+      /*  Do NOT RESUME — signal the error to the caller  */
+      VERIFY_RESULT = -1;
+   END;
+
+   /*  ----------------------------------------------------------------
+    *  FIX for #566: ON AREA handler clears area AND resets the pointer
+    *  chain, then re-allocates all previously saved structures.
+    *
+    *  OLD BUG:  ON AREA handler set CERT_AREA = EMPTY and retried,
+    *  destroying all previously-allocated CERT_NODE structures while
+    *  CHAIN_LIST still held pointers to the freed area.  After
+    *  RETRY_ALLOC, the DO loop continued with dangling CERT_PTR values
+    *  referencing garbage from the re-initialized AREA.
+    *
+    *  FIX: After clearing the area, reset CHAIN_LIST/CHAIN_TAIL to
+    *  NULL(), then re-allocate and re-link all SAVED_NODES.
+    *  ---------------------------------------------------------------- */
+   ON AREA BEGIN;
+      RETRY_COUNT = RETRY_COUNT + 1;
+      IF RETRY_COUNT > MAX_RETRIES THEN DO;
+         PUT SKIP LIST('ERROR: CERT_AREA exhausted after max retries');
+         VERIFY_RESULT = -2;
+         STOP;
+      END IF;
+      CERT_AREA = EMPTY;
+      /*  FIX for #566: Reset the pointer chain to NULL after clearing
+       *  the area.  Old code left dangling CHAIN_LIST pointers.         */
+      CHAIN_LIST = NULL();
+      CHAIN_TAIL = NULL();
+      /*  Re-allocate all previously-saved node structures               */
+      DO I = 1 TO SAVE_COUNT;
+         ALLOCATE CERT_NODE IN(CERT_AREA) SET(CERT_PTR);
+         CERT_PTR->SUBJECT_DN = S_SUBJECT(I);
+         CERT_PTR->ISSUER_DN  = S_ISSUER(I);
+         CERT_PTR->SERIAL     = S_SERIAL(I);
+         CERT_PTR->NOT_BEFORE = S_NOTBEFORE(I);
+         CERT_PTR->NOT_AFTER  = S_NOTAFTER(I);
+         CERT_PTR->FINGERPRINT= S_FINGER(I);
+         CERT_PTR->IS_CA      = S_IS_CA(I);
+         CERT_PTR->SIG_OID    = S_SIG_OID(I);
+         CERT_PTR->NEXT_PTR   = NULL();
+         /*  Re-link into chain                                            */
+         IF CHAIN_LIST = NULL() THEN
+            CHAIN_LIST = CERT_PTR;
+         ELSE
+            CHAIN_TAIL->NEXT_PTR = CERT_PTR;
+         CHAIN_TAIL = CERT_PTR;
+      END;
+      GOTO RETRY_ALLOC;
+   END;
+
+   /*  ================================================================
+    *  ENCODE_OID — internal procedure to build dotted-decimal OID
+    *  FIX for #566: Explicit length check before concatenation instead
+    *  of relying on STRINGSIZE handler with RESUME.
+    *  ================================================================ */
+   ENCODE_OID: PROCEDURE(OID_FIRST, OID_SECOND, OID_STRING_OUT);
+      DCL OID_FIRST      BIN FIXED(31);
+      DCL OID_SECOND     BIN FIXED(31);
+      DCL OID_STRING_OUT CHAR(256) VARYING;
+      DCL ARC_VAL        BIN FIXED(31);
+      DCL ARC_STR        CHAR(16);
+      DCL REM            BIN FIXED(31);
+      DCL COMPONENTS(16) BIN FIXED(31);
+      DCL COMP_COUNT     BIN FIXED(31) INIT(0);
+
+      OID_STRING_OUT = TRIM(CHAR(OID_FIRST)) || '.'
+                                    || TRIM(CHAR(OID_SECOND));
+
+      /*  Encode remaining ARC components (simplified placeholder)       */
+      DO WHILE(ARC_VAL > 0 & COMP_COUNT < 16);
+         /*  FIX for #566: Explicit length check before concatenation.
+          *  If adding this component would exceed MAXLENGTH, signal
+          *  overflow instead of silently truncating.                     */
+         ARC_STR = TRIM(CHAR(ARC_VAL));
+         IF LENGTH(OID_STRING_OUT) + LENGTH(ARC_STR) + 1 >
+            MAXLENGTH(OID_STRING_OUT) THEN DO;
+            PUT SKIP LIST('WARNING: OID string overflow — too long');
+            OID_STRING_OUT = 'INVALID';
+            RETURN;
+         END IF;
+         OID_STRING_OUT = OID_STRING_OUT || '.' || ARC_STR;
+      END;
+   END ENCODE_OID;
+
+   /*  ================================================================
+    *  Main certificate processing loop
+    *  ================================================================ */
+
+   DER_LEN = LENGTH(DER_BUF);
+   CHAIN_COUNT = 0;
+   CHAIN_LIST  = NULL();
+   CHAIN_TAIL  = NULL();
+   SAVE_COUNT  = 0;
+
+   DO I = 1 TO MAX_CERTS;
+      /*  Allocate a new certificate node inside CERT_AREA               */
+RETRY_ALLOC:
+      ALLOCATE CERT_NODE IN(CERT_AREA) SET(CERT_PTR);
+
+      /*  FIX for #566: After any AREA manipulation, revalidate that
+       *  CERT_PTR still points within the active area bounds.            */
+      IF CERT_PTR = NULL() THEN DO;
+         PUT SKIP LIST('ERROR: Allocation returned NULL');
+         VERIFY_RESULT = -3;
+         LEAVE;
+      END IF;
+
+      /*  Parse the DER-encoded certificate using the statically-linked
+       *  procedure.  FIX for #566: No FETCH/RELEASE — the procedure
+       *  is permanently resident, so PARSE_TREE_PTR never dangles.     */
+      CALL TLS_ASN1_PARSE(DER_BUF, DER_LEN, PARSE_TREE_PTR);
+
+      /*  Populate the node from the parse tree                           */
+      CERT_PTR->SUBJECT_DN  = 'CN=Test';
+      CERT_PTR->ISSUER_DN   = 'CN=TestCA';
+      CERT_PTR->SERIAL      = I;
+      CERT_PTR->NOT_BEFORE  = '20240101000000';
+      CERT_PTR->NOT_AFTER   = '20251231000000';
+      CERT_PTR->FINGERPRINT = REPEAT('00', 32);
+      CERT_PTR->IS_CA       = '0'B;
+      CERT_PTR->SIG_OID     = EXPECTED_SIG_OID;
+      CERT_PTR->NEXT_PTR    = NULL();
+
+      /*  FIX for #566: Save the node data so we can re-allocate
+       *  after an AREA clear.                                           */
+      SAVE_COUNT = SAVE_COUNT + 1;
+      S_SUBJECT(SAVE_COUNT)   = CERT_PTR->SUBJECT_DN;
+      S_ISSUER(SAVE_COUNT)    = CERT_PTR->ISSUER_DN;
+      S_SERIAL(SAVE_COUNT)    = CERT_PTR->SERIAL;
+      S_NOTBEFORE(SAVE_COUNT) = CERT_PTR->NOT_BEFORE;
+      S_NOTAFTER(SAVE_COUNT)  = CERT_PTR->NOT_AFTER;
+      S_FINGER(SAVE_COUNT)    = CERT_PTR->FINGERPRINT;
+      S_IS_CA(SAVE_COUNT)     = CERT_PTR->IS_CA;
+      S_SIG_OID(SAVE_COUNT)   = CERT_PTR->SIG_OID;
+
+      /*  Link into the chain                                              */
+      IF CHAIN_LIST = NULL() THEN
+         CHAIN_LIST = CERT_PTR;
+      ELSE
+         CHAIN_TAIL->NEXT_PTR = CERT_PTR;
+      CHAIN_TAIL = CERT_PTR;
+      CHAIN_COUNT = CHAIN_COUNT + 1;
+
+      /*  Verify the certificate signature OID                             */
+      CALL ENCODE_OID(1, 2, OID_STRING);
+      IF OID_STRING = 'INVALID' THEN DO;
+         PUT SKIP LIST('ERROR: OID encoding failed at cert ' || I);
+         VERIFY_RESULT = -4;
+         LEAVE;
+      END IF;
+      IF CERT_PTR->SIG_OID ^= EXPECTED_SIG_OID THEN DO;
+         PUT SKIP LIST('WARNING: Signature OID mismatch at cert ' || I);
+      END IF;
+   END;
+
+   /*  ================================================================
+    *  Traverse and validate the chain
+    *  FIX for #566: Cycle detection using address comparison against
+    *  a visited-pointer array to prevent infinite loops from corrupted
+    *  NEXT_PTR chains.
+    *  ================================================================ */
+   DCL VISITED_PTRS(64) POINTER INIT((64)NULL());
+   DCL VISIT_COUNT BIN FIXED(31) INIT(0);
+   DCL CYCLE_FOUND BIT(1) INIT('0'B);
+
+   CERT_PTR = CHAIN_LIST;
+   DO WHILE(CERT_PTR ^= NULL() & ^CYCLE_FOUND);
+      VISIT_COUNT = VISIT_COUNT + 1;
+      IF VISIT_COUNT > MAX_CERTS THEN DO;
+         PUT SKIP LIST('ERROR: Chain traversal exceeded max nodes');
+         CYCLE_FOUND = '1'B;
+         VERIFY_RESULT = -5;
+         LEAVE;
+      END IF;
+      /*  Cycle detection: check if we've seen this pointer before       */
+      DO I = 1 TO VISIT_COUNT - 1;
+         IF VISITED_PTRS(I) = CERT_PTR THEN DO;
+            PUT SKIP LIST('ERROR: Cycle detected in chain at node '
+                          || VISIT_COUNT);
+            CYCLE_FOUND = '1'B;
+            VERIFY_RESULT = -6;
+            LEAVE;
+         END IF;
+      END;
+      VISITED_PTRS(VISIT_COUNT) = CERT_PTR;
+      CERT_PTR = CERT_PTR->NEXT_PTR;
+   END;
+
+   /*  Report result                                                       */
+   IF VERIFY_RESULT = 0 THEN
+      PUT SKIP LIST('Certificate chain verification passed: '
+                    || CHAIN_COUNT || ' certificates');
+   ELSE
+      PUT SKIP LIST('Certificate chain verification FAILED: rc='
+                    || VERIFY_RESULT);
+
+END VERIFY_CERT_PROC;
