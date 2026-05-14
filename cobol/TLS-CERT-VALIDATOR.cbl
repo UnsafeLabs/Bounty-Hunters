@@ -99,6 +99,17 @@
            88  WS-HOSTNAME-MATCHES     VALUE 'Y'.
            88  WS-HOSTNAME-NO-MATCH    VALUE 'N'.
        01  WS-DOT-COUNT                PIC 9(3)  VALUE 0.
+       01  WS-SUBJECT-DN-PARSE.
+           05  WS-SUBJECT-DN-WORK      PIC X(256).
+           05  WS-SUBJECT-DN-NORMALIZED PIC X(256).
+           05  WS-PARSED-CN            PIC X(256).
+           05  WS-RDN-COUNT            PIC 9(2)  VALUE 0.
+           05  WS-RDN-TABLE.
+               10  WS-RDN-ENTRY OCCURS 20 TIMES.
+                   15  WS-RDN-TEXT     PIC X(256).
+           05  WS-RDN-INDEX            PIC 9(2)  VALUE 0.
+           05  WS-DN-SCAN-INDEX        PIC 9(3)  VALUE 0.
+           05  WS-DN-OUT-INDEX         PIC 9(3)  VALUE 0.
        01  WS-CERT-REVOKED             PIC X(1).
            88  WS-CERT-IS-REVOKED      VALUE 'Y'.
            88  WS-CERT-NOT-REVOKED     VALUE 'N'.
@@ -254,13 +265,108 @@
            .
        4000-EXIT.
            EXIT.
+       3500-PARSE-SUBJECT-DN.
+           MOVE SPACES TO WS-RDN-TABLE
+           MOVE SPACES TO WS-SUBJECT-DN-WORK
+           MOVE SPACES TO WS-SUBJECT-DN-NORMALIZED
+           MOVE SPACES TO WS-PARSED-CN
+           MOVE 0 TO WS-RDN-COUNT
+           MOVE WS-SUBJECT-COMMON-NAME TO WS-SUBJECT-DN-WORK
+           PERFORM 3510-PROTECT-ESCAPED-COMMAS
+           UNSTRING WS-SUBJECT-DN-NORMALIZED DELIMITED BY ','
+               INTO WS-RDN-TEXT(1)
+                    WS-RDN-TEXT(2)
+                    WS-RDN-TEXT(3)
+                    WS-RDN-TEXT(4)
+                    WS-RDN-TEXT(5)
+                    WS-RDN-TEXT(6)
+                    WS-RDN-TEXT(7)
+                    WS-RDN-TEXT(8)
+                    WS-RDN-TEXT(9)
+                    WS-RDN-TEXT(10)
+               TALLYING IN WS-RDN-COUNT
+           END-UNSTRING
+           IF WS-RDN-COUNT = 0
+               MOVE WS-SUBJECT-COMMON-NAME TO WS-PARSED-CN
+               GO TO 3500-EXIT
+           END-IF
+           PERFORM VARYING WS-RDN-INDEX FROM 1 BY 1
+               UNTIL WS-RDN-INDEX > WS-RDN-COUNT
+                   OR WS-RDN-INDEX > 10
+               MOVE WS-RDN-TEXT(WS-RDN-INDEX)
+                   TO WS-SUBJECT-DN-WORK
+               PERFORM 3520-RESTORE-ESCAPED-COMMAS
+               MOVE WS-SUBJECT-DN-NORMALIZED
+                   TO WS-RDN-TEXT(WS-RDN-INDEX)
+               IF WS-RDN-TEXT(WS-RDN-INDEX)(1:3) = 'CN='
+                   MOVE WS-RDN-TEXT(WS-RDN-INDEX)(4:)
+                       TO WS-PARSED-CN
+                   PERFORM 3530-STRIP-CN-QUOTES
+                   MOVE 21 TO WS-RDN-INDEX
+               END-IF
+           END-PERFORM
+           IF WS-PARSED-CN = SPACES
+               MOVE WS-SUBJECT-COMMON-NAME TO WS-PARSED-CN
+           END-IF
+           .
+       3500-EXIT.
+           EXIT.
+       3510-PROTECT-ESCAPED-COMMAS.
+           MOVE SPACES TO WS-SUBJECT-DN-NORMALIZED
+           MOVE 1 TO WS-DN-SCAN-INDEX
+           MOVE 1 TO WS-DN-OUT-INDEX
+           PERFORM UNTIL WS-DN-SCAN-INDEX > 256
+               OR WS-DN-OUT-INDEX > 256
+               IF WS-DN-SCAN-INDEX < 256
+                   AND WS-SUBJECT-DN-WORK(WS-DN-SCAN-INDEX:2)
+                       = '\,'
+                   MOVE '~' TO
+                       WS-SUBJECT-DN-NORMALIZED(WS-DN-OUT-INDEX:1)
+                   ADD 2 TO WS-DN-SCAN-INDEX
+               ELSE
+                   MOVE WS-SUBJECT-DN-WORK(WS-DN-SCAN-INDEX:1)
+                       TO
+                       WS-SUBJECT-DN-NORMALIZED(WS-DN-OUT-INDEX:1)
+                   ADD 1 TO WS-DN-SCAN-INDEX
+               END-IF
+               ADD 1 TO WS-DN-OUT-INDEX
+           END-PERFORM
+           .
+       3520-RESTORE-ESCAPED-COMMAS.
+           MOVE SPACES TO WS-SUBJECT-DN-NORMALIZED
+           PERFORM VARYING WS-DN-SCAN-INDEX FROM 1 BY 1
+               UNTIL WS-DN-SCAN-INDEX > 256
+               IF WS-SUBJECT-DN-WORK(WS-DN-SCAN-INDEX:1) = '~'
+                   MOVE ',' TO
+                       WS-SUBJECT-DN-NORMALIZED(WS-DN-SCAN-INDEX:1)
+               ELSE
+                   MOVE WS-SUBJECT-DN-WORK(WS-DN-SCAN-INDEX:1)
+                       TO
+                       WS-SUBJECT-DN-NORMALIZED(WS-DN-SCAN-INDEX:1)
+               END-IF
+           END-PERFORM
+           .
+       3530-STRIP-CN-QUOTES.
+           IF WS-PARSED-CN(1:1) = '"'
+               MOVE WS-PARSED-CN(2:) TO WS-PARSED-CN
+               PERFORM VARYING WS-DN-SCAN-INDEX FROM 1 BY 1
+                   UNTIL WS-DN-SCAN-INDEX > 256
+                   IF WS-PARSED-CN(WS-DN-SCAN-INDEX:1) = '"'
+                       MOVE SPACES TO
+                           WS-PARSED-CN(WS-DN-SCAN-INDEX:)
+                       MOVE 257 TO WS-DN-SCAN-INDEX
+                   END-IF
+               END-PERFORM
+           END-IF
+           .
        5000-MATCH-HOSTNAME.
-           INSPECT WS-SUBJECT-COMMON-NAME
+           PERFORM 3500-PARSE-SUBJECT-DN
+           INSPECT WS-PARSED-CN
                TALLYING WS-HOSTNAME-TALLY FOR ALL '*'
            IF WS-HOSTNAME-TALLY > 0
                PERFORM 5100-WILDCARD-MATCH
            ELSE
-               IF WS-SUBJECT-COMMON-NAME =
+               IF WS-PARSED-CN =
                    WS-EXPECTED-HOSTNAME
                    SET WS-HOSTNAME-MATCHES TO TRUE
                ELSE
@@ -278,7 +384,7 @@
            END-IF
            .
        5100-WILDCARD-MATCH.
-           INSPECT WS-SUBJECT-COMMON-NAME
+           INSPECT WS-PARSED-CN
                TALLYING WS-WILDCARD-POS
                FOR CHARACTERS BEFORE INITIAL '*'
            IF WS-WILDCARD-POS > 0
@@ -287,7 +393,7 @@
                    TO WS-VALIDATION-MSG
            ELSE
                IF WS-EXPECTED-HOSTNAME(2:) =
-                   WS-SUBJECT-COMMON-NAME(3:)
+                   WS-PARSED-CN(3:)
                    SET WS-HOSTNAME-MATCHES TO TRUE
                ELSE
                    SET WS-HOSTNAME-NO-MATCH TO TRUE
