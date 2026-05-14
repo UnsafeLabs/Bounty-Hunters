@@ -22,6 +22,6 @@
   "features": {
     "rate_limiting": true,
     "cors": true,
-    "allowed_origins": ["https://app.example.com", "https://admin.example.com"],
+    "allowed_origins": ["https://app.example.com", "https://admin.example.com"]
   }
 }
