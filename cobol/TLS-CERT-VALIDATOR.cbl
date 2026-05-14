@@ -161,11 +161,31 @@
            .
        2000-VALIDATE-CERT-CHAIN.
            IF WS-CHAIN-LENGTH = 0
-               SET WS-CHAIN-IS-INVALID TO TRUE
+               MOVE WS-CERT-SERIAL-NUM TO CS-CERT-SERIAL
+               READ CERT-STORE-FILE
+                   INVALID KEY
+                       DISPLAY 'TLSVAL-E010: EMPTY CERT CHAIN '
+                           WS-CERT-SERIAL-NUM
+                       MOVE 'SELF-SIGNED CERT NOT TRUSTED'
+                           TO WS-VALIDATION-MSG
+                       SET WS-CHAIN-IS-INVALID TO TRUE
+                       GO TO 2000-EXIT
+               END-READ
+               IF CS-IS-TRUST-ANCHOR
+                   DISPLAY 'TLSVAL-I010: TRUSTED SELF-SIGNED CERT '
+                       WS-CERT-SERIAL-NUM
+                   SET WS-CHAIN-IS-VALID TO TRUE
+               ELSE
+                   DISPLAY 'TLSVAL-E010: SELF-SIGNED CERT NOT TRUSTED '
+                       WS-CERT-SERIAL-NUM
+                   MOVE 'SELF-SIGNED CERT NOT TRUSTED'
+                       TO WS-VALIDATION-MSG
+                   SET WS-CHAIN-IS-INVALID TO TRUE
+               END-IF
                GO TO 2000-EXIT
            END-IF
            PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
-               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH + 1
+               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH
                MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
                    TO CS-CERT-SERIAL
                READ CERT-STORE-FILE
