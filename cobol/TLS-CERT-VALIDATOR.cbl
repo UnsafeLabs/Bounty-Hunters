@@ -31,6 +31,7 @@
            05  CS-KEY-LENGTH           PIC 9(5).
            05  CS-SIG-ALGORITHM        PIC X(20).
            05  CS-FINGERPRINT          PIC X(64).
+           05  CS-LAST-VALIDATED       PIC X(14).
            05  CS-TRUST-ANCHOR-FLAG    PIC X(1).
                88  CS-IS-TRUST-ANCHOR  VALUE 'Y'.
                88  CS-NOT-TRUST-ANCHOR VALUE 'N'.
@@ -46,6 +47,10 @@
        01  WS-FILE-STATUS              PIC XX.
            88  WS-FILE-OK              VALUE '00'.
            88  WS-FILE-NOT-FOUND       VALUE '23'.
+           88  WS-FILE-LOGIC-ERROR     VALUE '92'.
+           88  WS-FILE-UNAVAILABLE     VALUE '93'.
+           88  WS-FILE-LOCKED          VALUE '95'.
+           88  WS-FILE-RETRYABLE       VALUE '92' '93' '95'.
        01  WS-CRL-FILE-STATUS          PIC XX.
            88  WS-CRL-OK               VALUE '00'.
            88  WS-CRL-EOF              VALUE '10'.
@@ -124,6 +129,11 @@
        01  WS-VALIDATION-MSG           PIC X(128).
        01  WS-AUDIT-TIMESTAMP          PIC X(26).
        01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
+       01  WS-RETRY-COUNT              PIC 9 VALUE 0.
+       01  WS-MAX-RETRIES              PIC 9 VALUE 3.
+       01  WS-CERT-STORE-ENQ-HELD      PIC X VALUE 'N'.
+           88  WS-CERT-STORE-LOCKED    VALUE 'Y'.
+           88  WS-CERT-STORE-UNLOCKED  VALUE 'N'.
        PROCEDURE DIVISION.
        0000-MAIN-CONTROL.
            PERFORM 1000-INITIALIZE
@@ -136,19 +146,29 @@
            PERFORM 9000-CLEANUP
            STOP RUN.
        1000-INITIALIZE.
+           EXEC CICS HANDLE CONDITION
+               DSIDERR(1200-CERT-STORE-DSIDERR)
+           END-EXEC
            MOVE SPACES TO WS-VALIDATION-MSG
            SET WS-CERT-NOT-EXPIRED TO TRUE
            SET WS-CERT-NOT-REVOKED TO TRUE
            SET WS-HOSTNAME-NO-MATCH TO TRUE
-           SET WS-CHAIN-IS-VALID TO TRUE
+           SET WS-CHAIN-IS-INVALID TO TRUE
            MOVE FUNCTION CURRENT-DATE TO WS-CURRENT-DATE-TIME
-           OPEN INPUT CERT-STORE-FILE
+           OPEN EXTEND AUDIT-LOG-FILE
+           OPEN I-O CERT-STORE-FILE
            IF NOT WS-FILE-OK
-               DISPLAY 'TLSVAL-E001: CERT STORE FAILED '
-                   WS-FILE-STATUS
-               MOVE 12 TO WS-RETURN-CODE
-               PERFORM 9000-CLEANUP
-               STOP RUN
+               IF WS-FILE-RETRYABLE
+                   PERFORM 1100-RETRY-CERT-STORE-OPEN
+               ELSE
+                   DISPLAY 'TLSVAL-E001: CERT STORE FAILED '
+                       WS-FILE-STATUS
+                   SET WS-CERT-INVALID TO TRUE
+                   MOVE 12 TO WS-RETURN-CODE
+                   PERFORM 8000-WRITE-AUDIT-ENTRY
+                   PERFORM 9000-CLEANUP
+                   STOP RUN
+               END-IF
            END-IF
            OPEN INPUT CRL-FILE
            IF WS-CRL-OK
@@ -156,25 +176,59 @@
            ELSE
                SET WS-CRL-NOT-LOADED TO TRUE
            END-IF
-           OPEN EXTEND AUDIT-LOG-FILE
            DISPLAY 'TLSVAL-I001: VALIDATION STARTED'
            .
+       1100-RETRY-CERT-STORE-OPEN.
+           MOVE 0 TO WS-RETRY-COUNT
+           PERFORM UNTIL WS-FILE-OK
+               OR WS-RETRY-COUNT >= WS-MAX-RETRIES
+               ADD 1 TO WS-RETRY-COUNT
+               EXEC CICS DELAY
+                   FOR MILLISECS(100)
+               END-EXEC
+               OPEN I-O CERT-STORE-FILE
+           END-PERFORM
+           IF NOT WS-FILE-OK
+               DISPLAY 'TLSVAL-E002: CERT STORE RETRIES FAILED '
+                   WS-FILE-STATUS
+               SET WS-CHAIN-IS-INVALID TO TRUE
+               SET WS-CERT-INVALID TO TRUE
+               MOVE 'CERT STORE OPEN FAILED FILE STATUS '
+                   TO WS-VALIDATION-MSG
+               STRING WS-VALIDATION-MSG DELIMITED SPACES
+                   WS-FILE-STATUS DELIMITED SIZE
+                   INTO WS-VALIDATION-MSG
+               END-STRING
+               MOVE 12 TO WS-RETURN-CODE
+               PERFORM 8000-WRITE-AUDIT-ENTRY
+               PERFORM 9000-CLEANUP
+               STOP RUN
+           END-IF
+           .
+       1200-CERT-STORE-DSIDERR.
+           DISPLAY 'TLSVAL-E003: CERT STORE DSIDERR'
+           SET WS-CHAIN-IS-INVALID TO TRUE
+           SET WS-CERT-INVALID TO TRUE
+           MOVE 'CERT STORE DATASET MISSING'
+               TO WS-VALIDATION-MSG
+           MOVE 12 TO WS-RETURN-CODE
+           PERFORM 8000-WRITE-AUDIT-ENTRY
+           PERFORM 9000-CLEANUP
+           STOP RUN.
        2000-VALIDATE-CERT-CHAIN.
            IF WS-CHAIN-LENGTH = 0
                SET WS-CHAIN-IS-INVALID TO TRUE
                GO TO 2000-EXIT
            END-IF
            PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
-               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH + 1
+               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH
                MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
                    TO CS-CERT-SERIAL
-               READ CERT-STORE-FILE
-                   INVALID KEY
-                       DISPLAY 'TLSVAL-E011: UNKNOWN CERT '
-                           WS-CHN-SERIAL(WS-CHAIN-INDEX)
-                       SET WS-CHAIN-IS-INVALID TO TRUE
-                       GO TO 2000-EXIT
-               END-READ
+               PERFORM 2100-READ-REWRITE-CERT-STORE
+               IF NOT WS-FILE-OK
+                   SET WS-CHAIN-IS-INVALID TO TRUE
+                   GO TO 2000-EXIT
+               END-IF
                IF WS-CHAIN-INDEX = WS-CHAIN-LENGTH
                    IF NOT CS-IS-TRUST-ANCHOR
                        SET WS-CHAIN-IS-INVALID TO TRUE
@@ -190,9 +244,68 @@
                END-IF
                SET WS-CHN-IS-VERIFIED(WS-CHAIN-INDEX) TO TRUE
            END-PERFORM
+           SET WS-CHAIN-IS-VALID TO TRUE
            .
        2000-EXIT.
            EXIT.
+       2100-READ-REWRITE-CERT-STORE.
+           MOVE 0 TO WS-RETRY-COUNT
+           MOVE SPACES TO WS-FILE-STATUS
+           SET WS-CERT-STORE-UNLOCKED TO TRUE
+           PERFORM UNTIL WS-FILE-OK
+               OR WS-RETRY-COUNT >= WS-MAX-RETRIES
+               EXEC CICS ENQ
+                   RESOURCE('CERTSTOR')
+                   LENGTH(8)
+               END-EXEC
+               SET WS-CERT-STORE-LOCKED TO TRUE
+               READ CERT-STORE-FILE
+                   INVALID KEY
+                       DISPLAY 'TLSVAL-E011: UNKNOWN CERT '
+                           WS-CHN-SERIAL(WS-CHAIN-INDEX)
+                       SET WS-CHAIN-IS-INVALID TO TRUE
+               END-READ
+               IF WS-FILE-OK
+                   MOVE FUNCTION CURRENT-DATE TO WS-AUDIT-TIMESTAMP
+                   MOVE WS-AUDIT-TIMESTAMP(1:14)
+                       TO CS-LAST-VALIDATED
+                   REWRITE CERT-STORE-RECORD
+                   END-REWRITE
+               END-IF
+               IF WS-CERT-STORE-LOCKED
+                   EXEC CICS DEQ
+                       RESOURCE('CERTSTOR')
+                       LENGTH(8)
+                   END-EXEC
+                   SET WS-CERT-STORE-UNLOCKED TO TRUE
+               END-IF
+               IF WS-FILE-RETRYABLE
+                   ADD 1 TO WS-RETRY-COUNT
+                   IF WS-RETRY-COUNT < WS-MAX-RETRIES
+                       EXEC CICS DELAY
+                           FOR MILLISECS(100)
+                       END-EXEC
+                   END-IF
+               ELSE
+                   MOVE WS-MAX-RETRIES TO WS-RETRY-COUNT
+               END-IF
+           END-PERFORM
+           IF NOT WS-FILE-OK
+               SET WS-CHAIN-IS-INVALID TO TRUE
+               IF WS-FILE-RETRYABLE
+                   DISPLAY 'TLSVAL-E012: CERT STORE CONTENTION '
+                       WS-FILE-STATUS
+                   SET WS-CERT-INVALID TO TRUE
+                   MOVE 'CERT STORE FILE STATUS '
+                       TO WS-VALIDATION-MSG
+                   STRING WS-VALIDATION-MSG DELIMITED SPACES
+                       WS-FILE-STATUS DELIMITED SIZE
+                       INTO WS-VALIDATION-MSG
+                   END-STRING
+                   PERFORM 8000-WRITE-AUDIT-ENTRY
+               END-IF
+           END-IF
+           .
        3000-CHECK-EXPIRY-DATE.
            MOVE WS-CERT-NOT-AFTER(1:2)  TO WS-EXP-YEAR-2D
            MOVE WS-CERT-NOT-AFTER(3:2)  TO WS-EXP-MONTH
