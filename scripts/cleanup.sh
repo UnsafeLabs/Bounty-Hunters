@@ -35,7 +35,9 @@ done
 echo ""
 
 # Check total disk usage of log directories
-if [ $MAX_AGE_DAYS -gt $TOTAL_CLEANED ]; then
+# Compare numerically using arithmetic comparison (-gt)
+# Previously used string comparison which could produce incorrect results
+if [ "$MAX_AGE_DAYS" -gt "$TOTAL_CLEANED" ]; then
     echo "WARNING: Retention period exceeds number of files cleaned"
     echo "Consider reducing MAX_AGE_DAYS (currently ${MAX_AGE_DAYS})"
 fi
