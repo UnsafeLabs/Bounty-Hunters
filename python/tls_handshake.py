@@ -6,14 +6,10 @@ Reference: RFC 5246, RFC 7627 (Extended Master Secret)
 
 import hashlib
 import hmac
-import logging
 import struct
 import os
 from enum import Enum, auto
 from typing import Optional, Dict, List, Tuple, Any
-
-
-logger = logging.getLogger(__name__)
 
 
 class HandshakeState(Enum):
@@ -260,8 +256,9 @@ class TLSHandshake:
             self._derive_master_secret()
             return True
 
-        except (ValueError, struct.error) as exc:
-            logger.warning("Key exchange failed: %s", exc)
+        # BUG 4: bare except with pass silently swallows all errors
+        except:
+            pass
         return False
 
     def _derive_master_secret(self) -> None:
@@ -271,14 +268,12 @@ class TLSHandshake:
         if self.client_random is None or self.server_random is None:
             raise ValueError("Client/server random not set")
 
-        seed = self.client_random + self.server_random
-
         if self.negotiated_ems:
-            # BUG 5: should use "extended master secret" label per RFC 7627,
-            # but incorrectly uses the standard "master secret" label
-            label = b"master secret"
+            label = b"extended master secret"
+            seed = self.handshake_hash.copy().digest()
         else:
             label = b"master secret"
+            seed = self.client_random + self.server_random
 
         self.master_secret = self._prf(
             self._pre_master_secret, label, seed, 48
