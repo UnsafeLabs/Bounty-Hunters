@@ -26,11 +26,11 @@ And vanished with feline defense.
 
 ### The Coffee
 
-A barista who worked the night shift,
-Made lattes incredibly swift,
-Cream swirled in the cup,
-She drank it all up,
-But her espresso game was a gift.
+A barista who brewed through the night,
+Made coffees that tasted just right,
+The customers queued,
+While the flavors brewed,
+And thanked her with pure delight.
 
 ---
 
