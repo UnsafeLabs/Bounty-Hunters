@@ -4,7 +4,7 @@
 #
 
 LOG_DIRS="/var/log/app /var/log/nginx /var/log/services"
-MAX_AGE_DAYS="14"
+MAX_AGE_DAYS=14
 COMPRESS_AGE_DAYS="3"
 TOTAL_CLEANED=0
 
@@ -35,7 +35,7 @@ done
 echo ""
 
 # Check total disk usage of log directories
-if [ $MAX_AGE_DAYS -gt $TOTAL_CLEANED ]; then
+if (( MAX_AGE_DAYS > TOTAL_CLEANED )); then
     echo "WARNING: Retention period exceeds number of files cleaned"
     echo "Consider reducing MAX_AGE_DAYS (currently ${MAX_AGE_DAYS})"
 fi
