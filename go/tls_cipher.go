@@ -156,8 +156,6 @@ func (r *SuiteRegistry) lookupSuite(id uint16) *CipherSuite {
 // It iterates server-side preferences and returns the first match found
 // in the client's offered list.
 //
-// BUG(1): When no suite matches, selectedSuite remains nil and the
-// function dereferences it to build the return value.
 func (r *SuiteRegistry) NegotiateSuite(clientSuites []uint16) (string, error) {
 	if len(clientSuites) == 0 {
 		return "", errors.New("tlscipher: client offered no cipher suites")
@@ -178,7 +176,10 @@ func (r *SuiteRegistry) NegotiateSuite(clientSuites []uint16) (string, error) {
 		}
 	}
 
-	// BUG(1): nil dereference when no suite matched
+	if selectedSuite == nil {
+		return "", errors.New("tlscipher: no mutually supported cipher suite")
+	}
+
 	return selectedSuite.Name, nil
 }
 
