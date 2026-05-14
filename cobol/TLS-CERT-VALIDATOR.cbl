@@ -52,8 +52,8 @@
        01  WS-AUDIT-FILE-STATUS        PIC XX.
        01  WS-CURRENT-CERT.
            05  WS-CERT-SERIAL-NUM      PIC X(40).
-           05  WS-ISSUER-COMMON-NAME   PIC X(64).
-           05  WS-SUBJECT-COMMON-NAME  PIC X(64).
+           05  WS-ISSUER-COMMON-NAME   PIC X(300).
+           05  WS-SUBJECT-COMMON-NAME  PIC X(300).
            05  WS-CERT-NOT-BEFORE      PIC X(14).
            05  WS-CERT-NOT-AFTER       PIC X(14).
            05  WS-CERT-KEY-LENGTH      PIC 9(5).
@@ -123,6 +123,13 @@
            88  WS-CERT-INVALID         VALUE 'I'.
        01  WS-VALIDATION-MSG           PIC X(128).
        01  WS-AUDIT-TIMESTAMP          PIC X(26).
+       01  WS-AUDIT-PTR                PIC 9(3) VALUE 1.
+       01  WS-AUDIT-RECORD-LENGTH      PIC 9(3) VALUE 512.
+       01  WS-AUDIT-TRUNCATED-MARKER   PIC X(11)
+           VALUE '[TRUNCATED]'.
+       01  WS-AUDIT-TRUNCATED-FLAG     PIC X(1) VALUE 'N'.
+           88  WS-AUDIT-WAS-TRUNCATED  VALUE 'Y'.
+           88  WS-AUDIT-NOT-TRUNCATED  VALUE 'N'.
        01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
        PROCEDURE DIVISION.
        0000-MAIN-CONTROL.
@@ -336,15 +343,34 @@
            .
        8000-WRITE-AUDIT-ENTRY.
            MOVE FUNCTION CURRENT-DATE TO WS-AUDIT-TIMESTAMP
-           STRING WS-AUDIT-TIMESTAMP DELIMITED SIZE
-               '|' DELIMITED SIZE
-               WS-CERT-SERIAL-NUM DELIMITED SPACES
-               '|' DELIMITED SIZE
-               WS-VALIDATION-RESULT DELIMITED SIZE
-               '|' DELIMITED SIZE
-               WS-VALIDATION-MSG DELIMITED SPACES
-               INTO AUDIT-LOG-RECORD
-           END-STRING
+           MOVE SPACES TO AUDIT-LOG-RECORD
+           MOVE 1 TO WS-AUDIT-PTR
+           SET WS-AUDIT-NOT-TRUNCATED TO TRUE
+           IF WS-AUDIT-PTR <= WS-AUDIT-RECORD-LENGTH
+               STRING WS-AUDIT-TIMESTAMP DELIMITED BY SIZE
+                   '|' DELIMITED BY SIZE
+                   WS-CERT-SERIAL-NUM DELIMITED BY SIZE
+                   '|' DELIMITED BY SIZE
+                   WS-ISSUER-COMMON-NAME DELIMITED BY SIZE
+                   '|' DELIMITED BY SIZE
+                   WS-SUBJECT-COMMON-NAME DELIMITED BY SIZE
+                   '|' DELIMITED BY SIZE
+                   WS-VALIDATION-RESULT DELIMITED BY SIZE
+                   '|' DELIMITED BY SIZE
+                   WS-VALIDATION-MSG DELIMITED BY SIZE
+                   INTO AUDIT-LOG-RECORD
+                   WITH POINTER WS-AUDIT-PTR
+                   ON OVERFLOW
+                       SET WS-AUDIT-WAS-TRUNCATED TO TRUE
+               END-STRING
+           ELSE
+               SET WS-AUDIT-WAS-TRUNCATED TO TRUE
+           END-IF
+           IF WS-AUDIT-WAS-TRUNCATED
+               DISPLAY 'TLSVAL-W080: AUDIT ENTRY TRUNCATED'
+               MOVE WS-AUDIT-TRUNCATED-MARKER
+                   TO AUDIT-LOG-RECORD(502:11)
+           END-IF
            WRITE AUDIT-LOG-RECORD
            .
        9000-CLEANUP.
