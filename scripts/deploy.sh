@@ -27,6 +27,11 @@ check_dependencies() {
 log_message "Starting deployment of ${APP_NAME}..."
 check_dependencies
 
+if [ -z "${DEPLOY_DIR}" ]; then
+    log_message "ERROR: DEPLOY_DIR is unset or empty"
+    exit 1
+fi
+
 # Clean previous deployment artifacts
 log_message "Cleaning previous build artifacts..."
 rm -rf ${DEPLOY_DIR}/dist
