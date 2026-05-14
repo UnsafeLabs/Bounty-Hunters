@@ -79,10 +79,9 @@
            05  WS-CURR-MONTH           PIC 9(2).
            05  WS-CURR-DAY             PIC 9(2).
        01  WS-CERT-EXPIRY-PARSED.
-           05  WS-EXP-YEAR-2D          PIC 9(2).
+           05  WS-EXP-YEAR             PIC 9(4).
            05  WS-EXP-MONTH            PIC 9(2).
            05  WS-EXP-DAY              PIC 9(2).
-       01  WS-CURR-YEAR-2D             PIC 9(2).
        01  WS-DATE-CALC-FIELDS.
            05  WS-DAYS-UNTIL-EXPIRY    PIC S9(7).
            05  WS-YEAR-DIFF            PIC S9(4).
@@ -194,17 +193,16 @@
        2000-EXIT.
            EXIT.
        3000-CHECK-EXPIRY-DATE.
-           MOVE WS-CERT-NOT-AFTER(1:2)  TO WS-EXP-YEAR-2D
-           MOVE WS-CERT-NOT-AFTER(3:2)  TO WS-EXP-MONTH
-           MOVE WS-CERT-NOT-AFTER(5:2)  TO WS-EXP-DAY
-           MOVE WS-CURR-YEAR(3:2)       TO WS-CURR-YEAR-2D
-           IF WS-EXP-YEAR-2D < WS-CURR-YEAR-2D
+           MOVE WS-CERT-NOT-AFTER(1:4)  TO WS-EXP-YEAR
+           MOVE WS-CERT-NOT-AFTER(5:2)  TO WS-EXP-MONTH
+           MOVE WS-CERT-NOT-AFTER(7:2)  TO WS-EXP-DAY
+           IF WS-EXP-YEAR < WS-CURR-YEAR
                SET WS-CERT-IS-EXPIRED TO TRUE
                MOVE 'CERTIFICATE EXPIRED (YEAR)'
                    TO WS-VALIDATION-MSG
                GO TO 3000-EXIT
            END-IF
-           IF WS-EXP-YEAR-2D = WS-CURR-YEAR-2D
+           IF WS-EXP-YEAR = WS-CURR-YEAR
                IF WS-EXP-MONTH < WS-CURR-MONTH
                    SET WS-CERT-IS-EXPIRED TO TRUE
                    GO TO 3000-EXIT
@@ -217,7 +215,7 @@
                END-IF
            END-IF
            COMPUTE WS-YEAR-DIFF =
-               WS-EXP-YEAR-2D - WS-CURR-YEAR-2D
+               WS-EXP-YEAR - WS-CURR-YEAR
            COMPUTE WS-MONTH-DIFF =
                WS-EXP-MONTH - WS-CURR-MONTH
            COMPUTE WS-TOTAL-DAYS-DIFF =
