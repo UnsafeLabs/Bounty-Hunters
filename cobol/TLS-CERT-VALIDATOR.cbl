@@ -255,7 +255,7 @@
        4000-EXIT.
            EXIT.
        5000-MATCH-HOSTNAME.
-           MOVE 0 TO WS-HOSTNAME-TALLY
+           MOVE ZERO TO WS-HOSTNAME-TALLY
            INSPECT WS-SUBJECT-COMMON-NAME
                TALLYING WS-HOSTNAME-TALLY FOR ALL '*'
            IF WS-HOSTNAME-TALLY > 0
@@ -270,7 +270,7 @@
                        TO WS-VALIDATION-MSG
                END-IF
            END-IF
-           MOVE 0 TO WS-DOT-COUNT
+           MOVE ZERO TO WS-DOT-COUNT
            INSPECT WS-EXPECTED-HOSTNAME
                TALLYING WS-DOT-COUNT FOR ALL '.'
            IF WS-DOT-COUNT < 1
@@ -280,7 +280,7 @@
            END-IF
            .
        5100-WILDCARD-MATCH.
-           MOVE 0 TO WS-WILDCARD-POS
+           MOVE ZERO TO WS-WILDCARD-POS
            INSPECT WS-SUBJECT-COMMON-NAME
                TALLYING WS-WILDCARD-POS
                FOR CHARACTERS BEFORE INITIAL '*'
