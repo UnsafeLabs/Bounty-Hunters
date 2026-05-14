@@ -63,9 +63,13 @@ test('ClientHello advertises TLS 1.3 in supported_versions after key_share', () 
   const extensionTypes = extensions.map((extension) => extension.type);
   const keyShareIndex = extensionTypes.indexOf(EXTENSION_TYPE.KEY_SHARE);
   const supportedVersionsIndex = extensionTypes.indexOf(EXTENSION_TYPE.SUPPORTED_VERSIONS);
+  const supportedVersionsCount = extensionTypes.filter(
+    (type) => type === EXTENSION_TYPE.SUPPORTED_VERSIONS,
+  ).length;
 
   assert.notEqual(keyShareIndex, -1);
   assert.notEqual(supportedVersionsIndex, -1);
+  assert.equal(supportedVersionsCount, 1);
   assert.ok(supportedVersionsIndex > keyShareIndex);
 
   const supportedVersions = extensions[supportedVersionsIndex].data;
