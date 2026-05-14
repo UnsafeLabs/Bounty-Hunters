@@ -6,14 +6,10 @@ Reference: RFC 5246, RFC 7627 (Extended Master Secret)
 
 import hashlib
 import hmac
-import logging
 import struct
 import os
 from enum import Enum, auto
 from typing import Optional, Dict, List, Tuple, Any
-
-
-logger = logging.getLogger(__name__)
 
 
 class HandshakeState(Enum):
@@ -237,8 +233,7 @@ class TLSHandshake:
             12,
         )
 
-        # BUG 3: uses == instead of hmac.compare_digest(), enabling timing attacks
-        return computed_verify == received_verify
+        return hmac.compare_digest(computed_verify, received_verify)
 
     def process_key_exchange(self, message: HandshakeMessage) -> bool:
         """Process a ClientKeyExchange or ServerKeyExchange message."""
@@ -260,8 +255,9 @@ class TLSHandshake:
             self._derive_master_secret()
             return True
 
-        except (ValueError, struct.error) as exc:
-            logger.warning("Key exchange failed: %s", exc)
+        # BUG 4: bare except with pass silently swallows all errors
+        except:
+            pass
         return False
 
     def _derive_master_secret(self) -> None:
