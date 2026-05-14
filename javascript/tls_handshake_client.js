@@ -388,7 +388,7 @@ class TLSHandshakeClient {
   }
 
   _hkdfExpandLabel(hash, secret, label, context, length) {
-    const tlsLabel = `tls13 ${label}`;
+    const tlsLabel = label.startsWith('tls13 ') ? label : `tls13 ${label}`;
     const info = Buffer.concat([
       this._uint16(length),
       Buffer.from([tlsLabel.length]),
