@@ -6,14 +6,10 @@ Reference: RFC 5246, RFC 7627 (Extended Master Secret)
 
 import hashlib
 import hmac
-import logging
 import struct
 import os
 from enum import Enum, auto
 from typing import Optional, Dict, List, Tuple, Any
-
-
-logger = logging.getLogger(__name__)
 
 
 class HandshakeState(Enum):
@@ -207,9 +203,22 @@ class TLSHandshake:
 
             ext = TLSExtension(ext_type, ext_data)
 
-            # BUG 2: SNI extension (type 0x0000) is parsed but the server_name
-            # field is never extracted from the extension data
-            if ext_type == EXT_EXTENDED_MASTER_SECRET:
+            if ext_type == EXT_SNI:
+                if len(ext_data) >= 5:
+                    list_len = struct.unpack("!H", ext_data[0:2])[0]
+                    if (
+                        3 <= list_len <= len(ext_data) - 2
+                        and ext_data[2] == 0x00
+                    ):
+                        name_len = struct.unpack("!H", ext_data[3:5])[0]
+                        name_start = 5
+                        name_end = name_start + name_len
+                        if name_end <= 2 + list_len:
+                            ext.server_name = ext_data[
+                                name_start:name_end
+                            ].decode("ascii")
+                            self.server_name = ext.server_name
+            elif ext_type == EXT_EXTENDED_MASTER_SECRET:
                 self.negotiated_ems = True
             elif ext_type == EXT_SIGNATURE_ALGORITHMS:
                 pass  # stored in ext.data for later use
@@ -260,8 +269,9 @@ class TLSHandshake:
             self._derive_master_secret()
             return True
 
-        except (ValueError, struct.error) as exc:
-            logger.warning("Key exchange failed: %s", exc)
+        # BUG 4: bare except with pass silently swallows all errors
+        except:
+            pass
         return False
 
     def _derive_master_secret(self) -> None:
