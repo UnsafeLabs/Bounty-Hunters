@@ -183,22 +183,23 @@ func (r *SuiteRegistry) NegotiateSuite(clientSuites []uint16) (string, error) {
 }
 
 // FilterWeakSuites removes cipher suites that do not meet the minimum
-// security threshold. Currently only checks key size against a fixed
-// floor of 128 bits.
-//
-// BUG(3): Only filters by key size. Suites using RC4 or 3DES are
-// considered weak regardless of key size, but this function does not
-// check the cipher algorithm name.
+// security threshold.
 func (r *SuiteRegistry) FilterWeakSuites(suites []*CipherSuite) []*CipherSuite {
 	const minKeyBits = 128
 
 	result := make([]*CipherSuite, 0, len(suites))
 	for _, s := range suites {
-		if s.KeySize >= minKeyBits {
-			result = append(result, s)
+		if s.KeySize < minKeyBits || isBrokenCipherAlgorithm(s.Name) {
+			continue
 		}
+		result = append(result, s)
 	}
 	return result
+}
+
+func isBrokenCipherAlgorithm(name string) bool {
+	upper := strings.ToUpper(name)
+	return strings.Contains(upper, "RC4") || strings.Contains(upper, "3DES")
 }
 
 // SortByPreference returns a copy of the slice ordered by server
