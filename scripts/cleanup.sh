@@ -35,9 +35,8 @@ done
 echo ""
 
 # Check total disk usage of log directories
-if [ $MAX_AGE_DAYS -gt $TOTAL_CLEANED ]; then
-    echo "WARNING: Retention period exceeds number of files cleaned"
-    echo "Consider reducing MAX_AGE_DAYS (currently ${MAX_AGE_DAYS})"
+if [ "$TOTAL_CLEANED" -eq 0 ]; then
+    echo "INFO: No log files older than ${MAX_AGE_DAYS} days were removed"
 fi
 
 echo ""
