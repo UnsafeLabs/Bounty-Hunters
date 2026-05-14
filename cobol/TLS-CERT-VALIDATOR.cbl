@@ -160,38 +160,67 @@
            DISPLAY 'TLSVAL-I001: VALIDATION STARTED'
            .
        2000-VALIDATE-CERT-CHAIN.
-           IF WS-CHAIN-LENGTH = 0
-               SET WS-CHAIN-IS-INVALID TO TRUE
-               GO TO 2000-EXIT
+           IF WS-CHAIN-LENGTH > 0
+               PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
+                   UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH
+                   MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
+                       TO CS-CERT-SERIAL
+                   READ CERT-STORE-FILE
+                       INVALID KEY
+                           DISPLAY 'TLSVAL-E011: UNKNOWN CERT '
+                               WS-CHN-SERIAL(WS-CHAIN-INDEX)
+                           SET WS-CHAIN-IS-INVALID TO TRUE
+                           GO TO 2000-EXIT
+                   END-READ
+                   IF WS-CHAIN-INDEX = WS-CHAIN-LENGTH
+                       IF NOT CS-IS-TRUST-ANCHOR
+                           SET WS-CHAIN-IS-INVALID TO TRUE
+                           GO TO 2000-EXIT
+                       END-IF
+                   END-IF
+                   IF WS-CHAIN-INDEX > 1
+                       IF WS-CHN-ISSUER(WS-CHAIN-INDEX - 1)
+                           NOT = WS-CHN-SUBJECT(WS-CHAIN-INDEX)
+                           SET WS-CHAIN-IS-INVALID TO TRUE
+                           GO TO 2000-EXIT
+                       END-IF
+                   END-IF
+                   SET WS-CHN-IS-VERIFIED(WS-CHAIN-INDEX) TO TRUE
+               END-PERFORM
+           ELSE
+               PERFORM 2100-VALIDATE-SELF-SIGNED-CERT
            END-IF
-           PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
-               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH + 1
-               MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
-                   TO CS-CERT-SERIAL
-               READ CERT-STORE-FILE
-                   INVALID KEY
-                       DISPLAY 'TLSVAL-E011: UNKNOWN CERT '
-                           WS-CHN-SERIAL(WS-CHAIN-INDEX)
-                       SET WS-CHAIN-IS-INVALID TO TRUE
-                       GO TO 2000-EXIT
-               END-READ
-               IF WS-CHAIN-INDEX = WS-CHAIN-LENGTH
-                   IF NOT CS-IS-TRUST-ANCHOR
-                       SET WS-CHAIN-IS-INVALID TO TRUE
-                       GO TO 2000-EXIT
-                   END-IF
-               END-IF
-               IF WS-CHAIN-INDEX > 1
-                   IF WS-CHN-ISSUER(WS-CHAIN-INDEX - 1)
-                       NOT = WS-CHN-SUBJECT(WS-CHAIN-INDEX)
-                       SET WS-CHAIN-IS-INVALID TO TRUE
-                       GO TO 2000-EXIT
-                   END-IF
-               END-IF
-               SET WS-CHN-IS-VERIFIED(WS-CHAIN-INDEX) TO TRUE
-           END-PERFORM
            .
        2000-EXIT.
+           EXIT.
+       2100-VALIDATE-SELF-SIGNED-CERT.
+           SET WS-CHAIN-IS-INVALID TO TRUE
+           DISPLAY 'TLSVAL-W010: EMPTY CERTIFICATE CHAIN '
+               WS-CERT-SERIAL-NUM
+           MOVE WS-CERT-SERIAL-NUM TO CS-CERT-SERIAL
+           READ CERT-STORE-FILE
+               INVALID KEY
+                   DISPLAY 'TLSVAL-E010: SELF-SIGNED CERT NOT TRUSTED '
+                       WS-CERT-SERIAL-NUM
+                   MOVE 'SELF-SIGNED CERT NOT TRUSTED'
+                       TO WS-VALIDATION-MSG
+                   SET WS-CHAIN-IS-INVALID TO TRUE
+                   GO TO 2100-EXIT
+           END-READ
+           IF CS-IS-TRUST-ANCHOR
+               AND CS-FINGERPRINT = WS-CERT-FINGERPRINT
+               SET WS-CHAIN-IS-VALID TO TRUE
+               DISPLAY 'TLSVAL-I010: TRUSTED SELF-SIGNED CERT '
+                   WS-CERT-SERIAL-NUM
+           ELSE
+               DISPLAY 'TLSVAL-E010: SELF-SIGNED CERT NOT TRUSTED '
+                   WS-CERT-SERIAL-NUM
+               MOVE 'SELF-SIGNED CERT NOT TRUSTED'
+                   TO WS-VALIDATION-MSG
+               SET WS-CHAIN-IS-INVALID TO TRUE
+           END-IF
+           .
+       2100-EXIT.
            EXIT.
        3000-CHECK-EXPIRY-DATE.
            MOVE WS-CERT-NOT-AFTER(1:2)  TO WS-EXP-YEAR-2D
