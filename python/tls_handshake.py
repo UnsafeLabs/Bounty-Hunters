@@ -53,10 +53,7 @@ EXT_KEY_SHARE = 0x0033
 
 VALID_TRANSITIONS: Dict[HandshakeState, List[HandshakeState]] = {
     HandshakeState.IDLE: [HandshakeState.CLIENT_HELLO],
-    HandshakeState.CLIENT_HELLO: [
-        HandshakeState.SERVER_HELLO,
-        HandshakeState.FINISHED,       # BUG 1: allows skipping key exchange
-    ],
+    HandshakeState.CLIENT_HELLO: [HandshakeState.SERVER_HELLO],
     HandshakeState.SERVER_HELLO: [HandshakeState.CERTIFICATE],
     HandshakeState.CERTIFICATE: [HandshakeState.KEY_EXCHANGE],
     HandshakeState.KEY_EXCHANGE: [HandshakeState.CHANGE_CIPHER_SPEC],
