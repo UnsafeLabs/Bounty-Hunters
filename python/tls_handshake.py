@@ -256,10 +256,10 @@ class TLSHandshake:
             self._derive_master_secret()
             return True
 
-        # BUG 4: bare except with pass silently swallows all errors
-        except:
-            pass
-        return False
+        # Malformed key exchange inputs should fail cleanly; programming errors
+        # should still propagate instead of being silently swallowed.
+        except (ValueError, struct.error):
+            return False
 
     def _derive_master_secret(self) -> None:
         """Derive the master secret from pre-master secret and randoms."""
