@@ -77,8 +77,11 @@ def create_model_field(
         ) from None
 
 
+_generated_operation_ids: set[str] = set()
+
+
 def generate_operation_id_for_path(
-    *, name: str, path: str, method: str
+    *, name: str, path: str, method: str, deduplicate: bool = True
 ) -> str:  # pragma: nocover
     warnings.warn(
         message="fastapi.utils.generate_operation_id_for_path() was deprecated, "
@@ -89,6 +92,13 @@ def generate_operation_id_for_path(
     operation_id = f"{name}{path}"
     operation_id = re.sub(r"\W", "_", operation_id)
     operation_id = f"{operation_id}_{method.lower()}"
+    if deduplicate:
+        original_id = operation_id
+        counter = 1
+        while operation_id in _generated_operation_ids:
+            operation_id = f"{original_id}_{counter}"
+            counter += 1
+        _generated_operation_ids.add(operation_id)
     return operation_id
 
 
