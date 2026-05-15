@@ -21,5 +21,9 @@ from .param_functions import Security as Security
 from .requests import Request as Request
 from .responses import Response as Response
 from .routing import APIRouter as APIRouter
+from .security.oauth2 import (
+    OAuth2PasswordBearerWithRefresh as OAuth2PasswordBearerWithRefresh,
+)
+from .security.oauth2 import OAuth2RefreshRequestForm as OAuth2RefreshRequestForm
 from .websockets import WebSocket as WebSocket
 from .websockets import WebSocketDisconnect as WebSocketDisconnect

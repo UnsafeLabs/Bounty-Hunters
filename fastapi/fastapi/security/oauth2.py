@@ -327,6 +327,69 @@ class OAuth2PasswordRequestFormStrict(OAuth2PasswordRequestForm):
         )
 
 
+class OAuth2RefreshRequestForm:
+    """
+    This is a dependency class to collect the `refresh_token` as form data for an
+    OAuth2 refresh token flow.
+    """
+
+    def __init__(
+        self,
+        *,
+        grant_type: Annotated[
+            str,
+            Form(pattern="^refresh_token$"),
+            Doc(
+                """
+                The OAuth2 spec requires the fixed string "refresh_token" for the
+                refresh token grant.
+                """
+            ),
+        ],
+        refresh_token: Annotated[
+            str,
+            Form(json_schema_extra={"format": "password"}),
+            Doc(
+                """
+                The refresh token used to obtain a new access token.
+                """
+            ),
+        ],
+        scope: Annotated[
+            str,
+            Form(),
+            Doc(
+                """
+                A single string with several scopes separated by spaces.
+                """
+            ),
+        ] = "",
+        client_id: Annotated[
+            str | None,
+            Form(),
+            Doc(
+                """
+                Optional OAuth2 client identifier sent as a form field.
+                """
+            ),
+        ] = None,
+        client_secret: Annotated[
+            str | None,
+            Form(json_schema_extra={"format": "password"}),
+            Doc(
+                """
+                Optional OAuth2 client secret sent as a form field.
+                """
+            ),
+        ] = None,
+    ):
+        self.grant_type = grant_type
+        self.refresh_token = refresh_token
+        self.scopes = scope.split()
+        self.client_id = client_id
+        self.client_secret = client_secret
+
+
 class OAuth2(SecurityBase):
     """
     This is the base class for OAuth2 authentication, an instance of it would be used
@@ -542,6 +605,72 @@ class OAuth2PasswordBearer(OAuth2):
             else:
                 return None
         return param
+
+
+class OAuth2PasswordBearerWithRefresh(OAuth2PasswordBearer):
+    """
+    OAuth2 password flow for bearer tokens that also declares a refresh endpoint.
+    """
+
+    def __init__(
+        self,
+        tokenUrl: Annotated[
+            str,
+            Doc(
+                """
+                The URL to obtain the OAuth2 token.
+                """
+            ),
+        ],
+        refresh_url: Annotated[
+            str | None,
+            Doc(
+                """
+                The URL to refresh the token and obtain a new one.
+                """
+            ),
+        ] = None,
+        scheme_name: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme name.
+                """
+            ),
+        ] = None,
+        scopes: Annotated[
+            dict[str, str] | None,
+            Doc(
+                """
+                The OAuth2 scopes that would be required by the path operations.
+                """
+            ),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme description.
+                """
+            ),
+        ] = None,
+        auto_error: Annotated[
+            bool,
+            Doc(
+                """
+                Automatically error when the Authorization header is missing or invalid.
+                """
+            ),
+        ] = True,
+    ):
+        super().__init__(
+            tokenUrl=tokenUrl,
+            scheme_name=scheme_name,
+            scopes=scopes,
+            description=description,
+            auto_error=auto_error,
+            refreshUrl=refresh_url,
+        )
 
 
 class OAuth2AuthorizationCodeBearer(OAuth2):
