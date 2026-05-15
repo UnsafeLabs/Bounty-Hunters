@@ -26,7 +26,17 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
-            'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Hash the password with configured bcrypt rounds.
+     */
+    protected function setPasswordAttribute(string $value): void
+    {
+        $this->attributes['password'] = \Illuminate\Support\Facades\Hash::make(
+            $value,
+            ['rounds' => (int) config('hashing.bcrypt.rounds', 10)]
+        );
     }
 }
