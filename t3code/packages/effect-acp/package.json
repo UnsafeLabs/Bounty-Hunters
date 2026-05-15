@@ -30,6 +30,10 @@
     "./errors": {
       "types": "./src/errors.ts",
       "import": "./src/errors.ts"
+    },
+    "./auth": {
+      "types": "./src/auth.ts",
+      "import": "./src/auth.ts"
     }
   },
   "scripts": {
