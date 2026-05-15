@@ -13,9 +13,9 @@
   },
   {
     "username": "tungnguyentu",
-    "total_prs": 35,
+    "total_prs": 37,
     "first_pr": "2026-05-14T12:19:23.886Z",
-    "last_pr": "2026-05-15T03:48:53.610Z"
+    "last_pr": "2026-05-15T07:00:17.480Z"
   },
   {
     "username": "weilixiong",
@@ -48,10 +48,22 @@
     "last_pr": "2026-05-14T11:21:50.394Z"
   },
   {
+    "username": "absalonCRC",
+    "total_prs": 18,
+    "first_pr": "2026-05-15T07:18:19.262Z",
+    "last_pr": "2026-05-15T09:24:13.394Z"
+  },
+  {
     "username": "realkoreanbeef",
     "total_prs": 17,
     "first_pr": "2026-05-13T19:03:58Z",
     "last_pr": "2026-05-15T03:59:12.766Z"
+  },
+  {
+    "username": "kosmo888",
+    "total_prs": 16,
+    "first_pr": "2026-05-15T06:05:54.039Z",
+    "last_pr": "2026-05-15T06:49:38.210Z"
   },
   {
     "username": "callmekidz",
@@ -108,12 +120,6 @@
     "last_pr": "2026-05-14T06:15:36Z"
   },
   {
-    "username": "kosmo888",
-    "total_prs": 10,
-    "first_pr": "2026-05-15T06:05:54.039Z",
-    "last_pr": "2026-05-15T06:19:10.228Z"
-  },
-  {
     "username": "digzrow-coder",
     "total_prs": 9,
     "first_pr": "2026-05-13T08:07:00Z",
@@ -144,6 +150,12 @@
     "last_pr": "2026-05-15T04:48:51.189Z"
   },
   {
+    "username": "johnhuang316",
+    "total_prs": 8,
+    "first_pr": "2026-05-15T07:16:01.796Z",
+    "last_pr": "2026-05-15T08:34:46.125Z"
+  },
+  {
     "username": "Mburdo",
     "total_prs": 7,
     "first_pr": "2026-05-13T15:20:17Z",
@@ -168,6 +180,12 @@
     "last_pr": "2026-05-14T18:54:31.227Z"
   },
   {
+    "username": "rinopatrick",
+    "total_prs": 7,
+    "first_pr": "2026-05-13T15:48:48Z",
+    "last_pr": "2026-05-15T09:22:59.593Z"
+  },
+  {
     "username": "TsukinowaRin",
     "total_prs": 6,
     "first_pr": "2026-05-13T07:06:32Z",
@@ -178,12 +196,6 @@
     "total_prs": 6,
     "first_pr": "2026-05-13T13:37:17Z",
     "last_pr": "2026-05-13T13:43:31Z"
-  },
-  {
-    "username": "rinopatrick",
-    "total_prs": 6,
-    "first_pr": "2026-05-13T15:48:48Z",
-    "last_pr": "2026-05-14T05:26:38Z"
   },
   {
     "username": "sypham98-prog",
@@ -244,6 +256,12 @@
     "total_prs": 5,
     "first_pr": "2026-05-14T19:52:26.050Z",
     "last_pr": "2026-05-14T20:07:03.308Z"
+  },
+  {
+    "username": "Mira-Mjodheim",
+    "total_prs": 5,
+    "first_pr": "2026-05-14T20:36:52.095Z",
+    "last_pr": "2026-05-15T06:44:55.207Z"
   },
   {
     "username": "spqrcode",
@@ -312,12 +330,6 @@
     "last_pr": "2026-05-14T10:56:24.475Z"
   },
   {
-    "username": "Mira-Mjodheim",
-    "total_prs": 3,
-    "first_pr": "2026-05-14T20:36:52.095Z",
-    "last_pr": "2026-05-14T20:47:01.686Z"
-  },
-  {
     "username": "autochamchikim-pixel",
     "total_prs": 3,
     "first_pr": "2026-05-13T07:10:36Z",
@@ -334,6 +346,18 @@
     "total_prs": 3,
     "first_pr": "2026-05-14T09:24:31.004Z",
     "last_pr": "2026-05-15T05:29:00.257Z"
+  },
+  {
+    "username": "jiezishu000",
+    "total_prs": 3,
+    "first_pr": "2026-05-15T07:17:56.996Z",
+    "last_pr": "2026-05-15T07:20:47.637Z"
+  },
+  {
+    "username": "Bjvsquare",
+    "total_prs": 3,
+    "first_pr": "2026-05-15T08:37:45.776Z",
+    "last_pr": "2026-05-15T09:05:16.486Z"
   },
   {
     "username": "Saumya-Verma123",
@@ -378,10 +402,22 @@
     "last_pr": "2026-05-15T03:12:09.085Z"
   },
   {
+    "username": "tytkk2",
+    "total_prs": 2,
+    "first_pr": "2026-05-15T10:07:26.701Z",
+    "last_pr": "2026-05-15T10:18:40.712Z"
+  },
+  {
     "username": "694410194",
-    "total_prs": 1,
+    "total_prs": 2,
     "first_pr": "2026-05-13T13:33:33Z",
-    "last_pr": "2026-05-13T13:33:33Z"
+    "last_pr": "2026-05-15T10:20:35.136Z"
+  },
+  {
+    "username": "GitWizzz",
+    "total_prs": 2,
+    "first_pr": "2026-05-15T10:12:59.694Z",
+    "last_pr": "2026-05-15T10:41:31.163Z"
   },
   {
     "username": "ErenCankutUYSAL",
@@ -598,5 +634,23 @@
     "total_prs": 1,
     "first_pr": "2026-05-15T02:04:51.797Z",
     "last_pr": "2026-05-15T02:04:51.797Z"
+  },
+  {
+    "username": "vamtech",
+    "total_prs": 1,
+    "first_pr": "2026-05-15T07:12:04.084Z",
+    "last_pr": "2026-05-15T07:12:04.084Z"
+  },
+  {
+    "username": "ya-nsh",
+    "total_prs": 1,
+    "first_pr": "2026-05-15T07:29:21.799Z",
+    "last_pr": "2026-05-15T07:29:21.799Z"
+  },
+  {
+    "username": "QuinnYates",
+    "total_prs": 1,
+    "first_pr": "2026-05-15T09:45:21.969Z",
+    "last_pr": "2026-05-15T09:45:21.969Z"
   }
 ]

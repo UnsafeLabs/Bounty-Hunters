@@ -1,0 +1,42 @@
+name: Comment on PR or Issue
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_type:
+        description: 'Where to post the comment'
+        required: true
+        type: choice
+        options:
+          - pull_request
+          - issue
+      number:
+        description: 'PR or Issue number'
+        required: true
+        type: string
+      message:
+        description: 'Comment message'
+        required: true
+        type: string
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const targetType = '${{ inputs.target_type }}';
+            const number = parseInt('${{ inputs.number }}');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+              body: `${{ inputs.message }}`
+            });
+            console.log(`Commented on ${targetType} #${number}`);
