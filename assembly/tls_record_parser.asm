@@ -12,6 +12,8 @@ section .data
     msg_version     db "Protocol version: 0x", 0
     msg_length      db "Payload length: ", 0
     msg_newline     db 10, 0
+    msg_tls13       db "TLS 1.3 record detected", 10, 0
+    msg_inner_type  db "Inner content type: 0x", 0
 
     ; --- Content type labels ---
     lbl_change_cipher   db "ChangeCipherSpec", 10, 0
@@ -224,12 +226,31 @@ parse_tls_record:
     jmp .parse_done
 
 .handle_application:
+    cmp r14d, 0x0303
+    je .handle_tls13_record
     push rdi
     lea rdi, [rel lbl_application]
     call print_string
     pop rdi
     ; Application data is encrypted, just report the length
-    ; No TLS 1.3 inner content type detection is performed
+    jmp .parse_done
+
+.handle_tls13_record:
+    push rdi
+    lea rdi, [rel msg_tls13]
+    call print_string
+    pop rdi
+    cmp ecx, 0
+    jle .parse_done
+    movzx ebx, byte [rdi+rcx-1]
+    push rdi
+    lea rdi, [rel msg_inner_type]
+    call print_string
+    mov edi, ebx
+    call print_hex_byte
+    lea rdi, [rel msg_newline]
+    call print_string
+    pop rdi
     jmp .parse_done
 
 .handle_heartbeat:
