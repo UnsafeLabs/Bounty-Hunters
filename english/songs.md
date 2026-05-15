@@ -16,15 +16,20 @@ But the server returned an empty frame,
 **[Chorus]**
 Heart not found, heart not found,
 I keep refreshing but you're not around,
-[TODO: write 2 more chorus lines — must maintain the "internet/heartbreak" metaphor, rhyme scheme AABB]
+Your status pings through a broken line,
+My inbox echoes: you are no longer mine.
 
 **[Verse 2]**
 Your profile says you're online tonight,
 The green dot glowing, soft and bright,
-[TODO: write 2 more verse lines — continue the theme of digital loneliness, rhyme with each other]
+I type three dots, then let them disappear,
+Alone with the cursor and no one to hear.
 
 **[Bridge]**
-[TODO: write 4-line bridge — shift tone to acceptance, slower rhythm, can break rhyme scheme]
+So I'll close the tabs that kept us alive,
+Let old notifications fade from the drive,
+If love was a page that refused to load,
+I'll walk home slowly on an offline road.
 
 **[Chorus — Final]**
 Heart not found, heart not found,
@@ -45,15 +50,21 @@ And that was the end of the Cretaceous ball!
 
 **[Chorus]**
 Extinction polka, one-two-three!
-[TODO: write 3 more chorus lines — must be upbeat and absurd, reference different extinct species, maintain polka rhythm]
+A dodo do-si-do, a mammoth on a spree,
+A saber-tooth slides with a trilobite knee,
+Everybody's extinct, but the snacks are free!
 
 **[Verse 2]**
 The dodo bird walked without a care,
 With its fluffy wings and its vacant stare,
-[TODO: write 2 more verse lines — rhyme with each other, reference the dodo's obliviousness]
+It missed every warning in the island air,
+Then asked where the party went, standing there.
 
 **[Verse 3]**
-[TODO: write full 4-line verse — pick another extinct animal (mammoth, saber-tooth, etc.), maintain humorous polka tone, AABB rhyme]
+A woolly mammoth wore a tiny hat,
+And tap-danced bravely on the thinning flat,
+It packed for spring in a glacier coat,
+Then sneezed out a polka through its furry throat.
 
 **[Outro]**
 So raise a glass to the ones who are gone,
@@ -73,9 +84,13 @@ The garbage collector will sweep while you sleep,
 And free all the pointers you promised to keep.
 
 **[Verse 2]**
-[TODO: write full 4-line verse — continue the "computer science lullaby" theme, reference threads/deadlocks/race conditions in a soothing way, AABB rhyme]
+Threads tuck their blankets in queues soft and deep,
+Deadlocks unlock as the semaphores sleep,
+Race conditions slow to a lullaby rhyme,
+And every lost signal arrives just in time.
 
 **[Verse 3]**
 The kernel is humming a low steady tune,
 The clock ticks in cycles from midnight to noon,
-[TODO: write 2 closing lines — wrap up the lullaby, reference shutdown/sleep mode, rhyme with each other]
+So shutdown your worries, let sleep mode begin,
+The fans whisper softly and draw the night in.
