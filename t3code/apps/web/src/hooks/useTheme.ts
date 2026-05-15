@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useSystemTheme } from "./useSystemTheme";
 
 type Theme = "light" | "dark" | "system";
 type ThemeSnapshot = {
   theme: Theme;
-  systemDark: boolean;
 };
 
 const STORAGE_KEY = "t3code:theme";
-const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
   theme: "system",
-  systemDark: false,
 };
 const THEME_COLOR_META_NAME = "theme-color";
 const DYNAMIC_THEME_COLOR_SELECTOR = `meta[name="${THEME_COLOR_META_NAME}"][data-dynamic-theme-color="true"]`;
@@ -28,7 +26,7 @@ function hasThemeStorage() {
 }
 
 function getSystemDark() {
-  return typeof window !== "undefined" && window.matchMedia(MEDIA_QUERY).matches;
+  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
 function getStored(): Theme {
@@ -129,13 +127,12 @@ if (typeof document !== "undefined" && hasThemeStorage()) {
 function getSnapshot(): ThemeSnapshot {
   if (!hasThemeStorage()) return DEFAULT_THEME_SNAPSHOT;
   const theme = getStored();
-  const systemDark = theme === "system" ? getSystemDark() : false;
 
-  if (lastSnapshot && lastSnapshot.theme === theme && lastSnapshot.systemDark === systemDark) {
+  if (lastSnapshot && lastSnapshot.theme === theme) {
     return lastSnapshot;
   }
 
-  lastSnapshot = { theme, systemDark };
+  lastSnapshot = { theme };
   return lastSnapshot;
 }
 
@@ -146,14 +143,6 @@ function getServerSnapshot() {
 function subscribe(listener: () => void): () => void {
   if (typeof window === "undefined") return () => {};
   listeners.push(listener);
-
-  // Listen for system preference changes
-  const mq = window.matchMedia(MEDIA_QUERY);
-  const handleChange = () => {
-    if (getStored() === "system") applyTheme("system", true);
-    emitChange();
-  };
-  mq.addEventListener("change", handleChange);
 
   // Listen for storage changes from other tabs
   const handleStorage = (e: StorageEvent) => {
@@ -166,17 +155,17 @@ function subscribe(listener: () => void): () => void {
 
   return () => {
     listeners = listeners.filter((l) => l !== listener);
-    mq.removeEventListener("change", handleChange);
     window.removeEventListener("storage", handleStorage);
   };
 }
 
 export function useTheme() {
+  const systemTheme = useSystemTheme();
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const theme = snapshot.theme;
 
   const resolvedTheme: "light" | "dark" =
-    theme === "system" ? (snapshot.systemDark ? "dark" : "light") : theme;
+    theme === "system" ? systemTheme.theme : theme;
 
   const setTheme = useCallback((next: Theme) => {
     if (!hasThemeStorage()) return;
@@ -188,7 +177,7 @@ export function useTheme() {
   // Keep DOM in sync on mount/change
   useEffect(() => {
     applyTheme(theme);
-  }, [theme]);
+  }, [theme, systemTheme.theme]);
 
   return { theme, setTheme, resolvedTheme } as const;
 }
