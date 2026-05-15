@@ -2,22 +2,27 @@
 
 namespace Database\Seeders;
 
+use App\Models\Role;
+use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\DB;
 
 class RoleSeeder extends Seeder
 {
+    use WithoutModelEvents;
+
+    /**
+     * Run the database seeds.
+     */
     public function run(): void
     {
-        $roles = ['admin', 'editor', 'viewer'];
+        Role::firstOrCreate(
+            ['name' => 'admin'],
+            ['description' => 'Administrator role with full access']
+        );
 
-        foreach ($roles as $role) {
-            DB::table('roles')->insertOrIgnore([
-                'name' => $role,
-                'guard_name' => 'web',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-        }
+        Role::firstOrCreate(
+            ['name' => 'user'],
+            ['description' => 'Standard user role']
+        );
     }
 }
