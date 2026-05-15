@@ -49,6 +49,7 @@ import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
+import { ProviderCache } from "../../services/ProviderCache.ts";
 import {
   ProviderSessionDirectory,
   type ProviderRuntimeBinding,
@@ -202,6 +203,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 ) {
   const analytics = yield* Effect.service(AnalyticsService);
   const eventLoggers = yield* ProviderEventLoggers;
+  const providerCache = yield* ProviderCache;
   // Options-provided logger wins (test overrides); otherwise we take whatever
   // the `ProviderEventLoggers` tag exposes — `undefined` means "no canonical
   // log writer is attached", which downstream code already handles as a
@@ -930,7 +932,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   );
 
   const getCapabilities: ProviderServiceShape["getCapabilities"] = (instanceId) =>
-    registry.getByInstance(instanceId).pipe(Effect.map((adapter) => adapter.capabilities));
+    registry
+      .getInstanceInfo(instanceId)
+      .pipe(
+        Effect.flatMap((info) =>
+          providerCache.getCapabilities(
+            { instanceId, driverKind: info.driverKind },
+            registry.getByInstance(instanceId).pipe(Effect.map((adapter) => adapter.capabilities)),
+          ),
+        ),
+      );
 
   const getInstanceInfo: ProviderServiceShape["getInstanceInfo"] = (instanceId) =>
     registry.getInstanceInfo(instanceId);

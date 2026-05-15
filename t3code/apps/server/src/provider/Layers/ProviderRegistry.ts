@@ -41,6 +41,7 @@ import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
 import { ServerConfig } from "../../config.ts";
+import { ProviderCache } from "../../services/ProviderCache.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
 import {
@@ -188,6 +189,7 @@ export const ProviderRegistryLive = Layer.effect(
   ProviderRegistry,
   Effect.gen(function* () {
     const instanceRegistry = yield* ProviderInstanceRegistry;
+    const providerCache = yield* ProviderCache;
     const config = yield* ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -430,13 +432,15 @@ export const ProviderRegistryLive = Layer.effect(
     const refreshOneSource = Effect.fn("refreshOneSource")(function* (
       providerSource: ProviderSnapshotSource,
     ) {
-      return yield* providerSource.refresh.pipe(
-        Effect.flatMap((nextProvider) =>
-          correlateSnapshotWithSource(providerSource, nextProvider).pipe(
-            Effect.flatMap(syncProvider),
+      return yield* providerCache
+        .getModelList(providerSource, providerSource.refresh)
+        .pipe(
+          Effect.flatMap((nextProvider) =>
+            correlateSnapshotWithSource(providerSource, nextProvider).pipe(
+              Effect.flatMap(syncProvider),
+            ),
           ),
-        ),
-      );
+        );
     });
 
     const refreshAll = Effect.fn("refreshAll")(function* () {
@@ -541,6 +545,20 @@ export const ProviderRegistryLive = Layer.effect(
           }
           newlyAdded.push([instanceId, instance] as const);
         }
+
+        const invalidatedIds = new Set<ProviderInstanceId>(
+          newlyAdded.map(([instanceId]) => instanceId),
+        );
+        for (const [instanceId] of previousSubs) {
+          if (!nextByInstance.has(instanceId)) {
+            invalidatedIds.add(instanceId);
+          }
+        }
+        yield* Effect.forEach(
+          invalidatedIds,
+          (instanceId) => providerCache.invalidateProvider(instanceId),
+          { discard: true },
+        );
 
         // Fork long-lived subscriptions to each new/rebuilt instance's
         // change stream BEFORE kicking off refreshes — if the driver's
