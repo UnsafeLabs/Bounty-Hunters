@@ -1,0 +1,5 @@
+{
+  "agent": "Codex GPT-5",
+  "pre_task_context": "Task assignment from UnsafeLabs/Bounty-Hunters issue #763: implement DynamicCORSMiddleware in fastapi/fastapi/middleware/cors.py with allow_origin_func (sync + async), fallback to static allow_origins, configurable cors_max_age, keep existing CORSMiddleware behavior unchanged, and add tests for dynamic allow/deny, async callback, fallback, and max age.",
+  "timestamp": "2026-05-15T22:10:00Z"
+}
