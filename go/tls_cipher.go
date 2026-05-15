@@ -139,6 +139,9 @@ func (r *SuiteRegistry) loadDefaults() {
 // scan of knownSuites. Results are cached for faster repeated lookups.
 // BUG(5): suiteCache is read/written without holding r.mu.
 func (r *SuiteRegistry) lookupSuite(id uint16) *CipherSuite {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if cached, ok := r.suiteCache[id]; ok {
 		return cached
 	}
