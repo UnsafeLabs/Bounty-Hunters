@@ -338,7 +338,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       case "Request":
         return handleRequestEncoded(message);
       case "Exit":
-        return handleExitEncoded(message);
+        return handleExitEncoded(normalizeProtocolErrorExit(message));
       case "Chunk":
         return Ref.get(extPending).pipe(
           Effect.flatMap((pending) =>
@@ -520,6 +520,39 @@ function isProtocolError(
     "message" in value &&
     typeof value.message === "string"
   );
+}
+
+function normalizeProtocolErrorExit(
+  message: RpcMessage.ResponseExitEncoded,
+): RpcMessage.ResponseExitEncoded {
+  if (message.exit._tag !== "Failure") {
+    return message;
+  }
+
+  let normalized = false;
+  const cause = message.exit.cause.map((entry) => {
+    if (entry._tag === "Die" && isProtocolError(entry.defect)) {
+      normalized = true;
+      return {
+        _tag: "Fail" as const,
+        error: entry.defect,
+      };
+    }
+    return entry;
+  });
+
+  if (!normalized) {
+    return message;
+  }
+
+  return {
+    _tag: "Exit",
+    requestId: message.requestId,
+    exit: {
+      _tag: "Failure",
+      cause,
+    },
+  };
 }
 
 function normalizeToRequestError(error: AcpError.AcpError): AcpError.AcpRequestError {
