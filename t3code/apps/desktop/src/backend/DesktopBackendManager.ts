@@ -31,6 +31,9 @@ import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 const INITIAL_RESTART_DELAY = Duration.millis(500);
 const MAX_RESTART_DELAY = Duration.seconds(10);
+const HEALTH_CHECK_INTERVAL = Duration.seconds(15);
+const HEALTH_CHECK_MAX_FAILURES = 3;
+const HEALTH_CHECK_MAX_RESTART_ATTEMPTS = 3;
 const DEFAULT_BACKEND_READINESS_TIMEOUT = Duration.minutes(1);
 const DEFAULT_BACKEND_READINESS_INTERVAL = Duration.millis(100);
 const DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT = Duration.seconds(1);
@@ -192,6 +195,87 @@ const waitForHttpReady = Effect.fn("desktop.backendManager.waitForHttpReady")(fu
     Effect.timeout(timeout),
     Effect.mapError(() => new BackendTimeoutError({ url: readinessUrl })),
   );
+});
+
+
+const runHealthCheck = Effect.fn("desktop.backendManager.runHealthCheck")(function* (
+  baseUrl: URL,
+): Effect.fn.Return<boolean, never, HttpClient.HttpClient> {
+  const readinessUrl = new URL(BACKEND_READINESS_PATH, baseUrl);
+  const client = yield* HttpClient.HttpClient;
+  return yield* client
+    .pipe(
+      HttpClient.filterStatusOk,
+      HttpClient.transformResponse(Effect.timeout(Duration.seconds(5))),
+    )
+    .get(readinessUrl)
+    .pipe(
+      Effect.as(true),
+      Effect.catch(() => Effect.succeed(false)),
+    );
+});
+
+const startHealthMonitor = Effect.fn("desktop.backendManager.startHealthMonitor")(function* (
+  config: DesktopBackendStartConfig,
+  state: Ref.Ref<BackendManagerState>,
+  scheduleRestart: (reason: string) => Effect.Effect<void>,
+  logWarning: (message: string, data?: Record<string, unknown>) => Effect.Effect<void>,
+): Effect.fn.Return<void, never, Scope.Scope | HttpClient.HttpClient> {
+  const failures = yield* Ref.make(0);
+  const restartAttempts = yield* Ref.make(0);
+
+  const healthSchedule = Schedule.spaced(HEALTH_CHECK_INTERVAL).pipe(
+    Schedule.compose(Schedule.jitter(0.8, 1.2)),
+    Schedule.whileOutputEffect(() =>
+      Ref.get(state).pipe(Effect.map((s) => s.desiredRunning && Option.isSome(s.active))),
+    ),
+  );
+
+  yield* Effect.repeat(
+    Effect.gen(function* () {
+      const current = yield* Ref.get(state);
+      const activeRun = Option.getOrUndefined(current.active);
+      if (!activeRun || !current.desiredRunning) return;
+
+      const healthy = yield* runHealthCheck(config.httpBaseUrl);
+
+      if (healthy) {
+        yield* Ref.set(failures, 0);
+        yield* Ref.set(restartAttempts, 0);
+      } else {
+        const failCount = yield* Ref.updateAndGet(failures, (n) => n + 1);
+        yield* logWarning("backend health check failed", {
+          failCount,
+          maxFailures: HEALTH_CHECK_MAX_FAILURES,
+          pid: Option.getOrElse(activeRun.pid, () => "unknown"),
+        });
+
+        if (failCount >= HEALTH_CHECK_MAX_FAILURES) {
+          const attempts = yield* Ref.updateAndGet(restartAttempts, (n) => n + 1);
+
+          if (attempts > HEALTH_CHECK_MAX_RESTART_ATTEMPTS) {
+            yield* logWarning("backend restart limit reached, showing error dialog", {
+              attempts,
+            });
+            yield* Effect.sync(() => {
+              const { dialog } = require("electron");
+              dialog.showErrorBox(
+                "Backend Unresponsive",
+                "The T3 Code backend has failed to respond multiple times. You can quit or try again.",
+              );
+            });
+            return;
+          }
+
+          yield* Ref.set(failures, 0);
+          yield* scheduleRestart(
+            "health check: " + HEALTH_CHECK_MAX_FAILURES + " consecutive failures",
+          );
+        }
+      }
+    }),
+    healthSchedule,
+  ).pipe(Effect.forkScoped, Effect.asVoid);
 });
 
 function describeProcessExit(
@@ -457,6 +541,16 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             }
 
             yield* Ref.set(desktopState.backendReady, true);
+
+            yield* startHealthMonitor(config, state, scheduleRestart, logBackendManagerWarning).pipe(
+              Effect.provideService(HttpClient.HttpClient, httpClient),
+              Effect.catch((error) =>
+                logBackendManagerWarning("health monitor failed to start", {
+                  message: error instanceof Error ? error.message : String(error),
+                }),
+              ),
+            );
+
             yield* desktopWindow.handleBackendReady.pipe(
               Effect.catch((error) =>
                 logBackendManagerError("failed to open main window after backend readiness", {
