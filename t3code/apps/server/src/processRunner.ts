@@ -1,4 +1,6 @@
 import * as Data from "effect/Data";
+import { classifyError, type ServerError } from "./errors.ts";
+
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -334,3 +336,8 @@ export const make = Effect.fn("makeProcessRunner")(function* () {
 });
 
 export const layer = Layer.effect(ProcessRunner, make());
+
+/** Maps a ProcessRunError to a centralized ServerError category. */
+export const classifyProcessError = (error: ProcessRunError): ServerError =>
+  classifyError(error);
+

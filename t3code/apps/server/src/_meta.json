@@ -1,0 +1,8 @@
+{
+  "contributor": "Xiaoqiang-Huang",
+  "issue": 861,
+  "generation_context": {
+    "tool": "claude-code",
+    "description": "Standardize server error types with centralized Error module using Effect.Data.TaggedEnum"
+  }
+}

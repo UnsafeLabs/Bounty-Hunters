@@ -1,6 +1,8 @@
 import Mime from "@effect/platform-node/Mime";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
+// Data import retained for any remaining uses
 import * as Data from "effect/Data";
+import { makeServerError, errorToResponse, classifyError } from "./errors.ts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -81,10 +83,7 @@ export const serverEnvironmentRouteLayer = HttpRouter.add(
   }),
 );
 
-class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
-  readonly cause: unknown;
-  readonly bodyJson: OtlpTracer.TraceData;
-}> {}
+// DecodeOtlpTraceRecordsError migrated to ServerError.NetworkError (see errors.ts)
 
 export const otlpTracesProxyRouteLayer = HttpRouter.add(
   "POST",
@@ -100,7 +99,7 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
 
     yield* Effect.try({
       try: () => decodeOtlpTraceRecords(bodyJson),
-      catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson }),
+      catch: (cause) => makeServerError.networkError("Failed to decode OTLP trace records", cause),
     }).pipe(
       Effect.flatMap((records) => browserTraceCollector.record(records)),
       Effect.catch((cause) =>

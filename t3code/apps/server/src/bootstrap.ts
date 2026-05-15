@@ -5,6 +5,8 @@ import * as readline from "node:readline";
 import type { Readable } from "node:stream";
 
 import * as Data from "effect/Data";
+import { makeServerError, type ServerError as ServerErrorType } from "./errors.ts";
+
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
@@ -12,10 +14,8 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 
-class BootstrapError extends Data.TaggedError("BootstrapError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+// BootstrapError migrated to ServerError.ConfigError (see errors.ts)
+type BootstrapError = ServerErrorType;
 
 export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function* <A, I>(
   schema: Schema.Codec<A, I>,
@@ -52,10 +52,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
       }
       resume(
         Effect.fail(
-          new BootstrapError({
-            message: "Failed to read bootstrap envelope.",
-            cause: error,
-          }),
+          makeServerError.configError("Failed to read bootstrap envelope.", error),
         ),
       );
     };
@@ -67,10 +64,8 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
       } else {
         resume(
           Effect.fail(
-            new BootstrapError({
-              message: "Failed to decode bootstrap envelope.",
-              cause: parsed.failure,
-            }),
+            makeServerError.configError("Failed to decode bootstrap envelope.", parsed.failure),
+          ),
           ),
         );
       }
@@ -97,10 +92,7 @@ const isFdReady = (fd: number) =>
   Effect.try({
     try: () => NFS.fstatSync(fd),
     catch: (error) =>
-      new BootstrapError({
-        message: "Failed to stat bootstrap fd.",
-        cause: error,
-      }),
+      makeServerError.configError("Failed to stat bootstrap fd.", error),
   }).pipe(
     Effect.as(true),
     Effect.catchIf(
@@ -136,10 +128,7 @@ const makeBootstrapInputStream = (fd: number) =>
       }
     },
     catch: (error) =>
-      new BootstrapError({
-        message: "Failed to duplicate bootstrap fd.",
-        cause: error,
-      }),
+      makeServerError.configError("Failed to duplicate bootstrap fd.", error),
   });
 
 const makeDirectBootstrapStream = (fd: number): Readable => {
