@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import base64
 from collections import defaultdict, deque
 from collections.abc import Callable
 from decimal import Decimal
@@ -82,7 +83,8 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
+    # bytes is handled explicitly in jsonable_encoder with bytes_encoding support
+    memoryview: lambda o: base64.b64encode(bytes(o)).decode(),
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
@@ -203,6 +205,18 @@ def jsonable_encoder(
             """
         ),
     ] = None,
+    bytes_encoding: Annotated[
+        str,
+        Doc(
+            """
+            Encoding to use for bytes and memoryview objects.
+
+            Options:
+            - `"base64"` (default): Encode as base64 string
+            - `"hex"`: Encode as hexadecimal string
+            """
+        ),
+    ] = "base64",
     sqlalchemy_safe: Annotated[
         bool,
         Doc(
@@ -331,6 +345,15 @@ def jsonable_encoder(
             )
         return encoded_list
 
+    if isinstance(obj, bytes):
+        if bytes_encoding == "hex":
+            return obj.hex()
+        return base64.b64encode(obj).decode()
+    if isinstance(obj, memoryview):
+        b = bytes(obj)
+        if bytes_encoding == "hex":
+            return b.hex()
+        return base64.b64encode(b).decode()
     if type(obj) in ENCODERS_BY_TYPE:
         return ENCODERS_BY_TYPE[type(obj)](obj)
     for encoder, classes_tuple in encoders_by_class_tuples.items():
