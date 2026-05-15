@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Support\Facades\Hash;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -26,7 +26,16 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
-            'password' => 'hashed',
+            'password' => 'hashed', // Keep for reads; writes handled by mutator
         ];
+    }
+
+    /**
+     * Hash password with configured bcrypt rounds on set.
+     */
+    public function setPasswordAttribute(string $value): void
+    {
+        $rounds = config('hashing.bcrypt.rounds', 10);
+        $this->attributes['password'] = Hash::make($value, ['rounds' => $rounds]);
     }
 }
