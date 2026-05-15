@@ -34,6 +34,7 @@
  * @module providerInstance
  */
 import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -49,6 +50,7 @@ const PROVIDER_SLUG_MAX_CHARS = 64;
 const PROVIDER_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 const ENVIRONMENT_VARIABLE_NAME_MAX_CHARS = 128;
 const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+const PROVIDER_API_KEY_PATTERN = /^[^\s]+$/;
 
 const slugSchema = TrimmedNonEmptyString.check(
   Schema.isMaxLength(PROVIDER_SLUG_MAX_CHARS),
@@ -112,6 +114,32 @@ export type ProviderInstanceEnvironmentVariable = typeof ProviderInstanceEnviron
 export const ProviderInstanceEnvironment = Schema.Array(ProviderInstanceEnvironmentVariable);
 export type ProviderInstanceEnvironment = typeof ProviderInstanceEnvironment.Type;
 
+export const ProviderApiKeyValue = TrimmedNonEmptyString.check(
+  Schema.isMinLength(10),
+  Schema.isPattern(PROVIDER_API_KEY_PATTERN),
+);
+export type ProviderApiKeyValue = typeof ProviderApiKeyValue.Type;
+
+export const ProviderHttpsEndpointUrl = TrimmedNonEmptyString.check(
+  Schema.isPattern(/^https:\/\/[^\s/?#]+[^\s]*$/i),
+);
+export type ProviderHttpsEndpointUrl = typeof ProviderHttpsEndpointUrl.Type;
+
+export class ProviderConfigError extends Schema.TaggedErrorClass<ProviderConfigError>()(
+  "ProviderConfigError",
+  {
+    field: TrimmedNonEmptyString,
+    invalidValue: Schema.String,
+    expected: TrimmedNonEmptyString,
+    reason: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message(): string {
+    return `Invalid provider config field ${this.field}: expected ${this.expected}`;
+  }
+}
+
 /**
  * Envelope shape for a provider instance configuration in `ServerSettings`.
  *
@@ -137,6 +165,209 @@ export type ProviderInstanceConfig = typeof ProviderInstanceConfig.Type;
  */
 export const ProviderInstanceConfigMap = Schema.Record(ProviderInstanceId, ProviderInstanceConfig);
 export type ProviderInstanceConfigMap = typeof ProviderInstanceConfigMap.Type;
+
+const decodeProviderInstanceConfig = Schema.decodeUnknownSync(ProviderInstanceConfig);
+const decodeProviderApiKeyValue = Schema.decodeUnknownSync(ProviderApiKeyValue);
+const decodeProviderHttpsEndpointUrl = Schema.decodeUnknownSync(ProviderHttpsEndpointUrl);
+
+const API_KEY_EXPECTED_FORMAT = "a non-empty API key of at least 10 characters with no whitespace";
+const HTTPS_ENDPOINT_EXPECTED_FORMAT = "a valid HTTPS URL with a hostname";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const normalizeFieldName = (fieldName: string): string =>
+  fieldName.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+
+const isApiKeyFieldName = (fieldName: string): boolean => {
+  const normalized = normalizeFieldName(fieldName);
+  return normalized.endsWith("apikey");
+};
+
+const isEndpointFieldName = (fieldName: string): boolean => {
+  const normalized = normalizeFieldName(fieldName);
+  return (
+    normalized === "url" ||
+    normalized.endsWith("url") ||
+    normalized === "endpoint" ||
+    normalized.endsWith("endpoint")
+  );
+};
+
+const describeInvalidSchemaValue = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "[array]";
+  }
+  if (typeof value === "object") {
+    return "[object]";
+  }
+  return String(value);
+};
+
+const createProviderConfigError = (
+  field: string,
+  invalidValue: string,
+  expected: string,
+  reason: string,
+  cause?: unknown,
+): ProviderConfigError =>
+  new ProviderConfigError({
+    field,
+    invalidValue,
+    expected,
+    reason,
+    cause,
+  });
+
+const validateApiKeyField = (
+  field: string,
+  value: string,
+  errors: Array<ProviderConfigError>,
+): void => {
+  try {
+    decodeProviderApiKeyValue(value);
+  } catch (cause) {
+    errors.push(
+      createProviderConfigError(
+        field,
+        value,
+        API_KEY_EXPECTED_FORMAT,
+        "API key must be at least 10 characters and cannot contain whitespace",
+        cause,
+      ),
+    );
+  }
+};
+
+const validateEndpointField = (
+  field: string,
+  value: string,
+  errors: Array<ProviderConfigError>,
+): void => {
+  try {
+    decodeProviderHttpsEndpointUrl(value);
+  } catch (cause) {
+    errors.push(
+      createProviderConfigError(
+        field,
+        value,
+        HTTPS_ENDPOINT_EXPECTED_FORMAT,
+        value.trim().toLowerCase().startsWith("http://")
+          ? "Endpoint URLs must use HTTPS, not HTTP"
+          : "Endpoint URL must be a valid HTTPS URL",
+        cause,
+      ),
+    );
+    return;
+  }
+
+  try {
+    const parsedUrl = new URL(value.trim());
+    if (parsedUrl.protocol !== "https:" || parsedUrl.hostname.trim().length === 0) {
+      errors.push(
+        createProviderConfigError(
+          field,
+          value,
+          HTTPS_ENDPOINT_EXPECTED_FORMAT,
+          parsedUrl.protocol === "http:"
+            ? "Endpoint URLs must use HTTPS, not HTTP"
+            : "Endpoint URL must include a hostname",
+        ),
+      );
+    }
+  } catch (cause) {
+    errors.push(
+      createProviderConfigError(
+        field,
+        value,
+        HTTPS_ENDPOINT_EXPECTED_FORMAT,
+        "Endpoint URL is malformed",
+        cause,
+      ),
+    );
+  }
+};
+
+const validateConfigStringFields = (
+  value: unknown,
+  path: string,
+  errors: Array<ProviderConfigError>,
+  seen: WeakSet<object>,
+): void => {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      validateConfigStringFields(item, `${path}[${index}]`, errors, seen);
+    });
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  if (seen.has(value)) {
+    return;
+  }
+  seen.add(value);
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const field = `${path}.${key}`;
+    if (typeof nestedValue === "string") {
+      if (isApiKeyFieldName(key)) {
+        validateApiKeyField(field, nestedValue, errors);
+      }
+      if (isEndpointFieldName(key)) {
+        validateEndpointField(field, nestedValue, errors);
+      }
+      continue;
+    }
+
+    validateConfigStringFields(nestedValue, field, errors, seen);
+  }
+};
+
+/**
+ * Runtime validation for provider instance configuration values that the
+ * envelope schema intentionally preserves opaquely.
+ */
+export const validateProviderConfig = (input: unknown) => {
+  let providerConfig: ProviderInstanceConfig;
+  try {
+    providerConfig = decodeProviderInstanceConfig(input);
+  } catch (cause) {
+    return Result.fail([
+      createProviderConfigError(
+        "providerConfig",
+        describeInvalidSchemaValue(input),
+        "a valid provider instance config envelope",
+        "Provider config does not match the ProviderInstanceConfig schema",
+        cause,
+      ),
+    ]);
+  }
+
+  const errors: Array<ProviderConfigError> = [];
+
+  providerConfig.environment?.forEach((environmentVariable) => {
+    const field = `environment.${environmentVariable.name}`;
+    if (isApiKeyFieldName(environmentVariable.name)) {
+      validateApiKeyField(field, environmentVariable.value, errors);
+    }
+    if (isEndpointFieldName(environmentVariable.name)) {
+      validateEndpointField(field, environmentVariable.value, errors);
+    }
+  });
+
+  validateConfigStringFields(providerConfig.config, "config", errors, new WeakSet());
+
+  return errors.length > 0 ? Result.fail(errors) : Result.succeed(providerConfig);
+};
 
 /**
  * Construct the canonical `ProviderInstanceId` used as a back-compat default

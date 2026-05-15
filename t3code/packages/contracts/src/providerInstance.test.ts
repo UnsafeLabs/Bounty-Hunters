@@ -7,6 +7,7 @@ import {
   ProviderInstanceConfigMap,
   ProviderInstanceId,
   ProviderInstanceRef,
+  validateProviderConfig,
 } from "./providerInstance.ts";
 
 const decodeProviderDriverKind = Schema.decodeUnknownSync(ProviderDriverKind);
@@ -204,5 +205,124 @@ describe("ProviderInstanceConfigMap", () => {
         "1codex": { driver: "codex" },
       }),
     ).toThrow();
+  });
+});
+
+describe("validateProviderConfig", () => {
+  it("accepts a valid provider config", () => {
+    const result = validateProviderConfig({
+      driver: "codex",
+      environment: [
+        { name: "OPENAI_API_KEY", value: "sk-valid-test-key", sensitive: true },
+        { name: "OPENAI_BASE_URL", value: "https://api.openai.com/v1" },
+      ],
+      config: {
+        apiKey: "sk-config-test-key",
+        endpoint: "https://api.example.com/v1",
+      },
+    });
+
+    expect(result._tag).toBe("Success");
+    if (result._tag !== "Success") {
+      throw new Error("Expected provider config validation to pass");
+    }
+    expect(result.success.driver).toBe("codex");
+  });
+
+  it("rejects an empty API key", () => {
+    const result = validateProviderConfig({
+      driver: "codex",
+      environment: [{ name: "OPENAI_API_KEY", value: "" }],
+    });
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag !== "Failure") {
+      throw new Error("Expected provider config validation to fail");
+    }
+    expect(result.failure).toHaveLength(1);
+    expect(result.failure[0]).toMatchObject({
+      field: "environment.OPENAI_API_KEY",
+      invalidValue: "",
+    });
+  });
+
+  it("rejects a short API key", () => {
+    const result = validateProviderConfig({
+      driver: "codex",
+      config: { apiKey: "short" },
+    });
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag !== "Failure") {
+      throw new Error("Expected provider config validation to fail");
+    }
+    expect(result.failure).toHaveLength(1);
+    expect(result.failure[0]).toMatchObject({
+      field: "config.apiKey",
+      invalidValue: "short",
+    });
+  });
+
+  it("rejects HTTP endpoint URLs with an HTTPS hint", () => {
+    const result = validateProviderConfig({
+      driver: "codex",
+      config: { endpoint: "http://api.example.com/v1" },
+    });
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag !== "Failure") {
+      throw new Error("Expected provider config validation to fail");
+    }
+    expect(result.failure).toHaveLength(1);
+    expect(result.failure[0]).toMatchObject({
+      field: "config.endpoint",
+      invalidValue: "http://api.example.com/v1",
+      expected: "a valid HTTPS URL with a hostname",
+      reason: "Endpoint URLs must use HTTPS, not HTTP",
+    });
+  });
+
+  it("rejects malformed endpoint URLs", () => {
+    const result = validateProviderConfig({
+      driver: "codex",
+      environment: [{ name: "OPENAI_BASE_URL", value: "not-a-url" }],
+    });
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag !== "Failure") {
+      throw new Error("Expected provider config validation to fail");
+    }
+    expect(result.failure).toHaveLength(1);
+    expect(result.failure[0]).toMatchObject({
+      field: "environment.OPENAI_BASE_URL",
+      invalidValue: "not-a-url",
+      expected: "a valid HTTPS URL with a hostname",
+    });
+  });
+
+  it("returns multiple validation errors at once", () => {
+    const result = validateProviderConfig({
+      driver: "codex",
+      environment: [
+        { name: "OPENAI_API_KEY", value: "" },
+        { name: "OPENAI_BASE_URL", value: "http://api.example.com/v1" },
+      ],
+      config: {
+        apiKey: "short",
+        endpoint: "not-a-url",
+      },
+    });
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag !== "Failure") {
+      throw new Error("Expected provider config validation to fail");
+    }
+    expect(result.failure).toHaveLength(4);
+    expect(result.failure.map((error) => error.field)).toEqual([
+      "environment.OPENAI_API_KEY",
+      "environment.OPENAI_BASE_URL",
+      "config.apiKey",
+      "config.endpoint",
+    ]);
   });
 });
