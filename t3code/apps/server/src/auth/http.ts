@@ -14,6 +14,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { AuthError, ServerAuth } from "./Services/ServerAuth.ts";
 import { SessionCredentialService } from "./Services/SessionCredentialService.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
+import { enforceRequestBodySizeLimit } from "../bodyLimit.ts";
 import { browserApiCorsHeaders } from "../httpCors.ts";
 
 export const respondToAuthError = (error: AuthError) =>
@@ -68,6 +69,9 @@ export const authBootstrapRouteLayer = HttpRouter.add(
   "/api/auth/bootstrap",
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
+    const oversizedBodyResponse = yield* enforceRequestBodySizeLimit();
+    if (oversizedBodyResponse) return oversizedBodyResponse;
+
     const serverAuth = yield* ServerAuth;
     const sessions = yield* SessionCredentialService;
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthBootstrapInput).pipe(
@@ -104,6 +108,9 @@ export const authBearerBootstrapRouteLayer = HttpRouter.add(
   "/api/auth/bootstrap/bearer",
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
+    const oversizedBodyResponse = yield* enforceRequestBodySizeLimit();
+    if (oversizedBodyResponse) return oversizedBodyResponse;
+
     const serverAuth = yield* ServerAuth;
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthBootstrapInput).pipe(
       Effect.mapError(
@@ -131,6 +138,9 @@ export const authWebSocketTokenRouteLayer = HttpRouter.add(
   "/api/auth/ws-token",
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
+    const oversizedBodyResponse = yield* enforceRequestBodySizeLimit();
+    if (oversizedBodyResponse) return oversizedBodyResponse;
+
     const serverAuth = yield* ServerAuth;
     const session = yield* serverAuth.authenticateHttpRequest(request);
     const result = yield* serverAuth.issueWebSocketToken(session);
@@ -147,6 +157,9 @@ export const authPairingCredentialRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const serverAuth = yield* ServerAuth;
     const request = yield* HttpServerRequest.HttpServerRequest;
+    const oversizedBodyResponse = yield* enforceRequestBodySizeLimit();
+    if (oversizedBodyResponse) return oversizedBodyResponse;
+
     const session = yield* serverAuth.authenticateHttpRequest(request);
     if (session.role !== "owner") {
       return yield* new AuthError({
@@ -209,6 +222,9 @@ export const authPairingLinksRevokeRouteLayer = HttpRouter.add(
   "/api/auth/pairing-links/revoke",
   Effect.gen(function* () {
     const { serverAuth } = yield* authenticateOwnerSession;
+    const oversizedBodyResponse = yield* enforceRequestBodySizeLimit();
+    if (oversizedBodyResponse) return oversizedBodyResponse;
+
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthRevokePairingLinkInput).pipe(
       Effect.mapError(
         (cause) =>
@@ -239,6 +255,9 @@ export const authClientsRevokeRouteLayer = HttpRouter.add(
   "/api/auth/clients/revoke",
   Effect.gen(function* () {
     const { serverAuth, session } = yield* authenticateOwnerSession;
+    const oversizedBodyResponse = yield* enforceRequestBodySizeLimit();
+    if (oversizedBodyResponse) return oversizedBodyResponse;
+
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthRevokeClientSessionInput).pipe(
       Effect.mapError(
         (cause) =>
@@ -259,6 +278,9 @@ export const authClientsRevokeOthersRouteLayer = HttpRouter.add(
   "/api/auth/clients/revoke-others",
   Effect.gen(function* () {
     const { serverAuth, session } = yield* authenticateOwnerSession;
+    const oversizedBodyResponse = yield* enforceRequestBodySizeLimit();
+    if (oversizedBodyResponse) return oversizedBodyResponse;
+
     const revokedCount = yield* serverAuth.revokeOtherClientSessions(session.sessionId);
     return HttpServerResponse.jsonUnsafe({ revokedCount }, { status: 200 });
   }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),

@@ -22,6 +22,7 @@ import {
   resolveAttachmentRelativePath,
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
+import { enforceRequestBodySizeLimit } from "./bodyLimit.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
@@ -91,6 +92,9 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
   OTLP_TRACES_PROXY_PATH,
   Effect.gen(function* () {
     yield* requireAuthenticatedRequest;
+    const oversizedBodyResponse = yield* enforceRequestBodySizeLimit();
+    if (oversizedBodyResponse) return oversizedBodyResponse;
+
     const request = yield* HttpServerRequest.HttpServerRequest;
     const config = yield* ServerConfig;
     const otlpTracesUrl = config.otlpTracesUrl;

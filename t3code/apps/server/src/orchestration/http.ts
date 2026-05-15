@@ -11,6 +11,7 @@ import { ServerAuth } from "../auth/Services/ServerAuth.ts";
 import { normalizeDispatchCommand } from "./Normalizer.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
+import { enforceRequestBodySizeLimit } from "../bodyLimit.ts";
 
 const respondToOrchestrationHttpError = (
   error: OrchestrationDispatchCommandError | OrchestrationGetSnapshotError,
@@ -68,6 +69,9 @@ export const orchestrationDispatchRouteLayer = HttpRouter.add(
   "/api/orchestration/dispatch",
   Effect.gen(function* () {
     yield* authenticateOwnerSession;
+    const oversizedBodyResponse = yield* enforceRequestBodySizeLimit();
+    if (oversizedBodyResponse) return oversizedBodyResponse;
+
     const orchestrationEngine = yield* OrchestrationEngineService;
     const command = yield* HttpServerRequest.schemaBodyJson(ClientOrchestrationCommand).pipe(
       Effect.mapError(
