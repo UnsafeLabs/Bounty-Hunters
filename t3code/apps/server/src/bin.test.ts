@@ -173,6 +173,18 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     }),
   );
 
+  it.effect("executes checkpoint pruning subcommand with retention days", () =>
+    Effect.gen(function* () {
+      const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-checkpoint-prune-test-"));
+
+      const output = yield* captureStdout(
+        runCli(["checkpoint:prune", "--base-dir", baseDir, "--days", "1"]),
+      );
+
+      assert.equal(output.output.includes("Pruned 0 checkpoint snapshots"), true);
+    }),
+  );
+
   it.effect("executes auth pairing subcommands and redacts secrets from list output", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-auth-pairing-test-"));

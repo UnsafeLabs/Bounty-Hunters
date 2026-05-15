@@ -26,6 +26,7 @@ import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReap
 import { OpenCodeRuntimeLive } from "./provider/opencodeRuntime.ts";
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery.ts";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore.ts";
+import { CheckpointSnapshotPrunerLive } from "./orchestration/checkpoint/CheckpointSnapshotPruner.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
@@ -208,9 +209,19 @@ const VcsLayerLive = Layer.empty.pipe(
   Layer.provideMerge(VcsStatusBroadcaster.layer.pipe(Layer.provide(GitWorkflowLayerLive))),
 );
 
+const CheckpointStoreLayerLive = CheckpointStoreLive.pipe(
+  Layer.provide(VcsDriverRegistryLayerLive),
+);
+
 const CheckpointingLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointDiffQueryLive),
-  Layer.provideMerge(CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
+  Layer.provideMerge(CheckpointStoreLayerLive),
+  Layer.provideMerge(
+    CheckpointSnapshotPrunerLive.pipe(
+      Layer.provideMerge(CheckpointStoreLayerLive),
+      Layer.provideMerge(PersistenceLayerLive),
+    ),
+  ),
 );
 
 const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));

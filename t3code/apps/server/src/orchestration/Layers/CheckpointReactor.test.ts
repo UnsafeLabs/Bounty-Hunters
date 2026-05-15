@@ -37,6 +37,7 @@ import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryIdentityResolver.ts";
 import { CheckpointReactorLive } from "./CheckpointReactor.ts";
+import { CheckpointSnapshotPruner } from "../checkpoint/CheckpointSnapshotPruner.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
@@ -61,6 +62,17 @@ import { WorkspacePathsLive } from "../../workspace/Layers/WorkspacePaths.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
+const CheckpointSnapshotPrunerNoopLayer = Layer.succeed(CheckpointSnapshotPruner, {
+  pruneSnapshots: () =>
+    Effect.succeed({
+      snapshotsDeleted: 0,
+      bytesFreed: 0,
+      durationMs: 0,
+      retentionDays: 7,
+      minimumPerSession: 3,
+      cutoffIso: "2026-01-01T00:00:00.000Z",
+    }),
+});
 
 type LegacyProviderRuntimeEvent = {
   readonly type: string;
@@ -327,6 +339,7 @@ describe("CheckpointReactor", () => {
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(RuntimeReceiptBusLive),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
+      Layer.provideMerge(CheckpointSnapshotPrunerNoopLayer),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
       Layer.provideMerge(CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistry.layer))),
       Layer.provideMerge(

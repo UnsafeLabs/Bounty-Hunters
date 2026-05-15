@@ -66,6 +66,18 @@ export const gitCommandDuration = Metric.timer("t3_git_command_duration", {
   description: "Git command execution duration.",
 });
 
+export const checkpointSnapshotsDeleted = Metric.counter("t3_checkpoint_snapshots_deleted_total", {
+  description: "Total checkpoint snapshots pruned.",
+});
+
+export const checkpointBytesFreed = Metric.counter("t3_checkpoint_bytes_freed_total", {
+  description: "Estimated bytes freed by checkpoint snapshot pruning.",
+});
+
+export const checkpointPruneDuration = Metric.timer("t3_checkpoint_prune_duration", {
+  description: "Checkpoint snapshot pruning duration.",
+});
+
 export const terminalSessionsTotal = Metric.counter("t3_terminal_sessions_total", {
   description: "Total terminal sessions started.",
 });

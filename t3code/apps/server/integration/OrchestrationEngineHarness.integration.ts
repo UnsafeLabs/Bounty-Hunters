@@ -46,6 +46,7 @@ import {
 import { ProviderService } from "../src/provider/Services/ProviderService.ts";
 import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
 import { CheckpointReactorLive } from "../src/orchestration/Layers/CheckpointReactor.ts";
+import { CheckpointSnapshotPruner } from "../src/orchestration/checkpoint/CheckpointSnapshotPruner.ts";
 import { RepositoryIdentityResolverLive } from "../src/project/Layers/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "../src/orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "../src/orchestration/Layers/ProjectionPipeline.ts";
@@ -295,6 +296,17 @@ export const makeOrchestrationIntegrationHarness = (
 
     const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistry.layer));
     const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive;
+    const checkpointSnapshotPrunerLayer = Layer.succeed(CheckpointSnapshotPruner, {
+      pruneSnapshots: () =>
+        Effect.succeed({
+          snapshotsDeleted: 0,
+          bytesFreed: 0,
+          durationMs: 0,
+          retentionDays: 7,
+          minimumPerSession: 3,
+          cutoffIso: "2026-01-01T00:00:00.000Z",
+        }),
+    });
     const runtimeServicesLayer = Layer.mergeAll(
       projectionSnapshotQueryLayer,
       orchestrationLayer.pipe(Layer.provide(projectionSnapshotQueryLayer)),
@@ -328,6 +340,7 @@ export const makeOrchestrationIntegrationHarness = (
     );
     const checkpointReactorLayer = CheckpointReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
+      Layer.provideMerge(checkpointSnapshotPrunerLayer),
       Layer.provideMerge(
         Layer.succeed(VcsStatusBroadcaster, {
           getStatus: () => Effect.die("getStatus should not be called in this test"),
