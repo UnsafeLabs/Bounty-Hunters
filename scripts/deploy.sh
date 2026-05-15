@@ -4,6 +4,8 @@
 # Pulls latest code, builds, and deploys to production
 #
 
+set -e
+
 APP_NAME="webapp"
 DEPLOY_DIR=""
 REPO_URL="git@github.com:org/webapp.git"
