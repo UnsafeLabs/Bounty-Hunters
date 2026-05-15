@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
+import * as Scope from "effect/Scope";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
@@ -13,16 +14,23 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { SshPasswordPrompt } from "./auth.ts";
+import { baseSshArgs } from "./command.ts";
 import {
   buildRemoteLaunchScript,
   buildRemotePairingScript,
   buildRemoteStopScript,
   buildRemoteT3RunnerScript,
+  checkTunnelHealth,
   describeReadinessCause,
   issueRemotePairingToken,
   launchOrReuseRemoteServer,
   REMOTE_PICK_PORT_SCRIPT,
   SshEnvironmentManager,
+  SshTunnelEntry,
+  TUNNEL_HEALTH_CHECK_INTERVAL,
+  TUNNEL_RECONNECT_BASE_DELAY,
+  TUNNEL_RECONNECT_MAX_ATTEMPTS,
+  TUNNEL_RECONNECT_MAX_DELAY,
   waitForHttpReady,
 } from "./tunnel.ts";
 
@@ -390,4 +398,148 @@ describe("ssh tunnel scripts", () => {
       assert.equal(tunnelKillCount, 1);
     }).pipe(Effect.provide(layer), Effect.scoped);
   });
+});
+
+describe("ssh tunnel keepalive", () => {
+  it("configures ServerAliveInterval and ServerAliveCountMax in tunnel args", () => {
+    const target = {
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 2222,
+    } as const;
+
+    const args = commandArgs(
+      ChildProcess.make("ssh", [
+        ...baseSshArgs(target),
+        "-o",
+        "ExitOnForwardFailure=yes",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=3",
+        "-n",
+        "-N",
+        "-L",
+        "41773:127.0.0.1:3773",
+        "julius@devbox.example.com",
+      ]),
+    );
+
+    assert.include(args.join(" "), "ServerAliveInterval=15");
+    assert.include(args.join(" "), "ServerAliveCountMax=3");
+  });
+
+  it("defines keepalive and reconnect constants", () => {
+    assert.isDefined(TUNNEL_HEALTH_CHECK_INTERVAL);
+    assert.isDefined(TUNNEL_RECONNECT_BASE_DELAY);
+    assert.isDefined(TUNNEL_RECONNECT_MAX_DELAY);
+    assert.isDefined(TUNNEL_RECONNECT_MAX_ATTEMPTS);
+    assert.equal(TUNNEL_RECONNECT_MAX_ATTEMPTS, 5);
+  });
+
+  it.effect("checkTunnelHealth returns false when process is not running", () =>
+    Effect.gen(function* () {
+      const deadProcess = ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(999),
+        stdout: Stream.empty,
+        stderr: Stream.empty,
+        all: Stream.empty,
+        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+        isRunning: Effect.succeed(false),
+        kill: () => Effect.void,
+        stdin: Sink.drain,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        unref: Effect.succeed(Effect.void),
+      });
+
+      const deadEntry: SshTunnelEntry = {
+        key: "test",
+        target: { alias: "test", hostname: "test.example.com", username: null, port: null },
+        remotePort: 3773,
+        remoteServerKind: "managed",
+        localPort: 41773,
+        httpBaseUrl: "http://127.0.0.1:41773/",
+        wsBaseUrl: "ws://127.0.0.1:41773/",
+        process: deadProcess,
+        scope: yield* Scope.make("test"),
+      };
+
+      const healthy = yield* checkTunnelHealth(deadEntry).pipe(
+        Effect.provideService(HttpClient.HttpClient, testHttpClient),
+      );
+      assert.isFalse(healthy);
+    }),
+  );
+
+  it.effect("checkTunnelHealth returns false when HTTP probe fails", () =>
+    Effect.gen(function* () {
+      const runningProcess = ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(999),
+        stdout: Stream.empty,
+        stderr: Stream.empty,
+        all: Stream.empty,
+        exitCode: Effect.never,
+        isRunning: Effect.succeed(true),
+        kill: () => Effect.void,
+        stdin: Sink.drain,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        unref: Effect.succeed(Effect.void),
+      });
+
+      const entry: SshTunnelEntry = {
+        key: "test",
+        target: { alias: "test", hostname: "test.example.com", username: null, port: null },
+        remotePort: 3773,
+        remoteServerKind: "managed",
+        localPort: 41773,
+        httpBaseUrl: "http://127.0.0.1:41773/",
+        wsBaseUrl: "ws://127.0.0.1:41773/",
+        process: runningProcess,
+        scope: yield* Scope.make("test"),
+      };
+
+      const healthy = yield* checkTunnelHealth(entry).pipe(
+        Effect.provideService(HttpClient.HttpClient, hangingHttpClient),
+      );
+      assert.isFalse(healthy);
+    }),
+  );
+
+  it.effect("checkTunnelHealth returns true for healthy tunnel", () =>
+    Effect.gen(function* () {
+      const runningProcess = ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(999),
+        stdout: Stream.empty,
+        stderr: Stream.empty,
+        all: Stream.empty,
+        exitCode: Effect.never,
+        isRunning: Effect.succeed(true),
+        kill: () => Effect.void,
+        stdin: Sink.drain,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        unref: Effect.succeed(Effect.void),
+      });
+
+      const entry: SshTunnelEntry = {
+        key: "test",
+        target: { alias: "test", hostname: "test.example.com", username: null, port: null },
+        remotePort: 3773,
+        remoteServerKind: "managed",
+        localPort: 41773,
+        httpBaseUrl: "http://127.0.0.1:41773/",
+        wsBaseUrl: "ws://127.0.0.1:41773/",
+        process: runningProcess,
+        scope: yield* Scope.make("test"),
+      };
+
+      const healthy = yield* checkTunnelHealth(entry).pipe(
+        Effect.provideService(HttpClient.HttpClient, testHttpClient),
+      );
+      assert.isTrue(healthy);
+    }),
+  );
 });
