@@ -253,6 +253,26 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [],
   );
 
+  // Keyboard navigation helpers
+  const handleContainerKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const current = (e.target as HTMLElement).closest("[data-timeline-row-id]");
+        if (!current) return;
+        const rows = document.querySelectorAll<HTMLElement>(
+          `[data-timeline-root="true"] [data-timeline-row-id]`,
+        );
+        const currentIndex = Array.from(rows).indexOf(current as HTMLElement);
+        const nextIndex = e.key === "ArrowDown" ? currentIndex + 1 : currentIndex - 1;
+        if (nextIndex >= 0 && nextIndex < rows.length) {
+          rows[nextIndex].focus();
+        }
+      }
+    },
+    [],
+  );
+
   if (rows.length === 0 && !isWorking) {
     return (
       <div className="flex h-full items-center justify-center">
