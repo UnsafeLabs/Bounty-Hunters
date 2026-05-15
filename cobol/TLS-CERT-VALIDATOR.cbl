@@ -79,7 +79,7 @@
            05  WS-CURR-MONTH           PIC 9(2).
            05  WS-CURR-DAY             PIC 9(2).
        01  WS-CERT-EXPIRY-PARSED.
-           05  WS-EXP-YEAR-2D          PIC 9(2).
+           05  WS-EXP-YEAR             PIC 9(4).
            05  WS-EXP-MONTH            PIC 9(2).
            05  WS-EXP-DAY              PIC 9(2).
        01  WS-CURR-YEAR-2D             PIC 9(2).
@@ -165,7 +165,7 @@
                GO TO 2000-EXIT
            END-IF
            PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
-               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH + 1
+               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH
                MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
                    TO CS-CERT-SERIAL
                READ CERT-STORE-FILE
@@ -194,17 +194,16 @@
        2000-EXIT.
            EXIT.
        3000-CHECK-EXPIRY-DATE.
-           MOVE WS-CERT-NOT-AFTER(1:2)  TO WS-EXP-YEAR-2D
-           MOVE WS-CERT-NOT-AFTER(3:2)  TO WS-EXP-MONTH
-           MOVE WS-CERT-NOT-AFTER(5:2)  TO WS-EXP-DAY
-           MOVE WS-CURR-YEAR(3:2)       TO WS-CURR-YEAR-2D
-           IF WS-EXP-YEAR-2D < WS-CURR-YEAR-2D
+           MOVE WS-CERT-NOT-AFTER(1:4)  TO WS-EXP-YEAR
+           MOVE WS-CERT-NOT-AFTER(5:2)  TO WS-EXP-MONTH
+           MOVE WS-CERT-NOT-AFTER(7:2)  TO WS-EXP-DAY
+           IF WS-EXP-YEAR < WS-CURR-YEAR
                SET WS-CERT-IS-EXPIRED TO TRUE
                MOVE 'CERTIFICATE EXPIRED (YEAR)'
                    TO WS-VALIDATION-MSG
                GO TO 3000-EXIT
            END-IF
-           IF WS-EXP-YEAR-2D = WS-CURR-YEAR-2D
+           IF WS-EXP-YEAR = WS-CURR-YEAR
                IF WS-EXP-MONTH < WS-CURR-MONTH
                    SET WS-CERT-IS-EXPIRED TO TRUE
                    GO TO 3000-EXIT
@@ -217,14 +216,14 @@
                END-IF
            END-IF
            COMPUTE WS-YEAR-DIFF =
-               WS-EXP-YEAR-2D - WS-CURR-YEAR-2D
+               WS-EXP-YEAR - WS-CURR-YEAR
            COMPUTE WS-MONTH-DIFF =
                WS-EXP-MONTH - WS-CURR-MONTH
            COMPUTE WS-TOTAL-DAYS-DIFF =
                (WS-YEAR-DIFF * 365.25) +
                (WS-MONTH-DIFF * 30.44) +
                (WS-EXP-DAY - WS-CURR-DAY)
-           COMPUTE WS-DAYS-UNTIL-EXPIRY =
+           COMPUTE WS-DAYS-UNTIL-EXPIRY ROUNDED =
                WS-TOTAL-DAYS-DIFF
            IF WS-DAYS-UNTIL-EXPIRY < WS-EXPIRY-WARNING-DAYS
                DISPLAY 'TLSVAL-W020: EXPIRES IN '
@@ -255,6 +254,7 @@
        4000-EXIT.
            EXIT.
        5000-MATCH-HOSTNAME.
+           MOVE 0 TO WS-HOSTNAME-TALLY
            INSPECT WS-SUBJECT-COMMON-NAME
                TALLYING WS-HOSTNAME-TALLY FOR ALL '*'
            IF WS-HOSTNAME-TALLY > 0
@@ -269,6 +269,7 @@
                        TO WS-VALIDATION-MSG
                END-IF
            END-IF
+           MOVE 0 TO WS-DOT-COUNT
            INSPECT WS-EXPECTED-HOSTNAME
                TALLYING WS-DOT-COUNT FOR ALL '.'
            IF WS-DOT-COUNT < 1
@@ -278,6 +279,7 @@
            END-IF
            .
        5100-WILDCARD-MATCH.
+           MOVE 0 TO WS-WILDCARD-POS
            INSPECT WS-SUBJECT-COMMON-NAME
                TALLYING WS-WILDCARD-POS
                FOR CHARACTERS BEFORE INITIAL '*'
@@ -309,11 +311,9 @@
                    NOT AT END
                        IF CRL-REVOKED-SERIAL =
                            WS-CERT-SERIAL-NUM
-                           IF WS-CRL-NOT-LOADED
-                               SET WS-CERT-IS-REVOKED TO TRUE
-                               MOVE 'CERTIFICATE ON CRL'
-                                   TO WS-VALIDATION-MSG
-                           END-IF
+                           SET WS-CERT-IS-REVOKED TO TRUE
+                           MOVE 'CERTIFICATE ON CRL'
+                               TO WS-VALIDATION-MSG
                        END-IF
                END-READ
            END-PERFORM
