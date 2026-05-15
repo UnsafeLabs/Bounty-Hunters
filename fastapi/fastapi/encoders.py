@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import datetime
 from collections import defaultdict, deque
@@ -15,7 +16,7 @@ from ipaddress import (
 from pathlib import Path, PurePath
 from re import Pattern
 from types import GeneratorType
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from annotated_doc import Doc
@@ -82,7 +83,6 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
@@ -124,6 +124,18 @@ def generate_encoders_by_class_tuples(
 
 
 encoders_by_class_tuples = generate_encoders_by_class_tuples(ENCODERS_BY_TYPE)
+
+
+_BytesEncoding = Literal["base64", "hex"]
+
+
+def _encode_bytes(data: bytes, encoding: _BytesEncoding) -> str:
+    """Encode bytes to a string using the specified encoding."""
+    if encoding == "base64":
+        return base64.b64encode(data).decode("ascii")
+    elif encoding == "hex":
+        return data.hex()
+    raise ValueError(f"Unknown bytes encoding: {encoding!r}")
 
 
 def jsonable_encoder(
@@ -215,6 +227,16 @@ def jsonable_encoder(
             """
         ),
     ] = True,
+    bytes_encoding: Annotated[
+        _BytesEncoding,
+        Doc(
+            """
+            The encoding to use for `bytes` and `memoryview` objects. Defaults to
+            ``"base64"``, which produces a base64-encoded ASCII string. Can be set to
+            ``"hex"`` for hexadecimal encoding.
+            """
+        ),
+    ] = "base64",
 ) -> Any:
     """
     Convert any object to something that can be encoded in JSON.
@@ -278,6 +300,10 @@ def jsonable_encoder(
         return obj
     if isinstance(obj, PydanticUndefinedType):
         return None
+    if isinstance(obj, bytes):
+        return _encode_bytes(obj, bytes_encoding)
+    if isinstance(obj, memoryview):
+        return _encode_bytes(bytes(obj), bytes_encoding)
     if isinstance(obj, dict):
         encoded_dict = {}
         allowed_keys = set(obj.keys())
