@@ -13,6 +13,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { SshPasswordPrompt } from "./auth.ts";
+import { SshReadinessError } from "./errors.ts";
 import {
   buildRemoteLaunchScript,
   buildRemotePairingScript,
@@ -22,7 +23,9 @@ import {
   issueRemotePairingToken,
   launchOrReuseRemoteServer,
   REMOTE_PICK_PORT_SCRIPT,
+  resolveDefaultTunnelReconnectDelayMs,
   SshEnvironmentManager,
+  type SshTunnelStateChange,
   waitForHttpReady,
 } from "./tunnel.ts";
 
@@ -69,6 +72,45 @@ const makeRunningProcess = (onKill: () => void) => {
     getOutputFd: () => Stream.empty,
     unref: Effect.succeed(Effect.void),
   });
+};
+
+const makeDroppableProcess = (onKill: () => void) => {
+  let finish: ((exitCode: ChildProcessSpawner.ExitCode) => void) | null = null;
+  let running = true;
+  const drop = () => {
+    if (!running) {
+      return;
+    }
+    running = false;
+    finish?.(ChildProcessSpawner.ExitCode(255));
+  };
+  const handle = ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(123),
+    stdout: Stream.empty,
+    stderr: Stream.empty,
+    all: Stream.empty,
+    exitCode: Effect.callback<ChildProcessSpawner.ExitCode>((resume) => {
+      if (!running) {
+        resume(Effect.succeed(ChildProcessSpawner.ExitCode(255)));
+        return Effect.void;
+      }
+      finish = (exitCode) => resume(Effect.succeed(exitCode));
+      return Effect.sync(() => {
+        finish = null;
+      });
+    }),
+    isRunning: Effect.sync(() => running),
+    kill: () =>
+      Effect.sync(() => {
+        onKill();
+        drop();
+      }),
+    stdin: Sink.drain,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+    unref: Effect.succeed(Effect.void),
+  });
+  return { handle, drop };
 };
 
 const testHttpClient = HttpClient.make((request) =>
@@ -236,6 +278,13 @@ describe("ssh tunnel scripts", () => {
     assert.include(REMOTE_PICK_PORT_SCRIPT, 'const filePath = process.argv[2] ?? "";');
   });
 
+  it("uses the required reconnect backoff schedule", () => {
+    assert.deepEqual(
+      [1, 2, 3, 4, 5, 6].map((attempt) => resolveDefaultTunnelReconnectDelayMs(attempt)),
+      [1_000, 4_000, 16_000, 60_000, 60_000, 60_000],
+    );
+  });
+
   it.effect("bounds each HTTP readiness probe so retries cannot hang on one request", () =>
     Effect.gen(function* () {
       const fiber = yield* Effect.forkChild(
@@ -379,6 +428,9 @@ describe("ssh tunnel scripts", () => {
 
       const first = yield* manager.ensureEnvironment(target);
       assert.equal(first.httpBaseUrl, "http://127.0.0.1:41773/");
+      const firstTunnelArgs = spawnedCommands.find((args) => args.includes("-N")) ?? [];
+      assert.include(firstTunnelArgs, "ServerAliveInterval=15");
+      assert.include(firstTunnelArgs, "ServerAliveCountMax=3");
 
       yield* manager.disconnectEnvironment(target);
       assert.equal(tunnelKillCount, 1);
@@ -387,6 +439,265 @@ describe("ssh tunnel scripts", () => {
       yield* manager.ensureEnvironment(target);
 
       assert.equal(spawnedCommands.filter((args) => args.includes("-N")).length, 2);
+      assert.equal(tunnelKillCount, 1);
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  });
+
+  it.effect("reconnects a dropped tunnel after the configured backoff delay", () => {
+    const events: SshTunnelStateChange[] = [];
+    const tunnelProcesses: Array<ReturnType<typeof makeDroppableProcess>> = [];
+    let tunnelSpawnCount = 0;
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.sync(() => {
+        const args = commandArgs(command);
+        if (args.includes("-N")) {
+          tunnelSpawnCount += 1;
+          const process = makeDroppableProcess(() => {});
+          tunnelProcesses.push(process);
+          return process.handle;
+        }
+        if (args.includes("sh") && args.includes("--")) {
+          return makeSuccessfulProcess('{"remotePort":3773}\n');
+        }
+        if (args.includes("sh")) {
+          return makeSuccessfulProcess('{"stopped":true}\n');
+        }
+        return makeSuccessfulProcess("\n");
+      }),
+    );
+    const layer = Layer.mergeAll(
+      NodeServices.layer,
+      SshEnvironmentManager.layer({
+        tunnelHealthCheckIntervalMs: 100,
+        tunnelHealthProbe: () => Effect.void,
+        resolveTunnelReconnectDelayMs: () => 0,
+        onTunnelStateChange: (event) => {
+          events.push(event);
+        },
+      }),
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(HttpClient.HttpClient, testHttpClient),
+      Layer.succeed(NetService.NetService, testNetService),
+      SshPasswordPrompt.disabledLayer,
+      TestClock.layer(),
+    );
+    const target = {
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 2222,
+    } as const;
+
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+
+      yield* manager.ensureEnvironment(target);
+      assert.equal(tunnelSpawnCount, 1);
+      assert.deepEqual(
+        events.map((event) => event.state),
+        ["connecting", "connected"],
+      );
+
+      tunnelProcesses[0]?.drop();
+      yield* Effect.yieldNow;
+
+      const reconnecting = events.find((event) => event.state === "reconnecting");
+      assert.exists(reconnecting);
+      assert.equal(reconnecting?.attempt, 1);
+      assert.equal(reconnecting?.nextRetryDelayMs, 0);
+      assert.equal(tunnelSpawnCount, 1);
+
+      for (let index = 0; index < 100; index += 1) {
+        yield* Effect.yieldNow;
+      }
+
+      assert.equal(tunnelSpawnCount, 2);
+      assert.equal(events.at(-1)?.state, "connected");
+      assert.equal(events.at(-1)?.attempt, 1);
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  });
+
+  it.effect("reconnects when the tunnel health probe fails", () => {
+    let failHealthProbe = false;
+    let tunnelSpawnCount = 0;
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.sync(() => {
+        const args = commandArgs(command);
+        if (args.includes("-N")) {
+          tunnelSpawnCount += 1;
+          return makeDroppableProcess(() => {}).handle;
+        }
+        if (args.includes("sh") && args.includes("--")) {
+          return makeSuccessfulProcess('{"remotePort":3773}\n');
+        }
+        if (args.includes("sh")) {
+          return makeSuccessfulProcess('{"stopped":true}\n');
+        }
+        return makeSuccessfulProcess("\n");
+      }),
+    );
+    const layer = Layer.mergeAll(
+      NodeServices.layer,
+      SshEnvironmentManager.layer({
+        tunnelHealthCheckIntervalMs: 0,
+        tunnelHealthProbe: () => {
+          if (!failHealthProbe) {
+            return Effect.void;
+          }
+          failHealthProbe = false;
+          return Effect.fail(new SshReadinessError({ message: "synthetic health failure" }));
+        },
+        resolveTunnelReconnectDelayMs: () => 0,
+      }),
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(HttpClient.HttpClient, testHttpClient),
+      Layer.succeed(NetService.NetService, testNetService),
+      SshPasswordPrompt.disabledLayer,
+      TestClock.layer(),
+    );
+    const target = {
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 2222,
+    } as const;
+
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+
+      yield* manager.ensureEnvironment(target);
+      assert.equal(tunnelSpawnCount, 1);
+
+      failHealthProbe = true;
+      for (let index = 0; index < 100; index += 1) {
+        yield* Effect.yieldNow;
+      }
+
+      assert.equal(tunnelSpawnCount, 2);
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  });
+
+  it.effect("moves to failed after five unsuccessful reconnect attempts", () => {
+    const events: SshTunnelStateChange[] = [];
+    const tunnelProcesses: Array<ReturnType<typeof makeDroppableProcess>> = [];
+    let tunnelSpawnCount = 0;
+    const spawner = ChildProcessSpawner.make((command) => {
+      const args = commandArgs(command);
+      if (args.includes("-N")) {
+        tunnelSpawnCount += 1;
+        if (tunnelSpawnCount > 1) {
+          return Effect.die("reconnect spawn failed");
+        }
+        const process = makeDroppableProcess(() => {});
+        tunnelProcesses.push(process);
+        return Effect.succeed(process.handle);
+      }
+      if (args.includes("sh") && args.includes("--")) {
+        return Effect.succeed(makeSuccessfulProcess('{"remotePort":3773}\n'));
+      }
+      if (args.includes("sh")) {
+        return Effect.succeed(makeSuccessfulProcess('{"stopped":true}\n'));
+      }
+      return Effect.succeed(makeSuccessfulProcess("\n"));
+    });
+    const layer = Layer.mergeAll(
+      NodeServices.layer,
+      SshEnvironmentManager.layer({
+        tunnelHealthCheckIntervalMs: 100,
+        tunnelHealthProbe: () => Effect.void,
+        resolveTunnelReconnectDelayMs: () => 0,
+        onTunnelStateChange: (event) => {
+          events.push(event);
+        },
+      }),
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(HttpClient.HttpClient, testHttpClient),
+      Layer.succeed(NetService.NetService, testNetService),
+      SshPasswordPrompt.disabledLayer,
+      TestClock.layer(),
+    );
+    const target = {
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 2222,
+    } as const;
+
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+
+      yield* manager.ensureEnvironment(target);
+      tunnelProcesses[0]?.drop();
+      for (let index = 0; index < 500; index += 1) {
+        yield* Effect.yieldNow;
+      }
+
+      assert.equal(tunnelSpawnCount, 6);
+      assert.deepEqual(
+        events
+          .filter((event) => event.state === "reconnecting")
+          .map((event) => event.nextRetryDelayMs),
+        [0, 0, 0, 0, 0],
+      );
+      assert.equal(events.at(-1)?.state, "failed");
+      assert.equal(events.at(-1)?.attempt, 5);
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  });
+
+  it.effect("does not reconnect after a manual disconnect", () => {
+    const tunnelProcesses: Array<ReturnType<typeof makeDroppableProcess>> = [];
+    let tunnelSpawnCount = 0;
+    let tunnelKillCount = 0;
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.sync(() => {
+        const args = commandArgs(command);
+        if (args.includes("-N")) {
+          tunnelSpawnCount += 1;
+          const process = makeDroppableProcess(() => {
+            tunnelKillCount += 1;
+          });
+          tunnelProcesses.push(process);
+          return process.handle;
+        }
+        if (args.includes("sh") && args.includes("--")) {
+          return makeSuccessfulProcess('{"remotePort":3773}\n');
+        }
+        if (args.includes("sh")) {
+          return makeSuccessfulProcess('{"stopped":true}\n');
+        }
+        return makeSuccessfulProcess("\n");
+      }),
+    );
+    const layer = Layer.mergeAll(
+      NodeServices.layer,
+      SshEnvironmentManager.layer({
+        tunnelHealthCheckIntervalMs: 100,
+        tunnelHealthProbe: () => Effect.void,
+        resolveTunnelReconnectDelayMs: () => 0,
+      }),
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(HttpClient.HttpClient, testHttpClient),
+      Layer.succeed(NetService.NetService, testNetService),
+      SshPasswordPrompt.disabledLayer,
+      TestClock.layer(),
+    );
+    const target = {
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 2222,
+    } as const;
+
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+
+      yield* manager.ensureEnvironment(target);
+      yield* manager.disconnectEnvironment(target);
+      for (let index = 0; index < 20; index += 1) {
+        yield* Effect.yieldNow;
+      }
+
+      assert.equal(tunnelSpawnCount, 1);
       assert.equal(tunnelKillCount, 1);
     }).pipe(Effect.provide(layer), Effect.scoped);
   });
