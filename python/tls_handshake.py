@@ -233,8 +233,8 @@ class TLSHandshake:
             12,
         )
 
-        # BUG 3: uses == instead of hmac.compare_digest(), enabling timing attacks
-        return computed_verify == received_verify
+ # Use hmac.compare_digest for constant-time comparison to prevent timing attacks
+ return hmac.compare_digest(computed_verify, received_verify)
 
     def process_key_exchange(self, message: HandshakeMessage) -> bool:
         """Process a ClientKeyExchange or ServerKeyExchange message."""
