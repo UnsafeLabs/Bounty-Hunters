@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 from collections import defaultdict, deque
+import base64
 from collections.abc import Callable
 from decimal import Decimal
 from enum import Enum
@@ -82,7 +83,8 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
+    bytes: lambda o: base64.b64encode(o).decode(),
+    memoryview: lambda o: base64.b64encode(bytes(o)).decode(),
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
@@ -203,6 +205,15 @@ def jsonable_encoder(
             """
         ),
     ] = None,
+    bytes_encoding: Annotated[
+        str | None,
+        Doc(
+            """
+            Encoding to use for `bytes` and `memoryview` objects.
+            Defaults to ``"base64"``. Can be set to ``"hex"`` for hexadecimal encoding.
+            """
+        ),
+    ] = None,
     sqlalchemy_safe: Annotated[
         bool,
         Doc(
@@ -229,6 +240,13 @@ def jsonable_encoder(
     [FastAPI docs for JSON Compatible Encoder](https://fastapi.tiangolo.com/tutorial/encoder/).
     """
     custom_encoder = custom_encoder or {}
+    if bytes_encoding:
+        if bytes_encoding == "hex":
+            ENCODERS_BY_TYPE[bytes] = lambda o: o.hex()
+            ENCODERS_BY_TYPE[memoryview] = lambda o: bytes(o).hex()
+        elif bytes_encoding == "base64":
+            ENCODERS_BY_TYPE[bytes] = lambda o: base64.b64encode(o).decode()
+            ENCODERS_BY_TYPE[memoryview] = lambda o: base64.b64encode(bytes(o)).decode()
     if custom_encoder:
         if type(obj) in custom_encoder:
             return custom_encoder[type(obj)](obj)
