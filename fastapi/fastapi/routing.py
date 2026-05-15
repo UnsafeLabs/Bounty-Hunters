@@ -78,6 +78,7 @@ from starlette._utils import is_async_callable
 from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException
+from starlette.middleware import Middleware as Middleware  # noqa
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import (
@@ -1313,6 +1314,34 @@ class APIRouter(routing.Router):
         self.default_response_class = default_response_class
         self.generate_unique_id_function = generate_unique_id_function
         self.strict_content_type = strict_content_type
+        self.middleware: list[Middleware] = []
+
+    def add_middleware(
+        self,
+        middleware_class: type,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Add a middleware to this router.
+
+        The middleware will be applied to all routes in this router. It uses the
+        same interface as app-level middleware in FastAPI.
+
+        Read more about it in the
+        [FastAPI docs for Middleware](https://fastapi.tiangolo.com/tutorial/middleware/).
+
+        ## Example
+
+        ```python
+        from fastapi import APIRouter
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        router = APIRouter()
+        router.add_middleware(BaseHTTPMiddleware, dispatch=...)
+        ```
+        """
+        self.middleware.append(Middleware(middleware_class, *args, **kwargs))
 
     def route(
         self,
@@ -1729,6 +1758,10 @@ class APIRouter(routing.Router):
                     )
         if responses is None:
             responses = {}
+        if router.middleware and prefix:
+            self.routes.append(
+                Mount(prefix, app=router)
+            )
         for route in router.routes:
             if isinstance(route, APIRoute):
                 combined_responses = {**responses, **route.responses}
@@ -4920,6 +4953,21 @@ class APIRouter(routing.Router):
             self.on_startup.append(func)
         else:
             self.on_shutdown.append(func)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """
+        The main entry point to the APIRouter class.
+
+        If the router has middleware configured, it builds a middleware stack
+        wrapping the router's routes and dispatches through that stack.
+        """
+        if self.middleware:
+            app = self.app
+            for cls, args, kwargs in reversed(self.middleware):
+                app = cls(app, *args, **kwargs)
+            await app(scope, receive, send)
+        else:
+            await super().__call__(scope, receive, send)
 
     @deprecated(
         """
