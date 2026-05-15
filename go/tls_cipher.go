@@ -219,6 +219,14 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 			return !si.IsAEAD && sj.IsAEAD
 		}
 
+		if !hasAESNI() && si.Strength == sj.Strength {
+			siChaCha := strings.Contains(si.Name, "CHACHA20")
+			sjChaCha := strings.Contains(sj.Name, "CHACHA20")
+			if siChaCha != sjChaCha {
+				return siChaCha
+			}
+		}
+
 		// Higher strength first
 		if si.Strength != sj.Strength {
 			return si.Strength > sj.Strength
@@ -277,6 +285,8 @@ func (r *SuiteRegistry) SuiteNames(ids []uint16) []string {
 // HasAESNI reports whether the current platform likely supports
 // hardware AES acceleration. This is a rough heuristic based on
 // runtime.GOARCH.
+var hasAESNI = HasAESNI
+
 func HasAESNI() bool {
 	return runtime.GOARCH == "amd64"
 }
