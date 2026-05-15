@@ -1,4 +1,7 @@
 import Mime from "@effect/platform-node/Mime";
+import * as NodeStream from "@effect/platform-node/NodeStream";
+import * as Stream from "effect/Stream";
+import * as zlib from "node:zlib";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -13,6 +16,7 @@ import {
   HttpRouter,
   HttpServerResponse,
   HttpServerRequest,
+  HttpMiddleware,
 } from "effect/unstable/http";
 import { OtlpTracer } from "effect/unstable/observability";
 
@@ -322,3 +326,102 @@ export const staticAndDevRouteLayer = HttpRouter.add(
     });
   }),
 );
+
+export const compressionMiddleware = HttpMiddleware.make((app: any) => Effect.gen(function*() {
+  const req = yield* HttpServerRequest.HttpServerRequest;
+  
+  const reqEncoding = req.headers["content-encoding"] || "";
+  let currentReq = req;
+  
+  if (reqEncoding.includes("br") || reqEncoding.includes("gzip")) {
+    const isBrotli = reqEncoding.includes("br");
+    currentReq = new Proxy(req, {
+      get(target, prop, receiver) {
+        if (prop === "stream") {
+          return target.stream.pipe(NodeStream.pipeThroughDuplex({ evaluate: () => isBrotli ? zlib.createBrotliDecompress() : zlib.createGunzip() }));
+        }
+        if (prop === "json") {
+          return Effect.gen(function*() {
+            const stream = target.stream.pipe(NodeStream.pipeThroughDuplex({ evaluate: () => isBrotli ? zlib.createBrotliDecompress() : zlib.createGunzip() }));
+            const chunks = yield* Stream.runCollect(stream);
+            const buffer = Buffer.concat(chunks.map((c: any) => Buffer.from(c)));
+            // @ts-ignore
+            return globalThis.JSON.parse(buffer.toString("utf-8"));
+          }) as any;
+        }
+        if (prop === "text") {
+          return Effect.gen(function*() {
+            const stream = target.stream.pipe(NodeStream.pipeThroughDuplex({ evaluate: () => isBrotli ? zlib.createBrotliDecompress() : zlib.createGunzip() }));
+            const chunks = yield* Stream.runCollect(stream);
+            const buffer = Buffer.concat(chunks.map((c: any) => Buffer.from(c)));
+            return buffer.toString("utf-8");
+          }) as any;
+        }
+        return Reflect.get(target, prop, receiver);
+      }
+    });
+  }
+
+  const res = (yield* Effect.provideService(app, HttpServerRequest.HttpServerRequest, currentReq)) as any;
+  
+  const acceptEncoding = req.headers["accept-encoding"] || "";
+  const canBrotli = acceptEncoding.includes("br");
+  const canGzip = acceptEncoding.includes("gzip");
+
+  if (!canBrotli && !canGzip) return res;
+
+  const contentType = res.headers["content-type"] || "";
+  if (contentType.startsWith("image/") || contentType.includes("zip") || contentType.includes("compress")) {
+    return res;
+  }
+
+  const compressionLevelStr = process.env.COMPRESSION_LEVEL;
+  const compressionLevel = compressionLevelStr ? parseInt(compressionLevelStr, 10) : undefined;
+  
+  const body = res.body;
+  if (body && body._tag === "Uint8Array") {
+    const data = body.body;
+    if (data.length < 1024) return res;
+
+    if (canBrotli) {
+      const options = compressionLevel !== undefined ? { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: compressionLevel } } : undefined;
+      const compressed = zlib.brotliCompressSync(data, options);
+      let newRes = HttpServerResponse.uint8Array(compressed, {
+        status: res.status,
+        headers: res.headers,
+      });
+      newRes = HttpServerResponse.setHeader(newRes, "Content-Encoding", "br");
+      newRes = HttpServerResponse.setHeader(newRes, "Content-Length", compressed.length.toString());
+      return newRes;
+    } else {
+      const options = compressionLevel !== undefined ? { level: compressionLevel } : undefined;
+      const compressed = zlib.gzipSync(data, options);
+      let newRes = HttpServerResponse.uint8Array(compressed, {
+        status: res.status,
+        headers: res.headers,
+      });
+      newRes = HttpServerResponse.setHeader(newRes, "Content-Encoding", "gzip");
+      newRes = HttpServerResponse.setHeader(newRes, "Content-Length", compressed.length.toString());
+      return newRes;
+    }
+  } else if (body && body._tag === "Stream") {
+    let newRes = HttpServerResponse.stream(
+        body.stream.pipe(NodeStream.pipeThroughDuplex({ evaluate: () => canBrotli ? zlib.createBrotliCompress() : zlib.createGzip() })),
+        { status: res.status, headers: res.headers }
+    );
+    const updatedHeaders = Object.keys(res.headers).reduce<Record<string, string>>((acc, key) => {
+        if (key.toLowerCase() === "content-length") return acc;
+        acc[key] = res.headers[key] as string;
+        return acc;
+    }, {});
+    
+    newRes = HttpServerResponse.stream(
+        body.stream.pipe(NodeStream.pipeThroughDuplex({ evaluate: () => canBrotli ? zlib.createBrotliCompress() : zlib.createGzip() })),
+        { status: res.status, headers: updatedHeaders }
+    );
+    newRes = HttpServerResponse.setHeader(newRes, "Content-Encoding", canBrotli ? "br" : "gzip");
+    return newRes;
+  }
+
+  return res;
+})) as any;
