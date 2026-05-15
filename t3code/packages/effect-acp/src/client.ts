@@ -1,4 +1,7 @@
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Effect from "effect/Effect";
 import * as Stdio from "effect/Stdio";
 import * as Layer from "effect/Layer";
@@ -26,6 +29,11 @@ export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  readonly onSessionExpired?: (sessionId: string | undefined) => Effect.Effect<void, never>;
+  readonly initialCredentials?: {
+    readonly accessToken: string;
+    readonly refreshToken?: string;
+  };
 }
 
 type AcpClientRaw = {
@@ -33,6 +41,13 @@ type AcpClientRaw = {
   readonly request: (method: string, payload: unknown) => Effect.Effect<unknown, AcpError.AcpError>;
   readonly notify: (method: string, payload: unknown) => Effect.Effect<void, AcpError.AcpError>;
 };
+
+interface SessionState {
+  readonly accessToken: string | undefined;
+  readonly refreshToken: string | undefined;
+  readonly sessionId: string | undefined;
+  readonly isReauthenticating: boolean;
+}
 
 export interface AcpClientShape {
   readonly raw: AcpClientRaw;
@@ -456,6 +471,86 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     generateRequestId: () => nextRpcRequestId++ as never,
   }).pipe(Effect.provideService(RpcClient.Protocol, transport.clientProtocol));
 
+  // --- Session state and token refresh ---
+  const sessionStateRef = yield* Ref.make<SessionState>({
+    accessToken: options.initialCredentials?.accessToken,
+    refreshToken: options.initialCredentials?.refreshToken,
+    sessionId: undefined,
+    isReauthenticating: false,
+  });
+  const initialLock = yield* Deferred.make<void, AcpError.AuthenticationError>();
+  yield* Deferred.succeed(initialLock, undefined);
+  let reauthLockRef = initialLock;
+
+  const isAuthError = (error: AcpError.AcpError): boolean => {
+    if (error._tag === "AcpRequestError") {
+      const msg = error.errorMessage.toLowerCase();
+      return error.code === -32000 || msg.includes("unauthorized") || msg.includes("authentication");
+    }
+    return false;
+  };
+
+  const reauthenticate = Effect.fn("effect-acp/reauthenticate")(function* () {
+    const state = yield* Ref.get(sessionStateRef);
+    if (options.onSessionExpired) {
+      yield* options.onSessionExpired(state.sessionId);
+    }
+    const newLock = yield* Deferred.make<void, AcpError.AuthenticationError>();
+    yield* Ref.update(sessionStateRef, (s) => ({ ...s, isReauthenticating: true }));
+    reauthLockRef = newLock;
+
+    return yield* Effect.acquireRelease(
+      Effect.gen(function* () {
+        const result = yield* callRpc(
+          rpc[AGENT_METHODS.authenticate]({ methodId: "cursor_login" }),
+        ).pipe(
+          Effect.mapError((error) =>
+            new AcpError.AuthenticationError({
+              sessionId: state.sessionId,
+              message: "Re-authentication failed: " + error.message,
+              cause: error,
+            }),
+          ),
+        );
+        const resultMap = result as Record<string, unknown>;
+        yield* Ref.update(sessionStateRef, (s) => ({
+          ...s,
+          accessToken: (resultMap?.accessToken as string) ?? s.accessToken,
+          refreshToken: (resultMap?.refreshToken as string) ?? s.refreshToken,
+          isReauthenticating: false,
+        }));
+        return result;
+      }),
+      (exit) =>
+        Effect.gen(function* () {
+          if (exit._tag === "Success") {
+            yield* Deferred.succeed(newLock, undefined);
+          } else {
+            yield* Deferred.fail(newLock, new AcpError.AuthenticationError({
+              sessionId: state.sessionId,
+              message: "Re-authentication failed, queued requests will fail",
+              cause: exit.cause,
+            }));
+          }
+          yield* Ref.update(sessionStateRef, (s) => ({ ...s, isReauthenticating: false }));
+        }),
+    );
+  });
+
+  const withAutoReauth = <A>(effect: Effect.Effect<A, AcpError.AcpError>): Effect.Effect<A, AcpError.AcpError> =>
+    effect.pipe(
+      Effect.catchIf(isAuthError, (error) =>
+        Effect.gen(function* () {
+          const state = yield* Ref.get(sessionStateRef);
+          if (state.isReauthenticating) {
+            yield* Deferred.await(reauthLockRef);
+            return yield* effect;
+          }
+          return yield* reauthenticate().pipe(Effect.flatMap(() => effect), Effect.retry(Schedule.once()));
+        }),
+      ),
+    );
+
   return AcpClient.of({
     raw: {
       notifications: transport.incoming,
@@ -463,19 +558,19 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
       notify: transport.notify,
     },
     agent: {
-      initialize: (payload) => callRpc(rpc[AGENT_METHODS.initialize](payload)),
+      initialize: (payload) => withAutoReauth(callRpc(rpc[AGENT_METHODS.initialize](payload))),
       authenticate: (payload) => callRpc(rpc[AGENT_METHODS.authenticate](payload)),
       logout: (payload) => callRpc(rpc[AGENT_METHODS.logout](payload)),
-      createSession: (payload) => callRpc(rpc[AGENT_METHODS.session_new](payload)),
-      loadSession: (payload) => callRpc(rpc[AGENT_METHODS.session_load](payload)),
-      listSessions: (payload) => callRpc(rpc[AGENT_METHODS.session_list](payload)),
-      forkSession: (payload) => callRpc(rpc[AGENT_METHODS.session_fork](payload)),
-      resumeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_resume](payload)),
-      closeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_close](payload)),
-      setSessionModel: (payload) => callRpc(rpc[AGENT_METHODS.session_set_model](payload)),
+      createSession: (payload) => withAutoReauth(callRpc(rpc[AGENT_METHODS.session_new](payload))),
+      loadSession: (payload) => withAutoReauth(callRpc(rpc[AGENT_METHODS.session_load](payload))),
+      listSessions: (payload) => withAutoReauth(callRpc(rpc[AGENT_METHODS.session_list](payload))),
+      forkSession: (payload) => withAutoReauth(callRpc(rpc[AGENT_METHODS.session_fork](payload))),
+      resumeSession: (payload) => withAutoReauth(callRpc(rpc[AGENT_METHODS.session_resume](payload))),
+      closeSession: (payload) => withAutoReauth(callRpc(rpc[AGENT_METHODS.session_close](payload))),
+      setSessionModel: (payload) => withAutoReauth(callRpc(rpc[AGENT_METHODS.session_set_model](payload))),
       setSessionConfigOption: (payload) =>
-        callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)),
-      prompt: (payload) => callRpc(rpc[AGENT_METHODS.session_prompt](payload)),
+        withAutoReauth(callRpc(rpc[AGENT_METHODS.session_set_config_option](payload))),
+      prompt: (payload) => withAutoReauth(callRpc(rpc[AGENT_METHODS.session_prompt](payload))),
       cancel: (payload) => transport.notify(AGENT_METHODS.session_cancel, payload),
     },
     handleRequestPermission: (handler) =>

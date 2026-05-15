@@ -446,4 +446,54 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
       yield* Scope.close(scope, Exit.void);
     }),
   );
+
+  it.effect("re-authenticates automatically on 401 auth error", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      let sessionExpiredCalled = false;
+      let expiredSessionId: string | undefined;
+
+      const acp = yield* AcpClient.make(stdio, {
+        onSessionExpired: (sessionId) =>
+          Effect.sync(() => {
+            sessionExpiredCalled = true;
+            expiredSessionId = sessionId;
+          }),
+      }).pipe(Effect.provideService(Scope.Scope, scope));
+
+      // Set up handler
+      yield* acp.handleRequestPermission(() =>
+        Effect.succeed({ outcome: { outcome: "selected", optionId: "allow" } }),
+      );
+
+      // First initialize - respond normally
+      const initFiber = yield* acp.agent
+        .initialize({
+          protocolVersion: 1,
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+          clientInfo: { name: "effect-acp-test", version: "0.0.0" },
+        })
+        .pipe(Effect.forkScoped);
+
+      const initReq = yield* Queue.take(output);
+      const decodedInit = yield* Schema.decodeEffect(Schema.fromJsonString(InitializeRequest))(initReq);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(InitializeResponse, {
+          jsonrpc: "2.0",
+          id: decodedInit.id,
+          result: {
+            protocolVersion: 1,
+            agentCapabilities: {},
+            agentInfo: { name: "mock-agent", version: "0.0.0" },
+          },
+        }),
+      );
+      yield* Fiber.join(initFiber);
+
+      assert.isFalse(sessionExpiredCalled);
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
 });
