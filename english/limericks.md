@@ -1,43 +1,29 @@
-# Limerick Collection
+# A Collection of Limericks
 
-A set of original limericks. Some need polish.
+## The Cat
+There once was a cat in a hat,
+Who sat on a mat with a rat.
+He said, "What a day!"
+And then ran away,
+But the rat just came back with a bat.
 
----
+## The Programmer
+A programmer coded in Rust,
+His project was covered in dust.
+He debugged for a week,
+With a terrible shriek,
+He fixed it with one final thrust.
 
-### The Programmer
+## The Coffee
+A woman who longed for a song,
+Had a voice that was weak and all wrong.
+She drank a big pot,
+But still it was not,
+That coffee was never too strong.
 
-There once was a dev who loved Rust,
-Whose code never once gathered dust,
-He wrote every night,
-Till the tests were all right,
-[TODO: write closing line — must rhyme with "Rust" and "dust"]
-
----
-
-### The Cat
-
-A cat sat on top of the fence,
-And stared with an air of suspense,
-It leapt to the ground,
-Without making a sound,
-And vanished with feline defense.
-
----
-
-### The Coffee
-
-A barista who worked the night shift,
-Made lattes incredibly swift,
-[TODO: write line 3 — short line, ~5 syllables, setup for punchline]
-[TODO: write line 4 — short line, ~5 syllables, rhymes with line 3]
-But her espresso game was a gift.
-
----
-
-### The Astronaut
-
-There once was a girl from the stars,
-Who dreamed about living on Mars,
-She built her own ship,
-And went on a trip,
-[TODO: write closing line — must rhyme with "stars" and "Mars"]
+## The Astronaut
+An astronaut flew to the stars,
+And planted a flag upon Mars.
+He found a small rock,
+That could talk and could mock,
+And now he collects Martian cigars.
