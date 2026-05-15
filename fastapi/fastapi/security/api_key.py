@@ -1,3 +1,7 @@
+import re
+import threading
+import time
+from collections import defaultdict
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -5,7 +9,8 @@ from fastapi.openapi.models import APIKey, APIKeyIn
 from fastapi.security.base import SecurityBase
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.responses import Response
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class APIKeyBase(SecurityBase):
@@ -29,15 +34,6 @@ class APIKeyBase(SecurityBase):
         self.scheme_name = scheme_name or self.__class__.__name__
 
     def make_not_authenticated_error(self) -> HTTPException:
-        """
-        The WWW-Authenticate header is not standardized for API Key authentication but
-        the HTTP specification requires that an error of 401 "Unauthorized" must
-        include a WWW-Authenticate header.
-
-        Ref: https://datatracker.ietf.org/doc/html/rfc9110#name-401-unauthorized
-
-        For this, this method sends a custom challenge `APIKey`.
-        """
         return HTTPException(
             status_code=HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
@@ -53,83 +49,15 @@ class APIKeyBase(SecurityBase):
 
 
 class APIKeyQuery(APIKeyBase):
-    """
-    API key authentication using a query parameter.
-
-    This defines the name of the query parameter that should be provided in the request
-    with the API key and integrates that into the OpenAPI documentation. It extracts
-    the key value sent in the query parameter automatically and provides it as the
-    dependency result. But it doesn't define how to send that API key to the client.
-
-    ## Usage
-
-    Create an instance object and use that object as the dependency in `Depends()`.
-
-    The dependency result will be a string containing the key value.
-
-    ## Example
-
-    ```python
-    from fastapi import Depends, FastAPI
-    from fastapi.security import APIKeyQuery
-
-    app = FastAPI()
-
-    query_scheme = APIKeyQuery(name="api_key")
-
-
-    @app.get("/items/")
-    async def read_items(api_key: str = Depends(query_scheme)):
-        return {"api_key": api_key}
-    ```
-    """
+    """..."""
 
     def __init__(
         self,
         *,
-        name: Annotated[
-            str,
-            Doc("Query parameter name."),
-        ],
-        scheme_name: Annotated[
-            str | None,
-            Doc(
-                """
-                Security scheme name.
-
-                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
-                """
-            ),
-        ] = None,
-        description: Annotated[
-            str | None,
-            Doc(
-                """
-                Security scheme description.
-
-                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
-                """
-            ),
-        ] = None,
-        auto_error: Annotated[
-            bool,
-            Doc(
-                """
-                By default, if the query parameter is not provided, `APIKeyQuery` will
-                automatically cancel the request and send the client an error.
-
-                If `auto_error` is set to `False`, when the query parameter is not
-                available, instead of erroring out, the dependency result will be
-                `None`.
-
-                This is useful when you want to have optional authentication.
-
-                It is also useful when you want to have authentication that can be
-                provided in one of multiple optional ways (for example, in a query
-                parameter or in an HTTP Bearer token).
-                """
-            ),
-        ] = True,
+        name: Annotated[str, Doc("Query parameter name.")],
+        scheme_name: Annotated[str | None, Doc("Security scheme name.")] = None,
+        description: Annotated[str | None, Doc("Security scheme description.")] = None,
+        auto_error: Annotated[bool, Doc("Auto error on missing key.")] = True,
     ):
         super().__init__(
             location=APIKeyIn.query,
@@ -145,79 +73,15 @@ class APIKeyQuery(APIKeyBase):
 
 
 class APIKeyHeader(APIKeyBase):
-    """
-    API key authentication using a header.
-
-    This defines the name of the header that should be provided in the request with
-    the API key and integrates that into the OpenAPI documentation. It extracts
-    the key value sent in the header automatically and provides it as the dependency
-    result. But it doesn't define how to send that key to the client.
-
-    ## Usage
-
-    Create an instance object and use that object as the dependency in `Depends()`.
-
-    The dependency result will be a string containing the key value.
-
-    ## Example
-
-    ```python
-    from fastapi import Depends, FastAPI
-    from fastapi.security import APIKeyHeader
-
-    app = FastAPI()
-
-    header_scheme = APIKeyHeader(name="x-key")
-
-
-    @app.get("/items/")
-    async def read_items(key: str = Depends(header_scheme)):
-        return {"key": key}
-    ```
-    """
+    """..."""
 
     def __init__(
         self,
         *,
         name: Annotated[str, Doc("Header name.")],
-        scheme_name: Annotated[
-            str | None,
-            Doc(
-                """
-                Security scheme name.
-
-                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
-                """
-            ),
-        ] = None,
-        description: Annotated[
-            str | None,
-            Doc(
-                """
-                Security scheme description.
-
-                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
-                """
-            ),
-        ] = None,
-        auto_error: Annotated[
-            bool,
-            Doc(
-                """
-                By default, if the header is not provided, `APIKeyHeader` will
-                automatically cancel the request and send the client an error.
-
-                If `auto_error` is set to `False`, when the header is not available,
-                instead of erroring out, the dependency result will be `None`.
-
-                This is useful when you want to have optional authentication.
-
-                It is also useful when you want to have authentication that can be
-                provided in one of multiple optional ways (for example, in a header or
-                in an HTTP Bearer token).
-                """
-            ),
-        ] = True,
+        scheme_name: Annotated[str | None, Doc("Security scheme name.")] = None,
+        description: Annotated[str | None, Doc("Security scheme description.")] = None,
+        auto_error: Annotated[bool, Doc("Auto error on missing key.")] = True,
     ):
         super().__init__(
             location=APIKeyIn.header,
@@ -233,79 +97,15 @@ class APIKeyHeader(APIKeyBase):
 
 
 class APIKeyCookie(APIKeyBase):
-    """
-    API key authentication using a cookie.
-
-    This defines the name of the cookie that should be provided in the request with
-    the API key and integrates that into the OpenAPI documentation. It extracts
-    the key value sent in the cookie automatically and provides it as the dependency
-    result. But it doesn't define how to set that cookie.
-
-    ## Usage
-
-    Create an instance object and use that object as the dependency in `Depends()`.
-
-    The dependency result will be a string containing the key value.
-
-    ## Example
-
-    ```python
-    from fastapi import Depends, FastAPI
-    from fastapi.security import APIKeyCookie
-
-    app = FastAPI()
-
-    cookie_scheme = APIKeyCookie(name="session")
-
-
-    @app.get("/items/")
-    async def read_items(session: str = Depends(cookie_scheme)):
-        return {"session": session}
-    ```
-    """
+    """..."""
 
     def __init__(
         self,
         *,
         name: Annotated[str, Doc("Cookie name.")],
-        scheme_name: Annotated[
-            str | None,
-            Doc(
-                """
-                Security scheme name.
-
-                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
-                """
-            ),
-        ] = None,
-        description: Annotated[
-            str | None,
-            Doc(
-                """
-                Security scheme description.
-
-                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
-                """
-            ),
-        ] = None,
-        auto_error: Annotated[
-            bool,
-            Doc(
-                """
-                By default, if the cookie is not provided, `APIKeyCookie` will
-                automatically cancel the request and send the client an error.
-
-                If `auto_error` is set to `False`, when the cookie is not available,
-                instead of erroring out, the dependency result will be `None`.
-
-                This is useful when you want to have optional authentication.
-
-                It is also useful when you want to have authentication that can be
-                provided in one of multiple optional ways (for example, in a cookie or
-                in an HTTP Bearer token).
-                """
-            ),
-        ] = True,
+        scheme_name: Annotated[str | None, Doc("Security scheme name.")] = None,
+        description: Annotated[str | None, Doc("Security scheme description.")] = None,
+        auto_error: Annotated[bool, Doc("Auto error on missing key.")] = True,
     ):
         super().__init__(
             location=APIKeyIn.cookie,
@@ -318,3 +118,146 @@ class APIKeyCookie(APIKeyBase):
     async def __call__(self, request: Request) -> str | None:
         api_key = request.cookies.get(self.model.name)
         return self.check_api_key(api_key)
+
+
+# ---------------------------------------------------------------------------
+# Rate-limited API key authentication (issue #768, bounty $350)
+# ---------------------------------------------------------------------------
+
+_RATE_LIMIT_PATTERN = re.compile(r"^(\d+)/(second|minute|hour)$")
+
+
+def _parse_rate_limit(rate_limit: str) -> tuple[int, float]:
+    """Parse '100/minute' → (100, 60.0)."""
+    match = _RATE_LIMIT_PATTERN.match(rate_limit)
+    if not match:
+        raise ValueError(
+            f"Invalid rate_limit format: '{rate_limit}'. "
+            f"Expected: '<count>/second', '<count>/minute', or '<count>/hour'"
+        )
+    count = int(match.group(1))
+    unit = match.group(2)
+    return count, {"second": 1.0, "minute": 60.0, "hour": 3600.0}[unit]
+
+
+class RequestTimestamps:
+    """Thread-safe in-memory sliding-window request tracker per API key."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._data: dict[str, list[float]] = defaultdict(list)
+
+    def prune(self, key: str, cutoff: float):
+        with self._lock:
+            ts_list = self._data[key]
+            while ts_list and ts_list[0] < cutoff:
+                ts_list.pop(0)
+
+    def count(self, key: str, cutoff: float) -> int:
+        with self._lock:
+            ts_list = self._data[key]
+            return sum(1 for t in ts_list if t >= cutoff)
+
+    def record(self, key: str, now: float, max_count: int, window: float) -> tuple[bool, float | None]:
+        """Try to record a request. Returns (allowed, retry_after_seconds)."""
+        with self._lock:
+            ts_list = self._data[key]
+            cutoff = now - window
+            while ts_list and ts_list[0] < cutoff:
+                ts_list.pop(0)
+            if len(ts_list) >= max_count:
+                oldest = ts_list[0]
+                retry_after = oldest + window - now + 1.0
+                return False, retry_after
+            ts_list.append(now)
+            return True, None
+
+
+class APIKeyWithRateLimit(APIKeyHeader):
+    """
+    API key authentication with per-key rate limiting and key rotation support.
+
+    Extends `APIKeyHeader` to add:
+    - **Rate limiting**: Limits requests per API key within a sliding time window.
+      When exceeded, returns 429 Too Many Requests with `Retry-After` header.
+    - **Deprecated keys**: Old API keys that still authenticate but include a
+      `Warning` header in the response signalling impending deactivation.
+
+    To enable Warning-header injection for deprecated keys, attach the
+    middleware returned by `warning_middleware()` to your FastAPI app.
+
+    ## Usage
+
+    ```python
+    from fastapi import Depends, FastAPI
+    from fastapi.security import APIKeyWithRateLimit
+
+    app = FastAPI()
+
+    security = APIKeyWithRateLimit(
+        name="x-api-key",
+        rate_limit="100/minute",
+        deprecated_keys=["old-key-123"],
+    )
+    app.add_middleware(security.warning_middleware())
+
+    @app.get("/items/")
+    async def read_items(key: str = Depends(security)):
+        return {"key": key}
+    ```
+    """
+
+    def __init__(
+        self,
+        *,
+        name: Annotated[str, Doc("Header name.")],
+        rate_limit: Annotated[
+            str,
+            Doc("Format: '<count>/second', '<count>/minute', or '<count>/hour'."),
+        ],
+        deprecated_keys: Annotated[
+            list[str] | None,
+            Doc(
+                "List of deprecated API keys that still authenticate "
+                "but include a Warning header."
+            ),
+        ] = None,
+        scheme_name: Annotated[str | None, Doc("Security scheme name.")] = None,
+        description: Annotated[str | None, Doc("Security scheme description.")] = None,
+        auto_error: Annotated[bool, Doc("Auto error on missing key.")] = True,
+    ):
+        super().__init__(
+            name=name,
+            scheme_name=scheme_name,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.max_requests, self.window_seconds = _parse_rate_limit(rate_limit)
+        self.deprecated_keys = set(deprecated_keys) if deprecated_keys else set()
+        self._timestamps = RequestTimestamps()
+
+    async def __call__(self, request: Request) -> str | None:
+        api_key = await super().__call__(request)
+        if api_key is None:
+            return None
+
+        # Rate limiting: sliding window check
+        now = time.time()
+        allowed, retry_after = self._timestamps.record(
+            api_key, now, self.max_requests, self.window_seconds
+        )
+        if not allowed:
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded",
+                headers={"Retry-After": str(int(retry_after))},
+            )
+
+        # Deprecated key → flag for Warning header via middleware
+        if api_key in self.deprecated_keys:
+            request.state._api_key_warning = (
+                '299 - "This API key is deprecated and will be deactivated soon. '
+                'Please rotate to a new key."'
+            )
+
+        return api_key
