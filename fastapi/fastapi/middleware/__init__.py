@@ -1,1 +1,1 @@
-from starlette.middleware import Middleware as Middleware
+from starlette.middleware import Middleware as Middleware\nfrom fastapi.middleware.request_id import RequestIDMiddleware as RequestIDMiddleware\n
