@@ -20,9 +20,25 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> Respon
 async def request_validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    errors = jsonable_encoder(exc.errors())
+    content: dict = {
+        "detail": errors,
+        "path": request.url.path,
+        "method": request.method,
+    }
+    # Include request body when in debug mode to help identify the problematic field
+    app = request.app
+    debug = getattr(app, "debug", False)
+    if debug:
+        try:
+            body = await request.body()
+            if body:
+                content["body"] = body.decode("utf-8", errors="replace")
+        except Exception:
+            pass
     return JSONResponse(
         status_code=422,
-        content={"detail": jsonable_encoder(exc.errors())},
+        content=content,
     )
 
 
