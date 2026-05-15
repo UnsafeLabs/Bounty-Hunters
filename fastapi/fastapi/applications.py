@@ -1,3 +1,4 @@
+import os
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from enum import Enum
 from typing import Annotated, Any, TypeVar
@@ -859,6 +860,74 @@ class FastAPI(Starlette):
                 """
             ),
         ] = True,
+        validate_env: Annotated[
+            bool,
+            Doc(
+                """
+                Whether to validate required environment variables at startup.
+
+                When `True`, the application will check that the environment variables
+                listed in `required_env_vars` are set and log warnings for any that
+                are missing. Optional env vars listed in `optional_env_vars` will
+                also be checked and warnings will be logged, without affecting
+                startup.
+
+                Read more in the
+                [FastAPI docs for Settings and Environment Variables](https://fastapi.tiangolo.com/advanced/settings/).
+                """
+            ),
+        ] = True,
+        required_env_vars: Annotated[
+            list[str] | None,
+            Doc(
+                """
+                A list of required environment variable names that must be set for the
+                application to function correctly.
+
+                If any of these variables are missing from the environment at startup,
+                a warning will be logged. Use this to validate that critical
+                configuration like database URLs, secret keys, etc. are present.
+
+                This only has an effect when `validate_env` is `True`.
+
+                **Example**
+
+                ```python
+                from fastapi import FastAPI
+
+                app = FastAPI(
+                    required_env_vars=["DATABASE_URL", "SECRET_KEY", "API_TOKEN"]
+                )
+                ```
+                """
+            ),
+        ] = None,
+        optional_env_vars: Annotated[
+            list[str] | None,
+            Doc(
+                """
+                A list of optional environment variable names that are nice to have
+                but not strictly required.
+
+                If any of these variables are missing from the environment at startup,
+                a less severe warning will be logged. Use this for configuration
+                values that have sensible defaults or are only needed for specific
+                features.
+
+                This only has an effect when `validate_env` is `True`.
+
+                **Example**
+
+                ```python
+                from fastapi import FastAPI
+
+                app = FastAPI(
+                    optional_env_vars=["LOG_LEVEL", "CACHE_TTL", "FEATURE_FLAG_X"]
+                )
+                ```
+                """
+            ),
+        ] = None,
         **extra: Annotated[
             Any,
             Doc(
@@ -889,6 +958,9 @@ class FastAPI(Starlette):
         self.separate_input_output_schemas = separate_input_output_schemas
         self.openapi_external_docs = openapi_external_docs
         self.extra = extra
+        self.validate_env = validate_env
+        self.required_env_vars = required_env_vars or []
+        self.optional_env_vars = optional_env_vars or []
         self.openapi_version: Annotated[
             str,
             Doc(
@@ -1014,6 +1086,8 @@ class FastAPI(Starlette):
         )
         self.middleware_stack: ASGIApp | None = None
         self.setup()
+        if self.validate_env:
+            self._validate_environment()
 
     def build_middleware_stack(self) -> ASGIApp:
         # Duplicate/override from Starlette to add AsyncExitStackMiddleware
@@ -1064,6 +1138,37 @@ class FastAPI(Starlette):
         for cls, args, kwargs in reversed(middleware):
             app = cls(app, *args, **kwargs)
         return app
+
+    def _validate_environment(self) -> None:
+        """
+        Validate that required and optional environment variables are set.
+
+        This method is called at startup if `validate_env` is `True`.
+        It logs warnings for missing required and optional environment variables
+        without crashing the application.
+        """
+        missing_required = [
+            var
+            for var in self.required_env_vars
+            if var not in os.environ
+        ]
+        missing_optional = [
+            var
+            for var in self.optional_env_vars
+            if var not in os.environ
+        ]
+
+        if missing_required:
+            logger.warning(
+                "Missing required environment variables: %s",
+                ", ".join(missing_required),
+            )
+        if missing_optional:
+            logger.warning(
+                "Missing optional environment variables: %s (app will continue "
+                "with defaults if applicable)",
+                ", ".join(missing_optional),
+            )
 
     def openapi(self) -> dict[str, Any]:
         """
