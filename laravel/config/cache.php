@@ -133,4 +133,20 @@ return [
 
     'serializable_classes' => false,
 
+    /*
+    |--------------------------------------------------------------------------
+    | Cache Health Check Settings
+    |--------------------------------------------------------------------------
+    |
+    | Here you may specify the settings for the cache health check system.
+    | The interval determines how often (in seconds) the check should
+    | be performed in scheduled tasks or external monitoring.
+    |
+    */
+
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+
+    'health_check_interval' => env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
 ];
+
