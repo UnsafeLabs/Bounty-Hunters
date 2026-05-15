@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 
-import { SshPasswordPromptError } from "./errors.ts";
+import { SshAskpassPathError, SshPasswordPromptError } from "./errors.ts";
 
 export interface SshPasswordRequest {
   readonly destination: string;
@@ -59,6 +59,7 @@ export interface SshChildEnvironmentOptions {
 }
 
 const SSH_ASKPASS_DIR_NAME = "t3code-ssh-askpass";
+const SSH_ASKPASS_SAFE_SCRIPT_PATH_PATTERN = /^[A-Za-z0-9_./:\\-]+$/u;
 
 function joinSshAskpassPath(
   directory: string,
@@ -74,7 +75,28 @@ export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # from the renderer's in-app prompt. We never expose a native dialog here - if
 # T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
 if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
-  printf "%s\\n" "$T3_SSH_AUTH_SECRET"
+  secret_file=
+  cleanup() {
+    if [ -n "\${secret_file:-}" ]; then
+      rm -f -- "$secret_file"
+    fi
+  }
+  trap cleanup EXIT
+  trap 'cleanup; exit 130' INT
+  trap 'cleanup; exit 143' TERM
+
+  old_umask=$(umask)
+  umask 077
+  secret_file=$(mktemp "\${TMPDIR:-/tmp}/t3code-ssh-askpass-secret.XXXXXX") || {
+    status=$?
+    umask "$old_umask"
+    exit "$status"
+  }
+  umask "$old_umask"
+  chmod 600 "$secret_file" || exit 1
+  printf "%s\\n" "$T3_SSH_AUTH_SECRET" > "$secret_file" || exit 1
+  unset T3_SSH_AUTH_SECRET
+  cat "$secret_file"
   exit 0
 fi
 printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
@@ -90,12 +112,35 @@ export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through
 # a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
 # and we fail loudly.\r
 if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
-  exit 0\r
+  $secureSecret = ConvertTo-SecureString -String $env:T3_SSH_AUTH_SECRET -AsPlainText -Force\r
+  $env:T3_SSH_AUTH_SECRET = $null\r
+  $secretPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureSecret)\r
+  try {\r
+    [Console]::Out.WriteLine([Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretPointer))\r
+    exit 0\r
+  }\r
+  finally {\r
+    if ([IntPtr]::Zero -ne $secretPointer) {\r
+      [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretPointer)\r
+    }\r
+  }\r
 }\r
 [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
 exit 1\r
 `;
+
+export const validateSshAskpassScriptPath = Effect.fn("ssh/auth.validateSshAskpassScriptPath")(
+  function* (scriptPath: string): Effect.fn.Return<string, SshAskpassPathError> {
+    if (scriptPath.length > 0 && SSH_ASKPASS_SAFE_SCRIPT_PATH_PATTERN.test(scriptPath)) {
+      return scriptPath;
+    }
+
+    return yield* new SshAskpassPathError({
+      path: scriptPath,
+      message: "SSH askpass script path contains spaces or shell metacharacters.",
+    });
+  },
+);
 
 export const getDefaultSshAskpassDirectory = Effect.fn("ssh/auth.getDefaultSshAskpassDirectory")(
   function* () {
@@ -111,18 +156,21 @@ export const buildSshAskpassHelperDescriptor = Effect.fn(
 )(function* (input: {
   readonly directory: string;
   readonly platform?: NodeJS.Platform;
-}): Effect.fn.Return<SshAskpassHelperDescriptor, never, Path.Path> {
+}): Effect.fn.Return<SshAskpassHelperDescriptor, SshAskpassPathError, Path.Path> {
   const platform = input.platform ?? process.platform;
   const path = yield* Path.Path;
   const directory = input.directory;
 
   if (platform === "win32") {
+    const launcherPath = joinSshAskpassPath(directory, "ssh-askpass.cmd", platform);
     const powershellPath = joinSshAskpassPath(directory, "ssh-askpass.ps1", platform);
+    yield* validateSshAskpassScriptPath(launcherPath);
+    yield* validateSshAskpassScriptPath(powershellPath);
     return {
-      launcherPath: joinSshAskpassPath(directory, "ssh-askpass.cmd", platform),
+      launcherPath,
       files: [
         {
-          path: joinSshAskpassPath(directory, "ssh-askpass.cmd", platform),
+          path: launcherPath,
           contents: ASKPASS_WINDOWS_LAUNCHER_SCRIPT,
         },
         {
@@ -133,11 +181,13 @@ export const buildSshAskpassHelperDescriptor = Effect.fn(
     };
   }
 
+  const launcherPath = path.join(directory, "ssh-askpass.sh");
+  yield* validateSshAskpassScriptPath(launcherPath);
   return {
-    launcherPath: path.join(directory, "ssh-askpass.sh"),
+    launcherPath,
     files: [
       {
-        path: path.join(directory, "ssh-askpass.sh"),
+        path: launcherPath,
         contents: ASKPASS_POSIX_SCRIPT,
         mode: 0o700,
       },
@@ -149,7 +199,11 @@ export const ensureSshAskpassHelpers = Effect.fn("ssh/auth.ensureSshAskpassHelpe
   function* (input: {
     readonly directory: string;
     readonly platform?: NodeJS.Platform;
-  }): Effect.fn.Return<string, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> {
+  }): Effect.fn.Return<
+    string,
+    SshAskpassPathError | PlatformError.PlatformError,
+    FileSystem.FileSystem | Path.Path
+  > {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const descriptor = yield* buildSshAskpassHelperDescriptor(input);
@@ -176,7 +230,7 @@ export const buildSshChildEnvironment = Effect.fn("ssh/auth.buildSshChildEnviron
   input: SshChildEnvironmentOptions = {},
 ): Effect.fn.Return<
   NodeJS.ProcessEnv,
-  PlatformError.PlatformError,
+  SshAskpassPathError | PlatformError.PlatformError,
   FileSystem.FileSystem | Path.Path
 > {
   const baseEnv = { ...(input.baseEnv ?? process.env) };
