@@ -9,6 +9,7 @@ import * as Stream from "effect/Stream";
 
 import { outcomeFromExit } from "./Attributes.ts";
 import { metricAttributes, rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
+import { recordPrometheusRpcRequest } from "../diagnostics/PrometheusMetrics.ts";
 
 const RPC_SPAN_PREFIX = "ws.rpc";
 const DEFAULT_RPC_SPAN_ATTRIBUTES = {
@@ -84,6 +85,7 @@ const recordRpcStreamMetrics = <E>(
       ),
       1,
     );
+    yield* recordPrometheusRpcRequest({ method, elapsedNanos });
   });
 
 export const observeRpcEffect = <A, E, R>(
@@ -91,18 +93,39 @@ export const observeRpcEffect = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   traceAttributes?: Readonly<Record<string, unknown>>,
 ): Effect.Effect<A, E, R> => {
-  const instrumented = effect.pipe(
-    withMetrics({
-      counter: rpcRequestsTotal,
-      timer: rpcRequestDuration,
-      attributes: {
-        method,
-      },
-    }),
+  const instrumented = withPrometheusRpcMetrics(
+    method,
+    effect.pipe(
+      withMetrics({
+        counter: rpcRequestsTotal,
+        timer: rpcRequestDuration,
+        attributes: {
+          method,
+        },
+      }),
+    ),
   );
 
   return withRpcEffectTracing(method, instrumented, traceAttributes);
 };
+
+const withPrometheusRpcMetrics = <A, E, R>(
+  method: string,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.gen(function* () {
+    const startedAt = yield* Clock.currentTimeNanos;
+    const exit = yield* Effect.exit(effect);
+    const endedAt = yield* Clock.currentTimeNanos;
+    const elapsedNanos = endedAt > startedAt ? endedAt - startedAt : 0n;
+
+    yield* recordPrometheusRpcRequest({ method, elapsedNanos });
+
+    if (Exit.isSuccess(exit)) {
+      return exit.value;
+    }
+    return yield* Effect.failCause(exit.cause);
+  });
 
 export const observeRpcStream = <A, E, R>(
   method: string,

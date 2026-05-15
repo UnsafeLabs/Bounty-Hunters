@@ -6,6 +6,7 @@ import { ServerConfig } from "./config.ts";
 import {
   attachmentsRouteLayer,
   otlpTracesProxyRouteLayer,
+  prometheusMetricsRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
@@ -308,6 +309,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,
+  prometheusMetricsRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,

@@ -26,7 +26,14 @@ import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { respondToAuthError } from "./auth/http.ts";
+import {
+  isMetricsAuthDisabled,
+  PROMETHEUS_CONTENT_TYPE,
+  PROMETHEUS_METRICS_PATH,
+  renderPrometheusMetrics,
+} from "./diagnostics/PrometheusMetrics.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import {
   browserApiCorsAllowedHeaders,
@@ -132,6 +139,42 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
           Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
         ),
       );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const prometheusMetricsRouteLayer = HttpRouter.add(
+  "GET",
+  PROMETHEUS_METRICS_PATH,
+  Effect.gen(function* () {
+    if (!isMetricsAuthDisabled()) {
+      yield* requireAuthenticatedRequest;
+    }
+
+    const sessions = yield* SessionCredentialService;
+    const activeSessions = yield* sessions.listActive().pipe(
+      Effect.map(
+        (clientSessions) =>
+          clientSessions.filter((clientSession) => clientSession.connected).length,
+      ),
+      Effect.catch((cause) =>
+        Effect.logWarning("Failed to collect active session metric", {
+          cause,
+        }).pipe(Effect.as(0)),
+      ),
+    );
+
+    const memoryUsageBytes = process.memoryUsage().rss;
+
+    return HttpServerResponse.text(
+      renderPrometheusMetrics({
+        activeSessions,
+        memoryUsageBytes,
+      }),
+      {
+        status: 200,
+        contentType: PROMETHEUS_CONTENT_TYPE,
+      },
+    );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
