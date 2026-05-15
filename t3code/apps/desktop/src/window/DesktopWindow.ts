@@ -358,9 +358,16 @@ const make = Effect.gen(function* () {
     }),
     syncAppearance: Effect.gen(function* () {
       const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
-      yield* electronWindow.syncAllAppearance((window) =>
-        syncWindowAppearance(window, shouldUseDarkColors),
-      );
+      const themeSource = yield* electronTheme.getThemeSource;
+      yield* electronWindow.syncAllAppearance((window) => {
+        if (!window.isDestroyed()) {
+          window.webContents.send(IpcChannels.THEME_CHANGED_CHANNEL, {
+            shouldUseDarkColors,
+            themeSource,
+          });
+        }
+        return syncWindowAppearance(window, shouldUseDarkColors);
+      });
     }).pipe(Effect.withSpan("desktop.window.syncAppearance")),
   });
 });

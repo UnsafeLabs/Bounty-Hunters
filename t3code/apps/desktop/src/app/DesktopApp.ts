@@ -9,6 +9,7 @@ import * as NetService from "@t3tools/shared/Net";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import { installDesktopIpcHandlers } from "../ipc/DesktopIpcHandlers.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
@@ -206,6 +207,7 @@ const startup = Effect.gen(function* () {
 
   yield* appIdentity.configure;
   yield* lifecycle.register;
+  yield* ElectronTheme.initializeTheme;
 
   yield* electronApp.whenReady.pipe(
     Effect.withSpan("desktop.electron.whenReady"),
