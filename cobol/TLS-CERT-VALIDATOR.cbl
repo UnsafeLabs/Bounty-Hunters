@@ -93,6 +93,14 @@
                88  WS-CERT-IS-EXPIRED  VALUE 'Y'.
                88  WS-CERT-NOT-EXPIRED VALUE 'N'.
        01  WS-EXPECTED-HOSTNAME        PIC X(255).
+       01  WS-SUBJECT-DN-WORK          PIC X(256).
+       01  WS-DN-SCAN-POS              PIC 9(3)  VALUE 1.
+       01  WS-CN-OUT-POS               PIC 9(3)  VALUE 1.
+       01  WS-DN-CHAR                  PIC X(1).
+       01  WS-DN-NEXT-CHAR             PIC X(1).
+       01  WS-DN-IN-CN                 PIC X(1)  VALUE 'N'.
+           88  WS-DN-CN-FOUND          VALUE 'Y'.
+           88  WS-DN-CN-NOT-FOUND      VALUE 'N'.
        01  WS-HOSTNAME-TALLY           PIC 9(5)  VALUE 0.
        01  WS-WILDCARD-POS             PIC 9(3)  VALUE 0.
        01  WS-HOSTNAME-MATCH-FLAG      PIC X(1).
@@ -129,6 +137,7 @@
            PERFORM 1000-INITIALIZE
            PERFORM 2000-VALIDATE-CERT-CHAIN
            PERFORM 3000-CHECK-EXPIRY-DATE
+           PERFORM 3500-PARSE-SUBJECT-DN
            PERFORM 4000-VERIFY-SIGNATURE
            PERFORM 5000-MATCH-HOSTNAME
            PERFORM 6000-CHECK-REVOCATION-STATUS
@@ -232,6 +241,73 @@
            END-IF
            .
        3000-EXIT.
+           EXIT.
+       3500-PARSE-SUBJECT-DN.
+      *    Parse the certificate Subject DN before hostname matching.
+      *    The old UNSTRING-style comma split treated escaped commas in
+      *    a CN value (for example CN=Smith\, John/OU=Legal) as RDN
+      *    delimiters.  Walk the DN one byte at a time so only unescaped
+      *    comma or slash characters terminate the CN component.
+           MOVE SPACES TO WS-SUBJECT-DN-WORK
+           IF CS-SUBJECT-DN NOT = SPACES
+               MOVE CS-SUBJECT-DN TO WS-SUBJECT-DN-WORK
+           ELSE
+               MOVE WS-SUBJECT-COMMON-NAME TO WS-SUBJECT-DN-WORK
+           END-IF
+           MOVE SPACES TO WS-SUBJECT-COMMON-NAME
+           SET WS-DN-CN-NOT-FOUND TO TRUE
+           MOVE 1 TO WS-DN-SCAN-POS
+           MOVE 1 TO WS-CN-OUT-POS
+           PERFORM UNTIL WS-DN-SCAN-POS > 254
+               MOVE WS-SUBJECT-DN-WORK(WS-DN-SCAN-POS:1)
+                   TO WS-DN-CHAR
+               MOVE WS-SUBJECT-DN-WORK(WS-DN-SCAN-POS + 1:1)
+                   TO WS-DN-NEXT-CHAR
+               IF WS-DN-CN-NOT-FOUND
+                   IF (WS-DN-CHAR = 'C' OR WS-DN-CHAR = 'c')
+                       AND (WS-DN-NEXT-CHAR = 'N'
+                           OR WS-DN-NEXT-CHAR = 'n')
+                       AND WS-SUBJECT-DN-WORK(WS-DN-SCAN-POS + 2:1)
+                           = '='
+                       SET WS-DN-CN-FOUND TO TRUE
+                       COMPUTE WS-DN-SCAN-POS = WS-DN-SCAN-POS + 3
+                   ELSE
+                       ADD 1 TO WS-DN-SCAN-POS
+                   END-IF
+               ELSE
+                   IF WS-DN-CHAR = '\'
+                       IF WS-DN-SCAN-POS < 256
+                           IF WS-CN-OUT-POS <= 64
+                               STRING WS-DN-NEXT-CHAR DELIMITED SIZE
+                                   INTO WS-SUBJECT-COMMON-NAME
+                                   WITH POINTER WS-CN-OUT-POS
+                               END-STRING
+                           END-IF
+                           ADD 2 TO WS-DN-SCAN-POS
+                       ELSE
+                           ADD 1 TO WS-DN-SCAN-POS
+                       END-IF
+                   ELSE
+                       IF WS-DN-CHAR = ',' OR WS-DN-CHAR = '/'
+                           MOVE 256 TO WS-DN-SCAN-POS
+                       ELSE
+                           IF WS-DN-CHAR = '"'
+                               ADD 1 TO WS-DN-SCAN-POS
+                           ELSE
+                               IF WS-CN-OUT-POS <= 64
+                                   STRING WS-DN-CHAR DELIMITED SIZE
+                                       INTO WS-SUBJECT-COMMON-NAME
+                                       WITH POINTER WS-CN-OUT-POS
+                                   END-STRING
+                               END-IF
+                               ADD 1 TO WS-DN-SCAN-POS
+                           END-IF
+                       END-IF
+                   END-IF
+               END-IF
+           END-PERFORM
+           .
+       3500-EXIT.
            EXIT.
        4000-VERIFY-SIGNATURE.
            IF WS-CERT-KEY-LENGTH < WS-MIN-KEY-LENGTH
