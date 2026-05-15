@@ -254,9 +254,10 @@
            .
        4000-EXIT.
            EXIT.
-       5000-MATCH-HOSTNAME.
-           INSPECT WS-SUBJECT-COMMON-NAME
-               TALLYING WS-HOSTNAME-TALLY FOR ALL '*'
+        5000-MATCH-HOSTNAME.
+            MOVE 0 TO WS-HOSTNAME-TALLY
+            INSPECT WS-SUBJECT-COMMON-NAME
+                TALLYING WS-HOSTNAME-TALLY FOR ALL '*'
            IF WS-HOSTNAME-TALLY > 0
                PERFORM 5100-WILDCARD-MATCH
            ELSE
@@ -269,18 +270,20 @@
                        TO WS-VALIDATION-MSG
                END-IF
            END-IF
-           INSPECT WS-EXPECTED-HOSTNAME
-               TALLYING WS-DOT-COUNT FOR ALL '.'
+            MOVE 0 TO WS-DOT-COUNT
+            INSPECT WS-EXPECTED-HOSTNAME
+                TALLYING WS-DOT-COUNT FOR ALL '.'
            IF WS-DOT-COUNT < 1
                SET WS-HOSTNAME-NO-MATCH TO TRUE
                MOVE 'HOSTNAME NOT FQDN'
                    TO WS-VALIDATION-MSG
            END-IF
            .
-       5100-WILDCARD-MATCH.
-           INSPECT WS-SUBJECT-COMMON-NAME
-               TALLYING WS-WILDCARD-POS
-               FOR CHARACTERS BEFORE INITIAL '*'
+        5100-WILDCARD-MATCH.
+            MOVE 0 TO WS-WILDCARD-POS
+            INSPECT WS-SUBJECT-COMMON-NAME
+                TALLYING WS-WILDCARD-POS
+                FOR CHARACTERS BEFORE INITIAL '*'
            IF WS-WILDCARD-POS > 0
                SET WS-HOSTNAME-NO-MATCH TO TRUE
                MOVE 'WILDCARD NOT AT LABEL START'
