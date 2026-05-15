@@ -10,7 +10,7 @@ There once was a dev who loved Rust,
 Whose code never once gathered dust,
 He wrote every night,
 Till the tests were all right,
-[TODO: write closing line — must rhyme with "Rust" and "dust"]
+Now his rivals all gather and fuss.
 
 ---
 
@@ -28,8 +28,8 @@ And vanished with feline defense.
 
 A barista who worked the night shift,
 Made lattes incredibly swift,
-[TODO: write line 3 — short line, ~5 syllables, setup for punchline]
-[TODO: write line 4 — short line, ~5 syllables, rhymes with line 3]
+She'd pour art with a twist,
+None could ever resist,
 But her espresso game was a gift.
 
 ---
@@ -40,4 +40,4 @@ There once was a girl from the stars,
 Who dreamed about living on Mars,
 She built her own ship,
 And went on a trip,
-[TODO: write closing line — must rhyme with "stars" and "Mars"]
+Now she charts all the craters and scars.
