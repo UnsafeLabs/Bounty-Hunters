@@ -60,3 +60,33 @@ export const checkForUpdate = makeIpcMethod({
     return yield* updates.check("web-ui");
   }),
 });
+
+export const deferUpdate = makeIpcMethod({
+  channel: IpcChannels.UPDATE_DEFER_CHANNEL,
+  payload: Schema.Void,
+  result: DesktopUpdateStateSchema,
+  handler: Effect.fn("desktop.ipc.updates.defer")(function* () {
+    const updates = yield* DesktopUpdates.DesktopUpdates;
+    return yield* updates.deferUpdate;
+  }),
+});
+
+export const skipVersion = makeIpcMethod({
+  channel: IpcChannels.UPDATE_SKIP_VERSION_CHANNEL,
+  payload: Schema.Void,
+  result: DesktopUpdateStateSchema,
+  handler: Effect.fn("desktop.ipc.updates.skipVersion")(function* () {
+    const updates = yield* DesktopUpdates.DesktopUpdates;
+    return yield* updates.skipVersion;
+  }),
+});
+
+export const getReleaseNotes = makeIpcMethod({
+  channel: IpcChannels.UPDATE_GET_RELEASE_NOTES_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.NullOr(Schema.String),
+  handler: Effect.fn("desktop.ipc.updates.getReleaseNotes")(function* () {
+    const updates = yield* DesktopUpdates.DesktopUpdates;
+    return yield* updates.getReleaseNotes;
+  }),
+});

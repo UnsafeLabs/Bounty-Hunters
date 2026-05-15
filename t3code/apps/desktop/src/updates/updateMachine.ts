@@ -34,6 +34,11 @@ export function createInitialDesktopUpdateState(
     message: null,
     errorContext: null,
     canRetry: false,
+    deferredUntil: null,
+    skippedVersion: null,
+    downloadBytesDownloaded: null,
+    downloadTotalBytes: null,
+    releaseNotes: null,
   };
 }
 
@@ -49,6 +54,11 @@ export function reduceDesktopUpdateStateOnCheckStart(
     downloadPercent: null,
     errorContext: null,
     canRetry: false,
+    deferredUntil: null,
+    skippedVersion: null,
+    downloadBytesDownloaded: null,
+    downloadTotalBytes: null,
+    releaseNotes: null,
   };
 }
 
@@ -83,6 +93,11 @@ export function reduceDesktopUpdateStateOnUpdateAvailable(
     message: null,
     errorContext: null,
     canRetry: false,
+    deferredUntil: null,
+    skippedVersion: null,
+    downloadBytesDownloaded: null,
+    downloadTotalBytes: null,
+    releaseNotes: null,
   };
 }
 
@@ -100,6 +115,11 @@ export function reduceDesktopUpdateStateOnNoUpdate(
     message: null,
     errorContext: null,
     canRetry: false,
+    deferredUntil: null,
+    skippedVersion: null,
+    downloadBytesDownloaded: null,
+    downloadTotalBytes: null,
+    releaseNotes: null,
   };
 }
 
@@ -113,6 +133,11 @@ export function reduceDesktopUpdateStateOnDownloadStart(
     message: null,
     errorContext: null,
     canRetry: false,
+    deferredUntil: null,
+    skippedVersion: null,
+    downloadBytesDownloaded: null,
+    downloadTotalBytes: null,
+    releaseNotes: null,
   };
 }
 
@@ -141,6 +166,11 @@ export function reduceDesktopUpdateStateOnDownloadProgress(
     message: null,
     errorContext: null,
     canRetry: false,
+    deferredUntil: null,
+    skippedVersion: null,
+    downloadBytesDownloaded: null,
+    downloadTotalBytes: null,
+    releaseNotes: null,
   };
 }
 

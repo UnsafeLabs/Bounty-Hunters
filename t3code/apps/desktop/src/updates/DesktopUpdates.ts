@@ -97,6 +97,9 @@ export interface DesktopUpdatesShape {
   readonly check: (reason: string) => Effect.Effect<DesktopUpdateCheckResult>;
   readonly download: Effect.Effect<DesktopUpdateActionResult>;
   readonly install: Effect.Effect<DesktopUpdateActionResult>;
+  readonly deferUpdate: Effect.Effect<DesktopUpdateState>;
+  readonly skipVersion: Effect.Effect<DesktopUpdateState>;
+  readonly getReleaseNotes: Effect.Effect<string | null>;
 }
 
 export class DesktopUpdates extends Context.Service<DesktopUpdates, DesktopUpdatesShape>()(
@@ -427,6 +430,28 @@ const make = Effect.gen(function* () {
           }
 
           const checkedAt = yield* currentIsoTimestamp;
+          // Skip if this version was marked as skipped
+          if (state.skippedVersion === info.version) {
+            yield* logUpdaterInfo("ignoring skipped version", { version: info.version });
+            yield* setState(reduceDesktopUpdateStateOnNoUpdate(state, checkedAt));
+            yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
+            return;
+          }
+          // Suppress if deferred period hasn't elapsed
+          if (state.deferredUntil != null) {
+            const deferredTime = new Date(state.deferredUntil).getTime();
+            if (Date.now() < deferredTime) {
+              yield* logUpdaterInfo("suppressing update during deferral window", {
+                version: info.version,
+                deferredUntil: state.deferredUntil,
+              });
+              yield* setState(reduceDesktopUpdateStateOnNoUpdate(state, checkedAt));
+              yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
+              return;
+            }
+            // Deferral expired, clear it
+            yield* updateState((current) => ({ ...current, deferredUntil: null }));
+          }
           yield* setState(
             reduceDesktopUpdateStateOnUpdateAvailable(state, info.version, checkedAt),
           );
@@ -487,8 +512,20 @@ const make = Effect.gen(function* () {
         Effect.fn("desktop.updates.applyDownloadProgress")(function* (progress) {
           const state = yield* Ref.get(updateStateRef);
           const percent = Math.floor(progress.percent);
+          const bytesDownloaded = (progress as any).bytes ?? null;
+          const totalBytes = (progress as any).total ?? null;
           if (shouldBroadcastDownloadProgress(state, progress.percent) || state.message !== null) {
-            yield* setState(reduceDesktopUpdateStateOnDownloadProgress(state, progress.percent));
+            yield* setState({
+              ...reduceDesktopUpdateStateOnDownloadProgress(state, progress.percent),
+              downloadBytesDownloaded: bytesDownloaded,
+              downloadTotalBytes: totalBytes,
+            });
+          } else if (bytesDownloaded != null || totalBytes != null) {
+            yield* updateState((current) => ({
+              ...current,
+              downloadBytesDownloaded: bytesDownloaded,
+              downloadTotalBytes: totalBytes,
+            }));
           }
           const milestone = percent - (percent % 10);
           const lastLoggedMilestone = yield* Ref.get(lastLoggedDownloadMilestoneRef);
@@ -661,6 +698,27 @@ const make = Effect.gen(function* () {
         state: yield* Ref.get(updateStateRef),
       };
     }).pipe(Effect.withSpan("desktop.updates.install")),
+    deferUpdate: Effect.gen(function* () {
+      const state = yield* Ref.get(updateStateRef);
+      if (state.status !== "available" && state.status !== "downloaded") {
+        return state;
+      }
+      const deferredUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      yield* setState({ ...state, deferredUntil });
+      yield* logUpdaterInfo("update deferred", { deferredUntil });
+      return yield* Ref.get(updateStateRef);
+    }).pipe(Effect.withSpan("desktop.updates.defer")),
+    skipVersion: Effect.gen(function* () {
+      const state = yield* Ref.get(updateStateRef);
+      const versionToSkip = state.availableVersion ?? state.downloadedVersion;
+      if (!versionToSkip) return state;
+      yield* setState({ ...state, skippedVersion: versionToSkip });
+      yield* logUpdaterInfo("version skipped", { skippedVersion: versionToSkip });
+      return yield* Ref.get(updateStateRef);
+    }).pipe(Effect.withSpan("desktop.updates.skipVersion")),
+    getReleaseNotes: Effect.succeed(null).pipe(
+      Effect.withSpan("desktop.updates.getReleaseNotes"),
+    ),
   });
 });
 

@@ -175,6 +175,16 @@ export interface DesktopUpdateState {
   message: string | null;
   errorContext: "check" | "download" | "install" | null;
   canRetry: boolean;
+  /** ISO timestamp — suppress update notifications until this time */
+  deferredUntil: string | null;
+  /** Version string — permanently skip this specific version */
+  skippedVersion: string | null;
+  /** Bytes downloaded so far */
+  downloadBytesDownloaded: number | null;
+  /** Total bytes to download */
+  downloadTotalBytes: number | null;
+  /** Release notes from update manifest (markdown) */
+  releaseNotes: string | null;
 }
 
 export const DesktopUpdateStateSchema = Schema.Struct({
@@ -192,6 +202,11 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   message: Schema.NullOr(Schema.String),
   errorContext: Schema.NullOr(Schema.Literals(["check", "download", "install"])),
   canRetry: Schema.Boolean,
+  deferredUntil: Schema.NullOr(Schema.String),
+  skippedVersion: Schema.NullOr(Schema.String),
+  downloadBytesDownloaded: Schema.NullOr(Schema.Number),
+  downloadTotalBytes: Schema.NullOr(Schema.Number),
+  releaseNotes: Schema.NullOr(Schema.String),
 });
 
 export interface DesktopUpdateActionResult {
@@ -421,6 +436,9 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  deferUpdate: () => Promise<DesktopUpdateState>;
+  skipVersion: () => Promise<DesktopUpdateState>;
+  getReleaseNotes: () => Promise<string | null>;
 }
 
 /**
