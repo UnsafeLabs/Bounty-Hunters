@@ -1,98 +1,193 @@
-import importlib
-from typing import Any, Protocol, cast
+from __future__ import annotations
 
-from fastapi.exceptions import FastAPIDeprecationWarning
-from fastapi.sse import EventSourceResponse as EventSourceResponse  # noqa
-from starlette.responses import FileResponse as FileResponse  # noqa
-from starlette.responses import HTMLResponse as HTMLResponse  # noqa
-from starlette.responses import JSONResponse as JSONResponse  # noqa
-from starlette.responses import PlainTextResponse as PlainTextResponse  # noqa
-from starlette.responses import RedirectResponse as RedirectResponse  # noqa
-from starlette.responses import Response as Response  # noqa
-from starlette.responses import StreamingResponse as StreamingResponse  # noqa
-from typing_extensions import deprecated
+import csv
+import io
+from collections.abc import AsyncIterator
+from typing import Any
+
+from starlette.responses import StreamingResponse
 
 
-class _UjsonModule(Protocol):
-    def dumps(self, __obj: Any, *, ensure_ascii: bool = ...) -> str: ...
+class StreamingCSVResponse(StreamingResponse):
+    """Streaming response that encodes an iterable of rows as CSV data.
 
+    Accepts an iterable of **dicts** (column names are auto-detected from the
+    first row) or an iterable of **lists/tuples**.  The CSV content is streamed
+    with ``text/csv`` content type, making it suitable for large datasets that
+    should not be buffered entirely in memory.
 
-class _OrjsonModule(Protocol):
-    OPT_NON_STR_KEYS: int
-    OPT_SERIALIZE_NUMPY: int
+    Usage as a **response class**::
 
-    def dumps(self, __obj: Any, *, option: int = ...) -> bytes: ...
+        from fastapi.responses import StreamingCSVResponse
+        from fastapi import APIRouter
 
+        router = APIRouter()
 
-try:
-    ujson = cast(_UjsonModule, importlib.import_module("ujson"))
-except ModuleNotFoundError:  # pragma: nocover
-    ujson = None  # type: ignore[assignment]
+        @router.get("/export", response_class=StreamingCSVResponse)
+        def export_csv():
+            rows = [
+                {"name": "Alice", "age": 30, "city": "New York"},
+                {"name": "Bob",   "age": 25, "city": "London"},
+            ]
+            return StreamingCSVResponse(rows)
 
+    Usage with a **generator** for large datasets::
 
-try:
-    orjson = cast(_OrjsonModule, importlib.import_module("orjson"))
-except ModuleNotFoundError:  # pragma: nocover
-    orjson = None  # type: ignore[assignment]
+        def large_csv():
+            yield ["col_a", "col_b", "col_c"]
+            for batch in query_database():
+                for row in batch:
+                    yield [row["a"], row["b"], row["c"]]
 
+        return StreamingCSVResponse(large_csv())
 
-@deprecated(
-    "UJSONResponse is deprecated, FastAPI now serializes data directly to JSON "
-    "bytes via Pydantic when a return type or response model is set, which is "
-    "faster and doesn't need a custom response class. Read more in the FastAPI "
-    "docs: https://fastapi.tiangolo.com/advanced/custom-response/#orjson-or-response-model "
-    "and https://fastapi.tiangolo.com/tutorial/response-model/",
-    category=FastAPIDeprecationWarning,
-    stacklevel=2,
-)
-class UJSONResponse(JSONResponse):
-    """JSON response using the ujson library to serialize data to JSON.
+    Args:
+        content: An iterable of dicts, lists, or tuples representing CSV rows.
+        status_code: HTTP status code (default ``200``).
+        headers: Optional custom headers.
+        media_type: Media type. Defaults to ``\"text/csv\"``.
+        background: Optional background task.
+        columns: Ordered list of column names. Required when ``content`` is an
+            iterable of lists and you want a header row; when ``content`` is an
+            iterable of dicts, columns may be provided to control ordering and
+            subset of columns — if omitted, column names are auto-detected from
+            the first dict in the iterable.
+        delimiter: Single-character field delimiter. Defaults to ``,`` (comma).
 
-    **Deprecated**: `UJSONResponse` is deprecated. FastAPI now serializes data
-    directly to JSON bytes via Pydantic when a return type or response model is
-    set, which is faster and doesn't need a custom response class.
-
-    Read more in the
-    [FastAPI docs for Custom Response](https://fastapi.tiangolo.com/advanced/custom-response/#orjson-or-response-model)
-    and the
-    [FastAPI docs for Response Model](https://fastapi.tiangolo.com/tutorial/response-model/).
-
-    **Note**: `ujson` is not included with FastAPI and must be installed
-    separately, e.g. `pip install ujson`.
+    Raises:
+        ValueError: If ``delimiter`` is not a single character.
     """
 
-    def render(self, content: Any) -> bytes:
-        assert ujson is not None, "ujson must be installed to use UJSONResponse"
-        return ujson.dumps(content, ensure_ascii=False).encode("utf-8")
+    media_type = "text/csv"
 
+    def __init__(
+        self,
+        content: Any = None,
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+        media_type: str = "text/csv",
+        background: Any = None,
+        *,
+        columns: list[str] | None = None,
+        delimiter: str = ",",
+    ) -> None:
+        if len(delimiter) != 1:
+            raise ValueError(
+                f"delimiter must be a single character, got {delimiter!r}"
+            )
 
-@deprecated(
-    "ORJSONResponse is deprecated, FastAPI now serializes data directly to JSON "
-    "bytes via Pydantic when a return type or response model is set, which is "
-    "faster and doesn't need a custom response class. Read more in the FastAPI "
-    "docs: https://fastapi.tiangolo.com/advanced/custom-response/#orjson-or-response-model "
-    "and https://fastapi.tiangolo.com/tutorial/response-model/",
-    category=FastAPIDeprecationWarning,
-    stacklevel=2,
-)
-class ORJSONResponse(JSONResponse):
-    """JSON response using the orjson library to serialize data to JSON.
+        self._columns = columns
+        self._delimiter = delimiter
 
-    **Deprecated**: `ORJSONResponse` is deprecated. FastAPI now serializes data
-    directly to JSON bytes via Pydantic when a return type or response model is
-    set, which is faster and doesn't need a custom response class.
+        stream = _csv_stream(content, columns=columns, delimiter=delimiter)
 
-    Read more in the
-    [FastAPI docs for Custom Response](https://fastapi.tiangolo.com/advanced/custom-response/#orjson-or-response-model)
-    and the
-    [FastAPI docs for Response Model](https://fastapi.tiangolo.com/tutorial/response-model/).
-
-    **Note**: `orjson` is not included with FastAPI and must be installed
-    separately, e.g. `pip install orjson`.
-    """
-
-    def render(self, content: Any) -> bytes:
-        assert orjson is not None, "orjson must be installed to use ORJSONResponse"
-        return orjson.dumps(
-            content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
+        super().__init__(
+            stream,
+            status_code=status_code,
+            headers=headers,
+            media_type=media_type,
+            background=background,
         )
+
+
+async def _csv_stream(
+    content: Any,
+    *,
+    columns: list[str] | None = None,
+    delimiter: str = ",",
+) -> AsyncIterator[bytes]:
+    """Convert an iterable of rows into CSV bytes ready for streaming."""
+
+    writer_buffer = io.StringIO()
+    writer = csv.writer(writer_buffer, delimiter=delimiter)
+
+    # ------------------------------------------------------------------
+    # Convert a sync iterable to an async iterator if needed
+    # ------------------------------------------------------------------
+    if hasattr(content, "__aiter__"):
+        aiter: AsyncIterator[Any] = content  # type: ignore[assignment]
+    elif hasattr(content, "__iter__"):
+
+        async def _sync_wrapper() -> AsyncIterator[Any]:
+            for item in content:  # type: ignore[union-attr]
+                yield item
+
+        aiter = _sync_wrapper()
+    else:
+        raise TypeError("content must be an async or sync iterable")
+
+    # ------------------------------------------------------------------
+    # Peek at the first item to detect column names from dict keys
+    # ------------------------------------------------------------------
+    resolved_columns: list[str] | None = columns
+
+    if resolved_columns is None:
+        first_item = None
+        async for item in aiter:
+            first_item = item
+            break
+
+        if first_item is None:
+            # Empty iterable — nothing to stream
+            return
+
+        if isinstance(first_item, dict):
+            resolved_columns = list(first_item.keys())
+
+            # Chain the first item back into the stream so it is written
+            # as a data row after the header.
+            async def _prepend_first(
+                first: Any,
+                rest: AsyncIterator[Any],
+            ) -> AsyncIterator[Any]:
+                yield first
+                async for item in rest:
+                    yield item
+
+            aiter = _prepend_first(first_item, aiter)
+
+        elif isinstance(first_item, (list, tuple)):
+            # No columns specified for list/tuple rows — skip the header
+            # and write data rows only.
+            yield writer.writerow(first_item).__str__().encode()
+            writer_buffer.seek(0)
+            writer_buffer.truncate(0)
+            # Chain the rest
+            async def _prepend_rest(rest: AsyncIterator[Any]) -> AsyncIterator[Any]:
+                async for item in rest:
+                    yield item
+
+            aiter = _prepend_rest(aiter)
+
+        else:
+            raise TypeError(
+                f"Expected dict, list, or tuple rows, got {type(first_item).__name__}"
+            )
+
+    # ------------------------------------------------------------------
+    # Write the header row (only when columns are resolved)
+    # ------------------------------------------------------------------
+    if resolved_columns is not None:
+        writer.writerow(resolved_columns)
+        yield writer_buffer.getvalue().encode("utf-8")
+        writer_buffer.seek(0)
+        writer_buffer.truncate(0)
+
+    # ------------------------------------------------------------------
+    # Write data rows
+    # ------------------------------------------------------------------
+    async for row in aiter:
+        if isinstance(row, dict):
+            writer.writerow(
+                [str(row.get(col, "")) for col in resolved_columns]  # type: ignore[union-attr]
+            )
+        elif isinstance(row, (list, tuple)):
+            writer.writerow(row)
+        else:
+            raise TypeError(
+                f"Expected dict, list, or tuple rows, got {type(row).__name__}"
+            )
+
+        yield writer_buffer.getvalue().encode("utf-8")
+        writer_buffer.seek(0)
+        writer_buffer.truncate(0)
