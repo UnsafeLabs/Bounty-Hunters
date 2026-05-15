@@ -1,4 +1,7 @@
-from typing import Annotated, Any
+import asyncio
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass, field
+from typing import Annotated, Any, cast
 
 from annotated_doc import Doc
 from pydantic import AfterValidator, BaseModel, Field, model_validator
@@ -220,3 +223,182 @@ KEEPALIVE_COMMENT = b": ping\n\n"
 # Seconds between keep-alive pings when a generator is idle.
 # Private but importable so tests can monkeypatch it.
 _PING_INTERVAL: float = 15.0
+
+
+@dataclass(eq=False)
+class _SSEConnection:
+    event_types: set[str] | None
+    queue: asyncio.Queue[ServerSentEvent] = field(default_factory=asyncio.Queue)
+
+
+class SSEManager:
+    """Manage Server-Sent Event connections, history replay, and broadcasts."""
+
+    def __init__(
+        self,
+        *,
+        retry: int | None = None,
+        history_limit: int = 100,
+    ) -> None:
+        if retry is not None and retry < 0:
+            raise ValueError("retry must be greater than or equal to 0")
+        if history_limit < 0:
+            raise ValueError("history_limit must be greater than or equal to 0")
+
+        self.retry = retry
+        self.history_limit = history_limit
+        self._connections: set[_SSEConnection] = set()
+        self._history: list[ServerSentEvent] = []
+        self._next_id = 1
+
+    @property
+    def connection_count(self) -> int:
+        return len(self._connections)
+
+    @property
+    def history(self) -> tuple[ServerSentEvent, ...]:
+        return tuple(self._history)
+
+    async def stream(
+        self,
+        request: Any | None = None,
+        *,
+        event_type: str | Sequence[str] | None = None,
+        last_event_id: str | None = None,
+        retry: int | None = None,
+        disconnect_poll_interval: float = 0.1,
+    ) -> AsyncIterator[ServerSentEvent]:
+        """Yield matching events until the client disconnects."""
+        event_types = self._event_types_from_request(request, event_type)
+        last_id = self._last_event_id_from_request(request, last_event_id)
+        retry_ms = self.retry if retry is None else retry
+        if retry_ms is not None and retry_ms < 0:
+            raise ValueError("retry must be greater than or equal to 0")
+
+        connection = _SSEConnection(event_types=event_types)
+        self._connections.add(connection)
+        try:
+            for event in self.replay(last_event_id=last_id, event_type=event_types):
+                yield self._with_retry(event, retry_ms)
+
+            while True:
+                if request is not None and await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(
+                        connection.queue.get(),
+                        timeout=disconnect_poll_interval,
+                    )
+                except TimeoutError:
+                    continue
+                yield self._with_retry(event, retry_ms)
+        finally:
+            self._connections.discard(connection)
+
+    async def broadcast(
+        self,
+        data: Any = None,
+        *,
+        raw_data: str | None = None,
+        event: str | None = None,
+        id: str | None = None,
+        retry: int | None = None,
+        comment: str | None = None,
+    ) -> ServerSentEvent:
+        sse_event = ServerSentEvent(
+            data=data,
+            raw_data=raw_data,
+            event=event,
+            id=id or self._new_event_id(),
+            retry=retry,
+            comment=comment,
+        )
+        self._remember(sse_event)
+
+        for connection in tuple(self._connections):
+            if self._matches(sse_event, connection.event_types):
+                connection.queue.put_nowait(sse_event)
+
+        return sse_event
+
+    def replay(
+        self,
+        *,
+        last_event_id: str | None,
+        event_type: str | Sequence[str] | set[str] | None = None,
+    ) -> list[ServerSentEvent]:
+        if last_event_id is None:
+            return []
+
+        event_types = self._normalize_event_types(event_type)
+        start_index = 0
+        for index, event in enumerate(self._history):
+            if event.id == last_event_id:
+                start_index = index + 1
+                break
+
+        return [
+            event
+            for event in self._history[start_index:]
+            if self._matches(event, event_types)
+        ]
+
+    def _remember(self, event: ServerSentEvent) -> None:
+        if self.history_limit == 0:
+            return
+        self._history.append(event)
+        if len(self._history) > self.history_limit:
+            self._history = self._history[-self.history_limit :]
+
+    def _new_event_id(self) -> str:
+        event_id = str(self._next_id)
+        self._next_id += 1
+        return event_id
+
+    @staticmethod
+    def _with_retry(
+        event: ServerSentEvent, retry: int | None
+    ) -> ServerSentEvent:
+        if retry is None or event.retry is not None:
+            return event
+        return event.model_copy(update={"retry": retry})
+
+    @classmethod
+    def _event_types_from_request(
+        cls, request: Any | None, event_type: str | Sequence[str] | None
+    ) -> set[str] | None:
+        if event_type is not None:
+            return cls._normalize_event_types(event_type)
+        if request is None:
+            return None
+        return cls._normalize_event_types(request.query_params.get("event_type"))
+
+    @staticmethod
+    def _last_event_id_from_request(
+        request: Any | None, last_event_id: str | None
+    ) -> str | None:
+        if last_event_id is not None or request is None:
+            return last_event_id
+        return cast(
+            str | None,
+            request.headers.get("last-event-id")
+            or request.headers.get("Last-Event-ID"),
+        )
+
+    @staticmethod
+    def _normalize_event_types(
+        event_type: str | Sequence[str] | set[str] | None,
+    ) -> set[str] | None:
+        if event_type is None:
+            return None
+        if isinstance(event_type, str):
+            event_types = {item.strip() for item in event_type.split(",")}
+        else:
+            event_types = {item.strip() for item in event_type}
+        return {item for item in event_types if item} or None
+
+    @staticmethod
+    def _matches(event: ServerSentEvent, event_types: set[str] | None) -> bool:
+        if event_types is None:
+            return True
+        return event.event in event_types
