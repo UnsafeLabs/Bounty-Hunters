@@ -256,10 +256,11 @@ class TLSHandshake:
             self._derive_master_secret()
             return True
 
-        # BUG 4: bare except with pass silently swallows all errors
-        except:
-            pass
-        return False
+        except Exception as e:
+            # Log the error instead of silently swallowing it
+            import logging
+            logging.getLogger(__name__).error(f"Key exchange failed: {e}")
+            return False
 
     def _derive_master_secret(self) -> None:
         """Derive the master secret from pre-master secret and randoms."""
