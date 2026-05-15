@@ -91,9 +91,10 @@ export function NotificationToast() {
   );
 
   useEffect(() => {
+    const closingTimers = closingTimersRef.current;
     return () => {
-      closingTimersRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
-      closingTimersRef.current.clear();
+      closingTimers.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      closingTimers.clear();
     };
   }, []);
 
