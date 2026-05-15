@@ -13,3 +13,4 @@ from .oauth2 import OAuth2PasswordRequestForm as OAuth2PasswordRequestForm
 from .oauth2 import OAuth2PasswordRequestFormStrict as OAuth2PasswordRequestFormStrict
 from .oauth2 import SecurityScopes as SecurityScopes
 from .open_id_connect_url import OpenIdConnect as OpenIdConnect
+from .oauth2 import OAuth2PasswordBearerWithRefresh as OAuth2PasswordBearerWithRefresh

@@ -543,6 +543,131 @@ class OAuth2PasswordBearer(OAuth2):
                 return None
         return param
 
+class OAuth2PasswordBearerWithRefresh(OAuth2PasswordBearer):
+    """
+    OAuth2 flow for authentication using a bearer token obtained with a password,
+    with explicit support for token refresh using a `refresh_url`.
+
+    This class extends `OAuth2PasswordBearer` and requires a `refresh_url`
+    parameter. It generates the OpenAPI schema with the `refreshUrl` metadata,
+    which provides clients with the URL to refresh expired tokens.
+
+    Read more about it in the
+    [FastAPI docs for Simple OAuth2 with Password and Bearer](https://fastapi.tiangolo.com/tutorial/security/simple-oauth2/).
+
+    ## Example
+
+    ```python
+    from typing import Annotated
+
+    from fastapi import Depends, FastAPI
+    from fastapi.security import OAuth2PasswordBearerWithRefresh
+
+    app = FastAPI()
+
+    oauth2_scheme = OAuth2PasswordBearerWithRefresh(
+        tokenUrl="/token",
+        refresh_url="/token/refresh",
+    )
+
+
+    @app.get("/items")
+    async def read_items(token: Annotated[str, Depends(oauth2_scheme)]):
+        return {"token": token}
+    ```
+    """
+
+    def __init__(
+        self,
+        tokenUrl: Annotated[
+            str,
+            Doc(
+                """
+                The URL to obtain the OAuth2 token. This would be the *path operation*
+                that has `OAuth2PasswordRequestForm` as a dependency.
+
+                Read more about it in the
+                [FastAPI docs for Simple OAuth2 with Password and Bearer](https://fastapi.tiangolo.com/tutorial/security/simple-oauth2/).
+                """
+            ),
+        ],
+        refresh_url: Annotated[
+            str,
+            Doc(
+                """
+                The URL to refresh the OAuth2 token. This is the endpoint that
+                accepts a refresh token grant and returns a new access token.
+
+                The generated OpenAPI schema will include this as `refreshUrl`
+                in the OAuth2 password flow metadata, enabling API consumers
+                to discover the token refresh endpoint programmatically.
+                """
+            ),
+        ],
+        scheme_name: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme name.
+
+                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
+                """
+            ),
+        ] = None,
+        scopes: Annotated[
+            dict[str, str] | None,
+            Doc(
+                """
+                The OAuth2 scopes that would be required by the *path operations* that
+                use this dependency.
+
+                Read more about it in the
+                [FastAPI docs for Simple OAuth2 with Password and Bearer](https://fastapi.tiangolo.com/tutorial/security/simple-oauth2/).
+                """
+            ),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme description.
+
+                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
+                """
+            ),
+        ] = None,
+        auto_error: Annotated[
+            bool,
+            Doc(
+                """
+                By default, if no HTTP Authorization header is provided, required for
+                OAuth2 authentication, it will automatically cancel the request and
+                send the client an error.
+
+                If `auto_error` is set to `False`, when the HTTP Authorization header
+                is not available, instead of erroring out, the dependency result will
+                be `None`.
+
+                This is useful when you want to have optional authentication.
+
+                It is also useful when you want to have authentication that can be
+                provided in one of multiple optional ways (for example, with OAuth2
+                or in a cookie).
+                """
+            ),
+        ] = True,
+    ):
+        super().__init__(
+            tokenUrl=tokenUrl,
+            scheme_name=scheme_name,
+            scopes=scopes,
+            description=description,
+            auto_error=auto_error,
+            refreshUrl=refresh_url,
+        )
+        self.refresh_url = refresh_url
+
+
 
 class OAuth2AuthorizationCodeBearer(OAuth2):
     """
