@@ -1,6 +1,5 @@
 import Mime from "@effect/platform-node/Mime";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -33,6 +32,7 @@ import {
   browserApiCorsAllowedMethods,
   browserApiCorsHeaders,
 } from "./httpCors.ts";
+import { ValidationError } from "./errors.ts";
 
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
@@ -81,11 +81,6 @@ export const serverEnvironmentRouteLayer = HttpRouter.add(
   }),
 );
 
-class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
-  readonly cause: unknown;
-  readonly bodyJson: OtlpTracer.TraceData;
-}> {}
-
 export const otlpTracesProxyRouteLayer = HttpRouter.add(
   "POST",
   OTLP_TRACES_PROXY_PATH,
@@ -100,7 +95,11 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
 
     yield* Effect.try({
       try: () => decodeOtlpTraceRecords(bodyJson),
-      catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson }),
+      catch: (cause) =>
+        ValidationError({
+          message: "Failed to decode browser OTLP traces.",
+          cause,
+        }),
     }).pipe(
       Effect.flatMap((records) => browserTraceCollector.record(records)),
       Effect.catch((cause) =>

@@ -64,7 +64,7 @@ it.effect("enqueueCommand fails queued work when readiness fails", () =>
         .pipe(Effect.forkScoped);
 
       yield* commandGate.failCommandReady(
-        new ServerRuntimeStartupError({
+        ServerRuntimeStartupError({
           message: "startup failed",
         }),
       );

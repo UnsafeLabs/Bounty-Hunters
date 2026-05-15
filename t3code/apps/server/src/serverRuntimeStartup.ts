@@ -7,7 +7,6 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
-import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -39,11 +38,10 @@ import {
   isWildcardHost,
   issueHeadlessServeAccessInfo,
 } from "./startupAccess.ts";
+import { ConfigError, type ConfigError as ServerRuntimeStartupConfigError } from "./errors.ts";
 
-export class ServerRuntimeStartupError extends Data.TaggedError("ServerRuntimeStartupError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export type ServerRuntimeStartupError = ServerRuntimeStartupConfigError;
+export const ServerRuntimeStartupError = ConfigError;
 
 export interface ServerRuntimeStartupShape {
   readonly awaitCommandReady: Effect.Effect<void, ServerRuntimeStartupError>;
@@ -106,7 +104,7 @@ export const makeCommandGate = Effect.gen(function* () {
           return yield* effect;
         }
         if (readinessState !== "pending") {
-          return yield* readinessState;
+          return yield* Effect.fail(readinessState);
         }
 
         const result = yield* Deferred.make<A, E | ServerRuntimeStartupError>();
@@ -402,7 +400,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
     Effect.gen(function* () {
       const startupExit = yield* Effect.exit(startup);
       if (Exit.isFailure(startupExit)) {
-        const error = new ServerRuntimeStartupError({
+        const error = ServerRuntimeStartupError({
           message: "Server runtime startup failed before command readiness.",
           cause: startupExit.cause,
         });

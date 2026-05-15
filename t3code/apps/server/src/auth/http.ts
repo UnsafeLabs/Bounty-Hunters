@@ -71,13 +71,12 @@ export const authBootstrapRouteLayer = HttpRouter.add(
     const serverAuth = yield* ServerAuth;
     const sessions = yield* SessionCredentialService;
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthBootstrapInput).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Invalid bootstrap payload.",
-            status: 400,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        AuthError({
+          message: "Invalid bootstrap payload.",
+          status: 400,
+          cause,
+        }),
       ),
     );
     const result = yield* serverAuth.exchangeBootstrapCredential(
@@ -106,13 +105,12 @@ export const authBearerBootstrapRouteLayer = HttpRouter.add(
     const request = yield* HttpServerRequest.HttpServerRequest;
     const serverAuth = yield* ServerAuth;
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthBootstrapInput).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Invalid bootstrap payload.",
-            status: 400,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        AuthError({
+          message: "Invalid bootstrap payload.",
+          status: 400,
+          cause,
+        }),
       ),
     );
     const result = yield* serverAuth.exchangeBootstrapCredentialForBearerSession(
@@ -149,30 +147,30 @@ export const authPairingCredentialRouteLayer = HttpRouter.add(
     const request = yield* HttpServerRequest.HttpServerRequest;
     const session = yield* serverAuth.authenticateHttpRequest(request);
     if (session.role !== "owner") {
-      return yield* new AuthError({
-        message: "Only owner sessions can create pairing credentials.",
-        status: 403,
-      });
+      return yield* Effect.fail(
+        AuthError({
+          message: "Only owner sessions can create pairing credentials.",
+          status: 403,
+        }),
+      );
     }
     const headers = yield* HttpServerRequest.schemaHeaders(PairingCredentialRequestHeaders).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Invalid pairing credential request headers.",
-            status: 400,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        AuthError({
+          message: "Invalid pairing credential request headers.",
+          status: 400,
+          cause,
+        }),
       ),
     );
     const payload = hasRequestBody(headers)
       ? yield* HttpServerRequest.schemaBodyJson(AuthCreatePairingCredentialInput).pipe(
-          Effect.mapError(
-            (cause) =>
-              new AuthError({
-                message: "Invalid pairing credential payload.",
-                status: 400,
-                cause,
-              }),
+          Effect.mapError((cause) =>
+            AuthError({
+              message: "Invalid pairing credential payload.",
+              status: 400,
+              cause,
+            }),
           ),
         )
       : {};
@@ -186,10 +184,12 @@ const authenticateOwnerSession = Effect.gen(function* () {
   const serverAuth = yield* ServerAuth;
   const session = yield* serverAuth.authenticateHttpRequest(request);
   if (session.role !== "owner") {
-    return yield* new AuthError({
-      message: "Only owner sessions can manage network access.",
-      status: 403,
-    });
+    return yield* Effect.fail(
+      AuthError({
+        message: "Only owner sessions can manage network access.",
+        status: 403,
+      }),
+    );
   }
   return { serverAuth, session } as const;
 });
@@ -210,13 +210,12 @@ export const authPairingLinksRevokeRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const { serverAuth } = yield* authenticateOwnerSession;
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthRevokePairingLinkInput).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Invalid revoke pairing link payload.",
-            status: 400,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        AuthError({
+          message: "Invalid revoke pairing link payload.",
+          status: 400,
+          cause,
+        }),
       ),
     );
     const revoked = yield* serverAuth.revokePairingLink(payload.id);
@@ -240,13 +239,12 @@ export const authClientsRevokeRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const { serverAuth, session } = yield* authenticateOwnerSession;
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthRevokeClientSessionInput).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Invalid revoke client payload.",
-            status: 400,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        AuthError({
+          message: "Invalid revoke client payload.",
+          status: 400,
+          cause,
+        }),
       ),
     );
     const revoked = yield* serverAuth.revokeClientSession(session.sessionId, payload.sessionId);

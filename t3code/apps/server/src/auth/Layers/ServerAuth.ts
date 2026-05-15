@@ -39,14 +39,14 @@ const WEBSOCKET_TOKEN_QUERY_PARAM = "wsToken";
 
 export function toBootstrapExchangeAuthError(cause: BootstrapCredentialError): AuthError {
   if (cause.status === 500) {
-    return new AuthError({
+    return AuthError({
       message: "Failed to validate bootstrap credential.",
       status: 500,
       cause,
     });
   }
 
-  return new AuthError({
+  return AuthError({
     message: "Invalid bootstrap credential.",
     status: 401,
     cause,
@@ -85,13 +85,12 @@ export const makeServerAuth = Effect.gen(function* () {
         role: session.role,
         ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
       })),
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Unauthorized request.",
-            status: 401,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        AuthError({
+          message: "Unauthorized request.",
+          status: 401,
+          cause,
+        }),
       ),
     );
 
@@ -101,7 +100,7 @@ export const makeServerAuth = Effect.gen(function* () {
     const credential = cookieToken ?? bearerToken;
     if (!credential) {
       return Effect.fail(
-        new AuthError({
+        AuthError({
           message: "Authentication required.",
           status: 401,
         }),
@@ -148,12 +147,11 @@ export const makeServerAuth = Effect.gen(function* () {
             },
           })
           .pipe(
-            Effect.mapError(
-              (cause) =>
-                new AuthError({
-                  message: "Failed to issue authenticated session.",
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              AuthError({
+                message: "Failed to issue authenticated session.",
+                cause,
+              }),
             ),
           ),
       ),
@@ -187,12 +185,11 @@ export const makeServerAuth = Effect.gen(function* () {
               },
             })
             .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new AuthError({
-                    message: "Failed to issue authenticated session.",
-                    cause,
-                  }),
+              Effect.mapError((cause) =>
+                AuthError({
+                  message: "Failed to issue authenticated session.",
+                  cause,
+                }),
               ),
             ),
         ),
@@ -216,12 +213,11 @@ export const makeServerAuth = Effect.gen(function* () {
         ...(input?.label ? { label: input.label } : {}),
       })
       .pipe(
-        Effect.mapError(
-          (cause) =>
-            new AuthError({
-              message: "Failed to issue pairing credential.",
-              cause,
-            }),
+        Effect.mapError((cause) =>
+          AuthError({
+            message: "Failed to issue pairing credential.",
+            cause,
+          }),
         ),
         Effect.map(
           (issued) =>
@@ -241,34 +237,31 @@ export const makeServerAuth = Effect.gen(function* () {
         excludeSubjects: ["owner-bootstrap"],
       })
       .pipe(
-        Effect.mapError(
-          (cause) =>
-            new AuthError({
-              message: "Failed to load pairing links.",
-              cause,
-            }),
+        Effect.mapError((cause) =>
+          AuthError({
+            message: "Failed to load pairing links.",
+            cause,
+          }),
         ),
       );
 
   const revokePairingLink: ServerAuthShape["revokePairingLink"] = (id) =>
     authControlPlane.revokePairingLink(id).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Failed to revoke pairing link.",
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        AuthError({
+          message: "Failed to revoke pairing link.",
+          cause,
+        }),
       ),
     );
 
   const listClientSessions: ServerAuthShape["listClientSessions"] = (currentSessionId) =>
     authControlPlane.listSessions().pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Failed to load paired clients.",
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        AuthError({
+          message: "Failed to load paired clients.",
+          cause,
+        }),
       ),
       Effect.map((clientSessions) =>
         clientSessions.map(
@@ -286,18 +279,19 @@ export const makeServerAuth = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       if (currentSessionId === targetSessionId) {
-        return yield* new AuthError({
-          message: "Use revoke other clients to keep the current owner session active.",
-          status: 403,
-        });
+        return yield* Effect.fail(
+          AuthError({
+            message: "Use revoke other clients to keep the current owner session active.",
+            status: 403,
+          }),
+        );
       }
       return yield* authControlPlane.revokeSession(targetSessionId).pipe(
-        Effect.mapError(
-          (cause) =>
-            new AuthError({
-              message: "Failed to revoke client session.",
-              cause,
-            }),
+        Effect.mapError((cause) =>
+          AuthError({
+            message: "Failed to revoke client session.",
+            cause,
+          }),
         ),
       );
     });
@@ -306,12 +300,11 @@ export const makeServerAuth = Effect.gen(function* () {
     currentSessionId,
   ) =>
     authControlPlane.revokeOtherSessionsExcept(currentSessionId).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Failed to revoke other client sessions.",
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        AuthError({
+          message: "Failed to revoke other client sessions.",
+          cause,
+        }),
       ),
     );
 
@@ -328,12 +321,11 @@ export const makeServerAuth = Effect.gen(function* () {
 
   const issueWebSocketToken: ServerAuthShape["issueWebSocketToken"] = (session) =>
     sessions.issueWebSocketToken(session.sessionId).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Failed to issue websocket token.",
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        AuthError({
+          message: "Failed to issue websocket token.",
+          cause,
+        }),
       ),
       Effect.map(
         (issued) =>
@@ -358,13 +350,12 @@ export const makeServerAuth = Effect.gen(function* () {
               role: session.role,
               ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
             })),
-            Effect.mapError(
-              (cause) =>
-                new AuthError({
-                  message: "Unauthorized request.",
-                  status: 401,
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              AuthError({
+                message: "Unauthorized request.",
+                status: 401,
+                cause,
+              }),
             ),
           );
         }
