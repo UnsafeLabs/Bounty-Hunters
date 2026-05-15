@@ -10,6 +10,7 @@ import {
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   browserApiCorsLayer,
+  httpCompressionMiddlewareLayer,
 } from "./http.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
@@ -294,6 +295,7 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
 );
 
 export const makeRoutesLayer = Layer.mergeAll(
+  httpCompressionMiddlewareLayer,
   authBearerBootstrapRouteLayer,
   authBootstrapRouteLayer,
   authClientsRevokeOthersRouteLayer,
