@@ -10,13 +10,36 @@
  *
  * @module OrchestrationEngineService
  */
-import type { OrchestrationCommand, OrchestrationEvent } from "@t3tools/contracts";
+import type {
+  OrchestrationCommand,
+  OrchestrationEvent,
+  OrchestrationReadModel,
+  ProjectId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
 import type * as Stream from "effect/Stream";
 
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
+
+export interface OrchestrationInterruptedCommandCheckpoint {
+  readonly commandId: OrchestrationCommand["commandId"];
+  readonly commandType: OrchestrationCommand["type"];
+  readonly command: OrchestrationCommand;
+  readonly aggregateKind: "project" | "thread";
+  readonly aggregateId: ProjectId | ThreadId;
+  readonly interruptedAt: string;
+  readonly fiberId: number;
+  readonly interruptingFiberIds: ReadonlyArray<number>;
+  readonly reason: "dispatch-interrupted" | "processing-interrupted";
+  readonly partialState: {
+    readonly snapshotSequence: number;
+    readonly readModel: OrchestrationReadModel;
+  };
+}
 
 /**
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
@@ -44,6 +67,25 @@ export interface OrchestrationEngineShape {
   readonly dispatch: (
     command: OrchestrationCommand,
   ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>;
+
+  /**
+   * Read the latest interrupt checkpoint for a command, if command handling was
+   * interrupted before the caller observed completion.
+   */
+  readonly getInterruptedCommandCheckpoint?: (
+    commandId: OrchestrationCommand["commandId"],
+  ) => Effect.Effect<Option.Option<OrchestrationInterruptedCommandCheckpoint>>;
+
+  /**
+   * Re-dispatch the command stored in an interrupt checkpoint.
+   *
+   * Normal command receipt deduplication makes this safe after the original
+   * command eventually commits; reconnecting callers receive the accepted
+   * sequence instead of duplicating domain events.
+   */
+  readonly resumeInterruptedCommand?: (
+    commandId: OrchestrationCommand["commandId"],
+  ) => Effect.Effect<Option.Option<{ sequence: number }>, OrchestrationDispatchError, never>;
 
   /**
    * Stream persisted domain events in dispatch order.

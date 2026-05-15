@@ -10,13 +10,16 @@ import {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it } from "vitest";
 
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
@@ -73,6 +76,36 @@ async function createOrchestrationSystem() {
   };
 }
 
+async function createOrchestrationSystemWithProjection(
+  projectionPipeline: OrchestrationProjectionPipelineShape,
+  options?: { readonly useTestClock?: boolean },
+) {
+  const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
+    prefix: "t3-orchestration-engine-interrupt-test-",
+  });
+  const orchestrationLayer = OrchestrationEngineLive.pipe(
+    Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+    Layer.provide(Layer.succeed(OrchestrationProjectionPipeline, projectionPipeline)),
+    Layer.provide(OrchestrationEventStoreLive),
+    Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+    Layer.provide(RepositoryIdentityResolverLive),
+    Layer.provide(SqlitePersistenceMemory),
+    Layer.provideMerge(ServerConfigLayer),
+    Layer.provideMerge(NodeServices.layer),
+  );
+  const runtime = ManagedRuntime.make(
+    options?.useTestClock
+      ? orchestrationLayer.pipe(Layer.provideMerge(TestClock.layer()))
+      : orchestrationLayer,
+  );
+  const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+  return {
+    engine,
+    run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
+    dispose: () => runtime.dispose(),
+  };
+}
+
 function now() {
   return "2026-01-01T00:00:00.000Z";
 }
@@ -89,6 +122,121 @@ const hasMetricSnapshot = (
   );
 
 describe("OrchestrationEngine", () => {
+  it("checkpoints command state when the dispatch fiber is interrupted by the client", async () => {
+    const projectionStarted = Effect.runSync(Deferred.make<void>());
+    const projectionPipeline: OrchestrationProjectionPipelineShape = {
+      bootstrap: Effect.void,
+      projectEvent: () =>
+        Deferred.succeed(projectionStarted, undefined).pipe(Effect.andThen(Effect.never)),
+    };
+    const system = await createOrchestrationSystemWithProjection(projectionPipeline);
+    const command = {
+      type: "project.create" as const,
+      commandId: CommandId.make("cmd-client-interrupt-project-create"),
+      projectId: asProjectId("project-client-interrupt"),
+      title: "Client Interrupt Project",
+      workspaceRoot: "/tmp/project-client-interrupt",
+      defaultModelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      },
+      createdAt: now(),
+    };
+
+    try {
+      const checkpoint = await system.run(
+        Effect.gen(function* () {
+          const dispatchFiber = yield* Effect.forkScoped(system.engine.dispatch(command));
+          yield* Deferred.await(projectionStarted);
+          yield* Fiber.interrupt(dispatchFiber);
+          return yield* system.engine.getInterruptedCommandCheckpoint!(command.commandId);
+        }).pipe(Effect.scoped),
+      );
+
+      expect(Option.isSome(checkpoint)).toBe(true);
+      if (Option.isSome(checkpoint)) {
+        expect(checkpoint.value.commandId).toBe(command.commandId);
+        expect(checkpoint.value.commandType).toBe("project.create");
+        expect(checkpoint.value.reason).toBe("dispatch-interrupted");
+        expect(checkpoint.value.fiberId).toBeGreaterThanOrEqual(0);
+        expect(checkpoint.value.partialState.snapshotSequence).toBe(0);
+      }
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("allows timeout-interrupted commands to be queried and resumed with TestClock", async () => {
+    const projectionStarted = Effect.runSync(Deferred.make<void>());
+    const projectionPipeline: OrchestrationProjectionPipelineShape = {
+      bootstrap: Effect.void,
+      projectEvent: () =>
+        Deferred.succeed(projectionStarted, undefined).pipe(
+          Effect.andThen(Effect.sleep("1 minute")),
+        ),
+    };
+    const system = await createOrchestrationSystemWithProjection(projectionPipeline, {
+      useTestClock: true,
+    });
+    const command = {
+      type: "project.create" as const,
+      commandId: CommandId.make("cmd-timeout-interrupt-project-create"),
+      projectId: asProjectId("project-timeout-interrupt"),
+      title: "Timeout Interrupt Project",
+      workspaceRoot: "/tmp/project-timeout-interrupt",
+      defaultModelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      },
+      createdAt: now(),
+    };
+
+    try {
+      const result = await system.run(
+        Effect.gen(function* () {
+          const dispatchFiber = yield* Effect.forkScoped(
+            system.engine.dispatch(command).pipe(Effect.timeoutOption("50 millis")),
+          );
+          yield* Deferred.await(projectionStarted);
+          yield* TestClock.adjust("50 millis");
+          const timedDispatchResult = yield* Fiber.join(dispatchFiber);
+          const interruptedCheckpoint = yield* system.engine.getInterruptedCommandCheckpoint!(
+            command.commandId,
+          );
+          const resumeFiber = yield* Effect.forkScoped(
+            system.engine.resumeInterruptedCommand!(command.commandId),
+          );
+          yield* TestClock.adjust("1 minute");
+          const resumedResult = yield* Fiber.join(resumeFiber);
+          const checkpointAfterResume = yield* system.engine.getInterruptedCommandCheckpoint!(
+            command.commandId,
+          );
+          return {
+            timedDispatchResult,
+            interruptedCheckpoint,
+            resumedResult,
+            checkpointAfterResume,
+          };
+        }).pipe(Effect.scoped),
+      );
+
+      expect(Option.isNone(result.timedDispatchResult)).toBe(true);
+      expect(Option.isSome(result.interruptedCheckpoint)).toBe(true);
+      if (Option.isSome(result.interruptedCheckpoint)) {
+        expect(result.interruptedCheckpoint.value.commandId).toBe(command.commandId);
+        expect(result.interruptedCheckpoint.value.reason).toBe("dispatch-interrupted");
+        expect(result.interruptedCheckpoint.value.partialState.snapshotSequence).toBe(0);
+      }
+      expect(Option.isSome(result.resumedResult)).toBe(true);
+      if (Option.isSome(result.resumedResult)) {
+        expect(result.resumedResult.value.sequence).toBe(1);
+      }
+      expect(Option.isNone(result.checkpointAfterResume)).toBe(true);
+    } finally {
+      await system.dispose();
+    }
+  });
+
   it("bootstraps command handling from persisted projections without reading the full snapshot", async () => {
     let nextSequence = 8;
     const eventStore: OrchestrationEventStoreShape = {

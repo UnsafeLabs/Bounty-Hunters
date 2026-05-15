@@ -42,6 +42,7 @@ import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   OrchestrationEngineService,
+  type OrchestrationInterruptedCommandCheckpoint,
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
 const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
@@ -87,6 +88,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+  const interruptedCommandCheckpoints = new Map<
+    OrchestrationCommand["commandId"],
+    OrchestrationInterruptedCommandCheckpoint
+  >();
 
   const projectEventsOntoReadModel = (
     baseReadModel: OrchestrationReadModel,
@@ -98,6 +103,46 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         nextReadModel = yield* projectEvent(nextReadModel, event);
       }
       return nextReadModel;
+    });
+
+  const recordInterruptedCommandCheckpoint = (input: {
+    readonly command: OrchestrationCommand;
+    readonly aggregateRef: ReturnType<typeof commandToAggregateRef>;
+    readonly reason: OrchestrationInterruptedCommandCheckpoint["reason"];
+    readonly fiberId: number;
+    readonly interruptors: ReadonlySet<number>;
+  }) =>
+    Effect.gen(function* () {
+      const interruptedAt = yield* nowIso;
+      const checkpoint: OrchestrationInterruptedCommandCheckpoint = {
+        commandId: input.command.commandId,
+        commandType: input.command.type,
+        command: structuredClone(input.command),
+        aggregateKind: input.aggregateRef.aggregateKind,
+        aggregateId: input.aggregateRef.aggregateId,
+        interruptedAt,
+        fiberId: input.fiberId,
+        interruptingFiberIds: Array.from(input.interruptors).toSorted(
+          (left, right) => left - right,
+        ),
+        reason: input.reason,
+        partialState: {
+          snapshotSequence: commandReadModel.snapshotSequence,
+          readModel: structuredClone(commandReadModel),
+        },
+      };
+      interruptedCommandCheckpoints.set(input.command.commandId, checkpoint);
+      yield* Effect.logWarning("orchestration command interrupted; checkpoint captured").pipe(
+        Effect.annotateLogs({
+          commandId: input.command.commandId,
+          commandType: input.command.type,
+          fiberId: input.fiberId,
+          interruptingFiberIds: checkpoint.interruptingFiberIds.join(","),
+          interruptedAt,
+          snapshotSequence: commandReadModel.snapshotSequence,
+          reason: input.reason,
+        }),
+      );
     });
 
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
@@ -122,6 +167,17 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         yield* PubSub.publish(eventPubSub, persistedEvent);
       }
     });
+
+    const onCommandProcessingInterrupted = (interruptors: ReadonlySet<number>) =>
+      Effect.withFiber((fiber) =>
+        recordInterruptedCommandCheckpoint({
+          command: envelope.command,
+          aggregateRef,
+          reason: "processing-interrupted",
+          fiberId: fiber.id,
+          interruptors,
+        }),
+      );
 
     return Effect.exit(
       Effect.gen(function* () {
@@ -216,7 +272,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           }
         }
         return { sequence: committedCommand.lastSequence };
-      }).pipe(Effect.withSpan(`orchestration.command.${envelope.command.type}`)),
+      }).pipe(
+        Effect.withSpan(`orchestration.command.${envelope.command.type}`),
+        Effect.onInterrupt(onCommandProcessingInterrupted),
+      ),
     ).pipe(
       Effect.flatMap((exit) =>
         Effect.gen(function* () {
@@ -244,6 +303,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
           if (Exit.isSuccess(exit)) {
+            interruptedCommandCheckpoints.delete(envelope.command.commandId);
             yield* Deferred.succeed(envelope.result, exit.value);
             return;
           }
@@ -299,17 +359,49 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
+      const aggregateRef = commandToAggregateRef(command);
       yield* Queue.offer(commandQueue, {
         command,
         result,
         startedAtMs: yield* Clock.currentTimeMillis,
       });
-      return yield* Deferred.await(result);
+      return yield* Deferred.await(result).pipe(
+        Effect.onInterrupt((interruptors) =>
+          Effect.withFiber((fiber) =>
+            recordInterruptedCommandCheckpoint({
+              command,
+              aggregateRef,
+              reason: "dispatch-interrupted",
+              fiberId: fiber.id,
+              interruptors,
+            }),
+          ),
+        ),
+      );
+    });
+
+  const getInterruptedCommandCheckpoint: NonNullable<
+    OrchestrationEngineShape["getInterruptedCommandCheckpoint"]
+  > = (commandId) =>
+    Effect.sync(() => Option.fromUndefinedOr(interruptedCommandCheckpoints.get(commandId)));
+
+  const resumeInterruptedCommand: NonNullable<
+    OrchestrationEngineShape["resumeInterruptedCommand"]
+  > = (commandId) =>
+    Effect.gen(function* () {
+      const checkpoint = interruptedCommandCheckpoints.get(commandId);
+      if (!checkpoint) {
+        return Option.none();
+      }
+      const result = yield* dispatch(checkpoint.command);
+      return Option.some(result);
     });
 
   return {
     readEvents,
     dispatch,
+    getInterruptedCommandCheckpoint,
+    resumeInterruptedCommand,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
     // each independently receive all domain events.
