@@ -162,9 +162,10 @@ parse_tls_record:
     ja .invalid_length
 
     ; --- Read payload data ---
-    ; BUG: No check that r12 (bytes in buffer) >= r15 + 5
-    ; If the record claims a large payload but we only read a few
-    ; bytes, we'll process past the end of valid data
+    ; Ensure the buffer contains the declared payload length.
+    lea eax, [r15d+5]
+    cmp eax, r12d
+    ja .invalid_length
     lea rdi, [rsi+5]            ; rdi = start of payload
     mov ecx, r15d               ; ecx = payload length
 
