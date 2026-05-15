@@ -2,6 +2,8 @@ import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeOS from "node:os";
+import * as Cause from "effect/Cause";
+import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -151,4 +153,47 @@ const desktopRuntimeLayer = ElectronProtocol.layerSchemePrivileges.pipe(
   ),
 );
 
-DesktopApp.program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);
+const desktopSafeStorageKeyRotationCliLayer = DesktopSavedEnvironments.layer.pipe(
+  Layer.provideMerge(desktopEnvironmentLayer),
+  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(electronLayer),
+);
+
+const rotateSafeStorageKeysCli = Effect.gen(function* () {
+  const electronApp = yield* ElectronApp.ElectronApp;
+  yield* electronApp.whenReady;
+  yield* Console.log("Rotating desktop safe storage credential keys...");
+  const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+  const result = yield* savedEnvironments.rotateKeys;
+  yield* Console.log(
+    [
+      `Re-encrypted ${result.reencryptedCredentials} credential${
+        result.reencryptedCredentials === 1 ? "" : "s"
+      }.`,
+      `New key version: ${result.currentKeyVersion}.`,
+      `Completed at: ${result.rotatedAt}.`,
+    ].join("\n"),
+  );
+  yield* electronApp.exit(0);
+}).pipe(
+  Effect.catchCause((cause) =>
+    Effect.gen(function* () {
+      yield* Console.error(`Failed to rotate desktop safe storage keys.\n${Cause.pretty(cause)}`);
+      const electronApp = yield* ElectronApp.ElectronApp;
+      yield* electronApp.exit(1);
+    }),
+  ),
+);
+
+const requestedCliCommand = process.argv.some(
+  (argument) => argument === "rotate-keys" || argument === "--rotate-keys",
+);
+
+if (requestedCliCommand) {
+  rotateSafeStorageKeysCli.pipe(
+    Effect.provide(desktopSafeStorageKeyRotationCliLayer),
+    NodeRuntime.runMain,
+  );
+} else {
+  DesktopApp.program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);
+}

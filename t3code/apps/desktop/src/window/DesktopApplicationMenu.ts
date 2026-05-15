@@ -11,6 +11,7 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
@@ -24,6 +25,7 @@ export class DesktopApplicationMenu extends Context.Service<
 >()("t3/desktop/ApplicationMenu") {}
 
 type DesktopApplicationMenuRuntimeServices =
+  | DesktopSavedEnvironments.DesktopSavedEnvironments
   | DesktopUpdates.DesktopUpdates
   | DesktopWindow.DesktopWindow
   | ElectronDialog.ElectronDialog;
@@ -94,6 +96,34 @@ const handleCheckForUpdatesMenuClick: Effect.Effect<
   yield* checkForUpdatesFromMenu;
 }).pipe(Effect.withSpan("desktop.menu.handleCheckForUpdatesClick"));
 
+const handleRotateSafeStorageKeysMenuClick: Effect.Effect<
+  void,
+  DesktopSavedEnvironments.DesktopSavedEnvironmentsRotateKeysError,
+  DesktopSavedEnvironments.DesktopSavedEnvironments | ElectronDialog.ElectronDialog
+> = Effect.gen(function* () {
+  const electronDialog = yield* ElectronDialog.ElectronDialog;
+  const confirmed = yield* electronDialog.confirm({
+    owner: Option.none(),
+    message:
+      "Rotate the desktop safe storage encryption key and re-encrypt saved environment credentials?",
+  });
+  if (!confirmed) {
+    return;
+  }
+
+  const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+  const result = yield* savedEnvironments.rotateKeys;
+  yield* electronDialog.showMessageBox({
+    type: "info",
+    title: "Safe storage keys rotated",
+    message: "Desktop safe storage credentials were re-encrypted.",
+    detail: `Re-encrypted ${result.reencryptedCredentials} credential${
+      result.reencryptedCredentials === 1 ? "" : "s"
+    } with key version ${result.currentKeyVersion}.`,
+    buttons: ["OK"],
+  });
+}).pipe(Effect.withSpan("desktop.menu.handleRotateSafeStorageKeysClick"));
+
 const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const electronMenu = yield* ElectronMenu.ElectronMenu;
@@ -126,6 +156,9 @@ const make = Effect.gen(function* () {
     };
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
+    };
+    const rotateSafeStorageKeysClick = () => {
+      runMenuEffect("rotate-safe-storage-keys", handleRotateSafeStorageKeysMenuClick);
     };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
@@ -190,6 +223,15 @@ const make = Effect.gen(function* () {
         ],
       },
       { role: "windowMenu" },
+      {
+        label: "Developer",
+        submenu: [
+          {
+            label: "Rotate Safe Storage Keys...",
+            click: rotateSafeStorageKeysClick,
+          },
+        ],
+      },
       {
         role: "help",
         submenu: [

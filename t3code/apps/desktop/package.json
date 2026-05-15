@@ -10,6 +10,7 @@
     "dev:electron": "node scripts/dev-electron.mjs",
     "build": "tsdown",
     "start": "node scripts/start-electron.mjs",
+    "rotate-keys": "node scripts/start-electron.mjs rotate-keys",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "smoke-test": "node scripts/smoke-test.mjs"

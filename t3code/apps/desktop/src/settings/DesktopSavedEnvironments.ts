@@ -1,7 +1,9 @@
 import { EnvironmentId, type PersistedSavedEnvironmentRecord } from "@t3tools/contracts";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
+import * as Crypto from "node:crypto";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
@@ -26,16 +28,42 @@ interface PersistedSavedEnvironmentStorageRecord extends Omit<
 > {
   readonly desktopSsh?: PersistedSavedEnvironmentDesktopSsh;
   readonly encryptedBearerToken?: string;
+  readonly encryptedBearerTokenKeyVersion?: number;
+}
+
+interface SavedEnvironmentSafeStorageKey {
+  readonly version: number;
+  readonly encryptedKey: string;
+  readonly createdAt: string;
+}
+
+interface SavedEnvironmentSafeStorageKeyring {
+  readonly currentVersion: number;
+  readonly keys: readonly SavedEnvironmentSafeStorageKey[];
 }
 
 interface SavedEnvironmentRegistryDocument {
   readonly version: number;
   readonly records: readonly PersistedSavedEnvironmentStorageRecord[];
+  readonly safeStorageKeyring?: SavedEnvironmentSafeStorageKeyring;
 }
 
 interface SavedEnvironmentRegistryStorageDocument {
   readonly version?: number;
   readonly records?: readonly PersistedSavedEnvironmentStorageRecord[];
+  readonly safeStorageKeyring?: SavedEnvironmentSafeStorageKeyring;
+}
+
+interface EncryptedBearerTokenReference {
+  readonly encryptedBearerToken: string;
+  readonly encryptedBearerTokenKeyVersion?: number;
+}
+
+export interface DesktopSafeStorageKeyRotationResult {
+  readonly rotatedAt: string;
+  readonly previousKeyVersion: number | null;
+  readonly currentKeyVersion: number;
+  readonly reencryptedCredentials: number;
 }
 
 const DesktopSshTargetSchema = Schema.Struct({
@@ -54,11 +82,24 @@ const PersistedSavedEnvironmentStorageRecordSchema = Schema.Struct({
   lastConnectedAt: Schema.NullOr(Schema.String),
   desktopSsh: Schema.optionalKey(DesktopSshTargetSchema),
   encryptedBearerToken: Schema.optionalKey(Schema.String),
+  encryptedBearerTokenKeyVersion: Schema.optionalKey(Schema.Number),
+});
+
+const SavedEnvironmentSafeStorageKeySchema = Schema.Struct({
+  version: Schema.Number,
+  encryptedKey: Schema.String,
+  createdAt: Schema.String,
+});
+
+const SavedEnvironmentSafeStorageKeyringSchema = Schema.Struct({
+  currentVersion: Schema.Number,
+  keys: Schema.Array(SavedEnvironmentSafeStorageKeySchema),
 });
 
 const SavedEnvironmentRegistryDocumentSchema = Schema.Struct({
   version: Schema.optionalKey(Schema.Number),
   records: Schema.optionalKey(Schema.Array(PersistedSavedEnvironmentStorageRecordSchema)),
+  safeStorageKeyring: Schema.optionalKey(SavedEnvironmentSafeStorageKeyringSchema),
 });
 
 const SavedEnvironmentRegistryDocumentJson = fromLenientJson(
@@ -91,14 +132,45 @@ export class DesktopSavedEnvironmentSecretDecodeError extends Data.TaggedError(
   }
 }
 
+export class DesktopSavedEnvironmentSecretCipherError extends Data.TaggedError(
+  "DesktopSavedEnvironmentSecretCipherError",
+)<{
+  readonly cause: unknown;
+}> {
+  override get message() {
+    return "Failed to decrypt desktop saved environment secret.";
+  }
+}
+
+export class DesktopSavedEnvironmentKeyRotationUnavailableError extends Data.TaggedError(
+  "DesktopSavedEnvironmentKeyRotationUnavailableError",
+)<{}> {
+  override get message() {
+    return "Desktop safe storage encryption is unavailable.";
+  }
+}
+
 export type DesktopSavedEnvironmentsGetSecretError =
   | DesktopSavedEnvironmentSecretDecodeError
+  | DesktopSavedEnvironmentSecretCipherError
   | ElectronSafeStorage.ElectronSafeStorageAvailabilityError
   | ElectronSafeStorage.ElectronSafeStorageDecryptError;
 
 export type DesktopSavedEnvironmentsSetSecretError =
+  | DesktopSavedEnvironmentSecretDecodeError
+  | DesktopSavedEnvironmentSecretCipherError
   | DesktopSavedEnvironmentsWriteError
   | ElectronSafeStorage.ElectronSafeStorageAvailabilityError
+  | ElectronSafeStorage.ElectronSafeStorageDecryptError
+  | ElectronSafeStorage.ElectronSafeStorageEncryptError;
+
+export type DesktopSavedEnvironmentsRotateKeysError =
+  | DesktopSavedEnvironmentKeyRotationUnavailableError
+  | DesktopSavedEnvironmentSecretDecodeError
+  | DesktopSavedEnvironmentSecretCipherError
+  | DesktopSavedEnvironmentsWriteError
+  | ElectronSafeStorage.ElectronSafeStorageAvailabilityError
+  | ElectronSafeStorage.ElectronSafeStorageDecryptError
   | ElectronSafeStorage.ElectronSafeStorageEncryptError;
 
 export interface DesktopSavedEnvironmentsShape {
@@ -116,6 +188,10 @@ export interface DesktopSavedEnvironmentsShape {
   readonly removeSecret: (
     environmentId: string,
   ) => Effect.Effect<void, DesktopSavedEnvironmentsWriteError>;
+  readonly rotateKeys: Effect.Effect<
+    DesktopSafeStorageKeyRotationResult,
+    DesktopSavedEnvironmentsRotateKeysError
+  >;
 }
 
 export class DesktopSavedEnvironments extends Context.Service<
@@ -139,7 +215,7 @@ function toPersistedSavedEnvironmentRecord(
 
 function toSavedEnvironmentStorageRecord(
   record: PersistedSavedEnvironmentRecord | PersistedSavedEnvironmentStorageRecord,
-  encryptedBearerToken: Option.Option<string>,
+  encryptedBearerToken: Option.Option<EncryptedBearerTokenReference>,
 ): PersistedSavedEnvironmentStorageRecord {
   const nextRecord = {
     environmentId: record.environmentId,
@@ -156,13 +232,22 @@ function toSavedEnvironmentStorageRecord(
       onSome: (value) => ({
         ...nextRecord,
         desktopSsh,
-        encryptedBearerToken: value,
+        encryptedBearerToken: value.encryptedBearerToken,
+        ...(value.encryptedBearerTokenKeyVersion === undefined
+          ? {}
+          : { encryptedBearerTokenKeyVersion: value.encryptedBearerTokenKeyVersion }),
       }),
     });
   }
   return Option.match(encryptedBearerToken, {
     onNone: () => nextRecord,
-    onSome: (value) => ({ ...nextRecord, encryptedBearerToken: value }),
+    onSome: (value) => ({
+      ...nextRecord,
+      encryptedBearerToken: value.encryptedBearerToken,
+      ...(value.encryptedBearerTokenKeyVersion === undefined
+        ? {}
+        : { encryptedBearerTokenKeyVersion: value.encryptedBearerTokenKeyVersion }),
+    }),
   });
 }
 
@@ -172,6 +257,9 @@ function normalizeSavedEnvironmentRegistryDocument(
   return {
     version: document.version ?? 1,
     records: document.records ?? [],
+    ...(document.safeStorageKeyring === undefined
+      ? {}
+      : { safeStorageKeyring: document.safeStorageKeyring }),
   };
 }
 
@@ -218,13 +306,26 @@ function preserveExistingSecrets(
   const encryptedBearerTokenById = new Map(
     currentDocument.records.flatMap((record) =>
       record.encryptedBearerToken
-        ? [[record.environmentId, record.encryptedBearerToken] as const]
+        ? [
+            [
+              record.environmentId,
+              {
+                encryptedBearerToken: record.encryptedBearerToken,
+                ...(record.encryptedBearerTokenKeyVersion === undefined
+                  ? {}
+                  : { encryptedBearerTokenKeyVersion: record.encryptedBearerTokenKeyVersion }),
+              },
+            ] as const,
+          ]
         : [],
     ),
   );
 
   return {
     version: currentDocument.version,
+    ...(currentDocument.safeStorageKeyring === undefined
+      ? {}
+      : { safeStorageKeyring: currentDocument.safeStorageKeyring }),
     records: records.map((record) => {
       const encryptedBearerToken = encryptedBearerTokenById.get(record.environmentId);
       return toSavedEnvironmentStorageRecord(record, Option.fromNullishOr(encryptedBearerToken));
@@ -238,6 +339,223 @@ function decodeSecretBytes(
   return Effect.fromResult(Encoding.decodeBase64(encoded)).pipe(
     Effect.mapError((cause) => new DesktopSavedEnvironmentSecretDecodeError({ cause })),
   );
+}
+
+const DATA_KEY_BYTES = 32;
+const AES_GCM_IV_BYTES = 12;
+const AES_GCM_AUTH_TAG_BYTES = 16;
+const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
+
+function encodeDataKey(value: Uint8Array): string {
+  return Buffer.from(value).toString("base64");
+}
+
+function maxKeyVersion(keyring: Option.Option<SavedEnvironmentSafeStorageKeyring>): number {
+  return Option.match(keyring, {
+    onNone: () => 0,
+    onSome: (value) =>
+      value.keys.reduce((highest, key) => Math.max(highest, key.version), value.currentVersion),
+  });
+}
+
+function findKeyEntry(
+  keyring: SavedEnvironmentSafeStorageKeyring | undefined,
+  version: number,
+): Effect.Effect<SavedEnvironmentSafeStorageKey, DesktopSavedEnvironmentSecretCipherError> {
+  const key = keyring?.keys.find((entry) => entry.version === version);
+  if (key === undefined) {
+    return Effect.fail(
+      new DesktopSavedEnvironmentSecretCipherError({
+        cause: new Error(`Missing safe storage key version ${version}.`),
+      }),
+    );
+  }
+  return Effect.succeed(key);
+}
+
+function validateDataKey(
+  value: Uint8Array,
+): Effect.Effect<Uint8Array, DesktopSavedEnvironmentSecretCipherError> {
+  if (value.byteLength !== DATA_KEY_BYTES) {
+    return Effect.fail(
+      new DesktopSavedEnvironmentSecretCipherError({
+        cause: new Error("Invalid safe storage data key length."),
+      }),
+    );
+  }
+  return Effect.succeed(value);
+}
+
+function decryptSafeStorageKey(
+  safeStorage: ElectronSafeStorage.ElectronSafeStorageShape,
+  key: SavedEnvironmentSafeStorageKey,
+): Effect.Effect<
+  Uint8Array,
+  | DesktopSavedEnvironmentSecretDecodeError
+  | DesktopSavedEnvironmentSecretCipherError
+  | ElectronSafeStorage.ElectronSafeStorageDecryptError
+> {
+  return Effect.gen(function* () {
+    const wrappedKeyBytes = yield* decodeSecretBytes(key.encryptedKey);
+    const rawKey = yield* safeStorage.decryptString(wrappedKeyBytes);
+    return yield* decodeSecretBytes(rawKey).pipe(Effect.flatMap(validateDataKey));
+  });
+}
+
+function encryptCredentialWithDataKey(
+  secret: string,
+  key: Uint8Array,
+): Effect.Effect<string, DesktopSavedEnvironmentSecretCipherError> {
+  return Effect.try({
+    try: () => {
+      const iv = Crypto.randomBytes(AES_GCM_IV_BYTES);
+      const cipher = Crypto.createCipheriv("aes-256-gcm", Buffer.from(key), iv);
+      const ciphertext = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
+      const authTag = cipher.getAuthTag();
+      return Buffer.concat([iv, authTag, ciphertext]).toString("base64");
+    },
+    catch: (cause) => new DesktopSavedEnvironmentSecretCipherError({ cause }),
+  });
+}
+
+function decryptCredentialWithDataKey(
+  encryptedSecret: string,
+  key: Uint8Array,
+): Effect.Effect<
+  string,
+  DesktopSavedEnvironmentSecretDecodeError | DesktopSavedEnvironmentSecretCipherError
+> {
+  return Effect.gen(function* () {
+    const payload = Buffer.from(yield* decodeSecretBytes(encryptedSecret));
+    if (payload.byteLength <= AES_GCM_IV_BYTES + AES_GCM_AUTH_TAG_BYTES) {
+      return yield* new DesktopSavedEnvironmentSecretCipherError({
+        cause: new Error("Invalid encrypted credential payload."),
+      });
+    }
+
+    return yield* Effect.try({
+      try: () => {
+        const iv = payload.subarray(0, AES_GCM_IV_BYTES);
+        const authTag = payload.subarray(
+          AES_GCM_IV_BYTES,
+          AES_GCM_IV_BYTES + AES_GCM_AUTH_TAG_BYTES,
+        );
+        const ciphertext = payload.subarray(AES_GCM_IV_BYTES + AES_GCM_AUTH_TAG_BYTES);
+        const decipher = Crypto.createDecipheriv("aes-256-gcm", Buffer.from(key), iv);
+        decipher.setAuthTag(authTag);
+        return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+      },
+      catch: (cause) => new DesktopSavedEnvironmentSecretCipherError({ cause }),
+    });
+  });
+}
+
+function generateSafeStorageKey(
+  safeStorage: ElectronSafeStorage.ElectronSafeStorageShape,
+  version: number,
+  createdAt: string,
+): Effect.Effect<
+  { readonly entry: SavedEnvironmentSafeStorageKey; readonly key: Uint8Array },
+  ElectronSafeStorage.ElectronSafeStorageEncryptError
+> {
+  return Effect.gen(function* () {
+    const key = Crypto.randomBytes(DATA_KEY_BYTES);
+    const encryptedKey = Encoding.encodeBase64(
+      yield* safeStorage.encryptString(encodeDataKey(key)),
+    );
+    return {
+      entry: {
+        version,
+        encryptedKey,
+        createdAt,
+      },
+      key,
+    };
+  });
+}
+
+function resolveCurrentDataKey(
+  safeStorage: ElectronSafeStorage.ElectronSafeStorageShape,
+  document: SavedEnvironmentRegistryDocument,
+): Effect.Effect<
+  { readonly version: number; readonly key: Uint8Array },
+  | DesktopSavedEnvironmentSecretDecodeError
+  | DesktopSavedEnvironmentSecretCipherError
+  | ElectronSafeStorage.ElectronSafeStorageDecryptError
+> {
+  return Effect.gen(function* () {
+    const keyring = document.safeStorageKeyring;
+    if (keyring === undefined) {
+      return yield* new DesktopSavedEnvironmentSecretCipherError({
+        cause: new Error("Missing safe storage keyring."),
+      });
+    }
+    const entry = yield* findKeyEntry(keyring, keyring.currentVersion);
+    const key = yield* decryptSafeStorageKey(safeStorage, entry);
+    return { version: keyring.currentVersion, key };
+  });
+}
+
+function ensureCurrentDataKey(
+  safeStorage: ElectronSafeStorage.ElectronSafeStorageShape,
+  document: SavedEnvironmentRegistryDocument,
+): Effect.Effect<
+  {
+    readonly document: SavedEnvironmentRegistryDocument;
+    readonly version: number;
+    readonly key: Uint8Array;
+  },
+  | DesktopSavedEnvironmentSecretDecodeError
+  | DesktopSavedEnvironmentSecretCipherError
+  | ElectronSafeStorage.ElectronSafeStorageDecryptError
+  | ElectronSafeStorage.ElectronSafeStorageEncryptError
+> {
+  if (document.safeStorageKeyring !== undefined) {
+    return resolveCurrentDataKey(safeStorage, document).pipe(
+      Effect.map(({ version, key }) => ({ document, version, key })),
+    );
+  }
+
+  return Effect.gen(function* () {
+    const createdAt = yield* currentIsoTimestamp;
+    const { entry, key } = yield* generateSafeStorageKey(safeStorage, 1, createdAt);
+    return {
+      document: {
+        ...document,
+        safeStorageKeyring: {
+          currentVersion: entry.version,
+          keys: [entry],
+        },
+      },
+      version: entry.version,
+      key,
+    };
+  });
+}
+
+function readRecordSecret(
+  safeStorage: ElectronSafeStorage.ElectronSafeStorageShape,
+  document: SavedEnvironmentRegistryDocument,
+  record: PersistedSavedEnvironmentStorageRecord,
+): Effect.Effect<Option.Option<string>, DesktopSavedEnvironmentsGetSecretError> {
+  return Effect.gen(function* () {
+    const encoded = Option.fromNullishOr(record.encryptedBearerToken);
+    if (Option.isNone(encoded)) {
+      return Option.none<string>();
+    }
+
+    if (record.encryptedBearerTokenKeyVersion === undefined) {
+      const secretBytes = yield* decodeSecretBytes(encoded.value);
+      return Option.some(yield* safeStorage.decryptString(secretBytes));
+    }
+
+    const keyEntry = yield* findKeyEntry(
+      document.safeStorageKeyring,
+      record.encryptedBearerTokenKeyVersion,
+    );
+    const key = yield* decryptSafeStorageKey(safeStorage, keyEntry);
+    return Option.some(yield* decryptCredentialWithDataKey(encoded.value, key));
+  });
 }
 
 export const layer = Layer.effect(
@@ -276,16 +594,12 @@ export const layer = Layer.effect(
           fileSystem,
           environment.savedEnvironmentRegistryPath,
         );
-        const encoded = Option.fromNullishOr(
-          document.records.find((record) => record.environmentId === environmentId)
-            ?.encryptedBearerToken,
-        );
-        if (Option.isNone(encoded) || !(yield* safeStorage.isEncryptionAvailable)) {
+        const record = document.records.find((record) => record.environmentId === environmentId);
+        if (record === undefined || !(yield* safeStorage.isEncryptionAvailable)) {
           return Option.none<string>();
         }
 
-        const secretBytes = yield* decodeSecretBytes(encoded.value);
-        return Option.some(yield* safeStorage.decryptString(secretBytes));
+        return yield* readRecordSecret(safeStorage, document, record);
       }),
       setSecret: Effect.fn("desktop.savedEnvironments.setSecret")(function* (input) {
         const { environmentId, secret } = input;
@@ -299,19 +613,27 @@ export const layer = Layer.effect(
           return false;
         }
 
-        const encryptedBearerToken = Encoding.encodeBase64(
-          yield* safeStorage.encryptString(secret),
-        );
+        const currentKey = yield* ensureCurrentDataKey(safeStorage, document);
+        const encryptedBearerToken = yield* encryptCredentialWithDataKey(secret, currentKey.key);
         let found = false;
         const nextDocument: SavedEnvironmentRegistryDocument = {
-          version: document.version,
-          records: document.records.map((record) => {
+          version: currentKey.document.version,
+          ...(currentKey.document.safeStorageKeyring === undefined
+            ? {}
+            : { safeStorageKeyring: currentKey.document.safeStorageKeyring }),
+          records: currentKey.document.records.map((record) => {
             if (record.environmentId !== environmentId) {
               return record;
             }
 
             found = true;
-            return toSavedEnvironmentStorageRecord(record, Option.some(encryptedBearerToken));
+            return toSavedEnvironmentStorageRecord(
+              record,
+              Option.some({
+                encryptedBearerToken,
+                encryptedBearerTokenKeyVersion: currentKey.version,
+              }),
+            );
           }),
         };
 
@@ -337,6 +659,9 @@ export const layer = Layer.effect(
 
         yield* writeDocument({
           version: document.version,
+          ...(document.safeStorageKeyring === undefined
+            ? {}
+            : { safeStorageKeyring: document.safeStorageKeyring }),
           records: document.records.map((record) => {
             if (record.environmentId !== environmentId) {
               return record;
@@ -345,6 +670,81 @@ export const layer = Layer.effect(
           }),
         });
       }),
+      rotateKeys: Effect.gen(function* () {
+        if (!(yield* safeStorage.isEncryptionAvailable)) {
+          return yield* new DesktopSavedEnvironmentKeyRotationUnavailableError();
+        }
+
+        const document = yield* readRegistryDocument(
+          fileSystem,
+          environment.savedEnvironmentRegistryPath,
+        );
+        const recordsWithSecrets = [];
+        for (const record of document.records) {
+          const secret = yield* readRecordSecret(safeStorage, document, record);
+          if (Option.isSome(secret)) {
+            recordsWithSecrets.push({ environmentId: record.environmentId, secret: secret.value });
+          }
+        }
+
+        const rotatedAt = yield* currentIsoTimestamp;
+        const previousKeyVersion = document.safeStorageKeyring?.currentVersion ?? null;
+        const currentKeyVersion =
+          maxKeyVersion(Option.fromNullishOr(document.safeStorageKeyring)) + 1;
+        const { entry, key } = yield* generateSafeStorageKey(
+          safeStorage,
+          currentKeyVersion,
+          rotatedAt,
+        );
+        const secretByEnvironmentId = new Map(
+          yield* Effect.all(
+            recordsWithSecrets.map((record) =>
+              encryptCredentialWithDataKey(record.secret, key).pipe(
+                Effect.map(
+                  (encryptedBearerToken) =>
+                    [
+                      record.environmentId,
+                      {
+                        encryptedBearerToken,
+                        encryptedBearerTokenKeyVersion: currentKeyVersion,
+                      },
+                    ] as const,
+                ),
+              ),
+            ),
+          ),
+        );
+
+        yield* writeDocument({
+          version: document.version,
+          safeStorageKeyring: {
+            currentVersion: currentKeyVersion,
+            keys: [entry],
+          },
+          records: document.records.map((record) =>
+            toSavedEnvironmentStorageRecord(
+              toPersistedSavedEnvironmentRecord(record),
+              Option.fromNullishOr(secretByEnvironmentId.get(record.environmentId)),
+            ),
+          ),
+        });
+
+        yield* Effect.logInfo("Rotated desktop safe storage credential encryption key.").pipe(
+          Effect.annotateLogs({
+            rotatedAt,
+            previousKeyVersion: previousKeyVersion ?? "legacy",
+            currentKeyVersion,
+            reencryptedCredentials: recordsWithSecrets.length,
+          }),
+        );
+
+        return {
+          rotatedAt,
+          previousKeyVersion,
+          currentKeyVersion,
+          reencryptedCredentials: recordsWithSecrets.length,
+        };
+      }).pipe(Effect.withSpan("desktop.savedEnvironments.rotateKeys")),
     });
   }),
 );
@@ -385,6 +785,15 @@ export const layerTest = (input?: {
             nextSecrets.delete(environmentId);
             return nextSecrets;
           }),
+        rotateKeys: Effect.gen(function* () {
+          const secrets = yield* Ref.get(secretsRef);
+          return {
+            rotatedAt: yield* currentIsoTimestamp,
+            previousKeyVersion: null,
+            currentKeyVersion: 1,
+            reencryptedCredentials: secrets.size,
+          };
+        }),
       });
     }),
   );

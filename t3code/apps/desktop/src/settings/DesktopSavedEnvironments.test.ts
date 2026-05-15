@@ -37,13 +37,32 @@ const SavedEnvironmentRegistryDocumentProbe = Schema.Struct({
 const decodeSavedEnvironmentRegistryDocumentProbe = Schema.decodeEffect(
   Schema.fromJsonString(SavedEnvironmentRegistryDocumentProbe),
 );
+const SavedEnvironmentRotationDocumentProbe = Schema.Struct({
+  records: Schema.Array(
+    Schema.Struct({
+      encryptedBearerTokenKeyVersion: Schema.optionalKey(Schema.Number),
+    }),
+  ),
+  safeStorageKeyring: Schema.Struct({
+    currentVersion: Schema.Number,
+    keys: Schema.Array(Schema.Unknown),
+  }),
+});
+const decodeSavedEnvironmentRotationDocumentProbe = Schema.decodeEffect(
+  Schema.fromJsonString(SavedEnvironmentRotationDocumentProbe),
+);
+const encodeSavedEnvironmentRegistryDocumentProbe = Schema.encodeEffect(
+  Schema.fromJsonString(SavedEnvironmentRegistryDocumentProbe),
+);
 
 function makeSafeStorageLayer(input: {
   readonly available: boolean;
   readonly availabilityError?: unknown;
   readonly encryptError?: unknown;
+  readonly encryptErrorAfter?: number;
   readonly decryptError?: unknown;
 }) {
+  let encryptCalls = 0;
   return Layer.succeed(ElectronSafeStorage.ElectronSafeStorage, {
     isEncryptionAvailable:
       input.availabilityError === undefined
@@ -53,14 +72,19 @@ function makeSafeStorageLayer(input: {
               cause: input.availabilityError,
             }),
           ),
-    encryptString: (value) =>
-      input.encryptError === undefined
-        ? Effect.succeed(textEncoder.encode(`enc:${value}`))
-        : Effect.fail(
+    encryptString: (value) => {
+      encryptCalls += 1;
+      const shouldFail =
+        input.encryptError !== undefined &&
+        (input.encryptErrorAfter === undefined || encryptCalls >= input.encryptErrorAfter);
+      return shouldFail
+        ? Effect.fail(
             new ElectronSafeStorage.ElectronSafeStorageEncryptError({
               cause: input.encryptError,
             }),
-          ),
+          )
+        : Effect.succeed(textEncoder.encode(`enc:${value}`));
+    },
     decryptString: (value) => {
       if (input.decryptError !== undefined) {
         return Effect.fail(
@@ -89,6 +113,7 @@ function makeLayer(
     readonly availableSecretStorage?: boolean;
     readonly availabilityError?: unknown;
     readonly encryptError?: unknown;
+    readonly encryptErrorAfter?: number;
     readonly decryptError?: unknown;
   },
 ) {
@@ -115,6 +140,9 @@ function makeLayer(
         available: options?.availableSecretStorage ?? true,
         availabilityError: options?.availabilityError,
         encryptError: options?.encryptError,
+        ...(options?.encryptErrorAfter === undefined
+          ? {}
+          : { encryptErrorAfter: options.encryptErrorAfter }),
         decryptError: options?.decryptError,
       }),
     ),
@@ -128,6 +156,7 @@ const withSavedEnvironments = <A, E, R>(
     readonly availableSecretStorage?: boolean;
     readonly availabilityError?: unknown;
     readonly encryptError?: unknown;
+    readonly encryptErrorAfter?: number;
     readonly decryptError?: unknown;
   },
 ) =>
@@ -341,4 +370,112 @@ describe("DesktopSavedEnvironments", () => {
       }),
     ),
   );
+
+  it.effect("tracks credential key versions and round-trips secrets after rotation", () =>
+    withSavedEnvironments(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+        yield* savedEnvironments.setRegistry([savedRegistryRecord]);
+        yield* savedEnvironments.setSecret({
+          environmentId: savedRegistryRecord.environmentId,
+          secret: "bearer-token",
+        });
+
+        const before = yield* decodeSavedEnvironmentRotationDocumentProbe(
+          yield* fileSystem.readFileString(environment.savedEnvironmentRegistryPath),
+        );
+        assert.equal(before.safeStorageKeyring.currentVersion, 1);
+        assert.equal(before.records[0]?.encryptedBearerTokenKeyVersion, 1);
+
+        const result = yield* savedEnvironments.rotateKeys;
+
+        assert.equal(result.previousKeyVersion, 1);
+        assert.equal(result.currentKeyVersion, 2);
+        assert.equal(result.reencryptedCredentials, 1);
+        assert.deepEqual(
+          yield* savedEnvironments.getSecret(savedRegistryRecord.environmentId),
+          Option.some("bearer-token"),
+        );
+
+        const after = yield* decodeSavedEnvironmentRotationDocumentProbe(
+          yield* fileSystem.readFileString(environment.savedEnvironmentRegistryPath),
+        );
+        assert.equal(after.safeStorageKeyring.currentVersion, 2);
+        assert.lengthOf(after.safeStorageKeyring.keys, 1);
+        assert.equal(after.records[0]?.encryptedBearerTokenKeyVersion, 2);
+      }),
+    ),
+  );
+
+  it.effect("keeps legacy direct safe-storage credentials readable while rotating them", () =>
+    withSavedEnvironments(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+        yield* savedEnvironments.setRegistry([savedRegistryRecord]);
+        const legacyDocument = yield* encodeSavedEnvironmentRegistryDocumentProbe({
+          version: 1,
+          records: [
+            {
+              ...savedRegistryRecord,
+              encryptedBearerToken: "ZW5jOmxlZ2FjeS10b2tlbg==",
+            },
+          ],
+        });
+        yield* fileSystem.writeFileString(
+          environment.savedEnvironmentRegistryPath,
+          `${legacyDocument}\n`,
+        );
+
+        assert.deepEqual(
+          yield* savedEnvironments.getSecret(savedRegistryRecord.environmentId),
+          Option.some("legacy-token"),
+        );
+
+        const result = yield* savedEnvironments.rotateKeys;
+
+        assert.equal(result.previousKeyVersion, null);
+        assert.equal(result.currentKeyVersion, 1);
+        assert.equal(result.reencryptedCredentials, 1);
+        assert.deepEqual(
+          yield* savedEnvironments.getSecret(savedRegistryRecord.environmentId),
+          Option.some("legacy-token"),
+        );
+      }),
+    ),
+  );
+
+  it.effect("rolls back key rotation when the new key cannot be stored", () => {
+    const cause = new Error("new key rejected");
+    return withSavedEnvironments(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+        yield* savedEnvironments.setRegistry([savedRegistryRecord]);
+        yield* savedEnvironments.setSecret({
+          environmentId: savedRegistryRecord.environmentId,
+          secret: "bearer-token",
+        });
+
+        const before = yield* fileSystem.readFileString(environment.savedEnvironmentRegistryPath);
+        const error = yield* savedEnvironments.rotateKeys.pipe(Effect.flip);
+
+        assert.instanceOf(error, ElectronSafeStorage.ElectronSafeStorageEncryptError);
+        assert.equal(error.cause, cause);
+        assert.equal(
+          yield* fileSystem.readFileString(environment.savedEnvironmentRegistryPath),
+          before,
+        );
+        assert.deepEqual(
+          yield* savedEnvironments.getSecret(savedRegistryRecord.environmentId),
+          Option.some("bearer-token"),
+        );
+      }),
+      { encryptError: cause, encryptErrorAfter: 2 },
+    );
+  });
 });

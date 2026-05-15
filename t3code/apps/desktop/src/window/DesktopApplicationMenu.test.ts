@@ -13,6 +13,7 @@ import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopApplicationMenu from "./DesktopApplicationMenu.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
@@ -63,6 +64,28 @@ const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, {
   install: Effect.die("unexpected install"),
 } satisfies DesktopUpdates.DesktopUpdatesShape);
 
+const makeDesktopSavedEnvironmentsLayer = (
+  rotations?: Deferred.Deferred<DesktopSavedEnvironments.DesktopSafeStorageKeyRotationResult>,
+) => {
+  const rotationResult = {
+    rotatedAt: "2026-05-16T00:00:00.000Z",
+    previousKeyVersion: 1,
+    currentKeyVersion: 2,
+    reencryptedCredentials: rotations === undefined ? 0 : 1,
+  } satisfies DesktopSavedEnvironments.DesktopSafeStorageKeyRotationResult;
+  return Layer.succeed(DesktopSavedEnvironments.DesktopSavedEnvironments, {
+    getRegistry: Effect.succeed([]),
+    setRegistry: () => Effect.void,
+    getSecret: () => Effect.succeed(Option.none()),
+    setSecret: () => Effect.succeed(false),
+    removeSecret: () => Effect.void,
+    rotateKeys:
+      rotations === undefined
+        ? Effect.succeed(rotationResult)
+        : Deferred.succeed(rotations, rotationResult).pipe(Effect.as(rotationResult)),
+  } satisfies DesktopSavedEnvironments.DesktopSavedEnvironmentsShape);
+};
+
 const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
   Layer.succeed(DesktopWindow.DesktopWindow, {
     createMain: Effect.die("unexpected createMain"),
@@ -100,6 +123,7 @@ describe("DesktopApplicationMenu", () => {
           DesktopApplicationMenu.layer.pipe(
             Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
             Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
+            Layer.provideMerge(makeDesktopSavedEnvironmentsLayer()),
             Layer.provideMerge(desktopUpdatesLayer),
             Layer.provideMerge(electronDialogLayer),
             Layer.provideMerge(electronAppLayer),
@@ -127,6 +151,62 @@ describe("DesktopApplicationMenu", () => {
 
       settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
       assert.equal(yield* Deferred.await(selectedAction), "open-settings");
+    }),
+  );
+
+  it.effect("installs a Developer menu item that confirms and rotates safe storage keys", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const rotations =
+        yield* Deferred.make<DesktopSavedEnvironments.DesktopSafeStorageKeyRotationResult>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* Effect.gen(function* () {
+        const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
+        yield* menu.configure;
+      }).pipe(
+        Effect.provide(
+          DesktopApplicationMenu.layer.pipe(
+            Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
+            Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
+            Layer.provideMerge(makeDesktopSavedEnvironmentsLayer(rotations)),
+            Layer.provideMerge(desktopUpdatesLayer),
+            Layer.provideMerge(
+              Layer.succeed(ElectronDialog.ElectronDialog, {
+                pickFolder: () => Effect.succeed(Option.none()),
+                confirm: () => Effect.succeed(true),
+                showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
+                showErrorBox: () => Effect.void,
+              } satisfies ElectronDialog.ElectronDialogShape),
+            ),
+            Layer.provideMerge(electronAppLayer),
+            Layer.provideMerge(
+              DesktopEnvironment.layer(environmentInput).pipe(
+                Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const developerMenu = template.find((item) => item.label === "Developer");
+      assert.isDefined(developerMenu);
+      if (!Array.isArray(developerMenu.submenu)) {
+        throw new Error("Expected Developer menu submenu to be an array.");
+      }
+      const rotateItem = developerMenu.submenu.find(
+        (item) => item.label === "Rotate Safe Storage Keys...",
+      );
+      assert.isDefined(rotateItem);
+      const rotateClick = rotateItem.click;
+      if (typeof rotateClick !== "function") {
+        throw new Error("Expected rotate menu item to have a click handler.");
+      }
+
+      rotateClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
+      assert.equal((yield* Deferred.await(rotations)).reencryptedCredentials, 1);
     }),
   );
 });
