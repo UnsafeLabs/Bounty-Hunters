@@ -18,6 +18,9 @@ from .param_functions import Header as Header
 from .param_functions import Path as Path
 from .param_functions import Query as Query
 from .param_functions import Security as Security
+from .pagination import PaginatedResponse as PaginatedResponse
+from .pagination import Paginator as Paginator
+from .pagination import paginate as paginate
 from .requests import Request as Request
 from .responses import Response as Response
 from .routing import APIRouter as APIRouter
