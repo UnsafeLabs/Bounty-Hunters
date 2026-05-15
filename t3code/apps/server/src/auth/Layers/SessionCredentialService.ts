@@ -33,6 +33,7 @@ import {
 const SIGNING_SECRET_NAME = "server-signing-key";
 const DEFAULT_SESSION_TTL = Duration.days(30);
 const DEFAULT_WEBSOCKET_TOKEN_TTL = Duration.minutes(5);
+const LAST_ACTIVE_UPDATE_INTERVAL = Duration.minutes(5);
 
 const SessionClaims = Schema.Struct({
   v: Schema.Literal(1),
@@ -136,11 +137,40 @@ export const makeSessionCredentialService = Effect.gen(function* () {
           client: toClientMetadata(row.value.client),
           issuedAt: row.value.issuedAt,
           expiresAt: row.value.expiresAt,
+          lastActiveAt: row.value.lastActiveAt,
           lastConnectedAt: row.value.lastConnectedAt,
           connected: connectedSessions.has(row.value.sessionId),
         }),
       );
     });
+
+  const touchLastActive = (input: {
+    readonly sessionId: AuthSessionId;
+    readonly lastActiveAt: DateTime.DateTime | null;
+    readonly issuedAt: DateTime.DateTime;
+    readonly nowEpochMillis: number;
+  }) =>
+    Effect.gen(function* () {
+      const previousLastActiveAt = input.lastActiveAt ?? input.issuedAt;
+      const elapsedMillis = input.nowEpochMillis - previousLastActiveAt.epochMilliseconds;
+      if (elapsedMillis < Duration.toMillis(LAST_ACTIVE_UPDATE_INTERVAL)) {
+        return;
+      }
+
+      const lastActiveAt = DateTime.make(input.nowEpochMillis);
+      if (Option.isNone(lastActiveAt)) {
+        return;
+      }
+
+      yield* authSessions.setLastActiveAt({
+        sessionId: input.sessionId,
+        lastActiveAt: lastActiveAt.value,
+      });
+      const activeSession = yield* loadActiveSession(input.sessionId);
+      if (Option.isSome(activeSession)) {
+        yield* emitUpsert(activeSession.value);
+      }
+    }).pipe(Effect.ignoreCause({ log: true }));
 
   const markConnected: SessionCredentialServiceShape["markConnected"] = (sessionId) =>
     Ref.modify(connectedSessionsRef, (current) => {
@@ -242,6 +272,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
         },
         issuedAt,
         expiresAt,
+        lastActiveAt: issuedAt,
       });
       yield* emitUpsert(
         toAuthClientSession({
@@ -252,6 +283,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
           client,
           issuedAt,
           expiresAt,
+          lastActiveAt: issuedAt,
           lastConnectedAt: null,
           connected: false,
         }),
@@ -318,6 +350,13 @@ export const makeSessionCredentialService = Effect.gen(function* () {
           message: "Invalid `exp` claim",
         });
       }
+
+      yield* touchLastActive({
+        sessionId: row.value.sessionId,
+        lastActiveAt: row.value.lastActiveAt,
+        issuedAt: row.value.issuedAt,
+        nowEpochMillis: now,
+      });
 
       return {
         sessionId: claims.sid,
@@ -419,6 +458,13 @@ export const makeSessionCredentialService = Effect.gen(function* () {
         });
       }
 
+      yield* touchLastActive({
+        sessionId: row.value.sessionId,
+        lastActiveAt: row.value.lastActiveAt,
+        issuedAt: row.value.issuedAt,
+        nowEpochMillis: now,
+      });
+
       return {
         sessionId: row.value.sessionId,
         token,
@@ -454,6 +500,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
           client: toClientMetadata(row.client),
           issuedAt: row.issuedAt,
           expiresAt: row.expiresAt,
+          lastActiveAt: row.lastActiveAt,
           lastConnectedAt: row.lastConnectedAt,
           connected: connectedSessions.has(row.sessionId),
         }),

@@ -142,6 +142,9 @@ it.layer(NodeServices.layer)("SessionCredentialServiceLive", (it) => {
       expect(
         beforeRevoke.find((entry) => entry.sessionId === owner.sessionId)?.client.deviceType,
       ).toBe("desktop");
+      expect(
+        beforeRevoke.find((entry) => entry.sessionId === client.sessionId)?.lastActiveAt,
+      ).not.toBeNull();
       expect(revokedCount).toBe(1);
       expect(afterRevoke).toHaveLength(1);
       expect(afterRevoke[0]?.sessionId).toBe(owner.sessionId);
@@ -188,6 +191,51 @@ it.layer(NodeServices.layer)("SessionCredentialServiceLive", (it) => {
       expect(afterReconnect[0]?.connected).toBe(true);
       expect(afterReconnect[0]?.lastConnectedAt).not.toBeNull();
       expect(afterReconnect[0]?.lastConnectedAt?.toString()).not.toBe(firstConnectedAt?.toString());
+    }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
+  );
+
+  it.effect("tracks lastActiveAt on verified requests with five minute debounce", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const issued = yield* sessions.issue({
+        subject: "activity-test",
+        method: "bearer-session-token",
+      });
+      const initial = (yield* sessions.listActive())[0]?.lastActiveAt;
+
+      yield* TestClock.adjust(Duration.minutes(4));
+      yield* sessions.verify(issued.token);
+      const debounced = (yield* sessions.listActive())[0]?.lastActiveAt;
+
+      yield* TestClock.adjust(Duration.minutes(1));
+      yield* sessions.verify(issued.token);
+      const refreshed = (yield* sessions.listActive())[0]?.lastActiveAt;
+
+      expect(initial).not.toBeNull();
+      expect(debounced?.toString()).toBe(initial?.toString());
+      expect(refreshed?.toString()).not.toBe(initial?.toString());
+    }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
+  );
+
+  it.effect("sorts active sessions by lastActiveAt descending", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const first = yield* sessions.issue({
+        subject: "first-session",
+        method: "bearer-session-token",
+      });
+
+      yield* TestClock.adjust(Duration.seconds(1));
+      const second = yield* sessions.issue({
+        subject: "second-session",
+        method: "bearer-session-token",
+      });
+
+      yield* TestClock.adjust(Duration.minutes(5));
+      yield* sessions.verify(first.token);
+      const listed = yield* sessions.listActive();
+
+      expect(listed.map((entry) => entry.sessionId)).toEqual([first.sessionId, second.sessionId]);
     }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
   );
 });

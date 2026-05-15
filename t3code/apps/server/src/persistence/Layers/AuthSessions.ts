@@ -20,6 +20,7 @@ import {
   ListActiveAuthSessionsInput,
   RevokeAuthSessionInput,
   RevokeOtherAuthSessionsInput,
+  SetAuthSessionLastActiveAtInput,
   SetAuthSessionLastConnectedAtInput,
 } from "../Services/AuthSessions.ts";
 
@@ -36,6 +37,7 @@ const AuthSessionDbRow = Schema.Struct({
   clientBrowser: Schema.NullOr(Schema.String),
   issuedAt: Schema.DateTimeUtcFromString,
   expiresAt: Schema.DateTimeUtcFromString,
+  lastActiveAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   lastConnectedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   revokedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
 });
@@ -56,6 +58,7 @@ function toAuthSessionRecord(row: typeof AuthSessionDbRow.Type): typeof AuthSess
     },
     issuedAt: row.issuedAt,
     expiresAt: row.expiresAt,
+    lastActiveAt: row.lastActiveAt,
     lastConnectedAt: row.lastConnectedAt,
     revokedAt: row.revokedAt,
   };
@@ -88,6 +91,7 @@ const makeAuthSessionRepository = Effect.gen(function* () {
           client_browser,
           issued_at,
           expires_at,
+          last_active_at,
           revoked_at
         )
         VALUES (
@@ -103,6 +107,7 @@ const makeAuthSessionRepository = Effect.gen(function* () {
           ${input.client.browser},
           ${input.issuedAt},
           ${input.expiresAt},
+          ${input.lastActiveAt},
           NULL
         )
       `,
@@ -126,6 +131,7 @@ const makeAuthSessionRepository = Effect.gen(function* () {
           client_browser AS "clientBrowser",
           issued_at AS "issuedAt",
           expires_at AS "expiresAt",
+          last_active_at AS "lastActiveAt",
           last_connected_at AS "lastConnectedAt",
           revoked_at AS "revokedAt"
         FROM auth_sessions
@@ -151,12 +157,13 @@ const makeAuthSessionRepository = Effect.gen(function* () {
           client_browser AS "clientBrowser",
           issued_at AS "issuedAt",
           expires_at AS "expiresAt",
+          last_active_at AS "lastActiveAt",
           last_connected_at AS "lastConnectedAt",
           revoked_at AS "revokedAt"
         FROM auth_sessions
         WHERE revoked_at IS NULL
           AND expires_at > ${now}
-        ORDER BY issued_at DESC, session_id DESC
+        ORDER BY COALESCE(last_active_at, issued_at) DESC, session_id DESC
       `,
   });
 
@@ -166,6 +173,17 @@ const makeAuthSessionRepository = Effect.gen(function* () {
       sql`
         UPDATE auth_sessions
         SET last_connected_at = ${lastConnectedAt}
+        WHERE session_id = ${sessionId}
+          AND revoked_at IS NULL
+      `,
+  });
+
+  const setLastActiveAtRow = SqlSchema.void({
+    Request: SetAuthSessionLastActiveAtInput,
+    execute: ({ sessionId, lastActiveAt }) =>
+      sql`
+        UPDATE auth_sessions
+        SET last_active_at = ${lastActiveAt}
         WHERE session_id = ${sessionId}
           AND revoked_at IS NULL
       `,
@@ -266,6 +284,16 @@ const makeAuthSessionRepository = Effect.gen(function* () {
       ),
     );
 
+  const setLastActiveAt: AuthSessionRepositoryShape["setLastActiveAt"] = (input) =>
+    setLastActiveAtRow(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "AuthSessionRepository.setLastActiveAt:query",
+          "AuthSessionRepository.setLastActiveAt:encodeRequest",
+        ),
+      ),
+    );
+
   return {
     create,
     getById,
@@ -273,6 +301,7 @@ const makeAuthSessionRepository = Effect.gen(function* () {
     revoke,
     revokeAllExcept,
     setLastConnectedAt,
+    setLastActiveAt,
   } satisfies AuthSessionRepositoryShape;
 });
 

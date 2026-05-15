@@ -98,6 +98,38 @@ function inferOs(userAgent: string | undefined): string | undefined {
   return undefined;
 }
 
+function inferDeviceName(input: {
+  readonly userAgent: string | undefined;
+  readonly deviceType: AuthClientMetadataDeviceType;
+  readonly os: string | undefined;
+  readonly browser: string | undefined;
+}): string | undefined {
+  if (!input.userAgent) {
+    return undefined;
+  }
+
+  const normalized = input.userAgent.toLowerCase();
+  if (/iphone/.test(normalized)) return "iPhone";
+  if (/ipad/.test(normalized)) return "iPad";
+  if (/ipod/.test(normalized)) return "iPod";
+
+  const androidModel = /android[^;)]*;\s*([^;)]+)/i.exec(input.userAgent)?.[1]?.trim();
+  if (androidModel && !/^wv$/i.test(androidModel) && !/build\//i.test(androidModel)) {
+    return androidModel;
+  }
+
+  if (input.deviceType === "bot") return input.browser ?? "Automated client";
+  if (input.os === "macOS") return "Mac";
+  if (input.os === "Windows") return "Windows PC";
+  if (input.os === "Linux") return "Linux desktop";
+  if (input.os === "Android") return "Android device";
+
+  if (input.browser && input.os) {
+    return `${input.browser} on ${input.os}`;
+  }
+  return input.os ?? input.browser;
+}
+
 function readRemoteAddressFromSource(source: unknown): string | undefined {
   if (!source || typeof source !== "object") {
     return undefined;
@@ -121,11 +153,13 @@ export function deriveAuthClientMetadata(input: {
   const ipAddress = readRemoteAddressFromSource(input.request.source);
   const os = inferOs(userAgent);
   const browser = inferBrowser(userAgent);
+  const deviceType = inferDeviceType(userAgent);
+  const label = input.label ?? inferDeviceName({ userAgent, deviceType, os, browser });
   return {
-    ...(input.label ? { label: input.label } : {}),
+    ...(label ? { label } : {}),
     ...(ipAddress ? { ipAddress } : {}),
     ...(userAgent ? { userAgent } : {}),
-    deviceType: inferDeviceType(userAgent),
+    deviceType,
     ...(os ? { os } : {}),
     ...(browser ? { browser } : {}),
   };

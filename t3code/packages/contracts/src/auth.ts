@@ -174,6 +174,7 @@ export const AuthClientSession = Schema.Struct({
   client: AuthClientMetadata,
   issuedAt: Schema.DateTimeUtc,
   expiresAt: Schema.DateTimeUtc,
+  lastActiveAt: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
   lastConnectedAt: Schema.NullOr(Schema.DateTimeUtc),
   connected: Schema.Boolean,
   current: Schema.Boolean,
