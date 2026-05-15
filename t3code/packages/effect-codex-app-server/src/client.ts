@@ -1,9 +1,16 @@
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stdio from "effect/Stdio";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as CodexRpc from "./_generated/meta.gen.ts";
@@ -18,6 +25,9 @@ import {
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
 
 const DEFAULT_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
+const DEFAULT_TURN_STREAM_QUEUE_CAPACITY = 16;
+const DEFAULT_TURN_STREAM_CHUNK_WARNING_AFTER = "30 seconds" as const;
+const DEFAULT_TURN_STREAM_CHUNK_TIMEOUT_AFTER = "120 seconds" as const;
 
 export interface CodexAppServerClientOptions {
   readonly logIncoming?: boolean;
@@ -36,6 +46,45 @@ interface CodexAppServerClientRaw {
   readonly respondError: CodexProtocol.CodexAppServerPatchedProtocol["respondError"];
 }
 
+export type CodexAppServerTurnStreamEvent =
+  | {
+      readonly _tag: "TurnStarted";
+      readonly method: "turn/started";
+      readonly payload: CodexRpc.ServerNotificationParamsByMethod["turn/started"];
+    }
+  | {
+      readonly _tag: "AgentMessageDelta";
+      readonly method: "item/agentMessage/delta";
+      readonly payload: CodexRpc.ServerNotificationParamsByMethod["item/agentMessage/delta"];
+      readonly textDelta: string;
+    }
+  | {
+      readonly _tag: "TurnCompleted";
+      readonly method: "turn/completed";
+      readonly payload: CodexRpc.ServerNotificationParamsByMethod["turn/completed"];
+    }
+  | {
+      readonly _tag: "ChunkTimeoutWarning";
+      readonly idleForMillis: number;
+      readonly method: "turn/start";
+      readonly message: string;
+      readonly threadId: string;
+      readonly timeoutMillis: number;
+      readonly turnId: string | undefined;
+    }
+  | {
+      readonly _tag: "TurnStartResponse";
+      readonly method: "turn/start";
+      readonly response: CodexRpc.ClientRequestResponsesByMethod["turn/start"];
+    };
+
+export interface CodexAppServerTurnStreamOptions {
+  readonly abortSignal?: AbortSignal;
+  readonly chunkTimeoutAfter?: Duration.Input;
+  readonly chunkWarningAfter?: Duration.Input;
+  readonly queueCapacity?: number;
+}
+
 export interface CodexAppServerClientShape {
   readonly raw: CodexAppServerClientRaw;
   readonly request: <M extends CodexRpc.ClientRequestMethod>(
@@ -46,6 +95,10 @@ export interface CodexAppServerClientShape {
     method: M,
     payload: CodexRpc.ClientNotificationParamsByMethod[M],
   ) => Effect.Effect<void, CodexError.CodexAppServerError>;
+  readonly streamTurn: (
+    payload: CodexRpc.ClientRequestParamsByMethod["turn/start"],
+    options?: CodexAppServerTurnStreamOptions,
+  ) => Stream.Stream<CodexAppServerTurnStreamEvent, CodexError.CodexAppServerError>;
   readonly handleServerRequest: <M extends CodexRpc.ServerRequestMethod>(
     method: M,
     handler: (
@@ -83,6 +136,19 @@ type ServerRequestHandler = (
 type ServerNotificationHandler = (
   payload: unknown,
 ) => Effect.Effect<void, CodexError.CodexAppServerError>;
+
+const durationMillis = (input: Duration.Input): number =>
+  Duration.toMillis(Duration.fromInputUnsafe(input));
+
+const awaitAbortSignal = (signal: AbortSignal): Effect.Effect<void> =>
+  signal.aborted
+    ? Effect.void
+    : Effect.promise(
+        () =>
+          new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          }),
+      );
 
 export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make")(function* (
   stdio: Stdio.Stdio,
@@ -136,6 +202,27 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
         CodexRpc.ClientNotificationParamsByMethod[M]
       >
     | undefined => CodexRpc.CLIENT_NOTIFICATION_PARAMS[method] as never;
+
+  const registerServerNotificationHandler = <M extends CodexRpc.ServerNotificationMethod>(
+    method: M,
+    handler: (
+      payload: CodexRpc.ServerNotificationParamsByMethod[M],
+    ) => Effect.Effect<void, CodexError.CodexAppServerError>,
+  ): Effect.Effect<Effect.Effect<void>> =>
+    Effect.sync(() => {
+      const registered = handler as ServerNotificationHandler;
+      const current = notificationHandlers.get(method) ?? [];
+      notificationHandlers.set(method, [...current, registered]);
+      return Effect.sync(() => {
+        const handlers = notificationHandlers.get(method) ?? [];
+        const next = handlers.filter((candidate) => candidate !== registered);
+        if (next.length === 0) {
+          notificationHandlers.delete(method);
+          return;
+        }
+        notificationHandlers.set(method, next);
+      });
+    });
 
   const dispatchNotification = (
     notification: CodexProtocol.CodexAppServerIncomingNotification,
@@ -218,6 +305,192 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       Effect.flatMap((encoded) => transport.notify(method, encoded)),
     );
 
+  const streamTurn = (
+    payload: CodexRpc.ClientRequestParamsByMethod["turn/start"],
+    streamOptions: CodexAppServerTurnStreamOptions = {},
+  ): Stream.Stream<CodexAppServerTurnStreamEvent, CodexError.CodexAppServerError> =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const chunkWarningMillis = durationMillis(
+          streamOptions.chunkWarningAfter ?? DEFAULT_TURN_STREAM_CHUNK_WARNING_AFTER,
+        );
+        const chunkTimeoutMillis = durationMillis(
+          streamOptions.chunkTimeoutAfter ?? DEFAULT_TURN_STREAM_CHUNK_TIMEOUT_AFTER,
+        );
+        const afterWarningTimeoutMillis = Math.max(0, chunkTimeoutMillis - chunkWarningMillis);
+        const queueCapacity = Math.max(
+          1,
+          Math.trunc(streamOptions.queueCapacity ?? DEFAULT_TURN_STREAM_QUEUE_CAPACITY),
+        );
+        const streamQueue = yield* Queue.bounded<
+          CodexAppServerTurnStreamEvent,
+          CodexError.CodexAppServerError | Cause.Done
+        >(queueCapacity);
+        const turnIdRef = yield* Ref.make<string | undefined>(undefined);
+        const warnedRef = yield* Ref.make(false);
+        const doneRef = yield* Ref.make(false);
+
+        const endStream = Ref.set(doneRef, true).pipe(
+          Effect.andThen(Queue.end(streamQueue)),
+          Effect.asVoid,
+        );
+
+        const failStream = (error: CodexError.CodexAppServerError) =>
+          Ref.set(doneRef, true).pipe(
+            Effect.andThen(Queue.fail(streamQueue, error)),
+            Effect.asVoid,
+          );
+
+        const offerEvent = (event: CodexAppServerTurnStreamEvent) =>
+          Queue.offer(streamQueue, event).pipe(Effect.asVoid);
+
+        const matchesTurn = (threadId: string, turnId: string) =>
+          Effect.map(Ref.get(turnIdRef), (currentTurnId) => {
+            if (threadId !== payload.threadId) {
+              return false;
+            }
+            return currentTurnId === undefined || currentTurnId === turnId;
+          });
+
+        const rememberTurnId = (turnId: string) =>
+          Ref.update(turnIdRef, (current) => current ?? turnId);
+
+        const interruptActiveTurn = Effect.gen(function* () {
+          const turnId = yield* Ref.get(turnIdRef);
+          if (!turnId) {
+            return;
+          }
+          yield* request("turn/interrupt", {
+            threadId: payload.threadId,
+            turnId,
+          }).pipe(Effect.ignore, Effect.forkDetach({ startImmediately: true }));
+        });
+
+        const unregisterStarted = yield* registerServerNotificationHandler(
+          "turn/started",
+          (started) =>
+            Effect.gen(function* () {
+              if (!(yield* matchesTurn(started.threadId, started.turn.id))) {
+                return;
+              }
+              yield* rememberTurnId(started.turn.id);
+              yield* offerEvent({
+                _tag: "TurnStarted",
+                method: "turn/started",
+                payload: started,
+              });
+            }),
+        );
+
+        const unregisterDelta = yield* registerServerNotificationHandler(
+          "item/agentMessage/delta",
+          (delta) =>
+            Effect.gen(function* () {
+              if (!(yield* matchesTurn(delta.threadId, delta.turnId))) {
+                return;
+              }
+              yield* rememberTurnId(delta.turnId);
+              yield* offerEvent({
+                _tag: "AgentMessageDelta",
+                method: "item/agentMessage/delta",
+                payload: delta,
+                textDelta: delta.delta,
+              });
+            }),
+        );
+
+        const unregisterCompleted = yield* registerServerNotificationHandler(
+          "turn/completed",
+          (completed) =>
+            Effect.gen(function* () {
+              if (!(yield* matchesTurn(completed.threadId, completed.turn.id))) {
+                return;
+              }
+              yield* rememberTurnId(completed.turn.id);
+              yield* offerEvent({
+                _tag: "TurnCompleted",
+                method: "turn/completed",
+                payload: completed,
+              });
+            }),
+        );
+
+        const requestFiber = yield* request("turn/start", payload).pipe(
+          Effect.flatMap((response) =>
+            rememberTurnId(response.turn.id).pipe(
+              Effect.andThen(
+                offerEvent({
+                  _tag: "TurnStartResponse",
+                  method: "turn/start",
+                  response,
+                }),
+              ),
+            ),
+          ),
+          Effect.andThen(endStream),
+          Effect.catch(failStream),
+          Effect.forkScoped,
+        );
+
+        if (streamOptions.abortSignal) {
+          yield* awaitAbortSignal(streamOptions.abortSignal).pipe(
+            Effect.andThen(interruptActiveTurn),
+            Effect.andThen(endStream),
+            Effect.forkScoped,
+          );
+        }
+
+        const cleanup = Effect.gen(function* () {
+          yield* unregisterStarted;
+          yield* unregisterDelta;
+          yield* unregisterCompleted;
+          const done = yield* Ref.get(doneRef);
+          if (!done) {
+            yield* interruptActiveTurn;
+          }
+          yield* Fiber.interrupt(requestFiber).pipe(Effect.ignore);
+          yield* Queue.shutdown(streamQueue).pipe(Effect.ignore);
+        });
+
+        const takeNext = Effect.gen(function* () {
+          const alreadyWarned = yield* Ref.get(warnedRef);
+          const timeoutMillis = alreadyWarned ? afterWarningTimeoutMillis : chunkWarningMillis;
+          const maybeEvent = yield* Queue.take(streamQueue).pipe(
+            Effect.timeoutOption(Duration.millis(timeoutMillis)),
+          );
+
+          if (Option.isSome(maybeEvent)) {
+            yield* Ref.set(warnedRef, false);
+            return maybeEvent.value;
+          }
+
+          const turnId = yield* Ref.get(turnIdRef);
+          if (!alreadyWarned) {
+            yield* Ref.set(warnedRef, true);
+            return {
+              _tag: "ChunkTimeoutWarning",
+              idleForMillis: chunkWarningMillis,
+              method: "turn/start",
+              message: `No Codex stream chunk received for ${chunkWarningMillis}ms; continuing to wait up to ${chunkTimeoutMillis}ms total.`,
+              threadId: payload.threadId,
+              timeoutMillis: chunkTimeoutMillis,
+              turnId,
+            } satisfies CodexAppServerTurnStreamEvent;
+          }
+
+          return yield* new CodexError.CodexAppServerStreamTimeoutError({
+            idleForMillis: chunkTimeoutMillis,
+            method: "turn/start",
+            threadId: payload.threadId,
+            timeoutMillis: chunkTimeoutMillis,
+            ...(turnId ? { turnId } : {}),
+          });
+        });
+
+        return Stream.fromEffectRepeat(takeNext).pipe(Stream.ensuring(cleanup));
+      }),
+    );
+
   return CodexAppServerClient.of({
     raw: {
       notifications: transport.incomingNotifications,
@@ -229,16 +502,13 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
     },
     request,
     notify,
+    streamTurn,
     handleServerRequest: (method, handler) =>
       Effect.sync(() => {
         requestHandlers.set(method, handler as ServerRequestHandler);
       }),
     handleServerNotification: (method, handler) =>
-      Effect.sync(() => {
-        const current = notificationHandlers.get(method) ?? [];
-        current.push(handler as ServerNotificationHandler);
-        notificationHandlers.set(method, current);
-      }),
+      registerServerNotificationHandler(method, handler).pipe(Effect.asVoid),
     handleUnknownServerRequest: (handler) =>
       Effect.sync(() => {
         unknownRequestHandler = handler;

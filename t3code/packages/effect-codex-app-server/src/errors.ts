@@ -58,6 +58,21 @@ export class CodexAppServerTransportError extends Schema.TaggedErrorClass<CodexA
   }
 }
 
+export class CodexAppServerStreamTimeoutError extends Schema.TaggedErrorClass<CodexAppServerStreamTimeoutError>()(
+  "CodexAppServerStreamTimeoutError",
+  {
+    idleForMillis: Schema.Number,
+    method: Schema.String,
+    threadId: Schema.String,
+    timeoutMillis: Schema.Number,
+    turnId: Schema.optional(Schema.String),
+  },
+) {
+  override get message() {
+    return `Codex App Server stream for ${this.method} on thread ${this.threadId} timed out after ${this.timeoutMillis}ms without a chunk`;
+  }
+}
+
 export class CodexAppServerRequestError extends Schema.TaggedErrorClass<CodexAppServerRequestError>()(
   "CodexAppServerRequestError",
   {
@@ -139,6 +154,7 @@ export const CodexAppServerError = Schema.Union([
   CodexAppServerSpawnError,
   CodexAppServerProcessExitedError,
   CodexAppServerProtocolParseError,
+  CodexAppServerStreamTimeoutError,
   CodexAppServerTransportError,
 ]);
 
