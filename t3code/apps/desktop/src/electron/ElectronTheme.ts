@@ -8,6 +8,7 @@ import * as Electron from "electron";
 
 export interface ElectronThemeShape {
   readonly shouldUseDarkColors: Effect.Effect<boolean>;
+  readonly getSource: Effect.Effect<DesktopTheme>;
   readonly setSource: (theme: DesktopTheme) => Effect.Effect<void>;
   readonly onUpdated: (listener: () => void) => Effect.Effect<void, never, Scope.Scope>;
 }
@@ -18,6 +19,11 @@ export class ElectronTheme extends Context.Service<ElectronTheme, ElectronThemeS
 
 const make = ElectronTheme.of({
   shouldUseDarkColors: Effect.sync(() => Electron.nativeTheme.shouldUseDarkColors),
+  getSource: Effect.sync(() => {
+    const source = Electron.nativeTheme.themeSource;
+    if (source === "light" || source === "dark") return source;
+    return "system";
+  }),
   setSource: (theme) =>
     Effect.suspend(() => {
       Electron.nativeTheme.themeSource = theme;
