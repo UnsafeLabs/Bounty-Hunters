@@ -1,5 +1,9 @@
 import binascii
+import hmac
+import time
 from base64 import b64decode
+from hashlib import pbkdf2_hmac
+from math import ceil
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -10,7 +14,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -217,6 +221,118 @@ class HTTPBasic(HTTPBase):
         if not separator:
             raise self.make_not_authenticated_error()
         return HTTPBasicCredentials(username=username, password=password)
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    def __init__(
+        self,
+        *,
+        max_attempts: Annotated[
+            int,
+            Doc("Maximum failed login attempts per client IP before lockout."),
+        ] = 5,
+        window_seconds: Annotated[
+            int,
+            Doc("Number of seconds failed attempts remain in the lockout window."),
+        ] = 60,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be >= 1")
+        if window_seconds < 1:
+            raise ValueError("window_seconds must be >= 1")
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self._failed_attempts: dict[str, list[float]] = {}
+
+    @staticmethod
+    def verify_password(
+        plain_password: str,
+        password_hash: str,
+        *,
+        salt: str | bytes = b"",
+        iterations: int = 390000,
+    ) -> bool:
+        if password_hash.startswith("pbkdf2_sha256$"):
+            _algorithm, raw_iterations, raw_salt, expected_hash = password_hash.split(
+                "$", 3
+            )
+            iterations = int(raw_iterations)
+            salt = raw_salt
+            candidate_hash = pbkdf2_hmac(
+                "sha256",
+                plain_password.encode("utf-8"),
+                salt.encode("utf-8"),
+                iterations,
+            ).hex()
+            return hmac.compare_digest(candidate_hash, expected_hash)
+        candidate_hash = pbkdf2_hmac(
+            "sha256",
+            plain_password.encode("utf-8"),
+            salt.encode("utf-8") if isinstance(salt, str) else salt,
+            iterations,
+        ).hex()
+        return hmac.compare_digest(candidate_hash, password_hash)
+
+    def _client_ip(self, request: Request) -> str:
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            return forwarded_for.split(",", 1)[0].strip()
+        if request.client:
+            return request.client.host
+        return "unknown"
+
+    def _active_failures(self, client_ip: str, now: float) -> list[float]:
+        window_start = now - self.window_seconds
+        failures = [
+            timestamp
+            for timestamp in self._failed_attempts.get(client_ip, [])
+            if timestamp > window_start
+        ]
+        if failures:
+            self._failed_attempts[client_ip] = failures
+        else:
+            self._failed_attempts.pop(client_ip, None)
+        return failures
+
+    def _retry_after(self, failures: list[float], now: float) -> int:
+        if not failures:
+            return self.window_seconds
+        retry_after = ceil(failures[0] + self.window_seconds - now)
+        return max(retry_after, 1)
+
+    def _raise_locked(self, retry_after: int) -> None:
+        raise HTTPException(
+            status_code=HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many authentication attempts",
+            headers={
+                "Retry-After": str(retry_after),
+                **self.make_authenticate_headers(),
+            },
+        )
+
+    def record_failure(self, request: Request) -> None:
+        client_ip = self._client_ip(request)
+        now = time.monotonic()
+        failures = self._active_failures(client_ip, now)
+        failures.append(now)
+        self._failed_attempts[client_ip] = failures
+        if len(failures) >= self.max_attempts:
+            self._raise_locked(self._retry_after(failures, now))
+
+    def reset_attempts(self, request: Request) -> None:
+        self._failed_attempts.pop(self._client_ip(request), None)
+
+    async def __call__(  # type: ignore
+        self, request: Request
+    ) -> HTTPBasicCredentials | None:
+        client_ip = self._client_ip(request)
+        now = time.monotonic()
+        failures = self._active_failures(client_ip, now)
+        if len(failures) >= self.max_attempts:
+            self._raise_locked(self._retry_after(failures, now))
+        return await super().__call__(request)
 
 
 class HTTPBearer(HTTPBase):
