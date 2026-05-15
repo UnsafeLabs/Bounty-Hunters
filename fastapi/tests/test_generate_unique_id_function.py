@@ -1697,3 +1697,81 @@ def test_warn_duplicate_operation_id():
         ]
         assert len(duplicate_warnings) > 0
         assert "Duplicate Operation ID" in str(duplicate_warnings[0].message)
+
+
+def test_default_generate_unique_id_includes_method_path_and_endpoint_name():
+    app = FastAPI()
+
+    @app.get("/users")
+    def list_users():
+        return []  # pragma: nocover
+
+    @app.post("/api/v1")
+    def create_item():
+        return {}  # pragma: nocover
+
+    openapi = app.openapi()
+
+    assert openapi["paths"]["/users"]["get"]["operationId"] == "get_users_list_users"
+    assert (
+        openapi["paths"]["/api/v1"]["post"]["operationId"] == "post_api_v1_create_item"
+    )
+
+
+def test_default_generate_unique_id_uses_router_prefix_for_duplicate_endpoint_names():
+    app = FastAPI()
+    users_router = APIRouter(prefix="/users")
+    admins_router = APIRouter(prefix="/admins")
+
+    def list_user_records():
+        return []  # pragma: nocover
+
+    def list_admin_records():
+        return []  # pragma: nocover
+
+    list_user_records.__name__ = "list_records"
+    list_admin_records.__name__ = "list_records"
+    users_router.add_api_route("/", list_user_records, methods=["GET"])
+    admins_router.add_api_route("/", list_admin_records, methods=["GET"])
+    app.include_router(users_router)
+    app.include_router(admins_router)
+    openapi = app.openapi()
+
+    operation_ids = {
+        openapi["paths"]["/users/"]["get"]["operationId"],
+        openapi["paths"]["/admins/"]["get"]["operationId"],
+    }
+    assert operation_ids == {
+        "get_users_list_records",
+        "get_admins_list_records",
+    }
+
+
+def test_duplicate_generated_operation_id_gets_numeric_suffix():
+    app = FastAPI()
+
+    def read_item_dash():
+        return {}  # pragma: nocover
+
+    def read_item_underscore():
+        return {}  # pragma: nocover
+
+    read_item_dash.__name__ = "read_item"
+    read_item_underscore.__name__ = "read_item"
+    app.add_api_route("/items/{item-id}", read_item_dash, methods=["GET"])
+    app.add_api_route("/items/{item_id}", read_item_underscore, methods=["GET"])
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        openapi = app.openapi()
+
+    operation_ids = [
+        openapi["paths"]["/items/{item-id}"]["get"]["operationId"],
+        openapi["paths"]["/items/{item_id}"]["get"]["operationId"],
+    ]
+
+    assert operation_ids == [
+        "get_items_item_id_read_item",
+        "get_items_item_id_read_item_2",
+    ]
+    assert any("Duplicate Operation ID" in str(warning.message) for warning in caught)
