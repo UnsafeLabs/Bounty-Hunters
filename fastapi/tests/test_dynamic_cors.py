@@ -67,6 +67,7 @@ def test_dynamic_allow() -> None:
 
     assert status_code == 200
     assert headers["access-control-allow-origin"] == "https://allowed.com"
+    assert "origin" in headers.get("vary", "").lower()
 
 
 def test_dynamic_deny() -> None:

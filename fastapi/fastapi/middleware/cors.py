@@ -65,9 +65,13 @@ class DynamicCORSMiddleware(CORSMiddleware):
         if self.allow_origin_func is None:
             return self.is_allowed_origin(origin=origin)
 
-        allowed = self.allow_origin_func(origin)
-        if inspect.isawaitable(allowed):
-            allowed = await allowed
+        try:
+            allowed = self.allow_origin_func(origin)
+            if inspect.isawaitable(allowed):
+                allowed = await allowed
+        except Exception:
+            # If the callback fails, treat as deny (secure-by-default).
+            return False
         return bool(allowed)
 
     async def preflight_response_async(self, request_headers: Headers) -> Response:
@@ -124,6 +128,8 @@ class DynamicCORSMiddleware(CORSMiddleware):
         has_cookie = "cookie" in request_headers
 
         if self.allow_origin_func is not None:
+            # Ensure caches don't serve a response computed for one Origin to another.
+            headers.add_vary_header("Origin")
             if await self.is_allowed_origin_async(origin=origin):
                 self.allow_explicit_origin(headers, origin)
         elif self.allow_all_origins and has_cookie:
