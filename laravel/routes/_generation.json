@@ -1,0 +1,5 @@
+{
+  "agent": "yi-hialong",
+  "pre_task_context": "Task assigned via Bounty-Hunters issue #753. The console.php file exists but has no scheduled tasks or custom commands registered. Tasks: Add a custom artisan command to clear old log files, add --days= option, output deleted count and freed space, register scheduled task at midnight.",
+  "timestamp": "2026-05-16T07:40:00.000Z"
+}
