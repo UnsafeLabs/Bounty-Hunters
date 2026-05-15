@@ -117,3 +117,31 @@ def test_preflight_sets_access_control_max_age() -> None:
     assert status_code == 200
     assert headers["access-control-max-age"] == "3600"
     assert headers["access-control-allow-origin"] == "https://allowed.com"
+
+
+def test_dynamic_cors_allow_origin_func_exception_denies_origin():
+    # If the callback errors, middleware should deny (secure-by-default)
+    from fastapi.middleware.cors import DynamicCORSMiddleware
+
+    async def boom(_origin: str) -> bool:
+        raise RuntimeError("boom")
+
+    app = FastAPI()
+    app.add_middleware(
+        DynamicCORSMiddleware,
+        allow_origin_func=boom,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    client = TestClient(app)
+    r = client.options(
+        "/",
+        headers={
+            "Origin": "https://example.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    # Denied: no ACAO header
+    assert "access-control-allow-origin" not in {k.lower(): v for k, v in r.headers.items()}
