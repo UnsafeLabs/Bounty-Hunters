@@ -1115,6 +1115,23 @@ export type OrchestrationThreadStreamItem = typeof OrchestrationThreadStreamItem
 export const OrchestrationCommandReceiptStatus = Schema.Literals(["accepted", "rejected"]);
 export type OrchestrationCommandReceiptStatus = typeof OrchestrationCommandReceiptStatus.Type;
 
+export const ScheduledCommandStatus = Schema.Literals([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+export type ScheduledCommandStatus = typeof ScheduledCommandStatus.Type;
+
+export const ScheduledCommand = Schema.Struct({
+  commandId: CommandId,
+  scheduledAt: IsoDateTime,
+  repeatInterval: Schema.optional(TrimmedNonEmptyString),
+  maxRetries: NonNegativeInt,
+});
+export type ScheduledCommand = typeof ScheduledCommand.Type;
+
 export const TurnCountRange = Schema.Struct({
   fromTurnCount: NonNegativeInt,
   toTurnCount: NonNegativeInt,
