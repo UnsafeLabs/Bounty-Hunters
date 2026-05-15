@@ -69,6 +69,29 @@ function joinSshAskpassPath(
   return platform === "win32" ? `${trimmed}\\${fileName}` : `${trimmed}/${fileName}`;
 }
 
+
+// Characters that could cause shell injection in script paths.
+const SHELL_METACHAR_PATTERN = /[;&|`$(){}[\]<>!#~*?
+	]/u;
+
+function validateScriptPath(scriptPath: string): Effect.Effect<void, SshPasswordPromptError> {
+  if (SHELL_METACHAR_PATTERN.test(scriptPath)) {
+    return Effect.fail(
+      new SshPasswordPromptError({
+        message: `SSH askpass script path contains shell metacharacters: ${scriptPath}`,
+      }),
+    );
+  }
+  if (scriptPath.includes(" ")) {
+    return Effect.fail(
+      new SshPasswordPromptError({
+        message: `SSH askpass script path contains spaces: ${scriptPath}`,
+      }),
+    );
+  }
+  return Effect.void;
+}
+
 export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
 # from the renderer's in-app prompt. We never expose a native dialog here - if
@@ -155,7 +178,15 @@ export const ensureSshAskpassHelpers = Effect.fn("ssh/auth.ensureSshAskpassHelpe
     const descriptor = yield* buildSshAskpassHelperDescriptor(input);
     const platform = input.platform ?? process.platform;
 
+    yield* validateScriptPath(descriptor.launcherPath);
+    for (const file of descriptor.files) {
+      yield* validateScriptPath(file.path);
+    }
+
     yield* fs.makeDirectory(path.dirname(descriptor.launcherPath), { recursive: true });
+    if (platform !== "win32") {
+      yield* fs.chmod(path.dirname(descriptor.launcherPath), 0o700);
+    }
 
     for (const file of descriptor.files) {
       const existing = yield* fs.exists(file.path);
