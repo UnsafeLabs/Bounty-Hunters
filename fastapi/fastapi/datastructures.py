@@ -28,6 +28,9 @@ class UploadFile(StarletteUploadFile):
     attribute to access the raw standard Python file (blocking, not async), useful and
     needed for non-async code.
 
+    Supports optional file size and content type validation via `max_size` and
+    `allowed_content_types` parameters.
+
     Read more about it in the
     [FastAPI docs for Request Files](https://fastapi.tiangolo.com/tutorial/request-files/).
 
@@ -62,6 +65,52 @@ class UploadFile(StarletteUploadFile):
     content_type: Annotated[
         str | None, Doc("The content type of the request, from the headers.")
     ]
+    max_size: Annotated[
+        int | None,
+        Doc(
+            "Maximum file size in bytes. When set, raises HTTP 413 if the file exceeds this limit."
+        ),
+    ] = None
+    allowed_content_types: Annotated[
+        list[str] | None,
+        Doc(
+            "List of allowed MIME types. When set, raises HTTP 415 if the file type is not in the list."
+        ),
+    ] = None
+
+    def __init__(
+        self,
+        *args: Any,
+        max_size: int | None = None,
+        allowed_content_types: list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.max_size = max_size
+        self.allowed_content_types = allowed_content_types
+
+    def validate(self) -> None:
+        """Validate the uploaded file against configured constraints.
+
+        Raises:
+            HTTPException(413) if file exceeds max_size.
+            HTTPException(415) if content type is not allowed.
+        """
+        from starlette.exceptions import HTTPException
+        from starlette.status import HTTP_413_REQUEST_ENTITY_TOO_LARGE, HTTP_415_UNSUPPORTED_MEDIA_TYPE
+
+        if self.max_size is not None and self.size is not None and self.size > self.max_size:
+            raise HTTPException(
+                status_code=HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File size {self.size} bytes exceeds maximum allowed size of {self.max_size} bytes",
+            )
+
+        if self.allowed_content_types is not None and self.content_type is not None:
+            if self.content_type not in self.allowed_content_types:
+                raise HTTPException(
+                    status_code=HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail=f"Content type '{self.content_type}' is not allowed. Allowed types: {self.allowed_content_types}",
+                )
 
     async def write(
         self,
