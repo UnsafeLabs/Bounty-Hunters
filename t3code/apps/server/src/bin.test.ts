@@ -33,10 +33,13 @@ import {
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import packageJson from "../package.json" with { type: "json" };
+import { formatVersionInfo, runtimeLabel } from "./cli/version.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
-const runCli = (args: ReadonlyArray<string>) => Command.runWith(cli, { version: "0.0.0" })(args);
+const runCli = (args: ReadonlyArray<string>) =>
+  Command.runWith(cli, { version: packageJson.version })(args);
 const runCliWithRuntime = (args: ReadonlyArray<string>) =>
   runCli(args).pipe(Effect.provide(CliRuntimeLayer));
 
@@ -153,6 +156,42 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("accepts the built-in lowercase log-level flag values", () =>
     runCliWithRuntime(["--log-level", "debug", "--version"]),
   );
+
+  it.effect("prints package version through the root --version flag", () =>
+    Effect.gen(function* () {
+      const { output } = yield* captureStdout(runCli(["--version"]));
+      assert.equal(output, `t3 v${packageJson.version}`);
+    }),
+  );
+
+  it.effect("prints detailed version information", () =>
+    Effect.gen(function* () {
+      const { output } = yield* captureStdout(runCli(["version"]));
+      assert.match(
+        output,
+        new RegExp(
+          `^t3code v${packageJson.version.replaceAll(".", "\\.")} \\((bun|node) [^,]+, ${process.platform} ${process.arch}\\)$`,
+        ),
+      );
+    }),
+  );
+
+  it("formats runtime version details", () => {
+    assert.equal(
+      formatVersionInfo({
+        version: "0.1.0",
+        runtime: "bun 1.3.11",
+        platform: "darwin",
+        arch: "arm64",
+      }),
+      "t3code v0.1.0 (bun 1.3.11, darwin arm64)",
+    );
+    assert.equal(
+      runtimeLabel({ node: "24.13.1", bun: "1.3.11" } as NodeJS.ProcessVersions),
+      "bun 1.3.11",
+    );
+    assert.equal(runtimeLabel({ node: "24.13.1" } as NodeJS.ProcessVersions), "node 24.13.1");
+  });
 
   it.effect("accepts canonical --no-<flag> boolean negation", () =>
     runCliWithRuntime(["--no-log-websocket-events", "--version"]),
