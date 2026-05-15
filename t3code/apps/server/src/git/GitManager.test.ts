@@ -73,6 +73,18 @@ function fakeGhOutput(stdout: string): VcsProcess.VcsProcessOutput {
   };
 }
 
+function fakeGitOutput(
+  input: { exitCode?: number; stdout?: string; stderr?: string } = {},
+): GitVcsDriver.ExecuteGitResult {
+  return {
+    exitCode: ChildProcessSpawner.ExitCode(input.exitCode ?? 0),
+    stdout: input.stdout ?? "",
+    stderr: input.stderr ?? "",
+    stdoutTruncated: false,
+    stderrTruncated: false,
+  };
+}
+
 interface FakeGitTextGeneration {
   generateCommitMessage: (input: {
     cwd: string;
@@ -649,6 +661,7 @@ function preparePullRequestThread(
 
 function makeManager(input?: {
   ghScenario?: FakeGhScenario;
+  gitVcsDriver?: Partial<GitVcsDriver.GitVcsDriverShape>;
   textGeneration?: Partial<FakeGitTextGeneration>;
   setupScriptRunner?: ProjectSetupScriptRunnerShape;
 }) {
@@ -660,11 +673,13 @@ function makeManager(input?: {
 
   const serverSettingsLayer = ServerSettingsService.layerTest();
 
-  const vcsDriverLayer = GitVcsDriver.layer.pipe(
-    Layer.provideMerge(VcsProcess.layer),
-    Layer.provideMerge(NodeServices.layer),
-    Layer.provideMerge(ServerConfigLayer),
-  );
+  const vcsDriverLayer = input?.gitVcsDriver
+    ? Layer.mock(GitVcsDriver.GitVcsDriver)(input.gitVcsDriver)
+    : GitVcsDriver.layer.pipe(
+        Layer.provideMerge(VcsProcess.layer),
+        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(ServerConfigLayer),
+      );
   const sourceControlRegistryLayer = Layer.effect(
     SourceControlProviderRegistry.SourceControlProviderRegistry,
     GitHubSourceControlProvider.make().pipe(
@@ -707,6 +722,207 @@ const GitManagerTestLayer = GitVcsDriver.layer.pipe(
 );
 
 it.layer(GitManagerTestLayer)("GitManager", (it) => {
+  it.effect("getConflictFiles parses mocked unresolved rebase paths", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const rebaseHeadPath = path.join(repoDir, ".git", "REBASE_HEAD");
+      const rebaseMergePath = path.join(repoDir, ".git", "rebase-merge");
+      const rebaseApplyPath = path.join(repoDir, ".git", "rebase-apply");
+      fs.mkdirSync(path.dirname(rebaseHeadPath), { recursive: true });
+      fs.mkdirSync(rebaseMergePath, { recursive: true });
+      fs.writeFileSync(rebaseHeadPath, "pending\n");
+      const calls: ReadonlyArray<string>[] = [];
+
+      const { manager } = yield* makeManager({
+        gitVcsDriver: {
+          execute: (input) =>
+            Effect.sync(() => {
+              calls.push([...input.args]);
+              if (input.args.join(" ") === "rev-parse --git-path REBASE_HEAD") {
+                return fakeGitOutput({ stdout: `${rebaseHeadPath}\n` });
+              }
+              if (input.args.join(" ") === "rev-parse --git-path rebase-merge") {
+                return fakeGitOutput({ stdout: `${rebaseMergePath}\n` });
+              }
+              if (input.args.join(" ") === "rev-parse --git-path rebase-apply") {
+                return fakeGitOutput({ stdout: `${rebaseApplyPath}\n` });
+              }
+              if (input.args.join(" ") === "diff --name-only --diff-filter=U") {
+                return fakeGitOutput({ stdout: "src/a.ts\n\nsrc/b.ts\n" });
+              }
+              throw new Error(`Unexpected git args: ${input.args.join(" ")}`);
+            }),
+        },
+      });
+
+      const result = yield* manager.getConflictFiles({ cwd: repoDir });
+
+      expect(result).toEqual({ inProgress: true, files: ["src/a.ts", "src/b.ts"] });
+      expect(calls).toEqual([
+        ["rev-parse", "--git-path", "REBASE_HEAD"],
+        ["rev-parse", "--git-path", "rebase-merge"],
+        ["rev-parse", "--git-path", "rebase-apply"],
+        ["diff", "--name-only", "--diff-filter=U"],
+      ]);
+    }),
+  );
+
+  it.effect("abortRebase runs the abort command and reports cleared conflicts", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const rebaseHeadPath = path.join(repoDir, ".git", "REBASE_HEAD");
+      const rebaseMergePath = path.join(repoDir, ".git", "rebase-merge");
+      fs.mkdirSync(path.dirname(rebaseHeadPath), { recursive: true });
+      fs.mkdirSync(rebaseMergePath, { recursive: true });
+      fs.writeFileSync(rebaseHeadPath, "pending\n");
+      const calls: ReadonlyArray<string>[] = [];
+
+      const { manager } = yield* makeManager({
+        gitVcsDriver: {
+          execute: (input) =>
+            Effect.sync(() => {
+              calls.push([...input.args]);
+              if (input.args.join(" ") === "rebase --abort") {
+                fs.rmSync(rebaseHeadPath, { force: true });
+                fs.rmSync(rebaseMergePath, { force: true, recursive: true });
+                return fakeGitOutput();
+              }
+              if (input.args.join(" ") === "rev-parse --git-path REBASE_HEAD") {
+                return fakeGitOutput({ stdout: `${rebaseHeadPath}\n` });
+              }
+              throw new Error(`Unexpected git args: ${input.args.join(" ")}`);
+            }),
+        },
+      });
+
+      const result = yield* manager.abortRebase({ cwd: repoDir });
+
+      expect(result).toEqual({
+        status: "aborted",
+        conflicts: { inProgress: false, files: [] },
+      });
+      expect(calls).toEqual([
+        ["rebase", "--abort"],
+        ["rev-parse", "--git-path", "REBASE_HEAD"],
+      ]);
+    }),
+  );
+
+  it.effect("continueRebase returns conflicts when git still reports unresolved paths", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const rebaseHeadPath = path.join(repoDir, ".git", "REBASE_HEAD");
+      const rebaseMergePath = path.join(repoDir, ".git", "rebase-merge");
+      const rebaseApplyPath = path.join(repoDir, ".git", "rebase-apply");
+      fs.mkdirSync(path.dirname(rebaseHeadPath), { recursive: true });
+      fs.mkdirSync(rebaseMergePath, { recursive: true });
+      fs.writeFileSync(rebaseHeadPath, "pending\n");
+      const calls: ReadonlyArray<string>[] = [];
+
+      const { manager } = yield* makeManager({
+        gitVcsDriver: {
+          execute: (input) =>
+            Effect.sync(() => {
+              calls.push([...input.args]);
+              if (input.args.join(" ") === "-c core.editor=true rebase --continue") {
+                return fakeGitOutput({ exitCode: 1, stderr: "conflicts remain\n" });
+              }
+              if (input.args.join(" ") === "rev-parse --git-path REBASE_HEAD") {
+                return fakeGitOutput({ stdout: `${rebaseHeadPath}\n` });
+              }
+              if (input.args.join(" ") === "rev-parse --git-path rebase-merge") {
+                return fakeGitOutput({ stdout: `${rebaseMergePath}\n` });
+              }
+              if (input.args.join(" ") === "rev-parse --git-path rebase-apply") {
+                return fakeGitOutput({ stdout: `${rebaseApplyPath}\n` });
+              }
+              if (input.args.join(" ") === "diff --name-only --diff-filter=U") {
+                return fakeGitOutput({ stdout: "README.md\n" });
+              }
+              throw new Error(`Unexpected git args: ${input.args.join(" ")}`);
+            }),
+        },
+      });
+
+      const result = yield* manager.continueRebase({ cwd: repoDir });
+
+      expect(result).toEqual({
+        status: "conflicts",
+        conflicts: { inProgress: true, files: ["README.md"] },
+      });
+      expect(calls).toEqual([
+        ["-c", "core.editor=true", "rebase", "--continue"],
+        ["rev-parse", "--git-path", "REBASE_HEAD"],
+        ["rev-parse", "--git-path", "rebase-merge"],
+        ["rev-parse", "--git-path", "rebase-apply"],
+        ["diff", "--name-only", "--diff-filter=U"],
+      ]);
+    }),
+  );
+
+  it.effect("getConflictFiles detects and clears a real rebase conflict after abort", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/rebase-conflict"]);
+      fs.writeFileSync(path.join(repoDir, "README.md"), "feature\n");
+      yield* runGit(repoDir, ["add", "README.md"]);
+      yield* runGit(repoDir, ["commit", "-m", "Feature change"]);
+      yield* runGit(repoDir, ["checkout", "main"]);
+      fs.writeFileSync(path.join(repoDir, "README.md"), "main\n");
+      yield* runGit(repoDir, ["add", "README.md"]);
+      yield* runGit(repoDir, ["commit", "-m", "Main change"]);
+      yield* runGit(repoDir, ["checkout", "feature/rebase-conflict"]);
+
+      const rebase = yield* runGit(repoDir, ["rebase", "main"], true);
+      expect(rebase.exitCode).not.toBe(0);
+
+      const { manager } = yield* makeManager();
+      const conflicts = yield* manager.getConflictFiles({ cwd: repoDir });
+      expect(conflicts).toEqual({ inProgress: true, files: ["README.md"] });
+
+      const aborted = yield* manager.abortRebase({ cwd: repoDir });
+      expect(aborted).toEqual({
+        status: "aborted",
+        conflicts: { inProgress: false, files: [] },
+      });
+
+      const afterAbort = yield* manager.getConflictFiles({ cwd: repoDir });
+      expect(afterAbort).toEqual({ inProgress: false, files: [] });
+    }),
+  );
+
+  it.effect("continueRebase completes after a real conflict is resolved", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/rebase-continue"]);
+      fs.writeFileSync(path.join(repoDir, "README.md"), "feature\n");
+      yield* runGit(repoDir, ["add", "README.md"]);
+      yield* runGit(repoDir, ["commit", "-m", "Feature change"]);
+      yield* runGit(repoDir, ["checkout", "main"]);
+      fs.writeFileSync(path.join(repoDir, "README.md"), "main\n");
+      yield* runGit(repoDir, ["add", "README.md"]);
+      yield* runGit(repoDir, ["commit", "-m", "Main change"]);
+      yield* runGit(repoDir, ["checkout", "feature/rebase-continue"]);
+
+      const rebase = yield* runGit(repoDir, ["rebase", "main"], true);
+      expect(rebase.exitCode).not.toBe(0);
+      fs.writeFileSync(path.join(repoDir, "README.md"), "feature\n");
+      yield* runGit(repoDir, ["add", "README.md"]);
+
+      const { manager } = yield* makeManager();
+      const result = yield* manager.continueRebase({ cwd: repoDir });
+
+      expect(result).toEqual({
+        status: "continued",
+        conflicts: { inProgress: false, files: [] },
+      });
+      const afterContinue = yield* manager.getConflictFiles({ cwd: repoDir });
+      expect(afterContinue).toEqual({ inProgress: false, files: [] });
+    }),
+  );
+
   it.effect("status includes PR metadata when branch already has an open PR", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");

@@ -88,6 +88,15 @@ function createTestClient() {
       runStackedAction: vi.fn(async () => ({}) as any),
       resolvePullRequest: vi.fn(async () => undefined),
       preparePullRequestThread: vi.fn(async () => undefined),
+      getConflictFiles: vi.fn(async () => ({ inProgress: false, files: [] })),
+      abortRebase: vi.fn(async () => ({
+        status: "aborted",
+        conflicts: { inProgress: false, files: [] },
+      })),
+      continueRebase: vi.fn(async () => ({
+        status: "continued",
+        conflicts: { inProgress: false, files: [] },
+      })),
     },
   } as unknown as WsRpcClient;
 

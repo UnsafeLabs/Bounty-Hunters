@@ -111,6 +111,9 @@ export interface WsRpcClient {
     readonly preparePullRequestThread: RpcUnaryMethod<
       typeof WS_METHODS.gitPreparePullRequestThread
     >;
+    readonly getConflictFiles: RpcUnaryMethod<typeof WS_METHODS.gitRebaseConflicts>;
+    readonly abortRebase: RpcUnaryMethod<typeof WS_METHODS.gitAbortRebase>;
+    readonly continueRebase: RpcUnaryMethod<typeof WS_METHODS.gitContinueRebase>;
   };
   readonly server: {
     readonly getConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetConfig>;
@@ -245,6 +248,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.gitResolvePullRequest](input)),
       preparePullRequestThread: (input) =>
         transport.request((client) => client[WS_METHODS.gitPreparePullRequestThread](input)),
+      getConflictFiles: (input) =>
+        transport.request((client) => client[WS_METHODS.gitRebaseConflicts](input)),
+      abortRebase: (input) =>
+        transport.request((client) => client[WS_METHODS.gitAbortRebase](input)),
+      continueRebase: (input) =>
+        transport.request((client) => client[WS_METHODS.gitContinueRebase](input)),
     },
     server: {
       getConfig: () => transport.request((client) => client[WS_METHODS.serverGetConfig]({})),

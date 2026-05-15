@@ -5,6 +5,10 @@ import * as Layer from "effect/Layer";
 import {
   GitManagerError,
   GitCommandError,
+  type GitAbortRebaseResult,
+  type GitContinueRebaseResult,
+  type GitRebaseConflictsInput,
+  type GitRebaseConflictsResult,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
   type VcsCreateRefInput,
@@ -56,6 +60,15 @@ export interface GitWorkflowServiceShape {
   readonly preparePullRequestThread: (
     input: GitPreparePullRequestThreadInput,
   ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+  readonly getConflictFiles: (
+    input: GitRebaseConflictsInput,
+  ) => Effect.Effect<GitRebaseConflictsResult, GitManagerServiceError>;
+  readonly abortRebase: (
+    input: GitRebaseConflictsInput,
+  ) => Effect.Effect<GitAbortRebaseResult, GitManagerServiceError>;
+  readonly continueRebase: (
+    input: GitRebaseConflictsInput,
+  ) => Effect.Effect<GitContinueRebaseResult, GitManagerServiceError>;
   readonly listRefs: (input: VcsListRefsInput) => Effect.Effect<VcsListRefsResult, GitCommandError>;
   readonly createWorktree: (
     input: VcsCreateWorktreeInput,
@@ -284,6 +297,12 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
       "GitWorkflowService.preparePullRequestThread",
       gitManager.preparePullRequestThread,
     ),
+    getConflictFiles: routeGitManager(
+      "GitWorkflowService.getConflictFiles",
+      gitManager.getConflictFiles,
+    ),
+    abortRebase: routeGitManager("GitWorkflowService.abortRebase", gitManager.abortRebase),
+    continueRebase: routeGitManager("GitWorkflowService.continueRebase", gitManager.continueRebase),
     listRefs: (input) =>
       detectGitRepositoryForCommand("GitWorkflowService.listRefs", input.cwd).pipe(
         Effect.flatMap((isGitRepository) =>

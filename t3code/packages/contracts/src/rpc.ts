@@ -22,10 +22,14 @@ import {
   VcsListRefsInput,
   VcsListRefsResult,
   GitManagerServiceError,
+  GitAbortRebaseResult,
+  GitContinueRebaseResult,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
   VcsPullInput,
   GitPullRequestRefInput,
+  GitRebaseConflictsInput,
+  GitRebaseConflictsResult,
   VcsPullResult,
   VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
@@ -127,6 +131,9 @@ export const WS_METHODS = {
   gitRunStackedAction: "git.runStackedAction",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
+  gitRebaseConflicts: "rebase.conflicts",
+  gitAbortRebase: "git.abortRebase",
+  gitContinueRebase: "git.continueRebase",
 
   // Terminal methods
   terminalOpen: "terminal.open",
@@ -325,6 +332,24 @@ export const WsGitPreparePullRequestThreadRpc = Rpc.make(WS_METHODS.gitPreparePu
   error: GitManagerServiceError,
 });
 
+export const WsGitRebaseConflictsRpc = Rpc.make(WS_METHODS.gitRebaseConflicts, {
+  payload: GitRebaseConflictsInput,
+  success: GitRebaseConflictsResult,
+  error: GitManagerServiceError,
+});
+
+export const WsGitAbortRebaseRpc = Rpc.make(WS_METHODS.gitAbortRebase, {
+  payload: GitRebaseConflictsInput,
+  success: GitAbortRebaseResult,
+  error: GitManagerServiceError,
+});
+
+export const WsGitContinueRebaseRpc = Rpc.make(WS_METHODS.gitContinueRebase, {
+  payload: GitRebaseConflictsInput,
+  success: GitContinueRebaseResult,
+  error: GitManagerServiceError,
+});
+
 export const WsVcsListRefsRpc = Rpc.make(WS_METHODS.vcsListRefs, {
   payload: VcsListRefsInput,
   success: VcsListRefsResult,
@@ -498,6 +523,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
+  WsGitRebaseConflictsRpc,
+  WsGitAbortRebaseRpc,
+  WsGitContinueRebaseRpc,
   WsVcsListRefsRpc,
   WsVcsCreateWorktreeRpc,
   WsVcsRemoveWorktreeRpc,

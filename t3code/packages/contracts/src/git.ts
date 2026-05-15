@@ -121,6 +121,11 @@ export const GitRunStackedActionInput = Schema.Struct({
 });
 export type GitRunStackedActionInput = typeof GitRunStackedActionInput.Type;
 
+export const GitRebaseConflictsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type GitRebaseConflictsInput = typeof GitRebaseConflictsInput.Type;
+
 export const VcsListRefsInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   query: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(256))),
@@ -315,6 +320,24 @@ export const VcsPullResult = Schema.Struct({
   upstreamRef: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
 });
 export type VcsPullResult = typeof VcsPullResult.Type;
+
+export const GitRebaseConflictsResult = Schema.Struct({
+  inProgress: Schema.Boolean,
+  files: Schema.Array(TrimmedNonEmptyStringSchema),
+});
+export type GitRebaseConflictsResult = typeof GitRebaseConflictsResult.Type;
+
+export const GitAbortRebaseResult = Schema.Struct({
+  status: Schema.Literal("aborted"),
+  conflicts: GitRebaseConflictsResult,
+});
+export type GitAbortRebaseResult = typeof GitAbortRebaseResult.Type;
+
+export const GitContinueRebaseResult = Schema.Struct({
+  status: Schema.Literals(["continued", "conflicts"]),
+  conflicts: GitRebaseConflictsResult,
+});
+export type GitContinueRebaseResult = typeof GitContinueRebaseResult.Type;
 
 // RPC / domain errors
 export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()("GitCommandError", {

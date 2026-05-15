@@ -16,11 +16,15 @@ import * as Ref from "effect/Ref";
 import {
   GitActionProgressEvent,
   GitActionProgressPhase,
+  type GitAbortRebaseResult,
   GitCommandError,
-  GitPreparePullRequestThreadInput,
-  GitPreparePullRequestThreadResult,
-  GitPullRequestRefInput,
-  GitResolvePullRequestResult,
+  type GitContinueRebaseResult,
+  type GitPreparePullRequestThreadInput,
+  type GitPreparePullRequestThreadResult,
+  type GitPullRequestRefInput,
+  type GitRebaseConflictsInput,
+  type GitRebaseConflictsResult,
+  type GitResolvePullRequestResult,
   GitRunStackedActionInput,
   GitRunStackedActionResult,
   GitStackedAction,
@@ -80,6 +84,15 @@ export interface GitManagerShape {
   readonly preparePullRequestThread: (
     input: GitPreparePullRequestThreadInput,
   ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+  readonly getConflictFiles: (
+    input: GitRebaseConflictsInput,
+  ) => Effect.Effect<GitRebaseConflictsResult, GitManagerServiceError>;
+  readonly abortRebase: (
+    input: GitRebaseConflictsInput,
+  ) => Effect.Effect<GitAbortRebaseResult, GitManagerServiceError>;
+  readonly continueRebase: (
+    input: GitRebaseConflictsInput,
+  ) => Effect.Effect<GitContinueRebaseResult, GitManagerServiceError>;
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
@@ -698,6 +711,54 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   const canonicalizeExistingPath = (value: string) =>
     fileSystem.realPath(value).pipe(Effect.catch(() => Effect.succeed(value)));
   const normalizeStatusCacheKey = canonicalizeExistingPath;
+  const resolveGitPath = Effect.fn("resolveGitPath")(function* (cwd: string, gitPath: string) {
+    const result = yield* gitCore.execute({
+      operation: "GitManager.resolveGitPath",
+      cwd,
+      args: ["rev-parse", "--git-path", gitPath],
+      maxOutputBytes: 4_096,
+    });
+    const resolvedPath = result.stdout.trim();
+    if (resolvedPath.length === 0) {
+      return yield* gitManagerError("resolveGitPath", `Git did not return a path for ${gitPath}.`);
+    }
+    return path.isAbsolute(resolvedPath) ? resolvedPath : path.resolve(cwd, resolvedPath);
+  });
+  const isRebaseInProgress = Effect.fn("isRebaseInProgress")(function* (cwd: string) {
+    const rebaseHeadPath = yield* resolveGitPath(cwd, "REBASE_HEAD");
+    const hasRebaseHead = yield* fileSystem
+      .exists(rebaseHeadPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!hasRebaseHead) {
+      return false;
+    }
+    const [rebaseMergePath, rebaseApplyPath] = yield* Effect.all([
+      resolveGitPath(cwd, "rebase-merge"),
+      resolveGitPath(cwd, "rebase-apply"),
+    ]);
+    const [hasRebaseMerge, hasRebaseApply] = yield* Effect.all([
+      fileSystem.exists(rebaseMergePath).pipe(Effect.orElseSucceed(() => false)),
+      fileSystem.exists(rebaseApplyPath).pipe(Effect.orElseSucceed(() => false)),
+    ]);
+    return hasRebaseMerge || hasRebaseApply;
+  });
+  const readRebaseConflicts = Effect.fn("readRebaseConflicts")(function* (cwd: string) {
+    const inProgress = yield* isRebaseInProgress(cwd);
+    if (!inProgress) {
+      return { inProgress: false, files: [] };
+    }
+    const result = yield* gitCore.execute({
+      operation: "GitManager.getConflictFiles",
+      cwd,
+      args: ["diff", "--name-only", "--diff-filter=U"],
+      maxOutputBytes: 1_000_000,
+    });
+    const files = result.stdout
+      .split(/\r?\n/)
+      .map((file) => file.trim())
+      .filter((file) => file.length > 0);
+    return { inProgress: true, files };
+  });
   const nonRepositoryStatusDetails = {
     isRepo: false,
     hasOriginRemote: false,
@@ -1553,6 +1614,47 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     }).pipe(Effect.ensuring(invalidateStatus(input.cwd)));
   });
 
+  const getConflictFiles: GitManagerShape["getConflictFiles"] = Effect.fn("getConflictFiles")(
+    function* (input) {
+      return yield* readRebaseConflicts(input.cwd);
+    },
+  );
+
+  const abortRebase: GitManagerShape["abortRebase"] = Effect.fn("abortRebase")(function* (input) {
+    yield* gitCore.execute({
+      operation: "GitManager.abortRebase",
+      cwd: input.cwd,
+      args: ["rebase", "--abort"],
+    });
+    const conflicts = yield* readRebaseConflicts(input.cwd);
+    yield* invalidateStatus(input.cwd);
+    return { status: "aborted", conflicts };
+  });
+
+  const continueRebase: GitManagerShape["continueRebase"] = Effect.fn("continueRebase")(
+    function* (input) {
+      const result = yield* gitCore.execute({
+        operation: "GitManager.continueRebase",
+        cwd: input.cwd,
+        args: ["-c", "core.editor=true", "rebase", "--continue"],
+        allowNonZeroExit: true,
+      });
+      const conflicts = yield* readRebaseConflicts(input.cwd);
+      yield* invalidateStatus(input.cwd);
+      if (result.exitCode !== 0) {
+        if (conflicts.inProgress && conflicts.files.length > 0) {
+          return { status: "conflicts", conflicts };
+        }
+        const detail =
+          result.stderr.trim() ||
+          result.stdout.trim() ||
+          `git rebase --continue exited with code ${result.exitCode}.`;
+        return yield* gitManagerError("continueRebase", detail);
+      }
+      return { status: "continued", conflicts };
+    },
+  );
+
   const runFeatureBranchStep = Effect.fn("runFeatureBranchStep")(function* (
     modelSelection: ModelSelection,
     cwd: string,
@@ -1777,6 +1879,9 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     invalidateStatus,
     resolvePullRequest,
     preparePullRequestThread,
+    getConflictFiles,
+    abortRebase,
+    continueRebase,
     runStackedAction,
   } satisfies GitManagerShape;
 });
