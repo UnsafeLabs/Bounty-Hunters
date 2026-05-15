@@ -6,6 +6,8 @@ import {
   SidebarMenuButton,
   SidebarMenuSubButton,
   SidebarProvider,
+  clampSidebarWidth,
+  type SidebarResolvedResizableOptions,
 } from "./sidebar";
 
 function renderSidebarButton(className?: string) {
@@ -49,5 +51,34 @@ describe("sidebar interactive cursors", () => {
 
     expect(html).toContain('data-slot="sidebar-menu-sub-button"');
     expect(html).toContain("cursor-pointer");
+  });
+});
+
+describe("clampSidebarWidth", () => {
+  const makeOptions = (min: number, max: number): SidebarResolvedResizableOptions => ({
+    minWidth: min,
+    maxWidth: max,
+    defaultWidth: 280,
+    storageKey: null,
+  });
+
+  it("returns width when within min and max bounds", () => {
+    expect(clampSidebarWidth(300, makeOptions(200, 500))).toBe(300);
+  });
+
+  it("clamps to minWidth when width is below minimum", () => {
+    expect(clampSidebarWidth(100, makeOptions(200, 500))).toBe(200);
+  });
+
+  it("clamps to maxWidth when width is above maximum", () => {
+    expect(clampSidebarWidth(600, makeOptions(200, 500))).toBe(500);
+  });
+
+  it("returns minWidth when width equals the minimum", () => {
+    expect(clampSidebarWidth(200, makeOptions(200, 500))).toBe(200);
+  });
+
+  it("returns maxWidth when width equals the maximum", () => {
+    expect(clampSidebarWidth(500, makeOptions(200, 500))).toBe(500);
   });
 });
