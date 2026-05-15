@@ -121,7 +121,9 @@ def test_preflight_sets_access_control_max_age() -> None:
 
 def test_dynamic_cors_allow_origin_func_exception_denies_origin():
     # If the callback errors, middleware should deny (secure-by-default)
+    from fastapi import FastAPI
     from fastapi.middleware.cors import DynamicCORSMiddleware
+    from fastapi.testclient import TestClient
 
     async def boom(_origin: str) -> bool:
         raise RuntimeError("boom")
