@@ -1266,6 +1266,21 @@ class APIRouter(routing.Router):
                 """
             ),
         ] = Default(True),
+        middleware: Annotated[
+            list[Callable[[Any], ASGIApp]] | None,
+            Doc(
+                """
+                A list of middleware classes (or callables) to apply to all
+                *path operations* in this router.
+
+                Middleware added here only applies to routes on this router.
+                Other routers or the main app are not affected.
+
+                Read more about it in the
+                [FastAPI docs for Middleware](https://fastapi.tiangolo.com/tutorial/middleware/).
+                """
+            ),
+        ] = None,
     ) -> None:
         # Determine the lifespan context to use
         if lifespan is None:
@@ -1313,6 +1328,23 @@ class APIRouter(routing.Router):
         self.default_response_class = default_response_class
         self.generate_unique_id_function = generate_unique_id_function
         self.strict_content_type = strict_content_type
+        self.router_middleware = middleware or []
+
+    def add_middleware(self, middleware_cls: Callable[..., Any], **options: Any) -> None:
+        """Add a middleware class to this router.
+
+        Middleware added via add_middleware only affects routes on this router.
+
+        ## Example
+
+        ```python
+        from starlette.middleware.sessions import SessionMiddleware
+
+        router = APIRouter()
+        router.add_middleware(SessionMiddleware, secret_key="secret")
+        ```
+        """
+        self.router_middleware.append(middleware_cls)
 
     def route(
         self,
@@ -1729,6 +1761,10 @@ class APIRouter(routing.Router):
                     )
         if responses is None:
             responses = {}
+        # Apply child router's middleware to this router first
+        for mw in router.router_middleware:
+            self.add_middleware(mw)
+
         for route in router.routes:
             if isinstance(route, APIRoute):
                 combined_responses = {**responses, **route.responses}
