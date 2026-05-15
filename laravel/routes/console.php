@@ -8,7 +8,7 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->describe('Display an inspiring quote');
 
-// Helper: convert bytes to human readable
+// Helper: convert bytes to human readable format
 function humanReadableSize($bytes) {
     $units = ['B', 'KB', 'MB', 'GB', 'TB'];
     $i = 0;
