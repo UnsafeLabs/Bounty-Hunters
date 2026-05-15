@@ -1,0 +1,12 @@
+{
+  "name": "bounty-hunters-solidity",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/SimpleSwap.test.js"
+  },
+  "devDependencies": {
+    "ethers": "6.16.0",
+    "ganache": "7.9.2",
+    "solc": "0.8.35"
+  }
+}
