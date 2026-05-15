@@ -203,14 +203,26 @@ class TLSHandshake:
 
             ext = TLSExtension(ext_type, ext_data)
 
-            # BUG 2: SNI extension (type 0x0000) is parsed but the server_name
-            # field is never extracted from the extension data
-            if ext_type == EXT_EXTENDED_MASTER_SECRET:
-                self.negotiated_ems = True
-            elif ext_type == EXT_SIGNATURE_ALGORITHMS:
-                pass  # stored in ext.data for later use
-            elif ext_type == EXT_SUPPORTED_VERSIONS:
-                pass  # stored in ext.data for later use
+        if ext_type == EXT_SNI:
+            # Parse SNI extension per RFC 6066:
+            # 2 bytes: server name list length
+            # 1 byte: name type (0x00 = hostname)
+            # 2 bytes: name length
+            # N bytes: hostname string
+            if len(ext_data) >= 5:
+                name_type = ext_data[2]
+                if name_type == 0x00:
+                    name_len = struct.unpack("!H", ext_data[3:5])[0]
+                    if 5 + name_len <= len(ext_data):
+                        hostname = ext_data[5:5 + name_len].decode("ascii", errors="replace")
+                        ext.server_name = hostname
+                        self.server_name = hostname
+        elif ext_type == EXT_EXTENDED_MASTER_SECRET:
+            self.negotiated_ems = True
+        elif ext_type == EXT_SIGNATURE_ALGORITHMS:
+            pass # stored in ext.data for later use
+        elif ext_type == EXT_SUPPORTED_VERSIONS:
+            pass # stored in ext.data for later use
 
             self.extensions[ext_type] = ext
             extensions.append(ext)
