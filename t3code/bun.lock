@@ -7,6 +7,7 @@
       "devDependencies": {
         "@effect/language-service": "catalog:",
         "@oxlint/plugins": "^1.63.0",
+        "@playwright/test": "1.58.2",
         "@types/node": "catalog:",
         "oxfmt": "^0.40.0",
         "oxlint": "^1.63.0",
@@ -17,7 +18,7 @@
     },
     "apps/desktop": {
       "name": "@t3tools/desktop",
-      "version": "0.0.23",
+      "version": "0.0.24",
       "dependencies": {
         "@effect/platform-node": "catalog:",
         "@t3tools/contracts": "workspace:*",
@@ -50,7 +51,7 @@
     },
     "apps/server": {
       "name": "t3",
-      "version": "0.0.23",
+      "version": "0.0.24",
       "bin": {
         "t3": "./dist/bin.mjs",
       },
@@ -83,7 +84,7 @@
     },
     "apps/web": {
       "name": "@t3tools/web",
-      "version": "0.0.23",
+      "version": "0.0.24",
       "dependencies": {
         "@base-ui/react": "^1.4.1",
         "@dnd-kit/core": "^6.3.1",
@@ -165,7 +166,7 @@
     },
     "packages/contracts": {
       "name": "@t3tools/contracts",
-      "version": "0.0.23",
+      "version": "0.0.24",
       "dependencies": {
         "effect": "catalog:",
       },
@@ -719,6 +720,8 @@
     "@pierre/diffs": ["@pierre/diffs@1.1.20", "", { "dependencies": { "@pierre/theme": "0.0.28", "@shikijs/transformers": "^3.0.0", "diff": "8.0.3", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" } }, "sha512-lLi+3sLCm3QDd5/aLO9pw+WbF6UzhrkWm2oTZ5WZJTGemOyUNRJ4DDhcEKmVusu4C4bXx9Nssh6fF+wQcapb5w=="],
 
     "@pierre/theme": ["@pierre/theme@0.0.28", "", {}, "sha512-1j/H/fECBuc9dEvntdWI+l435HZapw+RCJTlqCA6BboQ5TjlnE005j/ROWutXIs8aq5OAc82JI2Kwk4A1WWBgw=="],
+
+    "@playwright/test": ["@playwright/test@1.58.2", "", { "dependencies": { "playwright": "1.58.2" }, "bin": { "playwright": "cli.js" } }, "sha512-akea+6bHYBBfA9uQqSYmlJXn61cTa+jbO87xVLCWbTqbWadRVmhxlXATaOjOgcBaWU4ePo0wB41KMFv3o35IXA=="],
 
     "@polka/url": ["@polka/url@1.0.0-next.29", "", {}, "sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww=="],
 

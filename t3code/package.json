@@ -44,6 +44,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "oxlint --report-unused-disable-directives",
     "test": "turbo run test",
+    "test:e2e": "playwright test",
     "test:desktop-smoke": "turbo run smoke-test --filter=@t3tools/desktop",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
@@ -63,6 +64,7 @@
   "devDependencies": {
     "@effect/language-service": "catalog:",
     "@oxlint/plugins": "^1.63.0",
+    "@playwright/test": "1.58.2",
     "@types/node": "catalog:",
     "oxfmt": "^0.40.0",
     "oxlint": "^1.63.0",
