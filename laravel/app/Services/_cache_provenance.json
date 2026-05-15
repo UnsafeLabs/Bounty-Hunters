@@ -1,0 +1,1 @@
+{"tool_name": "xiaoqiang", "boot_context": "Add caching layer to config loading and fix cache store connection validation per issue #747", "timestamp": "2026-05-16T17:00:00Z"}
