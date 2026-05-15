@@ -23,6 +23,9 @@ import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
+import * as ElectronNotification from "../electron/ElectronNotification.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 const decodeDesktopBackendBootstrap = Schema.decodeEffect(
@@ -107,6 +110,9 @@ function makeManagerLayer(input: {
   readonly backendOutputLog?: Partial<DesktopObservability.DesktopBackendOutputLogShape>;
   readonly desktopState?: DesktopState.DesktopStateShape;
   readonly desktopWindow?: Partial<DesktopWindow.DesktopWindowShape>;
+  readonly electronApp?: Partial<ElectronApp.ElectronAppShape>;
+  readonly electronDialog?: Partial<ElectronDialog.ElectronDialogShape>;
+  readonly electronNotification?: Partial<ElectronNotification.ElectronNotificationShape>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
 }) {
   return DesktopBackendManager.layer.pipe(
@@ -128,6 +134,34 @@ function makeManagerLayer(input: {
           writeOutputChunk: () => Effect.void,
           ...input.backendOutputLog,
         } satisfies DesktopObservability.DesktopBackendOutputLogShape),
+        Layer.succeed(ElectronApp.ElectronApp, {
+          metadata: Effect.die("unexpected metadata"),
+          name: Effect.succeed("T3 Code"),
+          whenReady: Effect.void,
+          quit: Effect.void,
+          exit: () => Effect.void,
+          relaunch: () => Effect.void,
+          setPath: () => Effect.void,
+          setName: () => Effect.void,
+          setAboutPanelOptions: () => Effect.void,
+          setAppUserModelId: () => Effect.void,
+          setDesktopName: () => Effect.void,
+          setDockIcon: () => Effect.void,
+          appendCommandLineSwitch: () => Effect.void,
+          on: () => Effect.void,
+          ...input.electronApp,
+        } satisfies ElectronApp.ElectronAppShape),
+        Layer.succeed(ElectronDialog.ElectronDialog, {
+          pickFolder: () => Effect.succeed(Option.none()),
+          confirm: () => Effect.succeed(false),
+          showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
+          showErrorBox: () => Effect.void,
+          ...input.electronDialog,
+        } satisfies ElectronDialog.ElectronDialogShape),
+        Layer.succeed(ElectronNotification.ElectronNotification, {
+          show: () => Effect.void,
+          ...input.electronNotification,
+        } satisfies ElectronNotification.ElectronNotificationShape),
         Layer.succeed(DesktopWindow.DesktopWindow, {
           createMain: Effect.die("unexpected createMain"),
           ensureMain: Effect.die("unexpected ensureMain"),
@@ -346,6 +380,68 @@ describe("DesktopBackendManager", () => {
         assert.equal(stoppedSnapshot.ready, false);
         assert.equal(Option.isNone(stoppedSnapshot.activePid), true);
       }).pipe(Effect.provide(managerLayer));
+    }),
+  );
+
+  it.effect("prompts the user after the backend exhausts automatic restart attempts", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      let startCount = 0;
+      let promptCount = 0;
+      let quitCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.sync(() => {
+            startCount += 1;
+            return makeProcess({
+              exitCode: Queue.offer(starts, startCount).pipe(
+                Effect.as(ChildProcessSpawner.ExitCode(1)),
+              ),
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer(() => Effect.never),
+        electronDialog: {
+          showMessageBox: () =>
+            Effect.sync(() => {
+              promptCount += 1;
+              return { response: 0, checkboxChecked: false };
+            }),
+        },
+        electronApp: {
+          quit: Effect.sync(() => {
+            quitCount += 1;
+          }),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+
+        assert.equal(yield* Queue.take(starts), 1);
+
+        yield* TestClock.adjust(Duration.millis(500));
+        assert.equal(yield* Queue.take(starts), 2);
+
+        yield* TestClock.adjust(Duration.seconds(1));
+        assert.equal(yield* Queue.take(starts), 3);
+
+        yield* TestClock.adjust(Duration.seconds(2));
+        assert.equal(yield* Queue.take(starts), 4);
+
+        yield* Effect.yieldNow;
+
+        assert.equal(promptCount, 1);
+        assert.equal(quitCount, 1);
+        assert.isFalse((yield* manager.snapshot).desiredRunning);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
     }),
   );
 

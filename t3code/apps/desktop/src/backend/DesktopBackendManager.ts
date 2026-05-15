@@ -28,9 +28,15 @@ import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
+import * as ElectronNotification from "../electron/ElectronNotification.ts";
 
 const INITIAL_RESTART_DELAY = Duration.millis(500);
 const MAX_RESTART_DELAY = Duration.seconds(10);
+const HEALTH_CHECK_INTERVAL = Duration.seconds(15);
+const HEALTH_CHECK_FAILURES_BEFORE_RESTART = 3;
+const MAX_RESTART_ATTEMPTS = 3;
 const DEFAULT_BACKEND_READINESS_TIMEOUT = Duration.minutes(1);
 const DEFAULT_BACKEND_READINESS_INTERVAL = Duration.millis(100);
 const DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT = Duration.seconds(1);
@@ -135,8 +141,15 @@ interface BackendManagerState {
   readonly active: Option.Option<ActiveBackendRun>;
   readonly restartAttempt: number;
   readonly restartFiber: Option.Option<Fiber.Fiber<void, never>>;
+  readonly healthFailureCount: number;
+  readonly healthMonitorFiber: Option.Option<Fiber.Fiber<void, never>>;
   readonly nextRunId: number;
 }
+
+type RestartAction =
+  | { readonly _tag: "skip" }
+  | { readonly _tag: "prompt" }
+  | { readonly _tag: "schedule"; readonly delay: Duration.Duration };
 
 const initialState: BackendManagerState = {
   desiredRunning: false,
@@ -145,6 +158,8 @@ const initialState: BackendManagerState = {
   active: Option.none(),
   restartAttempt: 0,
   restartFiber: Option.none(),
+  healthFailureCount: 0,
+  healthMonitorFiber: Option.none(),
   nextRunId: 1,
 };
 
@@ -160,6 +175,8 @@ const withActiveRun =
 
 const calculateRestartDelay = (attempt: number): Duration.Duration =>
   Duration.min(Duration.times(INITIAL_RESTART_DELAY, 2 ** attempt), MAX_RESTART_DELAY);
+
+const healthCheckSchedule = Schedule.spaced(HEALTH_CHECK_INTERVAL).pipe(Schedule.jittered);
 
 const closeRun = (
   run: ActiveBackendRun,
@@ -284,6 +301,9 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
   const backendOutputLog = yield* DesktopObservability.DesktopBackendOutputLog;
   const desktopState = yield* DesktopState.DesktopState;
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
+  const electronApp = yield* ElectronApp.ElectronApp;
+  const electronDialog = yield* ElectronDialog.ElectronDialog;
+  const electronNotification = yield* ElectronNotification.ElectronNotification;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
   const state = yield* Ref.make(initialState);
@@ -318,6 +338,135 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
       onNone: () => Effect.void,
       onSome: (fiber) => Fiber.interrupt(fiber).pipe(Effect.asVoid),
     });
+  });
+
+  const runHealthCheck = Effect.fn("desktop.backendManager.runHealthCheck")(function* () {
+    const current = yield* Ref.get(state);
+    const currentRun = Option.getOrUndefined(current.active);
+    if (!current.desiredRunning || !current.ready || currentRun === undefined) {
+      return;
+    }
+
+    const config = Option.getOrUndefined(current.config);
+    if (config === undefined) {
+      return;
+    }
+
+    const readinessUrl = new URL(BACKEND_READINESS_PATH, config.httpBaseUrl);
+    const client = httpClient.pipe(
+      HttpClient.filterStatusOk,
+      HttpClient.transformResponse(Effect.timeout(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT)),
+    );
+
+    const probeExit = yield* client
+      .get(readinessUrl)
+      .pipe(Effect.asVoid, Effect.timeout(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT), Effect.exit);
+
+    if (Exit.isSuccess(probeExit)) {
+      yield* Ref.update(state, (latest) => {
+        const latestRun = Option.getOrUndefined(latest.active);
+        if (latestRun?.id !== currentRun.id || latest.healthFailureCount === 0) {
+          return latest;
+        }
+
+        return {
+          ...latest,
+          healthFailureCount: 0,
+        };
+      });
+      return;
+    }
+
+    const consecutiveFailures = yield* Ref.modify(state, (latest) => {
+      const latestRun = Option.getOrUndefined(latest.active);
+      if (latestRun?.id !== currentRun.id || !latest.desiredRunning || !latest.ready) {
+        return [0, latest] as const;
+      }
+
+      const nextFailures = latest.healthFailureCount + 1;
+      return [
+        nextFailures,
+        {
+          ...latest,
+          healthFailureCount: nextFailures,
+        },
+      ] as const;
+    });
+
+    if (consecutiveFailures === 0) {
+      return;
+    }
+
+    yield* logBackendManagerWarning("desktop backend health check failed", {
+      url: readinessUrl.href,
+      consecutiveFailures,
+      cause: Cause.pretty(probeExit.cause),
+    });
+
+    if (consecutiveFailures < HEALTH_CHECK_FAILURES_BEFORE_RESTART) {
+      return;
+    }
+
+    yield* Ref.update(state, (latest) => {
+      const latestRun = Option.getOrUndefined(latest.active);
+      if (latestRun?.id !== currentRun.id) {
+        return latest;
+      }
+
+      return {
+        ...latest,
+        healthFailureCount: 0,
+      };
+    });
+
+    yield* electronNotification
+      .show({
+        title: "T3 Code backend restarting",
+        body: "The local backend stopped responding. T3 Code is restarting it automatically.",
+      })
+      .pipe(Effect.ignore);
+    yield* logBackendManagerError("desktop backend health checks failed; restarting backend", {
+      url: readinessUrl.href,
+      consecutiveFailures,
+    });
+    yield* closeRun(currentRun, {
+      timeout: DEFAULT_BACKEND_TERMINATE_GRACE,
+    });
+  });
+
+  const ensureHealthMonitor = Effect.fn("desktop.backendManager.ensureHealthMonitor")(function* () {
+    const existingFiber = yield* Ref.get(state).pipe(
+      Effect.map((current) => current.healthMonitorFiber),
+    );
+    if (Option.isSome(existingFiber)) {
+      return;
+    }
+
+    const fiber = yield* Effect.forkIn(
+      Effect.sleep(HEALTH_CHECK_INTERVAL).pipe(
+        Effect.andThen(
+          runHealthCheck().pipe(
+            Effect.catchCause((cause) =>
+              logBackendManagerError("desktop backend health monitor crashed", {
+                cause: Cause.pretty(cause),
+              }),
+            ),
+            Effect.repeat(healthCheckSchedule),
+            Effect.asVoid,
+          ),
+        ),
+      ),
+      parentScope,
+    );
+
+    const stored = yield* Ref.modify(state, (latest): readonly [boolean, BackendManagerState] =>
+      Option.isNone(latest.healthMonitorFiber)
+        ? [true, { ...latest, healthMonitorFiber: Option.some(fiber) }]
+        : [false, latest],
+    );
+    if (!stored) {
+      yield* Fiber.interrupt(fiber).pipe(Effect.asVoid);
+    }
   });
 
   const start: Effect.Effect<void> = Effect.suspend(() =>
@@ -436,35 +585,38 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
               details: `pid=${pid} port=${config.bootstrap.port} cwd=${config.cwd}`,
             });
           }),
-          onReady: Effect.fn("desktop.backendManager.onReady")(function* () {
-            const isCurrentRun = yield* Ref.modify(state, (latest) => {
-              const activeRun = Option.getOrUndefined(latest.active);
-              if (activeRun?.id !== runId) {
-                return [false, latest] as const;
+          onReady: () =>
+            Effect.gen(function* () {
+              const isCurrentRun = yield* Ref.modify(state, (latest) => {
+                const activeRun = Option.getOrUndefined(latest.active);
+                if (activeRun?.id !== runId) {
+                  return [false, latest] as const;
+                }
+
+                return [
+                  true,
+                  {
+                    ...latest,
+                    restartAttempt: 0,
+                    healthFailureCount: 0,
+                    ready: true,
+                  },
+                ] as const;
+              });
+              if (!isCurrentRun) {
+                return;
               }
 
-              return [
-                true,
-                {
-                  ...latest,
-                  restartAttempt: 0,
-                  ready: true,
-                },
-              ] as const;
-            });
-            if (!isCurrentRun) {
-              return;
-            }
-
-            yield* Ref.set(desktopState.backendReady, true);
-            yield* desktopWindow.handleBackendReady.pipe(
-              Effect.catch((error) =>
-                logBackendManagerError("failed to open main window after backend readiness", {
-                  message: error.message,
-                }),
-              ),
-            );
-          }),
+              yield* Ref.set(desktopState.backendReady, true);
+              yield* desktopWindow.handleBackendReady.pipe(
+                Effect.catch((error) =>
+                  logBackendManagerError("failed to open main window after backend readiness", {
+                    message: error.message,
+                  }),
+                ),
+              );
+              yield* ensureHealthMonitor();
+            }),
           onReadinessFailure: (error) =>
             logBackendManagerWarning("backend readiness check failed during bootstrap", {
               error: error.message,
@@ -490,33 +642,84 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
     ),
   ).pipe(Effect.withSpan("desktop.backendManager.start"));
 
+  const promptRestartRecovery = Effect.fn("desktop.backendManager.promptRestartRecovery")(
+    function* (reason: string) {
+      yield* logBackendManagerError("desktop backend restart limit reached", {
+        reason,
+        restartAttempts: MAX_RESTART_ATTEMPTS,
+      });
+      const result = yield* electronDialog.showMessageBox({
+        type: "warning",
+        buttons: ["Quit", "Retry"],
+        defaultId: 1,
+        cancelId: 0,
+        noLink: true,
+        title: "T3 Code backend unavailable",
+        message: "T3 Code could not recover the local backend automatically.",
+        detail: `${reason}\n\nAutomatic restart failed 3 times. Retry manually or quit the app.`,
+      });
+
+      if (result.response === 1) {
+        yield* Ref.update(state, (latest) => ({
+          ...latest,
+          desiredRunning: true,
+          restartAttempt: 0,
+          healthFailureCount: 0,
+        }));
+        yield* start;
+        return;
+      }
+
+      yield* Ref.set(desktopState.quitting, true);
+      yield* electronApp.quit;
+    },
+  );
+
   const scheduleRestart = Effect.fn("desktop.backendManager.scheduleRestart")(function* (
     reason: string,
   ) {
-    const scheduled = yield* Ref.modify(state, (latest) => {
-      if (!latest.desiredRunning || Option.isSome(latest.restartFiber)) {
-        return [Option.none<Duration.Duration>(), latest] as const;
-      }
+    const action: RestartAction = yield* Ref.modify(
+      state,
+      (latest): readonly [RestartAction, BackendManagerState] => {
+        if (!latest.desiredRunning || Option.isSome(latest.restartFiber)) {
+          return [{ _tag: "skip" }, latest];
+        }
 
-      const delay = calculateRestartDelay(latest.restartAttempt);
-      return [
-        Option.some(delay),
-        {
-          ...latest,
-          restartAttempt: latest.restartAttempt + 1,
-        },
-      ] as const;
-    });
+        if (latest.restartAttempt >= MAX_RESTART_ATTEMPTS) {
+          return [
+            { _tag: "prompt" },
+            {
+              ...latest,
+              desiredRunning: false,
+              healthFailureCount: 0,
+            },
+          ];
+        }
 
-    yield* Option.match(scheduled, {
-      onNone: () => Effect.void,
-      onSome: Effect.fn("desktop.backendManager.scheduleRestartFiber")(function* (delay) {
+        const delay = calculateRestartDelay(latest.restartAttempt);
+        return [
+          { _tag: "schedule", delay },
+          {
+            ...latest,
+            restartAttempt: latest.restartAttempt + 1,
+          },
+        ];
+      },
+    );
+
+    switch (action._tag) {
+      case "skip":
+        return;
+      case "prompt":
+        yield* promptRestartRecovery(reason);
+        return;
+      case "schedule": {
         yield* logBackendManagerError("backend exited unexpectedly; restart scheduled", {
           reason,
-          delayMs: Duration.toMillis(delay),
+          delayMs: Duration.toMillis(action.delay),
         });
         const restartFiber = yield* Effect.forkIn(
-          Effect.sleep(delay).pipe(
+          Effect.sleep(action.delay).pipe(
             Effect.andThen(
               Ref.modify(state, (latest) => {
                 const shouldRestart = latest.desiredRunning;
@@ -546,19 +749,21 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
               }
             : latest,
         );
-      }),
-    });
+        return;
+      }
+    }
   });
 
   const stop = Effect.fn("desktop.backendManager.stop")(function* (options?: {
     readonly timeout?: Duration.Duration;
   }) {
-    const { active, restartFiber } = yield* mutex.withPermits(1)(
+    const { active, restartFiber, healthMonitorFiber } = yield* mutex.withPermits(1)(
       Effect.gen(function* () {
         const result = yield* Ref.modify(state, (latest) => [
           {
             active: latest.active,
             restartFiber: latest.restartFiber,
+            healthMonitorFiber: latest.healthMonitorFiber,
           },
           {
             ...latest,
@@ -566,6 +771,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             ready: false,
             active: Option.none<ActiveBackendRun>(),
             restartFiber: Option.none<Fiber.Fiber<void, never>>(),
+            healthMonitorFiber: Option.none<Fiber.Fiber<void, never>>(),
           },
         ]);
         yield* Ref.set(desktopState.backendReady, false);
@@ -574,6 +780,10 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
     );
 
     yield* Option.match(restartFiber, {
+      onNone: () => Effect.void,
+      onSome: (fiber) => Fiber.interrupt(fiber).pipe(Effect.asVoid),
+    });
+    yield* Option.match(healthMonitorFiber, {
       onNone: () => Effect.void,
       onSome: (fiber) => Fiber.interrupt(fiber).pipe(Effect.asVoid),
     });
