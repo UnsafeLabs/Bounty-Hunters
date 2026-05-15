@@ -3,7 +3,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -19,6 +19,44 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+
+// ── LocalStorage persistence ──────────────────────────────────────────
+
+const STORAGE_KEY = "t3code:providerModelPickerSelection";
+
+interface PersistedSelection {
+  readonly instanceId: string;
+  readonly model: string;
+}
+
+function readPersistedSelection(): PersistedSelection | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      typeof parsed.instanceId === "string" &&
+      typeof parsed.model === "string"
+    ) {
+      return { instanceId: parsed.instanceId, model: parsed.model };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedSelection(instanceId: string, model: string): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ instanceId, model }));
+  } catch {
+    // localStorage may be unavailable (private browsing, quota, etc.)
+  }
+}
+
+// ── Component ─────────────────────────────────────────────────────────
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -45,6 +83,14 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+
+  // Track whether the initial restore from localStorage has been attempted
+  // so we only fire it once on first mount.
+  const restoredRef = useRef(false);
+
+  // Persist on change: whenever the active instance or model changes from
+  // a user action, write to localStorage.
+  const isUserActionRef = useRef(false);
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -86,8 +132,77 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
+  // ── Restore persisted selection on mount ──────────────────────────
+  // If the current instanceId/model pair looks like it came from the
+  // default fallback (rather than an explicit user choice), check
+  // localStorage for a previously-saved preference and restore it.
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+
+    const persisted = readPersistedSelection();
+    if (!persisted) return;
+
+    // Validate the persisted instance is still available.
+    const matchingEntry = props.instanceEntries.find(
+      (entry) => entry.instanceId === persisted.instanceId && entry.enabled,
+    );
+    if (!matchingEntry) {
+      // Persisted provider is no longer available — fall back to first available.
+      const firstAvailable = props.instanceEntries.find((entry) => entry.enabled);
+      if (firstAvailable) {
+        const firstModelOptions = props.modelOptionsByInstance.get(firstAvailable.instanceId);
+        const firstModel = firstAvailable.models[0]?.slug ?? firstModelOptions?.[0]?.slug;
+        if (firstModel && firstModel !== props.model) {
+          isUserActionRef.current = true;
+          props.onInstanceModelChange(firstAvailable.instanceId, firstModel);
+        }
+      }
+      return;
+    }
+
+    // Check the persisted model is still valid for this instance.
+    const modelOptions = props.modelOptionsByInstance.get(matchingEntry.instanceId) ?? [];
+    const modelStillValid = modelOptions.some(
+      (option) => option.slug === persisted.model || option.name === persisted.model,
+    );
+    const resolvedModel = modelStillValid
+      ? persisted.model
+      : (modelOptions[0]?.slug ?? matchingEntry.models[0]?.slug);
+
+    // Only restore if the current selection actually differs — this avoids
+    // an unnecessary re-render cycle when the store has already been
+    // hydrated from its own persistence layer.
+    if (
+      (props.activeInstanceId !== persisted.instanceId || props.model !== resolvedModel) &&
+      resolvedModel
+    ) {
+      isUserActionRef.current = true;
+      props.onInstanceModelChange(
+        matchingEntry.instanceId as ProviderInstanceId,
+        resolvedModel,
+      );
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Persist to localStorage when the user makes a selection ───────
+  useEffect(() => {
+    // Only persist if this change was driven by a user action (not initial
+    // props from store hydration).
+    if (isUserActionRef.current) {
+      isUserActionRef.current = false;
+      // Validate instanceId/model pair is real before persisting
+      if (activeEntry && selectedModel) {
+        writePersistedSelection(activeInstanceId, selectedModel.slug);
+      } else {
+        writePersistedSelection(activeInstanceId, props.model);
+      }
+    }
+  }, [activeInstanceId, props.model, activeEntry, selectedModel]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
+    isUserActionRef.current = true;
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
   };
