@@ -4,6 +4,7 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 
 import { ServerConfig } from "./config.ts";
 import {
+  aggregatedMetricsRouteLayer,
   attachmentsRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
@@ -11,6 +12,7 @@ import {
   staticAndDevRouteLayer,
   browserApiCorsLayer,
 } from "./http.ts";
+import { MetricsAggregatorLive } from "./observability/MetricsAggregator.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -276,6 +278,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(RepositoryIdentityResolverLive),
   Layer.provideMerge(ServerEnvironmentLive),
   Layer.provideMerge(AuthLayerLive),
+  Layer.provideMerge(MetricsAggregatorLive),
 );
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
@@ -304,6 +307,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   authPairingCredentialRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
+  aggregatedMetricsRouteLayer,
   attachmentsRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,

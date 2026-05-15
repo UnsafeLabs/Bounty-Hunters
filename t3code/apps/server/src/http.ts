@@ -23,6 +23,7 @@ import {
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
+import { METRICS_AGGREGATED_PATH, MetricsAggregator } from "./observability/MetricsAggregator.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
@@ -132,6 +133,20 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
           Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
         ),
       );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const aggregatedMetricsRouteLayer = HttpRouter.add(
+  "GET",
+  METRICS_AGGREGATED_PATH,
+  Effect.gen(function* () {
+    yield* requireAuthenticatedRequest;
+    const metricsAggregator = yield* MetricsAggregator;
+    const windows = yield* metricsAggregator.snapshot;
+    return HttpServerResponse.jsonUnsafe(windows, {
+      status: 200,
+      headers: browserApiCorsHeaders,
+    });
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

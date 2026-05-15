@@ -88,6 +88,10 @@ import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
 } from "./observability/Services/BrowserTraceCollector.ts";
+import {
+  METRICS_AGGREGATED_PATH,
+  makeMetricsAggregatorTestLayer,
+} from "./observability/MetricsAggregator.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import {
   ProjectSetupScriptRunner,
@@ -722,6 +726,7 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.repositoryIdentityResolver,
         }),
       ),
+      Layer.provide(makeMetricsAggregatorTestLayer()),
       Layer.provideMerge(makeAuthTestLayer()),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
@@ -1027,6 +1032,23 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.equal(response.status, 200);
       assert.include(yield* response.text, 'data-fallback="project-favicon"');
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves aggregated metrics as authenticated JSON", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        config: { devUrl: new URL("http://127.0.0.1:5173") },
+      });
+
+      const response = yield* HttpClient.get(METRICS_AGGREGATED_PATH, {
+        headers: {
+          cookie: yield* getAuthenticatedSessionCookieHeader(),
+        },
+      });
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(yield* response.json, []);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
