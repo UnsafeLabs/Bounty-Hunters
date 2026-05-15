@@ -1,5 +1,7 @@
+import csv
 import importlib
-from typing import Any, Protocol, cast
+from io import StringIO
+from typing import Any, AsyncGenerator, Protocol, Sequence, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
 from fastapi.sse import EventSourceResponse as EventSourceResponse  # noqa
@@ -95,4 +97,96 @@ class ORJSONResponse(JSONResponse):
         assert orjson is not None, "orjson must be installed to use ORJSONResponse"
         return orjson.dumps(
             content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
+        )
+
+
+def _escape_csv_value(value: Any, delimiter: str) -> str:
+    """Escape a single CSV value per RFC 4180."""
+    s = str(value) if value is not None else ""
+    needs_quoting = (
+        delimiter in s
+        or '"' in s
+        or "\n" in s
+        or "\r" in s
+        or "," in s
+    )
+    if needs_quoting:
+        escaped = s.replace('"', '""')
+        s = f'"{escaped}"'
+    return s
+
+
+async def _csv_row_generator(
+    headers: Sequence[str] | None,
+    rows: AsyncGenerator[Sequence[Any], None],
+    delimiter: str,
+) -> AsyncGenerator[bytes, None]:
+    """Generate CSV content as bytes from an async row generator."""
+    if headers:
+        header_line = delimiter.join(_escape_csv_value(h, delimiter) for h in headers)
+        yield (header_line + "\r\n").encode("utf-8")
+
+    async for row in rows:
+        values = [_escape_csv_value(v, delimiter) for v in row]
+        line = delimiter.join(values)
+        yield (line + "\r\n").encode("utf-8")
+
+
+class StreamingCSVResponse(StreamingResponse):
+    """
+    A streaming CSV response for large dataset exports.
+
+    Streams rows as CSV without loading the entire dataset into memory.
+    Supports RFC 4180 escaping, custom delimiters, and configurable filenames.
+
+    ## Example
+
+    ```python
+    from fastapi.responses import StreamingCSVResponse
+
+
+    async def generate_rows():
+        for i in range(1000000):
+            yield [i, f"item-{i}", "description"]
+
+    @app.get("/export.csv")
+    async def export_csv():
+        return StreamingCSVResponse(
+            rows=generate_rows(),
+            headers=["id", "name", "description"],
+            filename="export.csv",
+        )
+    ```
+    """
+
+    MEDIA_TYPE = "text/csv"
+
+    def __init__(
+        self,
+        rows: AsyncGenerator[Sequence[Any], None],
+        headers: Sequence[str] | None = None,
+        filename: str = "export.csv",
+        delimiter: str = ",",
+        status_code: int = 200,
+        **kwargs: Any,
+    ):
+        """
+        Create a streaming CSV response.
+
+        Args:
+            rows: Async generator yielding sequences (lists/tuples) of row values.
+            headers: Optional list of column names written as the first row.
+            filename: Filename in the Content-Disposition header.
+            delimiter: CSV delimiter character (default: comma).
+            status_code: HTTP status code (default: 200).
+        """
+        content = _csv_row_generator(headers, rows, delimiter)
+        super().__init__(
+            content=content,
+            status_code=status_code,
+            media_type=self.MEDIA_TYPE,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+            **kwargs,
         )
