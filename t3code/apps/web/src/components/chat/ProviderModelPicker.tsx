@@ -18,6 +18,7 @@ import {
   getTriggerDisplayModelName,
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
+import { useProviderModelPersistence } from "./useProviderModelPersistence";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
@@ -45,6 +46,17 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+
+  const instanceIds = useMemo(
+    () => props.instanceEntries.map((e) => e.instanceId),
+    [props.instanceEntries],
+  );
+
+  const { persist, reset } = useProviderModelPersistence({
+    onRestore: props.onInstanceModelChange,
+    availableInstanceIds: instanceIds,
+    modelsByInstance: props.modelOptionsByInstance,
+  });
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -88,8 +100,19 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
+    persist(instanceId, model);
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
+  };
+
+  const handleResetToDefault = () => {
+    const firstEntry = props.instanceEntries[0];
+    const firstModel = firstEntry
+      ? (props.modelOptionsByInstance.get(firstEntry.instanceId)?.[0]?.slug ?? "")
+      : "";
+    if (firstEntry) {
+      reset(firstEntry.instanceId, firstModel);
+    }
   };
 
   return (
@@ -180,6 +203,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           terminalOpen={props.terminalOpen ?? false}
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
+          onResetToDefault={handleResetToDefault}
         />
       </PopoverPopup>
     </Popover>

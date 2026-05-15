@@ -82,6 +82,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   terminalOpen: boolean;
   onRequestClose?: () => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  onResetToDefault?: () => void;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -113,6 +114,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const focusSearchInput = useCallback(() => {
     searchInputRef.current?.focus({ preventScroll: true });
   }, []);
+
+  const handleResetToDefault = useCallback(() => {
+    props.onResetToDefault?.();
+    props.onRequestClose?.();
+  }, [props.onResetToDefault, props.onRequestClose]);
 
   const handleSelectInstance = useCallback(
     (instanceId: ProviderInstanceId | "favorites") => {
