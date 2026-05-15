@@ -63,6 +63,7 @@ function makeFakeBrowserWindow() {
     window: window as unknown as Electron.BrowserWindow,
     loadURL: window.loadURL,
     openDevTools: webContents.openDevTools,
+    send: webContents.send,
   };
 }
 
@@ -174,6 +175,32 @@ describe("DesktopWindow", () => {
         assert.equal(yield* Ref.get(createCount), 1);
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["http://127.0.0.1:5733/"]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("queues deep links until the backend window is ready", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.dispatchDeepLink({ type: "settings" });
+
+        assert.equal(yield* Ref.get(createCount), 0);
+        assert.deepEqual(fakeWindow.send.mock.calls, []);
+
+        yield* desktopWindow.handleBackendReady;
+
+        assert.equal(yield* Ref.get(createCount), 1);
+        assert.deepEqual(fakeWindow.send.mock.calls, [["desktop:deep-link", { type: "settings" }]]);
       }).pipe(Effect.provide(layer));
     }),
   );

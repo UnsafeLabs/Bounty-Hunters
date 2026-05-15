@@ -1,5 +1,11 @@
-import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
+import {
+  DEFAULT_MODEL,
+  type DesktopDeepLink,
+  type EnvironmentId,
+  ProviderInstanceId,
+  type ServerLifecycleWelcomePayload,
+} from "@t3tools/contracts";
+import { scopedProjectKey, scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import {
   Outlet,
   createRootRouteWithContext,
@@ -29,7 +35,12 @@ import {
 } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readLocalApi } from "../localApi";
+import { readEnvironmentApi } from "../environmentApi";
 import { useSettings } from "../hooks/useSettings";
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { findProjectByPath, inferProjectTitleFromPath } from "../lib/projectPaths";
+import { getLatestThreadForProject } from "../lib/threadSort";
+import { newCommandId, newProjectId } from "../lib/utils";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
@@ -43,7 +54,11 @@ import {
   useServerConfigUpdatedSubscription,
   useServerWelcomeSubscription,
 } from "../rpc/serverState";
-import { useStore } from "../store";
+import {
+  selectProjectsAcrossEnvironments,
+  selectThreadsAcrossEnvironments,
+  useStore,
+} from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { syncBrowserChromeTheme } from "../hooks/useTheme";
 import {
@@ -62,6 +77,7 @@ import {
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import { buildThreadRouteParams } from "../threadRoutes";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -137,6 +153,7 @@ function RootRouteView() {
         <EnvironmentConnectionManagerBootstrap />
         <SshPasswordPromptDialog />
         <HostedStaticEnvironmentBootstrap />
+        <DesktopDeepLinkRouter />
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
         {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
         {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}
@@ -149,6 +166,130 @@ function RootRouteView() {
       </AnchoredToastProvider>
     </ToastProvider>
   );
+}
+
+function getDeepLinkEnvironmentId(): EnvironmentId | null {
+  return (
+    useStore.getState().activeEnvironmentId ?? getPrimaryKnownEnvironment()?.environmentId ?? null
+  );
+}
+
+function DesktopDeepLinkRouter() {
+  const navigate = useNavigate();
+  const { handleNewThread } = useNewThreadHandler();
+  const settings = useSettings();
+
+  const showDeepLinkError = useEffectEvent((description: string) => {
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title: "Unable to open deep link",
+        description,
+      }),
+    );
+  });
+
+  const openProject = useEffectEvent(async (path: string) => {
+    const environmentId = getDeepLinkEnvironmentId();
+    if (!environmentId) {
+      throw new Error("No active environment is available.");
+    }
+
+    await ensureEnvironmentConnectionBootstrapped(environmentId);
+    const projects = selectProjectsAcrossEnvironments(useStore.getState());
+    const threads = selectThreadsAcrossEnvironments(useStore.getState());
+    const existing = findProjectByPath(
+      projects.filter((project) => project.environmentId === environmentId),
+      path,
+    );
+
+    if (existing) {
+      const latestThread = getLatestThreadForProject(
+        threads.filter((thread) => thread.environmentId === existing.environmentId),
+        existing.id,
+        settings.sidebarThreadSortOrder,
+      );
+      if (latestThread) {
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(
+            scopeThreadRef(latestThread.environmentId, latestThread.id),
+          ),
+        });
+        return;
+      }
+
+      await handleNewThread(scopeProjectRef(existing.environmentId, existing.id), {
+        envMode: settings.defaultThreadEnvMode,
+      });
+      return;
+    }
+
+    const api = readEnvironmentApi(environmentId);
+    if (!api) {
+      throw new Error("The active environment is not connected.");
+    }
+
+    const projectId = newProjectId();
+    await api.orchestration.dispatchCommand({
+      type: "project.create",
+      commandId: newCommandId(),
+      projectId,
+      title: inferProjectTitleFromPath(path),
+      workspaceRoot: path,
+      createWorkspaceRootIfMissing: true,
+      defaultModelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: DEFAULT_MODEL,
+      },
+      createdAt: new Date().toISOString(),
+    });
+    await handleNewThread(scopeProjectRef(environmentId, projectId), {
+      envMode: settings.defaultThreadEnvMode,
+    });
+  });
+
+  const openThread = useEffectEvent(async (id: string) => {
+    const threads = selectThreadsAcrossEnvironments(useStore.getState());
+    const thread = threads.find((candidate) => candidate.id === id);
+    if (!thread) {
+      throw new Error(`Thread ${id} was not found.`);
+    }
+
+    await navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
+    });
+  });
+
+  const handleDeepLink = useEffectEvent((link: DesktopDeepLink) => {
+    if (link.type === "error") {
+      showDeepLinkError(link.message);
+      return;
+    }
+
+    const task =
+      link.type === "settings"
+        ? navigate({ to: "/settings/general" })
+        : link.type === "chatThread"
+          ? openThread(link.id)
+          : openProject(link.path);
+
+    void Promise.resolve(task).catch((error) => {
+      showDeepLinkError(error instanceof Error ? error.message : "An unexpected error occurred.");
+    });
+  });
+
+  useEffect(() => {
+    const onDeepLink = window.desktopBridge?.onDeepLink;
+    if (typeof onDeepLink !== "function") {
+      return;
+    }
+
+    return onDeepLink(handleDeepLink);
+  }, []);
+
+  return null;
 }
 
 function HostedStaticEnvironmentBootstrap() {

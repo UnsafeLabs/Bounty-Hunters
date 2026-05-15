@@ -7,6 +7,7 @@ import * as Ref from "effect/Ref";
 
 import type * as Electron from "electron";
 
+import type { DesktopDeepLink } from "@t3tools/contracts";
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
@@ -58,6 +59,7 @@ export interface DesktopWindowShape {
   readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
   readonly handleBackendReady: Effect.Effect<void, DesktopWindowError>;
   readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
+  readonly dispatchDeepLink: (link: DesktopDeepLink) => Effect.Effect<void, DesktopWindowError>;
   readonly syncAppearance: Effect.Effect<void>;
 }
 
@@ -155,6 +157,7 @@ const make = Effect.gen(function* () {
   const state = yield* DesktopState.DesktopState;
   const context = yield* Effect.context<DesktopWindowRuntimeServices>();
   const runPromise = Effect.runPromiseWith(context);
+  const pendingDeepLinks = yield* Ref.make<DesktopDeepLink[]>([]);
 
   const createWindow = Effect.fn("desktop.window.createWindow")(function* (
     backendHttpUrl: URL,
@@ -320,6 +323,44 @@ const make = Effect.gen(function* () {
     yield* createMain;
   }).pipe(Effect.withSpan("desktop.window.createMainIfBackendReady"));
 
+  const dispatchDeepLinkNow = Effect.fn("desktop.window.dispatchDeepLinkNow")(function* (
+    link: DesktopDeepLink,
+  ) {
+    const targetWindow = yield* revealOrCreateMain;
+
+    const send = () => {
+      if (targetWindow.isDestroyed()) return;
+      targetWindow.webContents.send(IpcChannels.DEEP_LINK_CHANNEL, link);
+      void runPromise(electronWindow.reveal(targetWindow));
+    };
+
+    if (targetWindow.webContents.isLoadingMainFrame()) {
+      targetWindow.webContents.once("did-finish-load", send);
+      return;
+    }
+
+    send();
+  });
+
+  const dispatchDeepLink = Effect.fn("desktop.window.dispatchDeepLink")(function* (
+    link: DesktopDeepLink,
+  ) {
+    const backendReady = yield* Ref.get(state.backendReady);
+    if (!backendReady) {
+      yield* Ref.update(pendingDeepLinks, (links) => [...links, link]);
+      return;
+    }
+
+    yield* dispatchDeepLinkNow(link);
+  });
+
+  const flushPendingDeepLinks = Effect.gen(function* () {
+    const links = yield* Ref.getAndSet(pendingDeepLinks, []);
+    for (const link of links) {
+      yield* dispatchDeepLinkNow(link);
+    }
+  }).pipe(Effect.withSpan("desktop.window.flushPendingDeepLinks"));
+
   return DesktopWindow.of({
     createMain,
     ensureMain,
@@ -337,6 +378,7 @@ const make = Effect.gen(function* () {
       yield* Ref.set(state.backendReady, true);
       yield* logWindowInfo("backend ready", { source: "http" });
       yield* createMainIfBackendReady;
+      yield* flushPendingDeepLinks;
     }).pipe(Effect.withSpan("desktop.window.handleBackendReady")),
     dispatchMenuAction: Effect.fn("desktop.window.dispatchMenuAction")(function* (action) {
       yield* Effect.annotateCurrentSpan({ action });
@@ -356,6 +398,7 @@ const make = Effect.gen(function* () {
 
       send();
     }),
+    dispatchDeepLink,
     syncAppearance: Effect.gen(function* () {
       const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
       yield* electronWindow.syncAllAppearance((window) =>

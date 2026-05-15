@@ -10,9 +10,12 @@ import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
 
+import type { DesktopDeepLink } from "@t3tools/contracts";
+import { isUncPath, isWindowsDrivePath } from "@t3tools/shared/path";
 import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/DesktopEnvironment.ts";
 
 export const DESKTOP_SCHEME = "t3";
+export const DEEP_LINK_SCHEME = "t3code";
 
 export class ElectronProtocolRegistrationError extends Data.TaggedError(
   "ElectronProtocolRegistrationError",
@@ -49,6 +52,9 @@ export interface ElectronProtocolShape {
     ElectronProtocolRegistrationError | ElectronProtocolStaticBundleMissingError,
     FileSystem.FileSystem | DesktopEnvironment | Scope.Scope
   >;
+  readonly registerDeepLinkProtocol: <E, R>(
+    handler: (link: DesktopDeepLink) => Effect.Effect<void, E, R>,
+  ) => Effect.Effect<boolean, E, R | Scope.Scope>;
 }
 
 export class ElectronProtocol extends Context.Service<ElectronProtocol, ElectronProtocolShape>()(
@@ -67,6 +73,77 @@ export function normalizeDesktopProtocolPathname(rawPath: string): Option.Option
     segments.push(segment);
   }
   return Option.some(segments.join("/"));
+}
+
+function isDeepLinkUrl(value: string): boolean {
+  return value.toLowerCase().startsWith(`${DEEP_LINK_SCHEME}://`);
+}
+
+function collectDeepLinkUrls(argv: readonly string[]): readonly string[] {
+  return argv.filter(isDeepLinkUrl);
+}
+
+function hasTraversalSegment(value: string): boolean {
+  return value.split(/[\\/]+/).some((segment) => segment === "..");
+}
+
+function isAbsoluteProjectPath(value: string): boolean {
+  return value.startsWith("/") || isWindowsDrivePath(value) || isUncPath(value);
+}
+
+function validateProjectPath(rawPath: string | null): DesktopDeepLink {
+  const path = rawPath?.trim() ?? "";
+  if (path.length === 0) {
+    return { type: "error", message: "Project deep link is missing a path." };
+  }
+  if (path.includes("\0")) {
+    return { type: "error", message: "Project deep link path contains an invalid character." };
+  }
+  if (!isAbsoluteProjectPath(path)) {
+    return { type: "error", message: "Project deep link path must be absolute." };
+  }
+  if (hasTraversalSegment(path)) {
+    return { type: "error", message: "Project deep link path cannot contain '..' segments." };
+  }
+  return { type: "openProject", path };
+}
+
+export function parseDesktopDeepLink(rawUrl: string): DesktopDeepLink {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return { type: "error", message: "Deep link URL is invalid." };
+  }
+
+  if (url.protocol !== `${DEEP_LINK_SCHEME}:`) {
+    return { type: "error", message: "Deep link protocol is not supported." };
+  }
+
+  const route = `${url.hostname}${url.pathname}`.replace(/\/+$/g, "");
+  if (route === "open/project") {
+    return validateProjectPath(url.searchParams.get("path"));
+  }
+  if (route === "chat/thread") {
+    const id = url.searchParams.get("id")?.trim() ?? "";
+    return id.length > 0
+      ? { type: "chatThread", id }
+      : { type: "error", message: "Chat thread deep link is missing an id." };
+  }
+  if (route === "settings") {
+    return { type: "settings" };
+  }
+
+  return { type: "error", message: "Deep link route is not supported." };
+}
+
+function registerDefaultDeepLinkClient(): void {
+  if (process.defaultApp && process.argv.length >= 2) {
+    Electron.app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, process.execPath, [process.argv[1]!]);
+    return;
+  }
+
+  Electron.app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
 }
 
 const registerDesktopSchemePrivileges = Effect.sync(() => {
@@ -266,6 +343,58 @@ const make = Effect.gen(function* () {
   return ElectronProtocol.of({
     registerFileProtocol,
     registerDesktopFileProtocol,
+    registerDeepLinkProtocol: Effect.fn("desktop.electron.protocol.registerDeepLinkProtocol")(
+      function* <E, R>(
+        handler: (link: DesktopDeepLink) => Effect.Effect<void, E, R>,
+      ): Effect.fn.Return<boolean, E, R | Scope.Scope> {
+        const context = yield* Effect.context<R>();
+        const runPromise = Effect.runPromiseWith(context);
+        const dispatch = (rawUrl: string) => {
+          void runPromise(handler(parseDesktopDeepLink(rawUrl))).catch(() => undefined);
+        };
+
+        const hasSingleInstanceLock = Electron.app.requestSingleInstanceLock();
+        if (!hasSingleInstanceLock) {
+          return false;
+        }
+
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            registerDefaultDeepLinkClient();
+
+            const onOpenUrl = (event: Electron.Event, rawUrl: string) => {
+              event.preventDefault();
+              dispatch(rawUrl);
+            };
+            const onSecondInstance = (
+              _event: Electron.Event,
+              argv: string[],
+              _workingDirectory: string,
+            ) => {
+              for (const rawUrl of collectDeepLinkUrls(argv)) {
+                dispatch(rawUrl);
+              }
+            };
+
+            Electron.app.on("open-url", onOpenUrl);
+            Electron.app.on("second-instance", onSecondInstance);
+
+            for (const rawUrl of collectDeepLinkUrls(process.argv)) {
+              dispatch(rawUrl);
+            }
+
+            return { onOpenUrl, onSecondInstance };
+          }),
+          ({ onOpenUrl, onSecondInstance }) =>
+            Effect.sync(() => {
+              Electron.app.removeListener("open-url", onOpenUrl);
+              Electron.app.removeListener("second-instance", onSecondInstance);
+            }),
+        );
+
+        return true;
+      },
+    ),
   });
 });
 

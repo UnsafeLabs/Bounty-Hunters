@@ -1,7 +1,25 @@
-import type { DesktopBridge } from "@t3tools/contracts";
+import type { DesktopBridge, DesktopDeepLink } from "@t3tools/contracts";
 import { contextBridge, ipcRenderer } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
+
+const pendingDeepLinks: DesktopDeepLink[] = [];
+const deepLinkListeners = new Set<(link: DesktopDeepLink) => void>();
+
+ipcRenderer.on(
+  IpcChannels.DEEP_LINK_CHANNEL,
+  (_event: Electron.IpcRendererEvent, link: unknown) => {
+    if (typeof link !== "object" || link === null) return;
+    const deepLink = link as DesktopDeepLink;
+    if (deepLinkListeners.size === 0) {
+      pendingDeepLinks.push(deepLink);
+      return;
+    }
+    for (const listener of deepLinkListeners) {
+      listener(deepLink);
+    }
+  },
+);
 
 function unwrapEnsureSshEnvironmentResult(result: unknown) {
   if (
@@ -105,6 +123,15 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.on(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener);
     return () => {
       ipcRenderer.removeListener(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener);
+    };
+  },
+  onDeepLink: (listener) => {
+    deepLinkListeners.add(listener);
+    for (const link of pendingDeepLinks.splice(0)) {
+      listener(link);
+    }
+    return () => {
+      deepLinkListeners.delete(listener);
     };
   },
   getUpdateState: () => ipcRenderer.invoke(IpcChannels.UPDATE_GET_STATE_CHANNEL),
