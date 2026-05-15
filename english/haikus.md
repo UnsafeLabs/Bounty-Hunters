@@ -1,51 +1,31 @@
 # Haiku Collection
 
-A curated set of original haikus on nature, technology, and solitude.
+## Morning Dew
+Morning dew glistens  
+On the spider's web so fine  
+Sunrise paints the sky  
 
----
+## The Server Room
+Fans hum in the dark  
+Blinking lights in endless rows  
+Data dreams in sleep  
 
-### Morning Dew
+## Ocean at Dusk
+Waves kiss the shoreline  
+Sun bleeds orange into blue  
+Stars wake one by one  
 
-Dew drips from the leaf
-A spider weaves silver thread
-[TODO: write closing line — must be 5 syllables, reference sunrise]
+## Empty Chair
+The chair sits empty  
+In the corner of the room  
+No one sits here now  
 
----
+## Compiler Error
+The code won't compile  
+Forgot the semicolon  
+Forgot the damn dot  
 
-### The Server Room
-
-Blinking lights hum low
-Cables tangled, fans spinning
-No one hears them cry
-
----
-
-### Ocean at Dusk
-
-Waves crash on the shore
-The sun melts into the sea
-Seagulls call goodnight
-
----
-
-### Empty Chair
-
-Dust gathers softly
-A chair waits by the window
-[TODO: write closing line — must be 5 syllables, convey absence]
-
----
-
-### Compiler Error
-
-Semicolon missed
-The build fails at line forty
-[TODO: write closing line — must be 5 syllables, humorous tone]
-
----
-
-### Autumn Walk
-
-Leaves crunch underfoot
-[TODO: write middle line — must be 7 syllables, describe the wind]
-Cold hands find warm pockets
+## Autumn Walk
+Leaves crunch underfoot  
+The wind whispers through the trees  
+Memory fading
