@@ -17,7 +17,11 @@ import {
   getWsConnectionUiState,
   resetWsConnectionStateForTests,
 } from "../rpc/wsConnectionState";
-import { WsTransport } from "./wsTransport";
+import {
+  WsTransport,
+  WsTransportRequestQueueOverflowError,
+  WsTransportRequestTimeoutError,
+} from "./wsTransport";
 
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 
@@ -115,6 +119,32 @@ function createTransport(...args: ConstructorParameters<typeof WsTransport>): Ws
   const transport = new WsTransport(...args);
   transports.push(transport);
   return transport;
+}
+
+function upsertKeybindingRequest(transport: WsTransport, key: string) {
+  return transport.request((client) =>
+    client[WS_METHODS.serverUpsertKeybinding]({
+      command: "terminal.toggle",
+      key,
+    }),
+  );
+}
+
+function resolveUpsertRequest(socket: MockWebSocket, sentIndex: number) {
+  const requestMessage = JSON.parse(socket.sent[sentIndex] ?? "{}") as { id: string };
+  socket.serverMessage(
+    JSON.stringify({
+      _tag: "Exit",
+      requestId: requestMessage.id,
+      exit: {
+        _tag: "Success",
+        value: {
+          keybindings: [],
+          issues: [],
+        },
+      },
+    }),
+  );
 }
 
 beforeEach(() => {
@@ -403,6 +433,186 @@ describe("WsTransport", () => {
       issues: [],
     });
 
+    await transport.dispose();
+  });
+
+  it("queues unary requests while reconnecting and flushes them in FIFO order", async () => {
+    const transport = createTransport("ws://localhost:3020", undefined, {
+      requestQueueMaxAgeMs: 2_000,
+    });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = getSocket();
+    firstSocket.open();
+
+    await waitFor(() => {
+      expect(transport.connectionState.getSnapshot()).toBe("connected");
+    });
+
+    firstSocket.close(1012, "service restart");
+
+    await waitFor(() => {
+      expect(transport.connectionState.getSnapshot()).toBe("reconnecting");
+    });
+
+    const firstQueuedRequest = upsertKeybindingRequest(transport, "ctrl+1");
+    const secondQueuedRequest = upsertKeybindingRequest(transport, "ctrl+2");
+
+    expect(firstSocket.sent).toHaveLength(0);
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    }, 2_000);
+
+    const secondSocket = getSocket();
+    secondSocket.open();
+
+    await waitFor(() => {
+      expect(secondSocket.sent).toHaveLength(1);
+    });
+
+    const thirdQueuedRequest = upsertKeybindingRequest(transport, "ctrl+3");
+    expect(secondSocket.sent).toHaveLength(1);
+
+    expect(JSON.parse(secondSocket.sent[0] ?? "{}")).toMatchObject({
+      payload: { key: "ctrl+1" },
+    });
+    resolveUpsertRequest(secondSocket, 0);
+    await expect(firstQueuedRequest).resolves.toEqual({
+      keybindings: [],
+      issues: [],
+    });
+
+    await waitFor(() => {
+      expect(secondSocket.sent).toHaveLength(2);
+    });
+    expect(JSON.parse(secondSocket.sent[1] ?? "{}")).toMatchObject({
+      payload: { key: "ctrl+2" },
+    });
+    resolveUpsertRequest(secondSocket, 1);
+    await expect(secondQueuedRequest).resolves.toEqual({
+      keybindings: [],
+      issues: [],
+    });
+
+    await waitFor(() => {
+      expect(secondSocket.sent).toHaveLength(3);
+    });
+    expect(JSON.parse(secondSocket.sent[2] ?? "{}")).toMatchObject({
+      payload: { key: "ctrl+3" },
+    });
+    resolveUpsertRequest(secondSocket, 2);
+    await expect(thirdQueuedRequest).resolves.toEqual({
+      keybindings: [],
+      issues: [],
+    });
+
+    await transport.dispose();
+  });
+
+  it("drops the oldest queued unary request when the reconnect queue is full", async () => {
+    const transport = createTransport("ws://localhost:3020", undefined, {
+      requestQueueMaxAgeMs: 2_000,
+      requestQueueMaxSize: 2,
+    });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstQueuedRequest = upsertKeybindingRequest(transport, "ctrl+1");
+    const secondQueuedRequest = upsertKeybindingRequest(transport, "ctrl+2");
+    const thirdQueuedRequest = upsertKeybindingRequest(transport, "ctrl+3");
+
+    await expect(firstQueuedRequest).rejects.toBeInstanceOf(WsTransportRequestQueueOverflowError);
+
+    const socket = getSocket();
+    socket.open();
+
+    await waitFor(() => {
+      expect(socket.sent).toHaveLength(1);
+    });
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toMatchObject({
+      payload: { key: "ctrl+2" },
+    });
+    resolveUpsertRequest(socket, 0);
+    await expect(secondQueuedRequest).resolves.toEqual({
+      keybindings: [],
+      issues: [],
+    });
+
+    await waitFor(() => {
+      expect(socket.sent).toHaveLength(2);
+    });
+    expect(JSON.parse(socket.sent[1] ?? "{}")).toMatchObject({
+      payload: { key: "ctrl+3" },
+    });
+    resolveUpsertRequest(socket, 1);
+    await expect(thirdQueuedRequest).resolves.toEqual({
+      keybindings: [],
+      issues: [],
+    });
+
+    await transport.dispose();
+  });
+
+  it("expires queued unary requests that outlive the reconnect queue age limit", async () => {
+    const transport = createTransport("ws://localhost:3020", undefined, {
+      requestQueueMaxAgeMs: 20,
+    });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    await expect(upsertKeybindingRequest(transport, "ctrl+1")).rejects.toBeInstanceOf(
+      WsTransportRequestTimeoutError,
+    );
+
+    expect(getSocket().sent).toHaveLength(0);
+    await transport.dispose();
+  });
+
+  it("exposes connection state changes for UI subscribers", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    const states: string[] = [];
+    const unsubscribe = transport.connectionState.subscribe((state) => {
+      states.push(state);
+    });
+
+    expect(transport.connectionState.getSnapshot()).toBe("disconnected");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = getSocket();
+    firstSocket.open();
+
+    await waitFor(() => {
+      expect(states).toContain("connected");
+    });
+
+    firstSocket.close(1012, "service restart");
+
+    await waitFor(() => {
+      expect(states).toContain("reconnecting");
+    });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    }, 2_000);
+
+    getSocket().open();
+
+    await waitFor(() => {
+      expect(states.at(-1)).toBe("connected");
+    });
+
+    unsubscribe();
     await transport.dispose();
   });
 
@@ -1175,6 +1385,7 @@ describe("WsTransport", () => {
           }) => Promise<void>;
         }
       ).closeSession,
+      rejectQueuedRequests: vi.fn(),
     } as unknown as WsTransport;
 
     void WsTransport.prototype.dispose.call(transport);

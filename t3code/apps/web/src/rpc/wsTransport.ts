@@ -30,6 +30,20 @@ interface RequestOptions {
   readonly timeout?: Option.Option<Duration.Input>;
 }
 
+export type WsTransportConnectionState = "connected" | "disconnected" | "reconnecting";
+
+export interface WsTransportConnectionStateObservable {
+  readonly getSnapshot: () => WsTransportConnectionState;
+  readonly subscribe: (listener: (state: WsTransportConnectionState) => void) => () => void;
+}
+
+export interface WsTransportQueueOptions {
+  readonly requestQueueMaxAgeMs?: number;
+  readonly requestQueueMaxSize?: number;
+}
+
+export const WS_TRANSPORT_DEFAULT_REQUEST_QUEUE_MAX_AGE_MS = 30_000;
+export const WS_TRANSPORT_DEFAULT_REQUEST_QUEUE_MAX_SIZE = 100;
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
 const NOOP: () => void = () => undefined;
 
@@ -45,6 +59,30 @@ interface StreamRequestStartInfo {
   readonly stream: boolean;
 }
 
+interface QueuedRequest<TSuccess> {
+  readonly createdAt: number;
+  readonly execute: () => Promise<TSuccess>;
+  readonly reject: (error: unknown) => void;
+  readonly resolve: (value: TSuccess) => void;
+  readonly timeout: ReturnType<typeof setTimeout>;
+}
+
+export class WsTransportRequestTimeoutError extends Error {
+  override readonly name = "WsTransportRequestTimeoutError";
+
+  constructor(readonly maxAgeMs: number) {
+    super(`WebSocket RPC request timed out after ${maxAgeMs}ms in the reconnect queue.`);
+  }
+}
+
+export class WsTransportRequestQueueOverflowError extends Error {
+  override readonly name = "WsTransportRequestQueueOverflowError";
+
+  constructor(readonly maxSize: number) {
+    super(`WebSocket RPC reconnect queue exceeded its max size of ${maxSize}.`);
+  }
+}
+
 function formatErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -55,22 +93,45 @@ function formatErrorMessage(error: unknown): string {
 export class WsTransport {
   private readonly url: WsRpcProtocolSocketUrlProvider;
   private readonly lifecycleHandlers: WsProtocolLifecycleHandlers | undefined;
+  private readonly queueMaxAgeMs: number;
+  private readonly queueMaxSize: number;
   private disposed = false;
   private hasReportedTransportDisconnect = false;
+  private hasConnected = false;
   private intentionalCloseDepth = 0;
+  private currentConnectionState: WsTransportConnectionState = "disconnected";
+  private flushingQueuedRequests = false;
   private reconnectChain: Promise<void> = Promise.resolve();
   private nextSessionId = 0;
   private activeSessionId = 0;
   private session: TransportSession;
   private lastHeartbeatPongAt = 0;
+  private readonly connectionStateListeners = new Set<
+    (state: WsTransportConnectionState) => void
+  >();
+  private readonly queuedRequests: Array<QueuedRequest<unknown>> = [];
   private readonly streamRequestStartListeners = new Set<(info: StreamRequestStartInfo) => void>();
+  readonly connectionState: WsTransportConnectionStateObservable = {
+    getSnapshot: () => this.currentConnectionState,
+    subscribe: (listener) => {
+      this.connectionStateListeners.add(listener);
+      return () => {
+        this.connectionStateListeners.delete(listener);
+      };
+    },
+  };
 
   constructor(
     url: WsRpcProtocolSocketUrlProvider,
     lifecycleHandlers?: WsProtocolLifecycleHandlers,
+    queueOptions?: WsTransportQueueOptions,
   ) {
     this.url = url;
-    this.lifecycleHandlers = lifecycleHandlers;
+    this.lifecycleHandlers = this.withQueueLifecycle(lifecycleHandlers);
+    this.queueMaxAgeMs =
+      queueOptions?.requestQueueMaxAgeMs ?? WS_TRANSPORT_DEFAULT_REQUEST_QUEUE_MAX_AGE_MS;
+    this.queueMaxSize =
+      queueOptions?.requestQueueMaxSize ?? WS_TRANSPORT_DEFAULT_REQUEST_QUEUE_MAX_SIZE;
     this.session = this.createSession();
   }
 
@@ -82,9 +143,17 @@ export class WsTransport {
       throw new Error("Transport disposed");
     }
 
-    const session = this.session;
-    const client = await session.clientPromise;
-    return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
+    const runRequest = async () => {
+      const session = this.session;
+      const client = await session.clientPromise;
+      return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
+    };
+
+    if (this.shouldQueueRequests()) {
+      return await this.enqueueRequest(runRequest);
+    }
+
+    return await runRequest();
   }
 
   async requestStream<TValue>(
@@ -208,6 +277,7 @@ export class WsTransport {
 
       clearAllTrackedRpcRequests();
       this.lastHeartbeatPongAt = 0;
+      this.setConnectionState("reconnecting");
       const previousSession = this.session;
       this.session = this.createSession();
       await this.closeSession(previousSession);
@@ -226,6 +296,7 @@ export class WsTransport {
       return;
     }
     this.disposed = true;
+    this.rejectQueuedRequests(new Error("Transport disposed"));
     await this.closeSession(this.session);
   }
 
@@ -272,6 +343,147 @@ export class WsTransport {
       runtime,
       clientScope,
       clientPromise: runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient)),
+    };
+  }
+
+  private enqueueRequest<TSuccess>(execute: () => Promise<TSuccess>): Promise<TSuccess> {
+    this.expireQueuedRequests(Date.now());
+    while (this.queuedRequests.length >= this.queueMaxSize) {
+      const dropped = this.queuedRequests.shift();
+      if (!dropped) {
+        break;
+      }
+      clearTimeout(dropped.timeout);
+      dropped.reject(new WsTransportRequestQueueOverflowError(this.queueMaxSize));
+    }
+
+    return new Promise<TSuccess>((resolve, reject) => {
+      let queued: QueuedRequest<TSuccess>;
+      queued = {
+        createdAt: Date.now(),
+        execute,
+        reject,
+        resolve,
+        timeout: setTimeout(() => {
+          const index = this.queuedRequests.indexOf(queued as QueuedRequest<unknown>);
+          if (index >= 0) {
+            this.queuedRequests.splice(index, 1);
+          }
+          reject(new WsTransportRequestTimeoutError(this.queueMaxAgeMs));
+        }, this.queueMaxAgeMs),
+      };
+      this.queuedRequests.push(queued as QueuedRequest<unknown>);
+    });
+  }
+
+  private expireQueuedRequests(now: number) {
+    for (let index = 0; index < this.queuedRequests.length; ) {
+      const queued = this.queuedRequests[index];
+      if (!queued || now - queued.createdAt <= this.queueMaxAgeMs) {
+        index += 1;
+        continue;
+      }
+      this.queuedRequests.splice(index, 1);
+      clearTimeout(queued.timeout);
+      queued.reject(new WsTransportRequestTimeoutError(this.queueMaxAgeMs));
+    }
+  }
+
+  private flushQueuedRequests() {
+    if (
+      this.disposed ||
+      this.flushingQueuedRequests ||
+      this.currentConnectionState !== "connected"
+    ) {
+      return;
+    }
+
+    this.flushingQueuedRequests = true;
+    void (async () => {
+      try {
+        for (;;) {
+          this.expireQueuedRequests(Date.now());
+          const queued = this.queuedRequests.shift();
+          if (!queued) {
+            return;
+          }
+          if (this.disposed) {
+            clearTimeout(queued.timeout);
+            queued.reject(new Error("Transport disposed"));
+            continue;
+          }
+          if (this.currentConnectionState !== "connected") {
+            this.queuedRequests.unshift(queued);
+            return;
+          }
+
+          clearTimeout(queued.timeout);
+          try {
+            queued.resolve(await queued.execute());
+          } catch (error) {
+            queued.reject(error);
+          }
+        }
+      } finally {
+        this.flushingQueuedRequests = false;
+        if (this.currentConnectionState === "connected" && this.queuedRequests.length > 0) {
+          this.flushQueuedRequests();
+        }
+      }
+    })();
+  }
+
+  private rejectQueuedRequests(error: unknown) {
+    for (const queued of this.queuedRequests.splice(0)) {
+      clearTimeout(queued.timeout);
+      queued.reject(error);
+    }
+  }
+
+  private setConnectionState(state: WsTransportConnectionState) {
+    if (this.currentConnectionState === state) {
+      return;
+    }
+    this.currentConnectionState = state;
+    for (const listener of this.connectionStateListeners) {
+      try {
+        listener(state);
+      } catch {
+        // Listener failures should not affect transport recovery.
+      }
+    }
+  }
+
+  private shouldQueueRequests() {
+    return (
+      this.currentConnectionState !== "connected" ||
+      this.flushingQueuedRequests ||
+      this.queuedRequests.length > 0
+    );
+  }
+
+  private withQueueLifecycle(
+    handlers?: WsProtocolLifecycleHandlers,
+  ): WsProtocolLifecycleHandlers | undefined {
+    return {
+      ...handlers,
+      onOpen: () => {
+        this.hasConnected = true;
+        this.setConnectionState("connected");
+        handlers?.onOpen?.();
+        this.flushQueuedRequests();
+      },
+      onError: (message) => {
+        this.setConnectionState(this.hasConnected ? "reconnecting" : "disconnected");
+        handlers?.onError?.(message);
+        this.expireQueuedRequests(Date.now());
+      },
+      onClose: (details, context) => {
+        if (!context.intentional) {
+          this.setConnectionState(this.hasConnected ? "reconnecting" : "disconnected");
+        }
+        handlers?.onClose?.(details, context);
+      },
     };
   }
 

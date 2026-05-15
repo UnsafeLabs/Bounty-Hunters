@@ -15,7 +15,7 @@ import * as Stream from "effect/Stream";
 
 import { type WsRpcProtocolClient } from "./protocol";
 import { resetWsReconnectBackoff } from "./wsConnectionState";
-import { WsTransport } from "./wsTransport";
+import { WsTransport, type WsTransportConnectionStateObservable } from "./wsTransport";
 
 type RpcTag = keyof WsRpcProtocolClient & string;
 type RpcMethod<TTag extends RpcTag> = WsRpcProtocolClient[TTag];
@@ -55,6 +55,7 @@ interface GitRunStackedActionOptions {
 
 export interface WsRpcClient {
   readonly dispose: () => Promise<void>;
+  readonly connectionState: WsTransportConnectionStateObservable;
   readonly reconnect: () => Promise<void>;
   readonly isHeartbeatFresh: () => boolean;
   readonly terminal: {
@@ -158,6 +159,7 @@ export interface WsRpcClient {
 export function createWsRpcClient(transport: WsTransport): WsRpcClient {
   return {
     dispose: () => transport.dispose(),
+    connectionState: transport.connectionState,
     reconnect: async () => {
       resetWsReconnectBackoff();
       await transport.reconnect();
