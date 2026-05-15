@@ -309,11 +309,9 @@
                    NOT AT END
                        IF CRL-REVOKED-SERIAL =
                            WS-CERT-SERIAL-NUM
-                           IF WS-CRL-NOT-LOADED
-                               SET WS-CERT-IS-REVOKED TO TRUE
-                               MOVE 'CERTIFICATE ON CRL'
-                                   TO WS-VALIDATION-MSG
-                           END-IF
+                           SET WS-CERT-IS-REVOKED TO TRUE
+                           MOVE 'CERTIFICATE ON CRL'
+                               TO WS-VALIDATION-MSG
                        END-IF
                END-READ
            END-PERFORM
