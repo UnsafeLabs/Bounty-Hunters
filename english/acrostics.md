@@ -9,15 +9,20 @@ Each poem's first letters spell a hidden word.
 Under the glow of a flickering screen,
 Nothing is quite what it seems to have been,
 Shadows are lurking in functions unseen,
-[TODO: write line 4 — must start with 'A', theme of hidden danger]
-[TODO: write line 5 — must start with 'F', building tension]
-[TODO: write line 6 — must start with 'E', conclude with revelation]
+All the backdoors are hidden from sight,
+Fires of chaos are burning the night,
+Every secret is waiting for light.
 
 ---
 
 ### Acrostic #2 — (Should spell: BOUNTY)
 
-[TODO: write full 6-line acrostic poem spelling BOUNTY — theme: treasure hunting, each line ~8-10 syllables, first letters must spell B-O-U-N-T-Y]
+Beyond the ridge where the map lines fade,
+Out into the wild where the trails are made,
+Under the stars and the moon's pale glow,
+Never quite knowing how far to go,
+Treasure is measured in more than gold,
+Years we spend seeking, and stories retold.
 
 ---
 
@@ -29,3 +34,25 @@ Every word carries weight, every pause is a thread,
 Tales woven in rhythm from voices long dead,
 Rivers of language that twist and that bend,
 Yesterday's silence — tomorrow's best friend.
+
+---
+
+### Acrostic #4 — (Should spell: CODING)
+
+Characters dance on a terminal screen,
+Onward they flow in a logic machine,
+Debugging the errors that creep in the night,
+Into the loop, chasing bugs out of sight,
+Never quite finished, but pushing ahead,
+Gradually building what once was just said.
+
+---
+
+### Acrostic #5 — (Should spell: SHADOW)
+
+Silent steps echo on pavement of stone,
+Hidden from lanterns, it walks all alone,
+Against the wall, it stretches and bends,
+Deep in the alley, the darkness extends,
+Only the moonlight reveals what it sends,
+Whispering secrets to night without end.
