@@ -7,6 +7,7 @@ from enum import Enum
 from math import isinf, isnan
 from pathlib import PurePath, PurePosixPath, PureWindowsPath
 from typing import TypedDict
+import base64
 
 import pytest
 from fastapi._compat import Undefined
@@ -329,3 +330,74 @@ def test_encode_color(module_path):
 
     data = {"color": Color("blue")}
     assert jsonable_encoder(data) == {"color": "blue"}
+# ---- Tests for bytes/memoryview encoding ----
+
+def test_encode_bytes_base64():
+    """bytes objects are encoded as base64 strings by default."""
+    data = b"hello world"
+    assert jsonable_encoder(data) == base64.b64encode(b"hello world").decode("ascii")
+    assert jsonable_encoder({"data": b"test"}) == {
+        "data": base64.b64encode(b"test").decode("ascii")
+    }
+
+
+def test_encode_bytes_hex():
+    """bytes_encoding='hex' produces hexadecimal output."""
+    data = b"hello"
+    result = jsonable_encoder(data, bytes_encoding="hex")
+    assert result == b"hello".hex()
+    assert jsonable_encoder({"data": b"test"}, bytes_encoding="hex") == {
+        "data": b"test".hex()
+    }
+
+
+def test_encode_memoryview():
+    """memoryview objects are handled without errors."""
+    data = memoryview(b"hello")
+    result = jsonable_encoder(data)
+    assert result == base64.b64encode(b"hello").decode("ascii")
+
+
+def test_encode_memoryview_hex():
+    """memoryview with hex encoding."""
+    data = memoryview(b"hello")
+    result = jsonable_encoder(data, bytes_encoding="hex")
+    assert result == b"hello".hex()
+
+
+def test_encode_bytes_in_model():
+    """bytes inside BaseModel are handled."""
+    class ModelWithBytes(BaseModel):
+        data: bytes
+
+        model_config = {"arbitrary_types_allowed": True}
+
+    obj = ModelWithBytes(data=b"\x00\x01\x02")
+    result = jsonable_encoder(obj)
+    assert result == {"data": base64.b64encode(b"\x00\x01\x02").decode("ascii")}
+
+
+def test_encode_bytes_in_dict():
+    """bytes inside nested dictionaries are handled."""
+    data = {"nested": {"binary": b"\xff\xfe\xfd"}}
+    result = jsonable_encoder(data)
+    assert result == {"nested": {"binary": base64.b64encode(b"\xff\xfe\xfd").decode("ascii")}}
+
+
+def test_encode_non_utf8_bytes():
+    """Non-UTF-8 bytes (which would crash .decode()) are handled via base64."""
+    data = b"\xff\xfe\x00\x01"
+    result = jsonable_encoder(data)
+    assert result == base64.b64encode(data).decode("ascii")
+
+
+def test_existing_encoder_behavior_unchanged():
+    """Existing encoder behavior for all other types is unchanged."""
+    assert jsonable_encoder("hello") == "hello"
+    assert jsonable_encoder(42) == 42
+    assert jsonable_encoder(3.14) == 3.14
+    assert jsonable_encoder(None) is None
+    assert jsonable_encoder([1, 2, 3]) == [1, 2, 3]
+    assert jsonable_encoder({"a": 1}) == {"a": 1}
+    assert jsonable_encoder(True) is True
+    assert jsonable_encoder(False) is False
