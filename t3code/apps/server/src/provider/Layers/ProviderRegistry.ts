@@ -40,6 +40,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
+import { getProviderConfigChangesPubSub } from "../../services/ProviderCache.ts";
 import { ServerConfig } from "../../config.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
@@ -547,8 +548,9 @@ export const ProviderRegistryLive = Layer.effect(
         // own initial probe (line 140 in `makeManagedServerProvider`)
         // wins the refreshSemaphore race, its PubSub publish must land
         // in an active subscriber or the result is dropped.
-        for (const [, instance] of newlyAdded) {
+        for (const [id, instance] of newlyAdded) {
           const source = buildSnapshotSource(instance);
+          yield* PubSub.publish(getProviderConfigChangesPubSub(), { provider: instance.driverKind });
           yield* Stream.runForEach(source.streamChanges, (provider) =>
             correlateSnapshotWithSource(source, provider).pipe(Effect.flatMap(syncProvider)),
           ).pipe(Effect.forkScoped);

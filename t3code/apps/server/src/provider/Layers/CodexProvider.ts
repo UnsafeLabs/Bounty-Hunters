@@ -29,6 +29,7 @@ import {
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
+import { getModels } from "../../services/ProviderCache.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 
@@ -220,19 +221,23 @@ function parseCodexSkillsListResponse(
 const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
   client: CodexClient.CodexAppServerClientShape,
 ) {
-  const models: ServerProviderModel[] = [];
-  let cursor: string | null | undefined = undefined;
+  return yield* getModels("codex", Effect.gen(function* () {
+    const models: ServerProviderModel[] = [];
+    let cursor: string | null | undefined = undefined;
 
-  do {
-    const response: CodexSchema.V2ModelListResponse = yield* client.request(
-      "model/list",
-      cursor ? { cursor } : {},
-    );
-    models.push(...parseCodexModelListResponse(response));
-    cursor = response.nextCursor;
-  } while (cursor);
+    do {
+      const response: CodexSchema.V2ModelListResponse = yield* client.request(
+        "model/list",
+        cursor ? { cursor } : {},
+      );
+      models.push(...parseCodexModelListResponse(response));
+      cursor = response.nextCursor;
+    } while (cursor);
 
-  return models;
+    return models;
+  })).pipe(
+    Effect.catchTag("CacheError", (err) => Effect.die(err))
+  );
 });
 
 export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
