@@ -2,10 +2,6 @@
   "$schema": "https://turbo.build/schema.json",
   "extends": ["//"],
   "tasks": {
-    "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist-electron/**"],
-    },
     "dev": {
       "dependsOn": ["t3#build"],
       "persistent": true,
