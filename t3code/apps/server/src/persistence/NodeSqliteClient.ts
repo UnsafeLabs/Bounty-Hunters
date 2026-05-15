@@ -8,22 +8,24 @@ import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
+import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import { identity } from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
-import * as Semaphore from "effect/Semaphore";
-import * as Context from "effect/Context";
 import * as Stream from "effect/Stream";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
 import * as Client from "effect/unstable/sql/SqlClient";
 import type { Connection } from "effect/unstable/sql/SqlConnection";
 import { SqlError, classifySqliteError } from "effect/unstable/sql/SqlError";
-import * as Statement from "effect/unstable/sql/Statement";
 
-const ATTR_DB_SYSTEM_NAME = "db.system.name";
+import {
+  makePooledSqliteClient,
+  type PooledSqliteClient,
+  type PooledSqliteOptions,
+  type SqlitePoolConfig,
+} from "./SqlitePooledClient.ts";
 
 export const TypeId: TypeId = "~local/sqlite-node/SqliteClient";
 
@@ -32,9 +34,14 @@ export type TypeId = "~local/sqlite-node/SqliteClient";
 /**
  * SqliteClient - Effect service tag for the sqlite SQL client.
  */
-export const SqliteClient = Context.Service<Client.SqlClient>("t3/persistence/NodeSqliteClient");
+export const SqliteClient = Context.Service<SqliteClient>("t3/persistence/NodeSqliteClient");
 
-export interface SqliteClientConfig {
+export interface SqliteClient extends PooledSqliteClient {
+  readonly [TypeId]: TypeId;
+  readonly config: SqliteClientConfig;
+}
+
+export interface SqliteClientConfig extends PooledSqliteOptions {
   readonly filename: string;
   readonly readonly?: boolean | undefined;
   readonly allowExtension?: boolean | undefined;
@@ -43,6 +50,7 @@ export interface SqliteClientConfig {
   readonly spanAttributes?: Record<string, unknown> | undefined;
   readonly transformResultNames?: ((str: string) => string) | undefined;
   readonly transformQueryNames?: ((str: string) => string) | undefined;
+  readonly pool?: SqlitePoolConfig | undefined;
 }
 
 export interface SqliteMemoryClientConfig extends Omit<
@@ -75,13 +83,8 @@ const checkNodeSqliteCompat = () => {
 const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
   options: SqliteClientConfig,
   openDatabase: () => DatabaseSync,
-): Effect.fn.Return<Client.SqlClient, never, Scope.Scope | Reactivity.Reactivity> {
+): Effect.fn.Return<SqliteClient, SqlError, Scope.Scope | Reactivity.Reactivity> {
   yield* checkNodeSqliteCompat();
-
-  const compiler = Statement.makeCompilerSqlite(options.transformQueryNames);
-  const transformRows = options.transformResultNames
-    ? Statement.defaultTransforms(options.transformResultNames).array
-    : undefined;
 
   const makeConnection = Effect.gen(function* () {
     const scope = yield* Effect.scope;
@@ -194,34 +197,16 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
     });
   });
 
-  const semaphore = yield* Semaphore.make(1);
-  const connection = yield* makeConnection;
-
-  const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
-  const transactionAcquirer = Effect.uninterruptibleMask((restore) => {
-    const fiber = Fiber.getCurrent()!;
-    const scope = Context.getUnsafe(fiber.context, Scope.Scope);
-    return Effect.as(
-      Effect.tap(restore(semaphore.take(1)), () => Scope.addFinalizer(scope, semaphore.release(1))),
-      connection,
-    );
-  });
-
-  return yield* Client.make({
-    acquirer,
-    compiler,
-    transactionAcquirer,
-    spanAttributes: [
-      ...(options.spanAttributes ? Object.entries(options.spanAttributes) : []),
-      [ATTR_DB_SYSTEM_NAME, "sqlite"],
-    ],
-    transformRows,
+  const client = yield* makePooledSqliteClient(options, makeConnection);
+  return Object.assign(client, {
+    [TypeId]: TypeId,
+    config: options,
   });
 });
 
 const make = (
   options: SqliteClientConfig,
-): Effect.Effect<Client.SqlClient, never, Scope.Scope | Reactivity.Reactivity> =>
+): Effect.Effect<SqliteClient, SqlError, Scope.Scope | Reactivity.Reactivity> =>
   makeWithDatabase(
     options,
     () =>
@@ -233,7 +218,7 @@ const make = (
 
 const makeMemory = (
   config: SqliteMemoryClientConfig = {},
-): Effect.Effect<Client.SqlClient, never, Scope.Scope | Reactivity.Reactivity> =>
+): Effect.Effect<SqliteClient, SqlError, Scope.Scope | Reactivity.Reactivity> =>
   makeWithDatabase(
     {
       ...config,
@@ -250,7 +235,7 @@ const makeMemory = (
 
 export const layerConfig = (
   config: Config.Wrap<SqliteClientConfig>,
-): Layer.Layer<Client.SqlClient, Config.ConfigError> =>
+): Layer.Layer<Client.SqlClient, Config.ConfigError | SqlError> =>
   Layer.effectContext(
     Config.unwrap(config)
       .asEffect()
@@ -262,14 +247,16 @@ export const layerConfig = (
       ),
   ).pipe(Layer.provide(Reactivity.layer));
 
-export const layer = (config: SqliteClientConfig): Layer.Layer<Client.SqlClient> =>
+export const layer = (config: SqliteClientConfig): Layer.Layer<Client.SqlClient, SqlError> =>
   Layer.effectContext(
     Effect.map(make(config), (client) =>
       Context.make(SqliteClient, client).pipe(Context.add(Client.SqlClient, client)),
     ),
   ).pipe(Layer.provide(Reactivity.layer));
 
-export const layerMemory = (config: SqliteMemoryClientConfig = {}): Layer.Layer<Client.SqlClient> =>
+export const layerMemory = (
+  config: SqliteMemoryClientConfig = {},
+): Layer.Layer<Client.SqlClient, SqlError> =>
   Layer.effectContext(
     Effect.map(makeMemory(config), (client) =>
       Context.make(SqliteClient, client).pipe(Context.add(Client.SqlClient, client)),
