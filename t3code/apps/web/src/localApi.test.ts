@@ -66,6 +66,7 @@ const rpcClientMock = {
   },
   vcs: {
     pull: vi.fn(),
+    stageAll: vi.fn(),
     refreshStatus: vi.fn(),
     onStatus: vi.fn((input: { cwd: string }, listener: (event: VcsStatusResult) => void) =>
       registerListener(gitStatusListeners, listener),
@@ -226,6 +227,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     showContextMenu: async () => null,
     openExternal: async () => true,
     onMenuAction: () => () => undefined,
+    restartBackend: async () => undefined,
     getUpdateState: async () => {
       throw new Error("getUpdateState not implemented in test");
     },

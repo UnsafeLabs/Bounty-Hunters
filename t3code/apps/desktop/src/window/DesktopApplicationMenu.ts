@@ -3,7 +3,9 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 
+import { DESKTOP_MENU_ACTIONS, type DesktopMenuAction } from "@t3tools/contracts";
 import type * as Electron from "electron";
 
 import * as DesktopObservability from "../app/DesktopObservability.ts";
@@ -11,6 +13,7 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
@@ -26,6 +29,7 @@ export class DesktopApplicationMenu extends Context.Service<
 type DesktopApplicationMenuRuntimeServices =
   | DesktopUpdates.DesktopUpdates
   | DesktopWindow.DesktopWindow
+  | DesktopState.DesktopState
   | ElectronDialog.ElectronDialog;
 
 const { logInfo: logUpdaterInfo } = DesktopObservability.makeComponentLogger("desktop-updater");
@@ -33,7 +37,7 @@ const { logInfo: logUpdaterInfo } = DesktopObservability.makeComponentLogger("de
 const { logError: logMenuError } = DesktopObservability.makeComponentLogger("desktop-menu");
 
 const dispatchMenuAction = Effect.fn("desktop.menu.dispatchMenuAction")(function* (
-  action: string,
+  action: DesktopMenuAction,
 ): Effect.fn.Return<void, DesktopWindow.DesktopWindowError, DesktopWindow.DesktopWindow> {
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
   yield* desktopWindow.dispatchMenuAction(action);
@@ -99,6 +103,7 @@ const make = Effect.gen(function* () {
   const electronMenu = yield* ElectronMenu.ElectronMenu;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const appName = yield* electronApp.name;
+  const state = yield* DesktopState.DesktopState;
   const context = yield* Effect.context<DesktopApplicationMenuRuntimeServices>();
   const runPromise = Effect.runPromiseWith(context);
 
@@ -120,12 +125,19 @@ const make = Effect.gen(function* () {
     );
   };
 
-  const configure = Effect.gen(function* () {
+  const makeDispatchMenuClick = (action: DesktopMenuAction) => () => {
+    runMenuEffect(action, dispatchMenuAction(action));
+  };
+
+  const installMenu = Effect.fn("desktop.menu.installMenu")(function* (backendReady: boolean) {
     const checkForUpdatesClick = () => {
       runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
     };
     const settingsClick = () => {
-      runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
+      runMenuEffect(
+        DESKTOP_MENU_ACTIONS.openSettings,
+        dispatchMenuAction(DESKTOP_MENU_ACTIONS.openSettings),
+      );
     };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
@@ -189,6 +201,64 @@ const make = Effect.gen(function* () {
           { role: "togglefullscreen" },
         ],
       },
+      {
+        label: "Developer",
+        submenu: [
+          {
+            label: "Toggle Terminal",
+            accelerator: "CmdOrCtrl+J",
+            enabled: backendReady,
+            click: makeDispatchMenuClick(DESKTOP_MENU_ACTIONS.terminalToggle),
+          },
+          {
+            label: "Clear Terminal",
+            enabled: backendReady,
+            click: makeDispatchMenuClick(DESKTOP_MENU_ACTIONS.terminalClear),
+          },
+          { type: "separator" },
+          {
+            label: "Restart Backend",
+            enabled: backendReady,
+            click: makeDispatchMenuClick(DESKTOP_MENU_ACTIONS.backendRestart),
+          },
+          { type: "separator" },
+          {
+            label: "Open DevTools",
+            role: "toggleDevTools",
+          },
+        ],
+      },
+      {
+        label: "Git",
+        submenu: [
+          {
+            label: "Stage All Changes",
+            enabled: backendReady,
+            click: makeDispatchMenuClick(DESKTOP_MENU_ACTIONS.gitStageAll),
+          },
+          {
+            label: "Commit",
+            enabled: backendReady,
+            click: makeDispatchMenuClick(DESKTOP_MENU_ACTIONS.gitCommit),
+          },
+          {
+            label: "Push",
+            enabled: backendReady,
+            click: makeDispatchMenuClick(DESKTOP_MENU_ACTIONS.gitPush),
+          },
+          {
+            label: "Pull",
+            enabled: backendReady,
+            click: makeDispatchMenuClick(DESKTOP_MENU_ACTIONS.gitPull),
+          },
+          { type: "separator" },
+          {
+            label: "Create Branch...",
+            enabled: backendReady,
+            click: makeDispatchMenuClick(DESKTOP_MENU_ACTIONS.gitCreateBranch),
+          },
+        ],
+      },
       { role: "windowMenu" },
       {
         role: "help",
@@ -202,6 +272,11 @@ const make = Effect.gen(function* () {
     );
 
     yield* electronMenu.setApplicationMenu(template);
+  });
+
+  const configure = Effect.gen(function* () {
+    yield* state.onBackendReadyChange((ready) => installMenu(ready));
+    yield* installMenu(yield* Ref.get(state.backendReady));
   }).pipe(Effect.withSpan("desktop.menu.configure"));
 
   return DesktopApplicationMenu.of({
