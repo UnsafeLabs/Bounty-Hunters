@@ -88,7 +88,7 @@ from starlette.routing import (
 )
 from starlette.routing import Mount as Mount  # noqa
 from starlette.types import AppType, ASGIApp, Lifespan, Receive, Scope, Send
-from starlette.websockets import WebSocket
+from fastapi.websockets import WebSocket
 from typing_extensions import deprecated
 
 
@@ -140,14 +140,34 @@ def request_response(
 # dependencies' AsyncExitStack
 def websocket_session(
     func: Callable[[WebSocket], Awaitable[None]],
+    *,
+    heartbeat_interval: int = 25,
+    heartbeat_max_misses: int = 3,
 ) -> ASGIApp:
     """
     Takes a coroutine `func(session)`, and returns an ASGI application.
+
+    Parameters
+    ----------
+    func:
+        The WebSocket endpoint coroutine function.
+    heartbeat_interval:
+        Seconds between WebSocket ping frames. Set to ``0`` to disable.
+        Defaults to ``25``.
+    heartbeat_max_misses:
+        Consecutive pings without a pong response before the connection
+        is forcefully closed. Defaults to ``3``.
     """
     # assert asyncio.iscoroutinefunction(func), "WebSocket endpoints must be async"
 
     async def app(scope: Scope, receive: Receive, send: Send) -> None:
-        session = WebSocket(scope, receive=receive, send=send)
+        session = WebSocket(
+            scope,
+            receive=receive,
+            send=send,
+            heartbeat_interval=heartbeat_interval,
+            heartbeat_max_misses=heartbeat_max_misses,
+        )
 
         async def app(scope: Scope, receive: Receive, send: Send) -> None:
             async with AsyncExitStack() as request_stack:
@@ -775,6 +795,8 @@ class APIWebSocketRoute(routing.WebSocketRoute):
         name: str | None = None,
         dependencies: Sequence[params.Depends] | None = None,
         dependency_overrides_provider: Any | None = None,
+        heartbeat_interval: int = 25,
+        heartbeat_max_misses: int = 3,
     ) -> None:
         self.path = path
         self.endpoint = endpoint
@@ -798,7 +820,9 @@ class APIWebSocketRoute(routing.WebSocketRoute):
                 dependant=self.dependant,
                 dependency_overrides_provider=dependency_overrides_provider,
                 embed_body_fields=self._embed_body_fields,
-            )
+            ),
+            heartbeat_interval=heartbeat_interval,
+            heartbeat_max_misses=heartbeat_max_misses,
         )
 
     def matches(self, scope: Scope) -> tuple[Match, Scope]:
@@ -1485,6 +1509,8 @@ class APIRouter(routing.Router):
         name: str | None = None,
         *,
         dependencies: Sequence[params.Depends] | None = None,
+        heartbeat_interval: int = 25,
+        heartbeat_max_misses: int = 3,
     ) -> None:
         current_dependencies = self.dependencies.copy()
         if dependencies:
@@ -1496,6 +1522,8 @@ class APIRouter(routing.Router):
             name=name,
             dependencies=current_dependencies,
             dependency_overrides_provider=self.dependency_overrides_provider,
+            heartbeat_interval=heartbeat_interval,
+            heartbeat_max_misses=heartbeat_max_misses,
         )
         self.routes.append(route)
 
