@@ -156,6 +156,27 @@ const make = Effect.gen(function* () {
   const context = yield* Effect.context<DesktopWindowRuntimeServices>();
   const runPromise = Effect.runPromiseWith(context);
 
+  const loadApplication = Effect.fn("desktop.window.loadApplication")(function* (
+    window: Electron.BrowserWindow,
+    backendHttpUrl: URL,
+    options?: { readonly openDevTools?: boolean },
+  ) {
+    if (environment.isDevelopment) {
+      const devServerUrl = yield* resolveDesktopDevServerUrl(environment);
+      yield* Effect.sync(() => {
+        void window.loadURL(devServerUrl);
+        if (options?.openDevTools === true) {
+          window.webContents.openDevTools({ mode: "detach" });
+        }
+      });
+      return;
+    }
+
+    yield* Effect.sync(() => {
+      void window.loadURL(backendHttpUrl.href);
+    });
+  });
+
   const createWindow = Effect.fn("desktop.window.createWindow")(function* (
     backendHttpUrl: URL,
   ): Effect.fn.Return<Electron.BrowserWindow, DesktopWindowError> {
@@ -275,13 +296,7 @@ const make = Effect.gen(function* () {
       void runPromise(electronWindow.reveal(window));
     });
 
-    if (environment.isDevelopment) {
-      const devServerUrl = yield* resolveDesktopDevServerUrl(environment);
-      void window.loadURL(devServerUrl);
-      window.webContents.openDevTools({ mode: "detach" });
-    } else {
-      void window.loadURL(backendHttpUrl.href);
-    }
+    yield* loadApplication(window, backendHttpUrl, { openDevTools: true });
 
     window.on("closed", () => {
       void runPromise(electronWindow.clearMain(Option.some(window)));
@@ -336,6 +351,12 @@ const make = Effect.gen(function* () {
     handleBackendReady: Effect.gen(function* () {
       yield* Ref.set(state.backendReady, true);
       yield* logWindowInfo("backend ready", { source: "http" });
+      const existingWindow = yield* electronWindow.currentMainOrFirst;
+      if (Option.isSome(existingWindow)) {
+        const backendConfig = yield* serverExposure.backendConfig;
+        yield* loadApplication(existingWindow.value, backendConfig.httpBaseUrl);
+        return;
+      }
       yield* createMainIfBackendReady;
     }).pipe(Effect.withSpan("desktop.window.handleBackendReady")),
     dispatchMenuAction: Effect.fn("desktop.window.dispatchMenuAction")(function* (action) {
