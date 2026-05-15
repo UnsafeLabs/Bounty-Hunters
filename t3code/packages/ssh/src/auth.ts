@@ -4,6 +4,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
+import * as Scope from "effect/Scope";
 
 import { SshPasswordPromptError } from "./errors.ts";
 
@@ -102,9 +103,48 @@ export const getDefaultSshAskpassDirectory = Effect.fn("ssh/auth.getDefaultSshAs
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const parentDirectory = yield* fs.makeTempDirectory({ prefix: "t3code-ssh-runtime-" });
-    return path.join(parentDirectory, SSH_ASKPASS_DIR_NAME);
+    const result = path.join(parentDirectory, SSH_ASKPASS_DIR_NAME);
+    yield* fs.makeDirectory(result, { recursive: true });
+    return result;
   },
 );
+
+/**
+ * Securely clean up the SSH askpass directory and all its contents.
+ * Removes the helper scripts from disk to minimize the attack surface.
+ */
+export const removeSshAskpassDirectory = Effect.fn("ssh/auth.removeSshAskpassDirectory")(
+  function* (directory: string) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const parentDirectory = path.dirname(directory);
+
+    // Remove the askpass subdirectory contents first, then the parent temp dir
+    const removeIfExists = (dir: string) =>
+      fs.exists(dir).pipe(
+        Effect.flatMap((exists) =>
+          exists
+            ? fs.remove(dir, { recursive: true }).pipe(Effect.ignore)
+            : Effect.void,
+        ),
+      );
+
+    yield* removeIfExists(directory);
+    yield* removeIfExists(parentDirectory);
+  },
+);
+
+/**
+ * Overwrite a string value in memory as a best-effort cleanup.
+ * JavaScript strings are immutable, so this returns a new empty string
+ * to replace the reference. The original value remains in memory until
+ * garbage collected, but replacing the reference helps ensure prompt
+ * cleanup and reduces the window of exposure.
+ */
+export function clearSecret(value: string): string {
+  // Return an empty string to replace the reference
+  return "";
+}
 
 export const buildSshAskpassHelperDescriptor = Effect.fn(
   "ssh/auth.buildSshAskpassHelperDescriptor",

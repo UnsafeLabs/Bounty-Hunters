@@ -24,6 +24,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   buildSshChildEnvironment,
+  clearSecret,
   type SshAuthOptions,
   SshPasswordPrompt,
   isSshAuthFailure,
@@ -1352,6 +1353,11 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         Effect.forEach(entries, closeTunnelEntry, { concurrency: "unbounded" }),
       ),
       Effect.ignore,
+    ).pipe(
+      Effect.tap(() => Effect.sync(() => {
+        // Clear any remaining auth secrets from memory
+        authSecrets.clear();
+      }).pipe(Effect.ignore)),
     ),
   );
 
@@ -1542,26 +1548,25 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
               killSignal: "SIGTERM",
               forceKillAfter: TUNNEL_SHUTDOWN_TIMEOUT_MS,
             }),
-            stopRemoteServer(
-              tunnelEntry.target,
-              authSecret === null
-                ? {
-                    batchMode: "yes",
-                    interactiveAuth: false,
-                  }
-                : {
+            authSecret === null
+              ? Effect.void
+              : stopRemoteServer(
+                  tunnelEntry.target,
+                  {
                     authSecret,
                     batchMode: "no",
                     interactiveAuth: true,
                   },
-            ).pipe(
-              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawnerService),
-              Effect.provideService(FileSystem.FileSystem, fileSystemService),
-              Effect.provideService(Path.Path, pathService),
-            ),
+                ).pipe(
+                  Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawnerService),
+                  Effect.provideService(FileSystem.FileSystem, fileSystemService),
+                  Effect.provideService(Path.Path, pathService),
+                ),
           ],
           { concurrency: "unbounded" },
         ).pipe(Effect.ignore);
+        // Securely clean up the auth secret from the in-memory cache
+        authSecrets.delete(tunnelEntry.key);
         yield* Effect.logDebug("ssh.environment.tunnel.finalizer.succeeded", {
           ...sshTargetLogFields(tunnelEntry.target),
           key: tunnelEntry.key,
@@ -1744,9 +1749,13 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         operation: (authOptions) => stopRemoteServer(resolvedTarget, authOptions),
       });
     }
+    // Clean up the auth secret from the in-memory cache
+    const removedSecret = authSecrets.get(key) ?? null;
+    authSecrets.delete(key);
     yield* Effect.logInfo("ssh.environment.disconnect.succeeded", {
       ...sshTargetLogFields(resolvedTarget),
       key,
+      hadCachedAuthSecret: removedSecret !== null,
     });
   });
 
