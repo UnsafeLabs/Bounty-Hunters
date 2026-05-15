@@ -1,81 +1,117 @@
-# Song Lyrics Collection
+# English Songs
 
-Original song lyrics. Some sections need completion.
+## 404 — Heart Not Found
 
----
+**Verse 1**  
+You were the DNS that resolved my soul,  
+The cache of my heart, you made me whole.  
+But now your status shows "Away" or worse,  
+A broken link inside this universe.
 
-### "404 — Heart Not Found"
-*Genre: Indie/Alternative*
+**Chorus**  
+Your love was a 404 — I couldn't find the page,  
+Every refresh just returns to this digital cage.  
+The server of your heart returned "Not Found,"  
+And I'm left with this error, spinning round and round.
 
-**[Verse 1]**
-I searched every page for your name,
-Clicked through every link, played every game,
-But the server returned an empty frame,
-404 — you were never the same.
+**Verse 2**  
+I search the logs of our shared history,  
+But every entry ends in mystery.  
+You left me on read, then disappeared,  
+Now my inbox silence is the thing I most feared.
 
-**[Chorus]**
-Heart not found, heart not found,
-I keep refreshing but you're not around,
-[TODO: write 2 more chorus lines — must maintain the "internet/heartbreak" metaphor, rhyme scheme AABB]
+**Chorus**  
+Your love was a 404 — I couldn't find the page,  
+Every refresh just returns to this digital cage.  
+The server of your heart returned "Not Found,"  
+And I'm left with this error, spinning round and round.
 
-**[Verse 2]**
-Your profile says you're online tonight,
-The green dot glowing, soft and bright,
-[TODO: write 2 more verse lines — continue the theme of digital loneliness, rhyme with each other]
-
-**[Bridge]**
-[TODO: write 4-line bridge — shift tone to acceptance, slower rhythm, can break rhyme scheme]
-
-**[Chorus — Final]**
-Heart not found, heart not found,
-I stopped refreshing, I put the phone down,
-Cleared my cache, let the cookies expire,
-Sometimes you have to disconnect the wire.
-
----
-
-### "Mass Extinction Polka"
-*Genre: Polka/Comedy*
-
-**[Verse 1]**
-The dinosaurs were having a ball,
-Dancing and stomping in the great hall,
-Then a rock from the sky made them stumble and fall,
-And that was the end of the Cretaceous ball!
-
-**[Chorus]**
-Extinction polka, one-two-three!
-[TODO: write 3 more chorus lines — must be upbeat and absurd, reference different extinct species, maintain polka rhythm]
-
-**[Verse 2]**
-The dodo bird walked without a care,
-With its fluffy wings and its vacant stare,
-[TODO: write 2 more verse lines — rhyme with each other, reference the dodo's obliviousness]
-
-**[Verse 3]**
-[TODO: write full 4-line verse — pick another extinct animal (mammoth, saber-tooth, etc.), maintain humorous polka tone, AABB rhyme]
-
-**[Outro]**
-So raise a glass to the ones who are gone,
-Their fossils remind us to carry on,
-Evolution's a dance, and the music plays on,
-Extinction polka — until we're all done!
+**Bridge**  
+I'll clear the cache, I'll reboot the dream,  
+Accept that some connections break at the seam.  
+This 404 is just a sign to let go,  
+Time to close the browser and let the data flow.
 
 ---
 
-### "Segfault Lullaby"
-*Genre: Lullaby/Folk*
+## Mass Extinction Polka
 
-**[Verse 1]**
-Close your eyes, little process, goodnight,
-Your memory leaks will be fixed by first light,
-The garbage collector will sweep while you sleep,
-And free all the pointers you promised to keep.
+**Verse 1**  
+The trilobites were tripping, the ammonites were amped,  
+The asteroid was coming, but nobody had camped.  
+The party in the Permian was loud and full of cheer,  
+But then the music stopped and the end was very near.  
+Oh, the polka played on as the world went wrong,  
+With a one-two-three and a do-si-do,  
+To the tune of the great die-off song.
 
-**[Verse 2]**
-[TODO: write full 4-line verse — continue the "computer science lullaby" theme, reference threads/deadlocks/race conditions in a soothing way, AABB rhyme]
+**Chorus**  
+Stomp your feet for the dodo, shake a tail for the thylacine,  
+The passenger pigeon's still the polka's queen.  
+Boogie down with the great auk, twirl with the quagga too,  
+This extinction polka's got a beat for you!
 
-**[Verse 3]**
-The kernel is humming a low steady tune,
-The clock ticks in cycles from midnight to noon,
-[TODO: write 2 closing lines — wrap up the lullaby, reference shutdown/sleep mode, rhyme with each other]
+**Verse 2**  
+The dodo stood there blinking, its feathers all askew,  
+"There's a sailor with a musket — is that something I should do?"  
+He just shrugged and thought, "I'll be fine, I'm sure,"  
+Then the musket spoke and there were no dodos anymore.  
+Oh, the polka played on…
+
+**Verse 3**  
+The woolly mammoth lumbered onto the dance floor,  
+Its tusks were huge, its feet were sore.  
+"One more round of polka before the ice retreats!"  
+But the climate changed and so did the beats.  
+The ground grew warm, the tundra grew thin,  
+And the woolly mammoth's last dance was a spin.  
+
+**Chorus**  
+Stomp your feet for the dodo, shake a tail for the thylacine,  
+The passenger pigeon's still the polka's queen.  
+Boogie down with the great auk, twirl with the quagga too,  
+This extinction polka's got a beat for you!
+
+---
+
+## Segfault Lullaby
+
+**Verse 1**  
+Hush now, little pointer, don't dereference null,  
+The kernel's sleeping, the cache is full.  
+The scheduler hums a gentle tune,  
+While the memory manager croons:  
+"Close your eyes, let the cycles slow,  
+From the heap to the stack, let the data go."
+
+**Chorus**  
+Sleep, my thread, in the deadlock's dream,  
+No race condition, no silent scream.  
+The mutex yields, the semaphore falls,  
+And the OS whispers through the halls.
+
+**Verse 2**  
+Once there was a process that ran too long,  
+It forked too many children and they all went wrong.  
+But now the signals turn to sleep,  
+And the page faults are not so deep.  
+The clock ticks low, the voltage sags,  
+And the scheduler wraps you in its flags.
+
+**Chorus**  
+Sleep, my thread, in the deadlock's dream,  
+No race condition, no silent scream.  
+The mutex yields, the semaphore falls,  
+And the OS whispers through the halls.
+
+**Bridge**  
+Let the locks align, let the queues subside,  
+Let the garbage collector take the ride.  
+No more arbitration, no more state,  
+Just the soft hum of the clock at a steady rate.
+
+**Closing**  
+Now the CPU sleeps, the cache line snores,  
+Shutdown sequence — close the doors.  
+Enter sleep mode, dreams unwind,  
+All your state is saved in time.
