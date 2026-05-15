@@ -18,12 +18,6 @@
     "last_pr": "2026-05-15T00:54:32.550Z"
   },
   {
-    "username": "zp6",
-    "total_prs": 33,
-    "first_pr": "2026-05-14T18:28:53.934Z",
-    "last_pr": "2026-05-15T15:43:11.519Z"
-  },
-  {
     "username": "weilixiong",
     "total_prs": 32,
     "first_pr": "2026-05-13T06:47:51Z",
@@ -70,12 +64,6 @@
     "total_prs": 16,
     "first_pr": "2026-05-15T06:05:54.039Z",
     "last_pr": "2026-05-15T06:49:38.210Z"
-  },
-  {
-    "username": "leoliu201204-cmyk",
-    "total_prs": 15,
-    "first_pr": "2026-05-15T14:48:29.658Z",
-    "last_pr": "2026-05-15T15:25:42.851Z"
   },
   {
     "username": "callmekidz",
@@ -136,6 +124,12 @@
     "total_prs": 9,
     "first_pr": "2026-05-13T08:07:00Z",
     "last_pr": "2026-05-14T16:34:26.274Z"
+  },
+  {
+    "username": "zp6",
+    "total_prs": 9,
+    "first_pr": "2026-05-14T18:28:53.934Z",
+    "last_pr": "2026-05-15T11:46:23.640Z"
   },
   {
     "username": "ChienNguyen23",
@@ -384,12 +378,6 @@
     "last_pr": "2026-05-15T14:18:57.349Z"
   },
   {
-    "username": "QuinnYates",
-    "total_prs": 3,
-    "first_pr": "2026-05-15T09:45:21.969Z",
-    "last_pr": "2026-05-15T15:02:20.905Z"
-  },
-  {
     "username": "Saumya-Verma123",
     "total_prs": 2,
     "first_pr": "2026-05-13T11:20:03Z",
@@ -436,6 +424,12 @@
     "total_prs": 2,
     "first_pr": "2026-05-15T07:12:04.084Z",
     "last_pr": "2026-05-15T12:11:40.182Z"
+  },
+  {
+    "username": "QuinnYates",
+    "total_prs": 2,
+    "first_pr": "2026-05-15T09:45:21.969Z",
+    "last_pr": "2026-05-15T13:20:58.599Z"
   },
   {
     "username": "ErenCankutUYSAL",
