@@ -3,7 +3,10 @@ import * as Effect from "effect/Effect";
 import * as Stdio from "effect/Stdio";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as RpcClient from "effect/unstable/rpc/RpcClient";
 import * as RpcServer from "effect/unstable/rpc/RpcServer";
@@ -26,6 +29,7 @@ export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  readonly onSessionExpired?: (sessionId: string | undefined) => Effect.Effect<void, never>;
 }
 
 type AcpClientRaw = {
@@ -306,6 +310,33 @@ interface BufferedNotificationHandler<A> {
   readonly pending: Array<A>;
 }
 
+interface AuthState {
+  readonly methodId: string | undefined;
+  readonly accessToken: string | undefined;
+  readonly refreshToken: string | undefined;
+  readonly generation: number;
+}
+
+const getMetaString = (meta: { readonly [x: string]: unknown } | null | undefined, key: string) => {
+  const value = meta?.[key];
+  return typeof value === "string" ? value : undefined;
+};
+
+const getStatus = (data: unknown) =>
+  typeof data === "object" && data !== null && "status" in data
+    ? (data as { readonly status?: unknown }).status
+    : undefined;
+
+const isUnauthorizedError = (error: AcpError.AcpError) =>
+  error._tag === "AcpRequestError" &&
+  (error.code === -32000 || error.code === -32603) &&
+  (getStatus(error.data) === 401 || /\b401\b|unauthori[sz]ed/i.test(error.errorMessage));
+
+const getSessionId = (payload: unknown) =>
+  typeof payload === "object" && payload !== null && "sessionId" in payload
+    ? (payload as { readonly sessionId?: unknown }).sessionId
+    : undefined;
+
 export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
   stdio: Stdio.Stdio,
   options: AcpClientOptions = {},
@@ -456,6 +487,108 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     generateRequestId: () => nextRpcRequestId++ as never,
   }).pipe(Effect.provideService(RpcClient.Protocol, transport.clientProtocol));
 
+  const authStateRef = yield* Ref.make<AuthState>({
+    methodId: undefined,
+    accessToken: undefined,
+    refreshToken: undefined,
+    generation: 0,
+  });
+  const refreshSemaphore = yield* Semaphore.make(1);
+
+  const storeAuthentication = (
+    request: AcpSchema.AuthenticateRequest,
+    response: AcpSchema.AuthenticateResponse,
+  ) =>
+    Ref.update(authStateRef, (state) => ({
+      methodId: request.methodId,
+      accessToken: getMetaString(response._meta, "accessToken") ?? state.accessToken,
+      refreshToken: getMetaString(response._meta, "refreshToken") ?? state.refreshToken,
+      generation: state.generation + 1,
+    }));
+
+  const authenticate = (payload: AcpSchema.AuthenticateRequest) =>
+    callRpc(rpc[AGENT_METHODS.authenticate](payload)).pipe(
+      Effect.tap((response) => storeAuthentication(payload, response)),
+    );
+
+  const reauthenticate = (sessionId: string | undefined, generation: number) =>
+    refreshSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const state = yield* Ref.get(authStateRef);
+        if (state.generation !== generation) {
+          return;
+        }
+        if (!state.methodId) {
+          return yield* Effect.fail(
+            new AcpError.AuthenticationError({
+              errorMessage:
+                "Authentication required, but no previous authentication method is available",
+            }),
+          );
+        }
+
+        if (options.onSessionExpired) {
+          yield* options.onSessionExpired(sessionId);
+        }
+
+        yield* authenticate({
+          methodId: state.methodId,
+          _meta: {
+            ...(state.refreshToken ? { refreshToken: state.refreshToken } : {}),
+            ...(state.accessToken ? { previousAccessToken: state.accessToken } : {}),
+          },
+        }).pipe(
+          Effect.mapError(
+            (error) =>
+              new AcpError.AuthenticationError({
+                errorMessage: error.message,
+                cause: error,
+              }),
+          ),
+        );
+      }),
+    );
+
+  const withAuthRefresh = <A>(effect: Effect.Effect<A, AcpError.AcpError>, payload?: unknown) =>
+    Effect.gen(function* () {
+      const generation = yield* Ref.get(authStateRef).pipe(Effect.map((state) => state.generation));
+      const attemptedRefreshRef = yield* Ref.make(false);
+      const sessionId = getSessionId(payload);
+      return yield* effect.pipe(
+        Effect.catchIf(isUnauthorizedError, (error) =>
+          Effect.gen(function* () {
+            const attemptedRefresh = yield* Ref.get(attemptedRefreshRef);
+            if (attemptedRefresh) {
+              return yield* Effect.fail(
+                new AcpError.AuthenticationError({
+                  errorMessage: error.message,
+                  cause: error,
+                }),
+              );
+            }
+            yield* Ref.set(attemptedRefreshRef, true);
+            yield* reauthenticate(
+              typeof sessionId === "string" ? sessionId : undefined,
+              generation,
+            );
+            return yield* Effect.fail(error);
+          }),
+        ),
+        Effect.retry({
+          schedule: Schedule.recurs(1),
+          while: isUnauthorizedError,
+        }),
+        Effect.catchIf(isUnauthorizedError, (error) =>
+          Effect.fail(
+            new AcpError.AuthenticationError({
+              errorMessage: error.message,
+              cause: error,
+            }),
+          ),
+        ),
+      );
+    });
+
   return AcpClient.of({
     raw: {
       notifications: transport.incoming,
@@ -464,18 +597,25 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     },
     agent: {
       initialize: (payload) => callRpc(rpc[AGENT_METHODS.initialize](payload)),
-      authenticate: (payload) => callRpc(rpc[AGENT_METHODS.authenticate](payload)),
+      authenticate,
       logout: (payload) => callRpc(rpc[AGENT_METHODS.logout](payload)),
-      createSession: (payload) => callRpc(rpc[AGENT_METHODS.session_new](payload)),
-      loadSession: (payload) => callRpc(rpc[AGENT_METHODS.session_load](payload)),
-      listSessions: (payload) => callRpc(rpc[AGENT_METHODS.session_list](payload)),
-      forkSession: (payload) => callRpc(rpc[AGENT_METHODS.session_fork](payload)),
-      resumeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_resume](payload)),
+      createSession: (payload) =>
+        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_new](payload)), payload),
+      loadSession: (payload) =>
+        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_load](payload)), payload),
+      listSessions: (payload) =>
+        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_list](payload)), payload),
+      forkSession: (payload) =>
+        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_fork](payload)), payload),
+      resumeSession: (payload) =>
+        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_resume](payload)), payload),
       closeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_close](payload)),
-      setSessionModel: (payload) => callRpc(rpc[AGENT_METHODS.session_set_model](payload)),
+      setSessionModel: (payload) =>
+        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_set_model](payload)), payload),
       setSessionConfigOption: (payload) =>
-        callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)),
-      prompt: (payload) => callRpc(rpc[AGENT_METHODS.session_prompt](payload)),
+        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)), payload),
+      prompt: (payload) =>
+        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_prompt](payload)), payload),
       cancel: (payload) => transport.notify(AGENT_METHODS.session_cancel, payload),
     },
     handleRequestPermission: (handler) =>

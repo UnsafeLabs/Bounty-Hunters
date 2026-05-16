@@ -47,6 +47,18 @@ export class AcpTransportError extends Schema.TaggedErrorClass<AcpTransportError
   },
 ) {}
 
+export class AuthenticationError extends Schema.TaggedErrorClass<AuthenticationError>()(
+  "AuthenticationError",
+  {
+    errorMessage: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message() {
+    return this.errorMessage;
+  }
+}
+
 export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()("AcpRequestError", {
   code: AcpSchema.ErrorCode,
   errorMessage: Schema.String,
@@ -129,6 +141,7 @@ export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()(
 }
 
 export const AcpError = Schema.Union([
+  AuthenticationError,
   AcpRequestError,
   AcpSpawnError,
   AcpProcessExitedError,

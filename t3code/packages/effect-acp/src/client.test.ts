@@ -22,8 +22,28 @@ import { makeInMemoryStdio } from "./_internal/stdio.ts";
 
 const InitializeRequest = jsonRpcRequest("initialize", AcpSchema.InitializeRequest);
 const InitializeResponse = jsonRpcResponse(AcpSchema.InitializeResponse);
+const AuthenticateRequest = jsonRpcRequest("authenticate", AcpSchema.AuthenticateRequest);
+const AuthenticateResponse = jsonRpcResponse(AcpSchema.AuthenticateResponse);
+const PromptRequest = jsonRpcRequest("session/prompt", AcpSchema.PromptRequest);
+const PromptResponse = jsonRpcResponse(AcpSchema.PromptResponse);
+const decodeAuthenticateRequest = Schema.decodeEffect(Schema.fromJsonString(AuthenticateRequest));
+const decodePromptRequest = Schema.decodeEffect(Schema.fromJsonString(PromptRequest));
 const ExtRequest = jsonRpcRequest("x/test", Schema.Struct({ hello: Schema.String }));
 const ExtResponse = jsonRpcResponse(Schema.Struct({ ok: Schema.Boolean }));
+const textEncoder = new TextEncoder();
+
+const encodeRawJsonl = (value: unknown) => textEncoder.encode(`${JSON.stringify(value)}\n`);
+const encodeRpcFailureJsonl = (id: string | number, error: AcpSchema.Error) =>
+  encodeRawJsonl({
+    jsonrpc: "2.0",
+    id,
+    error: {
+      _tag: "Cause",
+      code: 0,
+      message: JSON.stringify([{ _tag: "Fail", error }]),
+      data: [{ _tag: "Fail", error }],
+    },
+  });
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/acp-mock-peer.ts"),
 );
@@ -372,6 +392,140 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
 
         assert.equal(yield* Ref.get(successfulHandlers), 1);
       }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+    }),
+  );
+
+  it.effect("refreshes authentication once and replays a prompt after a 401", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      const expiredSessions = yield* Ref.make<Array<string>>([]);
+      const acp = yield* AcpClient.make(stdio, {
+        onSessionExpired: (sessionId) =>
+          Ref.update(expiredSessions, (current) => [...current, sessionId ?? "unknown"]),
+      }).pipe(Effect.provideService(Scope.Scope, scope));
+
+      const authenticateFiber = yield* acp.agent
+        .authenticate({ methodId: "cursor_login" })
+        .pipe(Effect.forkScoped);
+      const authenticateOutbound = yield* Queue.take(output);
+      const authenticateRequest = yield* decodeAuthenticateRequest(authenticateOutbound);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(AuthenticateResponse, {
+          jsonrpc: "2.0",
+          id: authenticateRequest.id,
+          result: { _meta: { accessToken: "access-1", refreshToken: "refresh-1" } },
+        }),
+      );
+      yield* Fiber.join(authenticateFiber);
+
+      const promptFiber = yield* acp.agent
+        .prompt({
+          sessionId: "expired-session",
+          prompt: [{ type: "text", text: "hello" }],
+        })
+        .pipe(Effect.forkScoped);
+
+      const firstPromptOutbound = yield* Queue.take(output);
+      const firstPromptRequest = yield* decodePromptRequest(firstPromptOutbound);
+      yield* Queue.offer(
+        input,
+        encodeRpcFailureJsonl(firstPromptRequest.id, {
+          code: -32000,
+          message: "401 Unauthorized",
+          data: { status: 401 },
+        }),
+      );
+
+      const refreshOutbound = yield* Queue.take(output);
+      const refreshRequest = yield* decodeAuthenticateRequest(refreshOutbound);
+      assert.equal(refreshRequest.params.methodId, "cursor_login");
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(AuthenticateResponse, {
+          jsonrpc: "2.0",
+          id: refreshRequest.id,
+          result: { _meta: { accessToken: "access-2", refreshToken: "refresh-2" } },
+        }),
+      );
+
+      const replayedPromptOutbound = yield* Queue.take(output);
+      const replayedPromptRequest = yield* decodePromptRequest(replayedPromptOutbound);
+      assert.equal(replayedPromptRequest.params.sessionId, "expired-session");
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(PromptResponse, {
+          jsonrpc: "2.0",
+          id: replayedPromptRequest.id,
+          result: { stopReason: "end_turn" },
+        }),
+      );
+
+      assert.deepEqual(yield* Fiber.join(promptFiber), { stopReason: "end_turn" });
+      assert.deepEqual(yield* Ref.get(expiredSessions), ["expired-session"]);
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
+  it.effect("fails queued requests with AuthenticationError when refresh fails", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      const acp = yield* AcpClient.make(stdio).pipe(Effect.provideService(Scope.Scope, scope));
+
+      const authenticateFiber = yield* acp.agent
+        .authenticate({ methodId: "cursor_login" })
+        .pipe(Effect.forkScoped);
+      const authenticateOutbound = yield* Queue.take(output);
+      const authenticateRequest = yield* decodeAuthenticateRequest(authenticateOutbound);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(AuthenticateResponse, {
+          jsonrpc: "2.0",
+          id: authenticateRequest.id,
+          result: { _meta: { accessToken: "access-1", refreshToken: "refresh-1" } },
+        }),
+      );
+      yield* Fiber.join(authenticateFiber);
+
+      const promptExitFiber = yield* Effect.exit(
+        acp.agent.prompt({
+          sessionId: "expired-session",
+          prompt: [{ type: "text", text: "hello" }],
+        }),
+      ).pipe(Effect.forkScoped);
+
+      const firstPromptOutbound = yield* Queue.take(output);
+      const firstPromptRequest = yield* decodePromptRequest(firstPromptOutbound);
+      yield* Queue.offer(
+        input,
+        encodeRpcFailureJsonl(firstPromptRequest.id, {
+          code: -32000,
+          message: "401 Unauthorized",
+          data: { status: 401 },
+        }),
+      );
+
+      const refreshOutbound = yield* Queue.take(output);
+      const refreshRequest = yield* decodeAuthenticateRequest(refreshOutbound);
+      yield* Queue.offer(
+        input,
+        encodeRpcFailureJsonl(refreshRequest.id, {
+          code: -32000,
+          message: "refresh token expired",
+          data: { status: 401 },
+        }),
+      );
+
+      const promptExit = yield* Fiber.join(promptExitFiber);
+      if (promptExit._tag !== "Failure") {
+        assert.fail("Expected prompt to fail when refresh fails");
+      }
+      const rendered = Cause.pretty(promptExit.cause);
+      assert.include(rendered, "AuthenticationError");
+      assert.include(rendered, "refresh token expired");
+      yield* Scope.close(scope, Exit.void);
     }),
   );
 
