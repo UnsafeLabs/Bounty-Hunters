@@ -1,6 +1,7 @@
 import {
   ChevronDownIcon,
   ChevronsLeftRightEllipsisIcon,
+  LineChartIcon,
   PlusIcon,
   QrCodeIcon,
   RefreshCwIcon,
@@ -16,6 +17,7 @@ import {
   type DesktopSshEnvironmentTarget,
   type DesktopServerExposureState,
   type EnvironmentId,
+  type PeerDiagnosticsResult,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
@@ -112,6 +114,52 @@ function formatAccessTimestamp(value: string): string {
     return value;
   }
   return accessTimestampFormatter.format(parsed);
+}
+
+function formatDiagnosticsLatency(value: number | null): string {
+  return value === null ? "Unavailable" : `${Number(value.toFixed(1))} ms`;
+}
+
+function formatDiagnosticsValue(value: string | boolean | null | undefined): string {
+  if (value === null || value === undefined || value === "") {
+    return "Unavailable";
+  }
+  if (typeof value === "boolean") {
+    return value ? "Online" : "Offline";
+  }
+  return value;
+}
+
+function TailscaleLatencyGraph({ diagnostics }: { diagnostics: PeerDiagnosticsResult }) {
+  const maxLatency = Math.max(1, ...diagnostics.samples.map((sample) => sample.latencyMs ?? 0));
+
+  return (
+    <div className="flex h-16 items-end gap-1" aria-label="Tailscale latency samples">
+      {diagnostics.samples.map((sample) => {
+        const heightPercent =
+          sample.latencyMs === null ? 10 : Math.max(10, (sample.latencyMs / maxLatency) * 100);
+        return (
+          <Tooltip key={sample.sequence}>
+            <TooltipTrigger
+              render={
+                <div
+                  className={cn(
+                    "w-4 rounded-t-sm bg-primary/70",
+                    sample.connectionType === "relayed" && "bg-warning/80",
+                    sample.latencyMs === null && "bg-muted-foreground/30",
+                  )}
+                  style={{ height: `${heightPercent}%` }}
+                />
+              }
+            />
+            <TooltipPopup side="top">
+              Sample {sample.sequence}: {formatDiagnosticsLatency(sample.latencyMs)}
+            </TooltipPopup>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
 }
 
 type ConnectionStatusDotProps = {
@@ -1498,6 +1546,12 @@ export function ConnectionsSettings() {
   const [tailscaleServePortInput, setTailscaleServePortInput] = useState(
     String(DEFAULT_TAILSCALE_SERVE_PORT),
   );
+  const [tailscaleDiagnosticsPeer, setTailscaleDiagnosticsPeer] = useState("");
+  const [tailscaleDiagnostics, setTailscaleDiagnostics] = useState<PeerDiagnosticsResult | null>(
+    null,
+  );
+  const [tailscaleDiagnosticsError, setTailscaleDiagnosticsError] = useState<string | null>(null);
+  const [isRunningTailscaleDiagnostics, setIsRunningTailscaleDiagnostics] = useState(false);
   const [pendingDesktopServerExposureMode, setPendingDesktopServerExposureMode] = useState<
     DesktopServerExposureState["mode"] | null
   >(null);
@@ -1640,6 +1694,40 @@ export function ConnectionsSettings() {
   const handleStartTailscaleServeDisable = useCallback((_endpoint: AdvertisedEndpoint) => {
     setDisableTailscaleServeDialogOpen(true);
   }, []);
+
+  const handleRunTailscaleDiagnostics = useCallback(async () => {
+    const peer = tailscaleDiagnosticsPeer.trim();
+    if (!peer) {
+      setTailscaleDiagnosticsError("Enter a peer name or Tailscale IP.");
+      setTailscaleDiagnostics(null);
+      return;
+    }
+
+    setIsRunningTailscaleDiagnostics(true);
+    setTailscaleDiagnosticsError(null);
+    try {
+      const diagnostics =
+        await getPrimaryEnvironmentConnection().client.server.diagnoseTailscalePeer({ peer });
+      setTailscaleDiagnostics(diagnostics);
+      if (diagnostics.error) {
+        setTailscaleDiagnosticsError(diagnostics.error);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to run Tailscale diagnostics.";
+      setTailscaleDiagnostics(null);
+      setTailscaleDiagnosticsError(message);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not run Tailscale diagnostics",
+          description: message,
+        }),
+      );
+    } finally {
+      setIsRunningTailscaleDiagnostics(false);
+    }
+  }, [tailscaleDiagnosticsPeer]);
 
   const handleRevokeDesktopPairingLink = useCallback(async (id: string) => {
     setRevokingDesktopPairingLinkId(id);
@@ -2356,6 +2444,102 @@ export function ConnectionsSettings() {
       }
     />
   );
+  const renderTailscaleDiagnosticsPanel = () => (
+    <div className="border-t border-border/60 px-4 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <label className="min-w-0 flex-1">
+          <span className="text-sm font-medium text-foreground">Peer diagnostics</span>
+          <Input
+            className="mt-2"
+            value={tailscaleDiagnosticsPeer}
+            onChange={(event) => setTailscaleDiagnosticsPeer(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                void handleRunTailscaleDiagnostics();
+              }
+            }}
+            placeholder="runner.tail.ts.net or 100.x.y.z"
+            disabled={isRunningTailscaleDiagnostics}
+          />
+        </label>
+        <Button
+          className="shrink-0 gap-2"
+          variant="outline"
+          onClick={() => void handleRunTailscaleDiagnostics()}
+          disabled={isRunningTailscaleDiagnostics || tailscaleDiagnosticsPeer.trim().length === 0}
+        >
+          {isRunningTailscaleDiagnostics ? (
+            <Spinner className="size-3.5" />
+          ) : (
+            <LineChartIcon className="size-3.5" />
+          )}
+          Run
+        </Button>
+      </div>
+      {tailscaleDiagnosticsError ? (
+        <p className="mt-3 text-xs text-destructive">{tailscaleDiagnosticsError}</p>
+      ) : null}
+      {tailscaleDiagnostics ? (
+        <div className="mt-4 space-y-4">
+          <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Connection</p>
+              <p className="font-medium capitalize text-foreground">
+                {tailscaleDiagnostics.connectionType}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Latency</p>
+              <p className="font-medium text-foreground">
+                {formatDiagnosticsLatency(tailscaleDiagnostics.latencyMs)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Peer IP</p>
+              <p className="truncate font-medium text-foreground">
+                {formatDiagnosticsValue(tailscaleDiagnostics.peerIp)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Last seen</p>
+              <p className="truncate font-medium text-foreground">
+                {tailscaleDiagnostics.lastSeen
+                  ? formatAccessTimestamp(tailscaleDiagnostics.lastSeen)
+                  : "Unavailable"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Relay</p>
+              <p className="truncate font-medium text-foreground">
+                {formatDiagnosticsValue(tailscaleDiagnostics.relayServer)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Region</p>
+              <p className="truncate font-medium text-foreground">
+                {formatDiagnosticsValue(tailscaleDiagnostics.relayRegion)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Status</p>
+              <p className="font-medium text-foreground">
+                {formatDiagnosticsValue(tailscaleDiagnostics.online)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Checked</p>
+              <p className="truncate font-medium text-foreground">
+                {formatAccessTimestamp(tailscaleDiagnostics.checkedAt)}
+              </p>
+            </div>
+          </div>
+          {tailscaleDiagnostics.samples.length > 0 ? (
+            <TailscaleLatencyGraph diagnostics={tailscaleDiagnostics} />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
   const renderAuthorizedClients = (presentation: AccessSectionPresentation) => (
     <>
       {desktopAccessManagementError ? (
@@ -2463,6 +2647,7 @@ export function ConnectionsSettings() {
                 {renderNetworkAccessRow()}
                 {renderEndpointRows("endpoint-rail")}
                 {renderTailscaleRow()}
+                {renderTailscaleDiagnosticsPanel()}
               </>
             ) : (
               renderDisabledNetworkAccessRow()

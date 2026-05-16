@@ -81,6 +81,8 @@ import {
   ServerProcessDiagnosticsResult,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
+  PeerDiagnosticsInput,
+  PeerDiagnosticsResult,
   ServerSignalProcessInput,
   ServerSignalProcessResult,
   ServerUpsertKeybindingInput,
@@ -148,6 +150,7 @@ export const WS_METHODS = {
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
+  serverDiagnoseTailscalePeer: "server.diagnoseTailscalePeer",
   serverSignalProcess: "server.signalProcess",
 
   // Source control methods
@@ -238,6 +241,11 @@ export const WsServerGetProcessResourceHistoryRpc = Rpc.make(
 export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
+});
+
+export const WsServerDiagnoseTailscalePeerRpc = Rpc.make(WS_METHODS.serverDiagnoseTailscalePeer, {
+  payload: PeerDiagnosticsInput,
+  success: PeerDiagnosticsResult,
 });
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
@@ -484,6 +492,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,
   WsServerGetProcessResourceHistoryRpc,
+  WsServerDiagnoseTailscalePeerRpc,
   WsServerSignalProcessRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,

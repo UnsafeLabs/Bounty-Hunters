@@ -394,6 +394,40 @@ export const ServerSignalProcessResult = Schema.Struct({
 });
 export type ServerSignalProcessResult = typeof ServerSignalProcessResult.Type;
 
+export const PeerDiagnosticsConnectionType = Schema.Literals(["direct", "relayed", "unknown"]);
+export type PeerDiagnosticsConnectionType = typeof PeerDiagnosticsConnectionType.Type;
+
+export const PeerDiagnosticsInput = Schema.Struct({
+  peer: TrimmedNonEmptyString,
+});
+export type PeerDiagnosticsInput = typeof PeerDiagnosticsInput.Type;
+
+export const PeerDiagnosticsPingSample = Schema.Struct({
+  sequence: PositiveInt,
+  latencyMs: Schema.NullOr(Schema.Number),
+  connectionType: PeerDiagnosticsConnectionType,
+  peerIp: Schema.NullOr(TrimmedNonEmptyString),
+  relayServer: Schema.NullOr(TrimmedNonEmptyString),
+  relayRegion: Schema.NullOr(TrimmedNonEmptyString),
+  raw: TrimmedNonEmptyString,
+});
+export type PeerDiagnosticsPingSample = typeof PeerDiagnosticsPingSample.Type;
+
+export const PeerDiagnosticsResult = Schema.Struct({
+  peer: TrimmedNonEmptyString,
+  checkedAt: IsoDateTime,
+  connectionType: PeerDiagnosticsConnectionType,
+  latencyMs: Schema.NullOr(Schema.Number),
+  peerIp: Schema.NullOr(TrimmedNonEmptyString),
+  relayServer: Schema.NullOr(TrimmedNonEmptyString),
+  relayRegion: Schema.NullOr(TrimmedNonEmptyString),
+  lastSeen: Schema.NullOr(TrimmedNonEmptyString),
+  online: Schema.NullOr(Schema.Boolean),
+  samples: Schema.Array(PeerDiagnosticsPingSample),
+  error: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type PeerDiagnosticsResult = typeof PeerDiagnosticsResult.Type;
+
 export const ServerConfig = Schema.Struct({
   environment: ExecutionEnvironmentDescriptor,
   auth: ServerAuthDescriptor,
