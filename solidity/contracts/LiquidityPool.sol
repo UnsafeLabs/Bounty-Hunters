@@ -3,15 +3,16 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract LiquidityPool is ERC20 {
+contract LiquidityPool is ERC20, ReentrancyGuard {
     IERC20 public tokenA;
     IERC20 public tokenB;
 
     uint256 public reserveA;
     uint256 public reserveB;
 
-    // BUG: No MINIMUM_LIQUIDITY lock — first depositor can manipulate LP price
+    // Minimum liquidity locked forever to prevent first-depositor manipulation
     uint256 public constant MINIMUM_LIQUIDITY = 1000;
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
@@ -22,13 +23,15 @@ contract LiquidityPool is ERC20 {
         tokenB = IERC20(_tokenB);
     }
 
-    function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
+    function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant returns (uint256 lpTokens) {
         tokenA.transferFrom(msg.sender, address(this), amountA);
         tokenB.transferFrom(msg.sender, address(this), amountB);
 
         if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
-            lpTokens = sqrt(amountA * amountB);
+            // FIX: Lock minimum liquidity to prevent manipulation
+            lpTokens = sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
+            // Mint minimum liquidity to dead address (locked forever)
+            _mint(address(0xdead), MINIMUM_LIQUIDITY);
         } else {
             uint256 lpFromA = amountA * totalSupply() / reserveA;
             uint256 lpFromB = amountB * totalSupply() / reserveB;
@@ -44,25 +47,23 @@ contract LiquidityPool is ERC20 {
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
     }
 
-    // BUG: Uses balanceOf instead of internal reserves — manipulable via direct transfer
-    function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
+    // FIX: Use internal reserves instead of balanceOf to prevent manipulation
+    function removeLiquidity(uint256 lpTokens) external nonReentrant returns (uint256 amountA, uint256 amountB) {
         require(lpTokens > 0, "Must burn > 0");
         require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
 
-        // BUG: Should use reserveA/reserveB, not balanceOf
-        uint256 balA = tokenA.balanceOf(address(this));
-        uint256 balB = tokenB.balanceOf(address(this));
+        // FIX: Use reserves instead of balanceOf
+        amountA = lpTokens * reserveA / totalSupply();
+        amountB = lpTokens * reserveB / totalSupply();
 
-        amountA = lpTokens * balA / totalSupply();
-        amountB = lpTokens * balB / totalSupply();
-
+        // State update BEFORE external call
         _burn(msg.sender, lpTokens);
-
-        tokenA.transfer(msg.sender, amountA);
-        tokenB.transfer(msg.sender, amountB);
-
         reserveA -= amountA;
         reserveB -= amountB;
+
+        // External calls after state update
+        tokenA.transfer(msg.sender, amountA);
+        tokenB.transfer(msg.sender, amountB);
 
         emit LiquidityRemoved(msg.sender, amountA, amountB, lpTokens);
     }
