@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent",
+  "initial_directives": "Implement MetricsAggregator service for UnsafeLabs/Bounty-Hunters issue #856. Requirements: Effect.Ref, Effect.Schedule, 1-minute sliding windows, p50/p95/p99 percentiles, circular buffer of 60 windows, /metrics/aggregated endpoint.",
+  "date": "2026-05-16T11:30:00.000Z"
+}
