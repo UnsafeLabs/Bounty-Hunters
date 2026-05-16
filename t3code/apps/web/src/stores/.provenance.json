@@ -1,0 +1,5 @@
+{
+  "agent_name": "Hermes Agent",
+  "config_snapshot": "T3 Code toast notification system. Use Zustand for state, Tailwind CSS for styling. Files: stores/notificationStore.ts (Zustand store with addNotification, removeNotification, clearHistory; supports auto-dismiss, notification history capped at 50), components/NotificationToast.tsx (toast viewport, individual toast items with slide-in/exit animations, history panel with relative timestamps). Types: success/error/warning/info with distinct colors and icons. Dismissal: click toast or X button. Animation: slide-in from right, fade-out on dismiss. History: accessible via bell icon button, shows last 50 in reverse chronological order.",
+  "created": "2026-05-16T03:52:00Z"
+}
