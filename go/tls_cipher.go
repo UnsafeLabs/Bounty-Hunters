@@ -208,6 +208,10 @@ func (r *SuiteRegistry) FilterWeakSuites(suites []*CipherSuite) []*CipherSuite {
 // BUG(4): The AEAD comparison is inverted — non-AEAD suites end up
 // ranked above AEAD suites.
 func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
+	return r.sortByPreferenceForArch(suites, runtime.GOARCH)
+}
+
+func (r *SuiteRegistry) sortByPreferenceForArch(suites []*CipherSuite, arch string) []*CipherSuite {
 	sorted := make([]*CipherSuite, len(suites))
 	copy(sorted, suites)
 
@@ -217,6 +221,10 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 		// BUG(4): operator is flipped; should be si.IsAEAD && !sj.IsAEAD
 		if si.IsAEAD != sj.IsAEAD {
 			return !si.IsAEAD && sj.IsAEAD
+		}
+
+		if arch == "arm64" && si.IsAEAD && sj.IsAEAD && isChaCha20Suite(si) != isChaCha20Suite(sj) {
+			return isChaCha20Suite(si)
 		}
 
 		// Higher strength first
@@ -229,6 +237,10 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 	})
 
 	return sorted
+}
+
+func isChaCha20Suite(suite *CipherSuite) bool {
+	return suite != nil && suite.ID == tls.TLS_CHACHA20_POLY1305_SHA256
 }
 
 // ConcurrentLookup demonstrates a batch lookup of suite IDs from
