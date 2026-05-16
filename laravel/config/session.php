@@ -22,6 +22,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Session Driver Fallback
+    |--------------------------------------------------------------------------
+    |
+    | When the configured session driver cannot be resolved, the application
+    | falls back to this driver so web requests can still be served safely.
+    |
+    */
+
+    'fallback' => env('SESSION_FALLBACK_DRIVER', 'file'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Session Lifetime
     |--------------------------------------------------------------------------
     |
