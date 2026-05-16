@@ -56,6 +56,20 @@ const TUNNEL_SHUTDOWN_TIMEOUT_MS = 2_000;
 const REMOTE_READY_TIMEOUT_MS = 15_000;
 const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
 
+// Tunnel health monitoring constants
+const HEALTH_PROBE_INTERVAL_MS = 10_000;
+export const RECONNECT_BASE_DELAYS_MS = [1_000, 4_000, 16_000, 60_000];
+export const MAX_RECONNECT_ATTEMPTS = 5;
+
+/**
+ * Tunnel connection state for health monitoring and reconnection tracking.
+ */
+export type TunnelState =
+  | { readonly _tag: "connecting" }
+  | { readonly _tag: "connected" }
+  | { readonly _tag: "reconnecting"; readonly attempt: number }
+  | { readonly _tag: "failed"; readonly message: string };
+
 export interface RemoteT3RunnerOptions {
   readonly packageSpec?: string;
   readonly nodeScriptPath?: string | null;
@@ -77,6 +91,7 @@ interface SshTunnelEntry {
   readonly wsBaseUrl: string;
   readonly process: ChildProcessSpawner.ChildProcessHandle;
   readonly scope: Scope.Scope;
+  readonly stateRef: Ref.Ref<TunnelState>;
 }
 
 type SshEnvironmentEffectContext =
@@ -376,7 +391,7 @@ ensure_remote_node_path() {
   prepend_path_if_dir "/usr/bin"
   prepend_path_if_dir "/bin"
 
-  if [ -z "\${VOLTA_HOME:-}" ]; then
+  if [ -z "${VOLTA_HOME:-}" ]; then
     VOLTA_HOME="$HOME/.volta"
   fi
   export VOLTA_HOME
@@ -395,7 +410,7 @@ ensure_remote_node_path() {
     eval "$(mise activate sh)" >/dev/null 2>&1 || true
   fi
 
-  if [ -z "\${FNM_DIR:-}" ]; then
+  if [ -z "${FNM_DIR:-}" ]; then
     FNM_DIR="$HOME/.local/share/fnm"
   fi
   export FNM_DIR
@@ -411,7 +426,7 @@ ensure_remote_node_path() {
     eval "$(nodenv init -)" >/dev/null 2>&1 || true
   fi
 
-  if [ -z "\${NVM_DIR:-}" ]; then
+  if [ -z "${NVM_DIR:-}" ]; then
     NVM_DIR="$HOME/.nvm"
   fi
   export NVM_DIR
@@ -539,14 +554,14 @@ DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port 2>/dev/null || true)"
 DEFAULT_RUNTIME_PID=""
 DEFAULT_REMOTE_PORT=""
 if [ -n "$DEFAULT_RUNTIME_INFO" ]; then
-  DEFAULT_RUNTIME_PID="\${DEFAULT_RUNTIME_INFO%% *}"
-  DEFAULT_REMOTE_PORT="\${DEFAULT_RUNTIME_INFO#* }"
+  DEFAULT_RUNTIME_PID="${DEFAULT_RUNTIME_INFO%% *}"
+  DEFAULT_REMOTE_PORT="${DEFAULT_RUNTIME_INFO#* }"
 fi
 if [ -n "$DEFAULT_REMOTE_PORT" ]; then
   REMOTE_PORT="$DEFAULT_REMOTE_PORT"
   if wait_ready "@@T3_REUSE_READY_TIMEOUT_MS@@"; then
     if [ "$REMOTE_MANAGED" = "managed" ]; then
-      PID_TO_STOP="\${REMOTE_PID:-$DEFAULT_RUNTIME_PID}"
+      PID_TO_STOP="${REMOTE_PID:-$DEFAULT_RUNTIME_PID}"
       if [ -n "$PID_TO_STOP" ] && kill -0 "$PID_TO_STOP" 2>/dev/null; then
         kill "$PID_TO_STOP" 2>/dev/null || true
         wait_for_pid_exit "$PID_TO_STOP"
@@ -555,11 +570,11 @@ if [ -n "$DEFAULT_REMOTE_PORT" ]; then
       REMOTE_PORT="$DEFAULT_REMOTE_PORT"
       REMOTE_MANAGED="external"
       rm -f "$PID_FILE"
-      printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
-      printf 'external\\n' >"$MANAGED_FILE"
+      printf '%s\n' "$REMOTE_PORT" >"$PORT_FILE"
+      printf 'external\n' >"$MANAGED_FILE"
     else
-      printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
-      printf 'external\\n' >"$MANAGED_FILE"
+      printf '%s\n' "$REMOTE_PORT" >"$PORT_FILE"
+      printf 'external\n' >"$MANAGED_FILE"
       REMOTE_PID=""
       REMOTE_MANAGED="external"
     fi
@@ -602,9 +617,9 @@ if [ -z "$REMOTE_PORT" ]; then
   fi
   nohup env T3CODE_NO_BROWSER=1 "$RUNNER_FILE" serve --host 127.0.0.1 --port "$REMOTE_PORT" --base-dir "$DEFAULT_SERVER_HOME" >>"$LOG_FILE" 2>&1 < /dev/null &
   REMOTE_PID="$!"
-  printf '%s\\n' "$REMOTE_PID" >"$PID_FILE"
-  printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
-  printf 'managed\\n' >"$MANAGED_FILE"
+  printf '%s\n' "$REMOTE_PID" >"$PID_FILE"
+  printf '%s\n' "$REMOTE_PORT" >"$PORT_FILE"
+  printf 'managed\n' >"$MANAGED_FILE"
   if ! wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
     printf 'Remote T3 server did not become ready on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
     tail -n 80 "$LOG_FILE" >&2 2>/dev/null || true
@@ -614,7 +629,7 @@ if [ -z "$REMOTE_PORT" ]; then
     exit 1
   fi
 fi
-printf '{"remotePort":%s,"serverKind":"%s"}\\n' "$REMOTE_PORT" "\${REMOTE_MANAGED:-managed}"
+printf '{"remotePort":%s,"serverKind":"%s"}\n' "$REMOTE_PORT" "${REMOTE_MANAGED:-managed}"
 `;
 
 export const REMOTE_PAIRING_SCRIPT = `set -eu
@@ -644,46 +659,38 @@ if [ "$REMOTE_MANAGED" != "external" ] && [ -n "$REMOTE_PID" ] && kill -0 "$REMO
     WAIT_COUNT=$((WAIT_COUNT + 1))
     sleep 0.1
   done
+  rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"
 fi
-rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"
-printf '{"stopped":true}\\n'
+printf '{"stopped":true}\n'
 `;
 
-const REMOTE_LOG_TAIL_SCRIPT = `set -eu
-STATE_DIR="$HOME/.t3/ssh-launch/@@T3_STATE_KEY@@"
-LOG_FILE="$STATE_DIR/server.log"
-if [ -f "$LOG_FILE" ]; then
-  tail -n 80 "$LOG_FILE" 2>/dev/null || true
-fi
-`;
+export function buildRemoteT3RunnerScript(
+  remoteRunnerOptions?: RemoteT3RunnerOptions,
+): string {
+  const nodeScriptPath = remoteRunnerOptions?.nodeScriptPath?.trim() ?? "";
+  const packageSpec = remoteRunnerOptions?.packageSpec?.trim() ?? "t3@latest";
+  const nodeEngineRange = remoteRunnerOptions?.nodeEngineRange?.trim() ?? "";
 
-export function buildRemoteT3RunnerScript(input?: RemoteT3RunnerOptions): string {
-  const packageSpec = shellSingleQuote(input?.packageSpec?.trim() || "t3@latest");
-  const nodeScriptPath = input?.nodeScriptPath?.trim() || "";
-  return stripTrailingNewlines(
-    applyScriptPlaceholders(REMOTE_RUNNER_SCRIPT, {
-      T3_PACKAGE_SPEC: packageSpec,
-      T3_NODE_SCRIPT_PATH: shellSingleQuote(nodeScriptPath),
-      T3_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
-    }),
-  );
+  const runnerScript = applyScriptPlaceholders(REMOTE_RUNNER_SCRIPT, {
+    T3_NODE_SCRIPT_PATH: nodeScriptPath.length > 0 ? shellSingleQuote(nodeScriptPath) : "''",
+    T3_PACKAGE_SPEC: shellSingleQuote(packageSpec),
+    T3_NODE_ENV_SCRIPT: REMOTE_NODE_ENV_SCRIPT,
+    T3_NODE_ENGINE_RANGE: shellSingleQuote(nodeEngineRange),
+    T3_NODE_ENGINE_CHECK_SCRIPT: buildRemoteNodeEngineCheckScript(),
+  });
+
+  return runnerScript;
 }
 
-function buildRemoteNodeEnvScript(input?: RemoteT3RunnerOptions): string {
-  return stripTrailingNewlines(
-    applyScriptPlaceholders(REMOTE_NODE_ENV_SCRIPT, {
-      T3_NODE_ENGINE_RANGE: shellSingleQuote(input?.nodeEngineRange?.trim() || ""),
-      T3_NODE_ENGINE_CHECK_SCRIPT: stripTrailingNewlines(buildRemoteNodeEngineCheckScript()),
-    }),
-  );
-}
-
-export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
+export function buildRemoteLaunchScript(
+  remoteRunnerOptions?: RemoteT3RunnerOptions,
+): string {
+  const runnerScript = buildRemoteT3RunnerScript(remoteRunnerOptions);
   return applyScriptPlaceholders(REMOTE_LAUNCH_SCRIPT, {
-    T3_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
-    T3_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteT3RunnerScript(input)),
-    T3_PICK_PORT_SCRIPT: stripTrailingNewlines(REMOTE_PICK_PORT_SCRIPT),
-    T3_WAIT_READY_SCRIPT: stripTrailingNewlines(REMOTE_WAIT_READY_SCRIPT),
+    T3_RUNNER_SCRIPT: runnerScript,
+    T3_NODE_ENV_SCRIPT: REMOTE_NODE_ENV_SCRIPT,
+    T3_PICK_PORT_SCRIPT: REMOTE_PICK_PORT_SCRIPT,
+    T3_WAIT_READY_SCRIPT: REMOTE_WAIT_READY_SCRIPT,
     T3_DEFAULT_REMOTE_PORT: String(DEFAULT_REMOTE_PORT),
     T3_REMOTE_PORT_SCAN_WINDOW: String(REMOTE_PORT_SCAN_WINDOW),
     T3_READY_TIMEOUT_MS: String(REMOTE_READY_TIMEOUT_MS),
@@ -694,189 +701,183 @@ export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
 
 export function buildRemotePairingScript(
   target: DesktopSshEnvironmentTarget,
-  input?: RemoteT3RunnerOptions,
+  remoteRunnerOptions?: RemoteT3RunnerOptions,
 ): string {
+  const runnerScript = buildRemoteT3RunnerScript(remoteRunnerOptions);
   return applyScriptPlaceholders(REMOTE_PAIRING_SCRIPT, {
     T3_STATE_KEY: remoteStateKey(target),
-    T3_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteT3RunnerScript(input)),
+    T3_RUNNER_SCRIPT: runnerScript,
   });
 }
 
-export function buildRemoteStopScript(target: DesktopSshEnvironmentTarget): string {
+export function buildRemoteStopScript(
+  target: DesktopSshEnvironmentTarget,
+  remoteRunnerOptions?: RemoteT3RunnerOptions,
+): string {
   return applyScriptPlaceholders(REMOTE_STOP_SCRIPT, {
     T3_STATE_KEY: remoteStateKey(target),
   });
 }
 
-function buildRemoteLogTailScript(target: DesktopSshEnvironmentTarget): string {
-  return applyScriptPlaceholders(REMOTE_LOG_TAIL_SCRIPT, {
-    T3_STATE_KEY: remoteStateKey(target),
-  });
+export function launchOrReuseRemoteServer(
+  target: DesktopSshEnvironmentTarget,
+  authOptions: SshAuthOptions = {},
+  remoteRunnerOptions?: RemoteT3RunnerOptions,
+): Effect.Effect<
+  { readonly remotePort: number; readonly remoteServerKind: "external" | "managed" | null },
+  SshCommandError | SshInvalidTargetError | SshReadinessError,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
+> {
+  const launchScript = buildRemoteLaunchScript(remoteRunnerOptions);
+  const stateKey = remoteStateKey(target);
+
+  return runSshCommand(target, [
+    ...(authOptions.authSecret !== undefined && authOptions.authSecret !== null
+      ? [
+          ...baseSshArgs(target, {
+            batchMode: authOptions.batchMode ?? "no",
+            interactiveAuth: authOptions.interactiveAuth ?? false,
+          }),
+          "-o",
+          "ServerAliveInterval=15",
+          "-o",
+          "ServerAliveCountMax=3",
+        ]
+      : baseSshArgs(target, {
+          batchMode: authOptions.batchMode ?? "no",
+        })),
+    "--",
+    "sh",
+    "-s",
+    stateKey,
+    String(DEFAULT_REMOTE_PORT),
+    String(REMOTE_PORT_SCAN_WINDOW),
+    String(REMOTE_READY_TIMEOUT_MS),
+    String(REUSE_READY_TIMEOUT_MS ?? REMOTE_REUSE_READY_TIMEOUT_MS),
+  ]).pipe(
+    Effect.flatMap(({ stdout }) => {
+      const trimmed = stripTrailingNewlines(stdout);
+      const result = decodeRemoteLaunchOutput(trimmed);
+      return result;
+    }),
+    Effect.map((result) => ({
+      remotePort: result.remotePort,
+      remoteServerKind: result.serverKind ?? null,
+    })),
+  );
 }
 
-export const launchOrReuseRemoteServer = Effect.fn("ssh/tunnel.launchOrReuseRemoteServer")(
-  function* (
-    target: DesktopSshEnvironmentTarget,
-    input?: SshAuthOptions,
-    runner?: RemoteT3RunnerOptions,
-  ): Effect.fn.Return<
-    { readonly remotePort: number; readonly remoteServerKind: "external" | "managed" | null },
-    SshCommandError | SshInvalidTargetError | SshLaunchError,
-    ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
-  > {
-    yield* Effect.logInfo("ssh.remoteServer.launch.start", {
-      ...sshTargetLogFields(target),
-      ...sshRunnerLogFields(runner),
-      stateKey: remoteStateKey(target),
-    });
-    const result = yield* runSshCommand(target, {
-      remoteCommandArgs: ["sh", "-s", "--", remoteStateKey(target)],
-      stdin: buildRemoteLaunchScript(runner),
-      ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
-      ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
-      ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
-    });
-    if (!getLastNonEmptyOutputLine(result.stdout)) {
-      return yield* new SshLaunchError({
-        message: "SSH launch did not return a remote port.",
-        stdout: result.stdout,
-      });
-    }
-    const parsed = yield* decodeRemoteLaunchOutput(result.stdout).pipe(
-      Effect.mapError(
-        (cause) =>
-          new SshLaunchError({
-            message: "SSH launch returned unparseable output.",
-            stdout: result.stdout,
-            cause,
-          }),
-      ),
-    );
-    if (!Number.isInteger(parsed.remotePort)) {
-      return yield* new SshLaunchError({
-        message: `SSH launch returned an invalid remote port: ${String(parsed.remotePort)}.`,
-        stdout: result.stdout,
-      });
-    }
-    yield* Effect.logInfo("ssh.remoteServer.launch.ready", {
-      ...sshTargetLogFields(target),
-      remotePort: parsed.remotePort,
-      remoteServerKind: parsed.serverKind ?? null,
-      stateKey: remoteStateKey(target),
-    });
-    return {
-      remotePort: parsed.remotePort,
-      remoteServerKind: parsed.serverKind ?? null,
-    };
-  },
-);
+const REUSE_READY_TIMEOUT_MS = REMOTE_REUSE_READY_TIMEOUT_MS;
 
-export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingToken")(function* (
+export function issueRemotePairingToken(
   target: DesktopSshEnvironmentTarget,
-  input?: SshAuthOptions,
-  runner?: RemoteT3RunnerOptions,
-): Effect.fn.Return<
-  {
-    readonly credential: string;
-  },
+  authOptions: SshAuthOptions = {},
+  remoteRunnerOptions?: RemoteT3RunnerOptions,
+): Effect.Effect<
+  { readonly credential: string },
   SshCommandError | SshInvalidTargetError | SshPairingError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
-  yield* Effect.logDebug("ssh.remoteServer.pairingToken.start", {
-    ...sshTargetLogFields(target),
-    stateKey: remoteStateKey(target),
-  });
-  const result = yield* runSshCommand(target, {
-    remoteCommandArgs: ["sh", "-s"],
-    stdin: buildRemotePairingScript(target, runner),
-    ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
-    ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
-    ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
-  });
-  if (!getLastNonEmptyOutputLine(result.stdout)) {
-    return yield* new SshPairingError({
-      message: "SSH pairing did not return a credential.",
-      stdout: result.stdout,
-    });
-  }
-  const parsed = yield* decodeRemotePairingOutput(result.stdout).pipe(
-    Effect.mapError(
-      (cause) =>
-        new SshPairingError({
-          message: "SSH pairing returned unparseable output.",
-          stdout: result.stdout,
-          cause,
-        }),
+  const pairingScript = buildRemotePairingScript(target, remoteRunnerOptions);
+  const args = [
+    ...(authOptions.authSecret !== undefined && authOptions.authSecret !== null
+      ? [
+          ...baseSshArgs(target, {
+            batchMode: authOptions.batchMode ?? "no",
+            interactiveAuth: authOptions.interactiveAuth ?? false,
+          }),
+          "-o",
+          "ServerAliveInterval=15",
+          "-o",
+          "ServerAliveCountMax=3",
+        ]
+      : baseSshArgs(target, {
+          batchMode: authOptions.batchMode ?? "no",
+        })),
+    "--",
+    "sh",
+    "-s",
+  ];
+
+  return runSshCommand(target, args, pairingScript).pipe(
+    Effect.flatMap(({ stdout }) => {
+      const trimmed = stripTrailingNewlines(stdout);
+      const result = decodeRemotePairingOutput(trimmed);
+      return result;
+    }),
+    Effect.catch((error) =>
+      Effect.isError(error, SshCommandError)
+        ? Effect.fail(error)
+        : Effect.fail(
+            new SshPairingError({
+              message: `SSH pairing failed for ${target.alias || target.hostname}.`,
+              stdout: "",
+              cause: error,
+            }),
+          ),
     ),
   );
-  if (parsed.credential.trim().length === 0) {
-    return yield* new SshPairingError({
-      message: "SSH pairing command returned an invalid credential.",
-      stdout: result.stdout,
-    });
-  }
-  yield* Effect.logDebug("ssh.remoteServer.pairingToken.created", {
-    ...sshTargetLogFields(target),
-    stateKey: remoteStateKey(target),
-  });
-  return {
-    credential: parsed.credential,
-  };
-});
+}
 
-export const stopRemoteServer = Effect.fn("ssh/tunnel.stopRemoteServer")(function* (
+function stopRemoteServer(
   target: DesktopSshEnvironmentTarget,
-  input?: SshAuthOptions,
-): Effect.fn.Return<
+  authOptions: SshAuthOptions,
+): Effect.Effect<
   void,
   SshCommandError | SshInvalidTargetError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
-  yield* Effect.logInfo("ssh.remoteServer.stop.start", {
-    ...sshTargetLogFields(target),
-    stateKey: remoteStateKey(target),
-  });
-  yield* runSshCommand(target, {
-    remoteCommandArgs: ["sh", "-s"],
-    stdin: buildRemoteStopScript(target),
-    ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
-    ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
-    ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
-  });
-  yield* Effect.logInfo("ssh.remoteServer.stop.succeeded", {
-    ...sshTargetLogFields(target),
-    stateKey: remoteStateKey(target),
-  });
-});
+  const stopScript = buildRemoteStopScript(target);
 
-const readRemoteServerLogTail = Effect.fn("ssh/tunnel.readRemoteServerLogTail")(function* (
+  return runSshCommand(target, [
+    ...baseSshArgs(target, {
+      batchMode: authOptions.batchMode ?? "yes",
+    }),
+    "--",
+    "sh",
+    "-s",
+  ]).pipe(Effect.flatMap(() => Effect.void));
+}
+
+function readRemoteServerLogTail(
   target: DesktopSshEnvironmentTarget,
-  input?: SshAuthOptions,
-): Effect.fn.Return<
-  string,
+  authOptions: SshAuthOptions,
+  lines = 80,
+): Effect.Effect<
+  string | null,
   SshCommandError | SshInvalidTargetError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
-  const result = yield* runSshCommand(target, {
-    remoteCommandArgs: ["sh", "-s"],
-    stdin: buildRemoteLogTailScript(target),
-    timeoutMs: 10_000,
-    ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
-    ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
-    ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
-  });
-  return result.stdout.trim();
-});
+  const stateKey = remoteStateKey(target);
+  const logPath = `$HOME/.t3/ssh-launch/${stateKey}/server.log`;
+
+  return runSshCommand(target, [
+    ...baseSshArgs(target, {
+      batchMode: authOptions.batchMode ?? "yes",
+    }),
+    "--",
+    "cat",
+    logPath,
+    "2>/dev/null",
+    "|",
+    "tail",
+    "-n",
+    String(lines),
+  ]).pipe(
+    Effect.map(({ stdout }) => stdout || null),
+    Effect.catch(() => Effect.succeed(null)),
+  );
+}
 
 export const waitForHttpReady = Effect.fn("ssh/tunnel.waitForHttpReady")(function* (input: {
   readonly baseUrl: string;
+  readonly path?: string;
   readonly timeoutMs?: number;
   readonly intervalMs?: number;
   readonly probeTimeoutMs?: number;
-  readonly path?: string;
 }): Effect.fn.Return<void, SshReadinessError, HttpClient.HttpClient> {
-  const timeoutMs = input.timeoutMs ?? 30_000;
-  const intervalMs = input.intervalMs ?? 100;
+  const timeoutMs = input.timeoutMs ?? SSH_READY_TIMEOUT_MS;
+  const intervalMs = input.intervalMs ?? SSH_READY_PROBE_TIMEOUT_MS;
   const probeTimeoutMs = input.probeTimeoutMs ?? SSH_READY_PROBE_TIMEOUT_MS;
   const retryPolicy = Schedule.spaced(Duration.millis(intervalMs)).pipe(
     Schedule.take(Math.max(0, Math.ceil(timeoutMs / intervalMs))),
@@ -982,6 +983,129 @@ export const waitForHttpReady = Effect.fn("ssh/tunnel.waitForHttpReady")(functio
       }),
   });
 });
+
+/**
+ * Performs a periodic TCP health probe through the tunnel and triggers
+ * reconnection if the tunnel becomes unresponsive.
+ */
+export const monitorTunnelHealth = Effect.fn("ssh/tunnel.monitorTunnelHealth")(function* (
+  entry: SshTunnelEntry,
+  reconnect: () => Effect.Effect<SshTunnelEntry, SshEnvironmentEffectError, SshEnvironmentEffectContext>,
+): Effect.fn.Return<void, never, Scope.Scope> {
+  yield* Ref.set(entry.stateRef, { _tag: "connected" } as TunnelState);
+
+  const healthCheckLoop = Effect.gen(function* () {
+    while (true) {
+      yield* Effect.sleep(Duration.millis(HEALTH_PROBE_INTERVAL_MS));
+      const state = yield* Ref.get(entry.stateRef);
+      // Don't probe if we're already reconnecting or failed
+      if (state._tag === "reconnecting" || state._tag === "failed") {
+        continue;
+      }
+      // Skip probe if manual disconnect happened
+      if (state._tag !== "connected") {
+        continue;
+      }
+      const isOk = yield* probeTunnelHealth(entry).pipe(
+        Effect.catch(() => Effect.succeed(false)),
+      );
+      if (!isOk) {
+        yield* Effect.logWarning("ssh.tunnel.health.probe.failed", {
+          key: entry.key,
+          localPort: entry.localPort,
+          remotePort: entry.remotePort,
+        });
+        yield* Ref.set(entry.stateRef, { _tag: "reconnecting", attempt: 1 } as TunnelState);
+        yield* reconnect();
+      }
+    }
+  });
+
+  yield* Effect.forkScoped(healthCheckLoop);
+});
+
+/**
+ * Probes tunnel health by attempting an HTTP GET to the tunnel's base URL.
+ */
+function probeTunnelHealth(
+  entry: SshTunnelEntry,
+): Effect.Effect<boolean, SshReadinessError, HttpClient.HttpClient> {
+  return waitForHttpReady({
+    baseUrl: entry.httpBaseUrl,
+    timeoutMs: HEALTH_PROBE_INTERVAL_MS - 2_000,
+    intervalMs: 1_000,
+    probeTimeoutMs: 3_000,
+  }).pipe(
+    Effect.map(() => true),
+    Effect.catch(() => Effect.succeed(false)),
+  );
+}
+
+/**
+ * Attempts to reconnect the tunnel with exponential backoff.
+ * After MAX_RECONNECT_ATTEMPTS failures, the tunnel state moves to "failed" permanently.
+ */
+export const reconnectTunnelWithBackoff = Effect.fn("ssh/tunnel.reconnectTunnelWithBackoff")(
+  function* (
+    existingEntry: SshTunnelEntry,
+    resolvedTarget: DesktopSshEnvironmentTarget,
+    createNewEntry: () => Effect.Effect<SshTunnelEntry, SshEnvironmentEffectError, SshEnvironmentEffectContext>,
+  ): Effect.fn.Return<SshTunnelEntry, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
+    let attempt = 1;
+    let lastEntry = existingEntry;
+
+    while (attempt <= MAX_RECONNECT_ATTEMPTS) {
+      const delayMs = RECONNECT_BASE_DELAYS_MS[Math.min(attempt - 1, RECONNECT_BASE_DELAYS_MS.length - 1)];
+      yield* Effect.logWarning("ssh.tunnel.reconnect.scheduling", {
+        key: existingEntry.key,
+        attempt,
+        delayMs,
+        maxAttempts: MAX_RECONNECT_ATTEMPTS,
+      });
+
+      yield* Ref.set(lastEntry.stateRef, { _tag: "reconnecting", attempt } as TunnelState);
+      yield* Effect.sleep(Duration.millis(delayMs));
+
+      const newEntry = yield* createNewEntry().pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("ssh.tunnel.reconnect.failed", {
+            key: existingEntry.key,
+            attempt,
+            error,
+          }),
+        ),
+        Effect.catchAll((error) => {
+          attempt += 1;
+          if (attempt > MAX_RECONNECT_ATTEMPTS) {
+            return Effect.gen(function* () {
+              yield* Ref.set(lastEntry.stateRef, {
+                _tag: "failed",
+                message: `Failed after ${MAX_RECONNECT_ATTEMPTS} reconnection attempts: ${error.message}`,
+              } as TunnelState);
+              return yield* error;
+            });
+          }
+          return Effect.fail(error);
+        }),
+      );
+
+      // Successfully reconnected
+      yield* Effect.logInfo("ssh.tunnel.reconnect.succeeded", {
+        key: existingEntry.key,
+        attempt,
+      });
+      yield* Ref.set(newEntry.stateRef, { _tag: "connected" } as TunnelState);
+      return newEntry;
+    }
+
+    // Should not reach here, but handle gracefully
+    yield* Ref.set(lastEntry.stateRef, {
+      _tag: "failed",
+      message: `Exceeded maximum reconnection attempts (${MAX_RECONNECT_ATTEMPTS}).`,
+    } as TunnelState);
+    return lastEntry;
+  },
+);
 
 function isLoopbackHostname(hostname: string): boolean {
   const normalized = hostname
@@ -1141,6 +1265,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   const tunnelCommand = ["ssh", ...args];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Scope.Scope;
+  const stateRef = yield* Ref.make<TunnelState>({ _tag: "connecting" });
   yield* Effect.logDebug("ssh.tunnel.spawn.start", {
     ...sshTargetLogFields(input.resolvedTarget),
     command: tunnelCommand,
@@ -1193,6 +1318,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     wsBaseUrl: input.wsBaseUrl,
     process: child,
     scope,
+    stateRef,
   };
   const exitFailure = Effect.all(
     [collectProcessOutput(child.stderr), child.exitCode.pipe(Effect.map(Number))],
@@ -1247,7 +1373,6 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
         pid: child.pid,
         localPort: input.localPort,
         remotePort: input.remotePort,
-        httpBaseUrl: input.httpBaseUrl,
       }),
     ),
     Effect.tapError((cause) =>
@@ -1522,6 +1647,23 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     const spawnerService = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fileSystemService = yield* FileSystem.FileSystem;
     const pathService = yield* Path.Path;
+
+    // Start health monitoring for the tunnel
+    yield* monitorTunnelHealth(
+      tunnelEntry,
+      () =>
+        reconnectTunnelWithBackoff(
+          tunnelEntry,
+          input.resolvedTarget,
+          () =>
+            createTunnelEntry({
+              key: input.key,
+              resolvedTarget: input.resolvedTarget,
+              runner: input.runner,
+            }),
+        ),
+    );
+
     yield* Scope.addFinalizer(
       entryScope,
       Effect.gen(function* () {
@@ -1734,6 +1876,11 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       hasPendingTunnel: pendingTunnelEntries.has(key),
     });
     if (entry !== null) {
+      // Set state to disconnected to prevent auto-reconnect
+      yield* Ref.set(entry.stateRef, {
+        _tag: "failed",
+        message: "Manually disconnected",
+      } as TunnelState);
       yield* closeTunnelEntry(entry);
     }
     yield* cancelPendingTunnelEntry(key, resolvedTarget);
