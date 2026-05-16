@@ -1,4 +1,4 @@
-import { parsePatchFiles } from "@pierre/diffs";
+import { parsePatchFiles, type DiffLineAnnotation } from "@pierre/diffs";
 import { FileDiff, type FileDiffMetadata, Virtualizer } from "@pierre/diffs/react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
@@ -8,10 +8,14 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CheckIcon,
   Columns2Icon,
+  MessageSquarePlusIcon,
+  MessagesSquareIcon,
   PilcrowIcon,
   Rows3Icon,
   TextWrapIcon,
+  XIcon,
 } from "lucide-react";
 import {
   type WheelEvent as ReactWheelEvent,
@@ -38,6 +42,15 @@ import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { useSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
+import ChatMarkdown from "./ChatMarkdown";
+import {
+  buildDiffCommentAnnotations,
+  buildDiffCommentKey,
+  countPendingDiffComments,
+  type DiffCommentAnnotationMetadata,
+  type DiffCommentSide,
+  type DiffInlineComment,
+} from "./DiffPanelComments.logic";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 
 type DiffRenderMode = "stacked" | "split";
@@ -193,9 +206,18 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const [collapsedDiffFileKeys, setCollapsedDiffFileKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [diffCommentsByKey, setDiffCommentsByKey] = useState<Record<string, DiffInlineComment>>({});
+  const [activeDiffCommentEditor, setActiveDiffCommentEditor] = useState<{
+    readonly key: string;
+    readonly filePath: string;
+    readonly lineNumber: number;
+    readonly side: DiffCommentSide;
+    readonly draft: string;
+  } | null>(null);
   const patchViewportRef = useRef<HTMLDivElement>(null);
   const turnStripRef = useRef<HTMLDivElement>(null);
   const previousDiffOpenRef = useRef(false);
+  const previousDiffCommentResetKeyRef = useRef<string | null>(null);
   const [canScrollTurnStripLeft, setCanScrollTurnStripLeft] = useState(false);
   const [canScrollTurnStripRight, setCanScrollTurnStripRight] = useState(false);
   const routeThreadRef = useParams({
@@ -335,6 +357,12 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       }),
     );
   }, [renderablePatch]);
+  const diffCommentResetKey = useMemo(
+    () =>
+      `${activeThreadId ?? "no-thread"}:${selectedTurn?.turnId ?? "conversation"}:${selectedPatch ?? ""}`,
+    [activeThreadId, selectedPatch, selectedTurn?.turnId],
+  );
+  const pendingDiffCommentCount = countPendingDiffComments(diffCommentsByKey);
 
   useEffect(() => {
     if (renderableFiles.length === 0) {
@@ -348,6 +376,20 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       return next.size === current.size ? current : next;
     });
   }, [renderableFiles]);
+
+  useEffect(() => {
+    if (previousDiffCommentResetKeyRef.current === null) {
+      previousDiffCommentResetKeyRef.current = diffCommentResetKey;
+      return;
+    }
+    if (previousDiffCommentResetKeyRef.current === diffCommentResetKey) {
+      return;
+    }
+
+    previousDiffCommentResetKeyRef.current = diffCommentResetKey;
+    setDiffCommentsByKey({});
+    setActiveDiffCommentEditor(null);
+  }, [diffCommentResetKey]);
 
   useEffect(() => {
     if (diffOpen && !previousDiffOpenRef.current) {
@@ -389,6 +431,177 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       return next;
     });
   }, []);
+  const openDiffCommentEditor = useCallback(
+    (input: { filePath: string; lineNumber: number; side: DiffCommentSide }) => {
+      const key = buildDiffCommentKey(input);
+      setActiveDiffCommentEditor({
+        ...input,
+        key,
+        draft: diffCommentsByKey[key]?.body ?? "",
+      });
+    },
+    [diffCommentsByKey],
+  );
+  const updateDiffCommentDraft = useCallback((key: string, draft: string) => {
+    setActiveDiffCommentEditor((current) =>
+      current?.key === key ? { ...current, draft } : current,
+    );
+  }, []);
+  const closeDiffCommentEditor = useCallback(() => {
+    setActiveDiffCommentEditor(null);
+  }, []);
+  const saveActiveDiffComment = useCallback(() => {
+    setActiveDiffCommentEditor((current) => {
+      if (!current) return current;
+      const body = current.draft.trim();
+      setDiffCommentsByKey((comments) => {
+        const next = { ...comments };
+        if (body.length === 0) {
+          delete next[current.key];
+          return next;
+        }
+
+        next[current.key] = {
+          key: current.key,
+          filePath: current.filePath,
+          lineNumber: current.lineNumber,
+          side: current.side,
+          body,
+          collapsed: false,
+          createdAt: comments[current.key]?.createdAt ?? new Date().toISOString(),
+        };
+        return next;
+      });
+      return null;
+    });
+  }, []);
+  const toggleDiffCommentCollapsed = useCallback((key: string) => {
+    setDiffCommentsByKey((comments) => {
+      const comment = comments[key];
+      if (!comment) return comments;
+      return {
+        ...comments,
+        [key]: {
+          ...comment,
+          collapsed: !comment.collapsed,
+        },
+      };
+    });
+  }, []);
+  const deleteDiffComment = useCallback((key: string) => {
+    setDiffCommentsByKey((comments) => {
+      if (!(key in comments)) return comments;
+      const next = { ...comments };
+      delete next[key];
+      return next;
+    });
+    setActiveDiffCommentEditor((current) => (current?.key === key ? null : current));
+  }, []);
+  const renderDiffCommentAnnotation = useCallback(
+    (annotation: DiffLineAnnotation<DiffCommentAnnotationMetadata>) => {
+      const metadata = annotation.metadata;
+      if (!metadata) return null;
+
+      if (metadata.kind === "editor") {
+        const { editor } = metadata;
+        return (
+          <div className="mx-9 my-1 rounded-md border border-primary/30 bg-background/95 p-2 shadow-sm">
+            <textarea
+              autoFocus
+              className="min-h-20 w-full resize-y rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground outline-hidden transition-colors placeholder:text-muted-foreground/60 focus:border-primary/60"
+              value={editor.draft}
+              placeholder={`Comment on ${editor.filePath}:${editor.lineNumber}`}
+              onChange={(event) => updateDiffCommentDraft(editor.key, event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeDiffCommentEditor();
+                }
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  saveActiveDiffComment();
+                }
+              }}
+            />
+            <div className="mt-2 flex items-center justify-end gap-1.5">
+              <button
+                type="button"
+                className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="Cancel comment"
+                onClick={closeDiffCommentEditor}
+              >
+                <XIcon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                className="inline-flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Save comment"
+                disabled={editor.draft.trim().length === 0}
+                onClick={saveActiveDiffComment}
+              >
+                <CheckIcon className="size-3.5" />
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      const { comment } = metadata;
+      return (
+        <div className="mx-9 my-1 rounded-md border border-border/70 bg-card/80 shadow-sm">
+          <div className="flex items-center gap-2 px-2 py-1.5">
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+              aria-expanded={!comment.collapsed}
+              onClick={() => toggleDiffCommentCollapsed(comment.key)}
+            >
+              <MessagesSquareIcon className="size-3.5 shrink-0" />
+              <span className="truncate">
+                {comment.filePath}:{comment.lineNumber}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Edit comment"
+              onClick={() =>
+                openDiffCommentEditor({
+                  filePath: comment.filePath,
+                  lineNumber: comment.lineNumber,
+                  side: comment.side,
+                })
+              }
+            >
+              <MessageSquarePlusIcon className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              aria-label="Delete comment"
+              onClick={() => deleteDiffComment(comment.key)}
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </div>
+          {!comment.collapsed ? (
+            <div className="border-t border-border/60 px-2 py-2 text-xs">
+              <ChatMarkdown text={comment.body} cwd={activeCwd} isStreaming={false} />
+            </div>
+          ) : null}
+        </div>
+      );
+    },
+    [
+      activeCwd,
+      closeDiffCommentEditor,
+      deleteDiffComment,
+      openDiffCommentEditor,
+      saveActiveDiffComment,
+      toggleDiffCommentCollapsed,
+      updateDiffCommentDraft,
+    ],
+  );
 
   const selectTurn = (turnId: TurnId) => {
     if (!activeThread) return;
@@ -567,6 +780,17 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
+        {pendingDiffCommentCount > 0 ? (
+          <span
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-border/70 bg-card px-2 text-[11px] font-medium text-muted-foreground"
+            aria-label={`${pendingDiffCommentCount} pending diff ${
+              pendingDiffCommentCount === 1 ? "comment" : "comments"
+            }`}
+          >
+            <MessagesSquareIcon className="size-3" />
+            {pendingDiffCommentCount}
+          </span>
+        ) : null}
         <ToggleGroup
           className="shrink-0"
           variant="outline"
@@ -682,6 +906,12 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                     >
                       <FileDiff
                         fileDiff={fileDiff}
+                        lineAnnotations={buildDiffCommentAnnotations({
+                          filePath,
+                          commentsByKey: diffCommentsByKey,
+                          activeEditor: activeDiffCommentEditor,
+                        })}
+                        renderAnnotation={renderDiffCommentAnnotation}
                         renderHeaderPrefix={() => (
                           <button
                             type="button"
@@ -708,6 +938,14 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                           collapsed,
                           diffStyle: diffRenderMode === "split" ? "split" : "unified",
                           lineDiffType: "none",
+                          lineHoverHighlight: "number",
+                          onLineNumberClick: ({ annotationSide, lineNumber }) => {
+                            openDiffCommentEditor({
+                              filePath,
+                              lineNumber,
+                              side: annotationSide,
+                            });
+                          },
                           overflow: diffWordWrap ? "wrap" : "scroll",
                           theme: resolveDiffThemeName(resolvedTheme),
                           themeType: resolvedTheme as DiffThemeType,
