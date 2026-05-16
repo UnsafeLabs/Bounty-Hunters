@@ -30,6 +30,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     },
     vcs: {
       pull: rpcClient.vcs.pull,
+      stageAll: rpcClient.vcs.stageAll,
       refreshStatus: rpcClient.vcs.refreshStatus,
       onStatus: (input, callback, options) => rpcClient.vcs.onStatus(input, callback, options),
       listRefs: rpcClient.vcs.listRefs,

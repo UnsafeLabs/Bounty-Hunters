@@ -1389,6 +1389,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const stageAll: GitVcsDriver.GitVcsDriverShape["stageAll"] = Effect.fn("stageAll")(
+    function* (cwd) {
+      yield* runGit("GitVcsDriver.stageAll", cwd, ["add", "-A"]);
+    },
+  );
+
   const commit: GitVcsDriver.GitVcsDriverShape["commit"] = Effect.fn("commit")(function* (
     cwd,
     subject,
@@ -2120,6 +2126,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     statusDetails,
     statusDetailsLocal,
     prepareCommitContext,
+    stageAll,
     commit,
     pushCurrentBranch,
     pullCurrentBranch,

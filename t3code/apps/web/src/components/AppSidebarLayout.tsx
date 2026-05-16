@@ -1,8 +1,10 @@
 import { useEffect, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { DESKTOP_MENU_ACTIONS } from "@t3tools/contracts";
 
 import ThreadSidebar from "./Sidebar";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
+import { dispatchDesktopMenuAction } from "../desktopMenuActions";
 import {
   clearShortcutModifierState,
   syncShortcutModifierStateFromKeyboardEvent,
@@ -43,9 +45,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     }
 
     const unsubscribe = onMenuAction((action) => {
-      if (action === "open-settings") {
+      if (action === DESKTOP_MENU_ACTIONS.openSettings) {
         void navigate({ to: "/settings" });
+        return;
       }
+      dispatchDesktopMenuAction(action);
     });
 
     return () => {

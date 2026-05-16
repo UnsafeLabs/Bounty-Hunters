@@ -1,4 +1,4 @@
-import { type ScopedThreadRef } from "@t3tools/contracts";
+import { DESKTOP_MENU_ACTIONS, type ScopedThreadRef } from "@t3tools/contracts";
 import type {
   GitActionProgressEvent,
   GitRunStackedActionResult,
@@ -76,6 +76,7 @@ import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
 import { newCommandId, randomUUID } from "~/lib/utils";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
+import { subscribeDesktopMenuAction } from "~/desktopMenuActions";
 import { readEnvironmentApi } from "~/environmentApi";
 import { readLocalApi } from "~/localApi";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
@@ -1585,6 +1586,143 @@ export default function GitActionsControl({
       ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
     });
   };
+
+  const stageAllChangesFromMenu = useCallback(() => {
+    const api = activeEnvironmentId ? readEnvironmentApi(activeEnvironmentId) : undefined;
+    if (!api || !gitCwd) {
+      toastManager.add({
+        type: "error",
+        title: "Git action unavailable",
+        description: "Connect to a project before staging changes.",
+        data: threadToastData,
+      });
+      return;
+    }
+
+    const promise = api.vcs.stageAll({ cwd: gitCwd }).then(async (result) => {
+      await refreshGitStatus({ environmentId: activeEnvironmentId, cwd: gitCwd }).catch(
+        () => undefined,
+      );
+      return result;
+    });
+    void toastManager.promise(promise, {
+      loading: { title: "Staging changes...", data: threadToastData },
+      success: { title: "Staged all changes", data: threadToastData },
+      error: (error) => ({
+        title: "Stage failed",
+        description: error instanceof Error ? error.message : "An error occurred.",
+        data: threadToastData,
+      }),
+    });
+    void promise.catch(() => undefined);
+  }, [activeEnvironmentId, gitCwd, threadToastData]);
+
+  const pullFromMenu = useCallback(() => {
+    const promise = pullMutation.mutateAsync();
+    void toastManager.promise(promise, {
+      loading: { title: "Pulling...", data: threadToastData },
+      success: (result) => ({
+        title: result.status === "pulled" ? "Pulled" : "Already up to date",
+        description:
+          result.status === "pulled"
+            ? `Updated ${result.refName} from ${result.upstreamRef ?? "upstream"}`
+            : `${result.refName} is already synchronized.`,
+        data: threadToastData,
+      }),
+      error: (err) => ({
+        title: "Pull failed",
+        description: err instanceof Error ? err.message : "An error occurred.",
+        data: threadToastData,
+      }),
+    });
+    void promise.catch(() => undefined);
+  }, [pullMutation, threadToastData]);
+
+  const createBranchFromMenu = useCallback(() => {
+    const api = activeEnvironmentId ? readEnvironmentApi(activeEnvironmentId) : undefined;
+    if (!api || !gitCwd) {
+      toastManager.add({
+        type: "error",
+        title: "Git action unavailable",
+        description: "Connect to a project before creating a branch.",
+        data: threadToastData,
+      });
+      return;
+    }
+
+    const refName = window.prompt("Branch name")?.trim();
+    if (!refName) return;
+
+    const promise = api.vcs
+      .createRef({ cwd: gitCwd, refName, switchRef: true })
+      .then(async (result) => {
+        persistThreadBranchSync(result.refName);
+        await refreshGitStatus({ environmentId: activeEnvironmentId, cwd: gitCwd }).catch(
+          () => undefined,
+        );
+        return result;
+      });
+    void toastManager.promise(promise, {
+      loading: { title: "Creating branch...", data: threadToastData },
+      success: (result) => ({
+        title: "Branch created",
+        description: result.refName,
+        data: threadToastData,
+      }),
+      error: (error) => ({
+        title: "Create branch failed",
+        description: error instanceof Error ? error.message : "An error occurred.",
+        data: threadToastData,
+      }),
+    });
+    void promise.catch(() => undefined);
+  }, [activeEnvironmentId, gitCwd, persistThreadBranchSync, threadToastData]);
+
+  useEffect(
+    () =>
+      subscribeDesktopMenuAction((action) => {
+        if (
+          action !== DESKTOP_MENU_ACTIONS.gitStageAll &&
+          action !== DESKTOP_MENU_ACTIONS.gitCommit &&
+          action !== DESKTOP_MENU_ACTIONS.gitPush &&
+          action !== DESKTOP_MENU_ACTIONS.gitPull &&
+          action !== DESKTOP_MENU_ACTIONS.gitCreateBranch
+        ) {
+          return;
+        }
+        if (isGitActionRunning || !isRepo || gitStatusForActions === null) {
+          return;
+        }
+
+        if (action === DESKTOP_MENU_ACTIONS.gitStageAll) {
+          stageAllChangesFromMenu();
+          return;
+        }
+        if (action === DESKTOP_MENU_ACTIONS.gitCommit) {
+          void runGitActionWithToast({ action: "commit" });
+          return;
+        }
+        if (action === DESKTOP_MENU_ACTIONS.gitPush) {
+          void runGitActionWithToast({ action: "push" });
+          return;
+        }
+        if (action === DESKTOP_MENU_ACTIONS.gitPull) {
+          pullFromMenu();
+          return;
+        }
+        if (action === DESKTOP_MENU_ACTIONS.gitCreateBranch) {
+          createBranchFromMenu();
+        }
+      }),
+    [
+      createBranchFromMenu,
+      gitStatusForActions,
+      isGitActionRunning,
+      isRepo,
+      pullFromMenu,
+      stageAllChangesFromMenu,
+    ],
+  );
 
   const openChangedFileInEditor = useCallback(
     (filePath: string) => {
