@@ -30,6 +30,11 @@ export function createInitialDesktopUpdateState(
     availableVersion: null,
     downloadedVersion: null,
     downloadPercent: null,
+    downloadedBytes: null,
+    totalBytes: null,
+    releaseNotes: null,
+    deferredUntil: null,
+    skippedVersion: null,
     checkedAt: null,
     message: null,
     errorContext: null,
@@ -47,6 +52,9 @@ export function reduceDesktopUpdateStateOnCheckStart(
     checkedAt,
     message: null,
     downloadPercent: null,
+    downloadedBytes: null,
+    totalBytes: null,
+    releaseNotes: null,
     errorContext: null,
     canRetry: false,
   };
@@ -63,6 +71,9 @@ export function reduceDesktopUpdateStateOnCheckFailure(
     message,
     checkedAt,
     downloadPercent: null,
+    downloadedBytes: null,
+    totalBytes: null,
+    releaseNotes: null,
     errorContext: "check",
     canRetry: true,
   };
@@ -72,6 +83,7 @@ export function reduceDesktopUpdateStateOnUpdateAvailable(
   state: DesktopUpdateState,
   version: string,
   checkedAt: string,
+  releaseNotes: string | null = null,
 ): DesktopUpdateState {
   return {
     ...state,
@@ -79,6 +91,9 @@ export function reduceDesktopUpdateStateOnUpdateAvailable(
     availableVersion: version,
     downloadedVersion: null,
     downloadPercent: null,
+    downloadedBytes: null,
+    totalBytes: null,
+    releaseNotes,
     checkedAt,
     message: null,
     errorContext: null,
@@ -96,6 +111,9 @@ export function reduceDesktopUpdateStateOnNoUpdate(
     availableVersion: null,
     downloadedVersion: null,
     downloadPercent: null,
+    downloadedBytes: null,
+    totalBytes: null,
+    releaseNotes: null,
     checkedAt,
     message: null,
     errorContext: null,
@@ -110,6 +128,8 @@ export function reduceDesktopUpdateStateOnDownloadStart(
     ...state,
     status: "downloading",
     downloadPercent: 0,
+    downloadedBytes: 0,
+    totalBytes: null,
     message: null,
     errorContext: null,
     canRetry: false,
@@ -125,6 +145,8 @@ export function reduceDesktopUpdateStateOnDownloadFailure(
     status: nextStatusAfterDownloadFailure(state),
     message,
     downloadPercent: null,
+    downloadedBytes: null,
+    totalBytes: null,
     errorContext: "download",
     canRetry: getCanRetryAfterDownloadFailure(state),
   };
@@ -133,11 +155,14 @@ export function reduceDesktopUpdateStateOnDownloadFailure(
 export function reduceDesktopUpdateStateOnDownloadProgress(
   state: DesktopUpdateState,
   percent: number,
+  bytes?: { readonly transferred?: number; readonly total?: number },
 ): DesktopUpdateState {
   return {
     ...state,
     status: "downloading",
     downloadPercent: percent,
+    downloadedBytes: bytes?.transferred ?? state.downloadedBytes ?? null,
+    totalBytes: bytes?.total ?? state.totalBytes ?? null,
     message: null,
     errorContext: null,
     canRetry: false,
@@ -154,9 +179,50 @@ export function reduceDesktopUpdateStateOnDownloadComplete(
     availableVersion: version,
     downloadedVersion: version,
     downloadPercent: 100,
+    downloadedBytes: state.totalBytes ?? state.downloadedBytes ?? null,
     message: null,
     errorContext: null,
     canRetry: true,
+  };
+}
+
+export function reduceDesktopUpdateStateOnNotificationDeferred(
+  state: DesktopUpdateState,
+  deferredUntil: string,
+): DesktopUpdateState {
+  return {
+    ...state,
+    status: "idle",
+    availableVersion: null,
+    downloadedVersion: null,
+    downloadPercent: null,
+    downloadedBytes: null,
+    totalBytes: null,
+    releaseNotes: null,
+    deferredUntil,
+    message: null,
+    errorContext: null,
+    canRetry: false,
+  };
+}
+
+export function reduceDesktopUpdateStateOnVersionSkipped(
+  state: DesktopUpdateState,
+  version: string,
+): DesktopUpdateState {
+  return {
+    ...state,
+    status: "idle",
+    availableVersion: null,
+    downloadedVersion: null,
+    downloadPercent: null,
+    downloadedBytes: null,
+    totalBytes: null,
+    releaseNotes: null,
+    skippedVersion: version,
+    message: null,
+    errorContext: null,
+    canRetry: false,
   };
 }
 

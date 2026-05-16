@@ -10,7 +10,9 @@ import {
   reduceDesktopUpdateStateOnDownloadStart,
   reduceDesktopUpdateStateOnInstallFailure,
   reduceDesktopUpdateStateOnNoUpdate,
+  reduceDesktopUpdateStateOnNotificationDeferred,
   reduceDesktopUpdateStateOnUpdateAvailable,
+  reduceDesktopUpdateStateOnVersionSkipped,
 } from "./updateMachine.ts";
 
 const runtimeInfo = {
@@ -128,13 +130,44 @@ describe("updateMachine", () => {
       "2026-03-04T00:00:00.000Z",
     );
     const downloading = reduceDesktopUpdateStateOnDownloadStart(available);
-    const progress = reduceDesktopUpdateStateOnDownloadProgress(downloading, 55.5);
+    const progress = reduceDesktopUpdateStateOnDownloadProgress(downloading, 55.5, {
+      transferred: 1024,
+      total: 2048,
+    });
 
     expect(available.status).toBe("available");
     expect(available.channel).toBe("latest");
     expect(downloading.status).toBe("downloading");
     expect(downloading.downloadPercent).toBe(0);
     expect(progress.downloadPercent).toBe(55.5);
+    expect(progress.downloadedBytes).toBe(1024);
+    expect(progress.totalBytes).toBe(2048);
     expect(progress.errorContext).toBeNull();
+  });
+
+  it("records release notes and clears them when an update is deferred or skipped", () => {
+    const available = reduceDesktopUpdateStateOnUpdateAvailable(
+      {
+        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+        enabled: true,
+        status: "checking",
+      },
+      "1.1.0",
+      "2026-03-04T00:00:00.000Z",
+      "Bug fixes and polish",
+    );
+    const deferred = reduceDesktopUpdateStateOnNotificationDeferred(
+      available,
+      "2026-03-05T00:00:00.000Z",
+    );
+    const skipped = reduceDesktopUpdateStateOnVersionSkipped(available, "1.1.0");
+
+    expect(available.releaseNotes).toBe("Bug fixes and polish");
+    expect(deferred.status).toBe("idle");
+    expect(deferred.releaseNotes).toBeNull();
+    expect(deferred.deferredUntil).toBe("2026-03-05T00:00:00.000Z");
+    expect(skipped.status).toBe("idle");
+    expect(skipped.releaseNotes).toBeNull();
+    expect(skipped.skippedVersion).toBe("1.1.0");
   });
 });

@@ -41,6 +41,26 @@ export const downloadUpdate = makeIpcMethod({
   }),
 });
 
+export const deferUpdate = makeIpcMethod({
+  channel: IpcChannels.UPDATE_DEFER_CHANNEL,
+  payload: Schema.Void,
+  result: DesktopUpdateActionResultSchema,
+  handler: Effect.fn("desktop.ipc.updates.defer")(function* () {
+    const updates = yield* DesktopUpdates.DesktopUpdates;
+    return yield* updates.defer;
+  }),
+});
+
+export const skipUpdateVersion = makeIpcMethod({
+  channel: IpcChannels.UPDATE_SKIP_VERSION_CHANNEL,
+  payload: Schema.Void,
+  result: DesktopUpdateActionResultSchema,
+  handler: Effect.fn("desktop.ipc.updates.skipVersion")(function* () {
+    const updates = yield* DesktopUpdates.DesktopUpdates;
+    return yield* updates.skipVersion;
+  }),
+});
+
 export const installUpdate = makeIpcMethod({
   channel: IpcChannels.UPDATE_INSTALL_CHANNEL,
   payload: Schema.Void,

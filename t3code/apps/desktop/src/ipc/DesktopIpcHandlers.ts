@@ -27,10 +27,12 @@ import {
 } from "./methods/sshEnvironment.ts";
 import {
   checkForUpdate,
+  deferUpdate,
   downloadUpdate,
   getUpdateState,
   installUpdate,
   setUpdateChannel,
+  skipUpdateVersion,
 } from "./methods/updates.ts";
 import {
   confirm,
@@ -79,6 +81,8 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
   yield* ipc.handle(getUpdateState);
   yield* ipc.handle(setUpdateChannel);
   yield* ipc.handle(downloadUpdate);
+  yield* ipc.handle(deferUpdate);
+  yield* ipc.handle(skipUpdateVersion);
   yield* ipc.handle(installUpdate);
   yield* ipc.handle(checkForUpdate);
 }).pipe(Effect.withSpan("desktop.ipc.installHandlers"));

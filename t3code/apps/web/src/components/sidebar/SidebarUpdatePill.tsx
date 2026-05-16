@@ -1,4 +1,11 @@
-import { DownloadIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import {
+  BanIcon,
+  ClockIcon,
+  DownloadIcon,
+  RotateCwIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { isElectron } from "../../env";
@@ -30,6 +37,10 @@ export function SidebarUpdatePill() {
   const tooltip = state ? getDesktopUpdateButtonTooltip(state) : "Update available";
   const disabled = isDesktopUpdateButtonDisabled(state);
   const action = state ? resolveDesktopUpdateButtonAction(state) : "none";
+  const downloadPercent =
+    state?.status === "downloading" && typeof state.downloadPercent === "number"
+      ? Math.max(0, Math.min(100, Math.floor(state.downloadPercent)))
+      : null;
 
   const showArm64Warning = isElectron && shouldShowArm64IntelBuildWarning(state);
   const arm64Description =
@@ -105,6 +116,78 @@ export function SidebarUpdatePill() {
     }
   }, [action, disabled, queryClient, state]);
 
+  const handleDefer = useCallback(() => {
+    const bridge = window.desktopBridge;
+    if (!bridge || !state) return;
+    void bridge
+      .deferUpdate()
+      .then((result) => {
+        setDesktopUpdateStateQueryData(queryClient, result.state);
+        if (result.completed) {
+          toastManager.add({
+            type: "success",
+            title: "Update deferred",
+            description: "T3 Code will remind you again tomorrow.",
+          });
+        }
+        if (!shouldToastDesktopUpdateActionResult(result)) return;
+        const actionError = getDesktopUpdateActionError(result);
+        if (!actionError) return;
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not defer update",
+            description: actionError,
+          }),
+        );
+      })
+      .catch((error) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not defer update",
+            description: error instanceof Error ? error.message : "An unexpected error occurred.",
+          }),
+        );
+      });
+  }, [queryClient, state]);
+
+  const handleSkipVersion = useCallback(() => {
+    const bridge = window.desktopBridge;
+    if (!bridge || !state) return;
+    void bridge
+      .skipUpdateVersion()
+      .then((result) => {
+        setDesktopUpdateStateQueryData(queryClient, result.state);
+        if (result.completed) {
+          toastManager.add({
+            type: "success",
+            title: "Update skipped",
+            description: "This version will stay hidden.",
+          });
+        }
+        if (!shouldToastDesktopUpdateActionResult(result)) return;
+        const actionError = getDesktopUpdateActionError(result);
+        if (!actionError) return;
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not skip update",
+            description: actionError,
+          }),
+        );
+      })
+      .catch((error) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not skip update",
+            description: error instanceof Error ? error.message : "An unexpected error occurred.",
+          }),
+        );
+      });
+  }, [queryClient, state]);
+
   if (!visible && !showArm64Warning) return null;
 
   return (
@@ -123,6 +206,12 @@ export function SidebarUpdatePill() {
           }`}
         >
           <div className="pointer-events-none absolute inset-0 rounded-lg transition-colors group-has-[button.update-main:hover]/update:bg-primary/22" />
+          {downloadPercent !== null && (
+            <div
+              className="pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-b-lg bg-primary transition-[width]"
+              style={{ width: `${downloadPercent}%` }}
+            />
+          )}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -131,35 +220,74 @@ export function SidebarUpdatePill() {
                   aria-label={tooltip}
                   aria-disabled={disabled || undefined}
                   disabled={disabled}
-                  className="update-main relative flex h-full flex-1 items-center gap-2 px-2 enabled:cursor-pointer"
+                  className="update-main relative flex h-full min-w-0 flex-1 items-center gap-2 px-2 enabled:cursor-pointer"
                   onClick={handleAction}
                 >
                   {action === "install" ? (
                     <>
                       <RotateCwIcon className="size-3.5" />
-                      <span>Restart to update</span>
+                      <span className="truncate">Restart to update</span>
                     </>
                   ) : state?.status === "downloading" ? (
                     <>
                       <DownloadIcon className="size-3.5" />
-                      <span>
+                      <span className="truncate">
                         Downloading
-                        {typeof state.downloadPercent === "number"
-                          ? ` (${Math.floor(state.downloadPercent)}%)`
-                          : "…"}
+                        {downloadPercent !== null ? ` (${downloadPercent}%)` : "…"}
                       </span>
                     </>
                   ) : (
                     <>
                       <DownloadIcon className="size-3.5" />
-                      <span>Update available</span>
+                      <span className="truncate">Update available</span>
                     </>
                   )}
                 </button>
               }
             />
-            <TooltipPopup side="top">{tooltip}</TooltipPopup>
+            <TooltipPopup side="top">
+              <div className="max-w-xs space-y-1">
+                <p>{tooltip}</p>
+                {state?.releaseNotes ? (
+                  <p className="line-clamp-4 text-muted-foreground">{state.releaseNotes}</p>
+                ) : null}
+              </div>
+            </TooltipPopup>
           </Tooltip>
+          {action === "download" && (
+            <>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="Remind me later"
+                      className="relative inline-flex size-5 items-center justify-center rounded-md text-primary/60 transition-colors hover:text-primary"
+                      onClick={handleDefer}
+                    >
+                      <ClockIcon className="size-3.5" />
+                    </button>
+                  }
+                />
+                <TooltipPopup side="top">Remind me later</TooltipPopup>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="Skip this version"
+                      className="relative inline-flex size-5 items-center justify-center rounded-md text-primary/60 transition-colors hover:text-primary"
+                      onClick={handleSkipVersion}
+                    >
+                      <BanIcon className="size-3.5" />
+                    </button>
+                  }
+                />
+                <TooltipPopup side="top">Skip this version</TooltipPopup>
+              </Tooltip>
+            </>
+          )}
           {action === "download" && (
             <Tooltip>
               <TooltipTrigger

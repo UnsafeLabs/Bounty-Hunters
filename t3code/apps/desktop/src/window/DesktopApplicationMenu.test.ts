@@ -60,6 +60,8 @@ const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, {
   setChannel: () => Effect.die("unexpected setChannel"),
   check: () => Effect.die("unexpected check"),
   download: Effect.die("unexpected download"),
+  defer: Effect.die("unexpected defer"),
+  skipVersion: Effect.die("unexpected skipVersion"),
   install: Effect.die("unexpected install"),
 } satisfies DesktopUpdates.DesktopUpdatesShape);
 

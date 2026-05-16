@@ -21,6 +21,8 @@ const DesktopSettingsPatch = Schema.Struct({
   tailscaleServePort: Schema.optionalKey(Schema.Number),
   updateChannel: Schema.optionalKey(Schema.Literals(["latest", "nightly"])),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
+  updateDeferredUntil: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  skippedUpdateVersion: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
 const decodeDesktopSettingsPatch = Schema.decodeEffect(Schema.fromJsonString(DesktopSettingsPatch));
@@ -95,6 +97,8 @@ describe("DesktopSettings", () => {
       tailscaleServePort: 443,
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
+      updateDeferredUntil: null,
+      skippedUpdateVersion: null,
     } satisfies DesktopSettingsValue);
   });
 
@@ -116,6 +120,8 @@ describe("DesktopSettings", () => {
           tailscaleServePort: 8443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: true,
+          updateDeferredUntil: null,
+          skippedUpdateVersion: null,
         } satisfies DesktopSettingsValue);
 
         const exposure = yield* settings.setServerExposureMode("local-only");
@@ -195,6 +201,8 @@ describe("DesktopSettings", () => {
           tailscaleServePort: 8443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          updateDeferredUntil: null,
+          skippedUpdateVersion: null,
         } satisfies DesktopSettingsValue);
       }),
     ),
@@ -234,6 +242,8 @@ describe("DesktopSettings", () => {
           tailscaleServePort: 443,
           updateChannel: "nightly",
           updateChannelConfiguredByUser: false,
+          updateDeferredUntil: null,
+          skippedUpdateVersion: null,
         } satisfies DesktopSettingsValue);
       }),
       { appVersion: "0.0.17-nightly.20260415.1" },
@@ -256,6 +266,8 @@ describe("DesktopSettings", () => {
           tailscaleServePort: 443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: true,
+          updateDeferredUntil: null,
+          skippedUpdateVersion: null,
         } satisfies DesktopSettingsValue);
       }),
       { appVersion: "0.0.17-nightly.20260415.1" },
@@ -277,6 +289,8 @@ describe("DesktopSettings", () => {
           tailscaleServePort: 443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          updateDeferredUntil: null,
+          skippedUpdateVersion: null,
         } satisfies DesktopSettingsValue);
       }),
     ),

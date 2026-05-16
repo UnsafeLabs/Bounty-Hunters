@@ -210,14 +210,47 @@ describe("DesktopUpdates", () => {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
 
-        harness.emit("update-available", { version: "1.2.4" });
+        harness.emit("update-available", { version: "1.2.4", releaseNotes: "Small fixes" });
         yield* flushCallbacks;
 
         const state = yield* updates.getState;
         assert.equal(state.status, "available");
         assert.equal(state.availableVersion, "1.2.4");
+        assert.equal(state.releaseNotes, "Small fixes");
         assert.isNotNull(state.checkedAt);
         assert.equal(harness.sentStates.at(-1)?.status, "available");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("defers and skips available update notifications through settings", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const deferred = yield* updates.defer;
+        const deferredSettings = yield* settings.get;
+        assert.equal(deferred.accepted, true);
+        assert.equal(deferred.completed, true);
+        assert.equal(deferred.state.status, "idle");
+        assert.isString(deferredSettings.updateDeferredUntil);
+
+        harness.emit("update-available", { version: "1.2.5" });
+        yield* flushCallbacks;
+
+        const skipped = yield* updates.skipVersion;
+        const skippedSettings = yield* settings.get;
+        assert.equal(skipped.accepted, true);
+        assert.equal(skipped.completed, true);
+        assert.equal(skipped.state.status, "idle");
+        assert.equal(skippedSettings.skippedUpdateVersion, "1.2.5");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
