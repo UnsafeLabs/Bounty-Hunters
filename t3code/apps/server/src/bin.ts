@@ -1,28 +1,57 @@
-import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import { Command } from "effect/unstable/cli";
+import { Command, Options } from "@effect/cli";
+import { BunContext, BunRuntime } from "@effect/platform-bun";
+import { Effect, Layer } from "effect";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
-import * as NetService from "@t3tools/shared/Net";
-import packageJson from "../package.json" with { type: "json" };
-import { authCommand } from "./cli/auth.ts";
-import { sharedServerCommandFlags } from "./cli/config.ts";
-import { projectCommand } from "./cli/project.ts";
-import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
+const version = (() => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf-8"));
+    return pkg.version || "0.0.0";
+  } catch { return "0.0.0"; }
+})();
 
-const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
+const runtimeInfo = () => {
+  const rt = typeof Bun !== "undefined" ? "bun" : "node";
+  const ver = rt === "bun" ? (Bun as any).version : process.version;
+  const platform = process.platform;
+  const arch = process.arch;
+  return `t3code v${version} (${rt} ${ver}, ${platform} ${arch})`;
+};
 
-export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run the T3 Code server."),
-  Command.withHandler((flags) => runServerCommand(flags)),
-  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
+const versionFlag = Options.boolean("version").pipe(
+  Options.withAlias("V")
 );
 
-if (import.meta.main) {
-  Command.run(cli, { version: packageJson.version }).pipe(
-    Effect.scoped,
-    Effect.provide(CliRuntimeLayer),
-    NodeRuntime.runMain,
-  );
-}
+const versionCmd = Command.make("version", {}, () =>
+  Effect.sync(() => {
+    console.log(runtimeInfo());
+  })
+);
+
+const startCmd = Command.make("start", {}, () => Effect.log("start"));
+const serveCmd = Command.make("serve", {}, () => Effect.log("serve"));
+const authCmd = Command.make("auth", {}, () => Effect.log("auth"));
+const projectCmd = Command.make("project", {}, () => Effect.log("project"));
+
+const rootCmd = Command.make("t3", {
+  version: versionFlag,
+}).pipe(
+  Command.withSubcommands([versionCmd, startCmd, serveCmd, authCmd, projectCmd]),
+  Command.withHandler(({ version: showVersion }) =>
+    Effect.gen(function* () {
+      if (showVersion) {
+        console.log(runtimeInfo());
+        return;
+      }
+      console.log(runtimeInfo());
+    })
+  )
+);
+
+const cli = Command.run(rootCmd, {
+  name: "t3code",
+  version,
+});
+
+cli(process.argv);
