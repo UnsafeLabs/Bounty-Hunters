@@ -473,6 +473,68 @@ label:has(> select#reasoning-effort) select {
   background: color-mix(in srgb, var(--muted) 78%, var(--background)) !important;
 }
 
+.chat-markdown .chat-markdown-codeblock-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 160ms ease;
+}
+
+.chat-markdown
+  .chat-markdown-codeblock.is-collapsible[data-expanded="false"]
+  .chat-markdown-codeblock-body {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.chat-markdown .chat-markdown-codeblock-toggle {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 0.75rem 0.75rem;
+  background: color-mix(in srgb, var(--muted) 86%, var(--background));
+  padding: 0.4rem 0.65rem;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.chat-markdown .chat-markdown-codeblock-toggle:hover {
+  background: color-mix(in srgb, var(--muted) 72%, var(--background));
+  color: var(--foreground);
+}
+
+.chat-markdown .chat-markdown-codeblock.is-collapsible .chat-markdown-codeblock-body pre {
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.chat-markdown .chat-markdown-shiki .shiki code {
+  counter-reset: chat-markdown-code-line;
+}
+
+.chat-markdown .chat-markdown-shiki .shiki .line {
+  display: inline-block;
+  min-width: 100%;
+  counter-increment: chat-markdown-code-line;
+}
+
+.chat-markdown .chat-markdown-shiki .shiki .line::before {
+  content: counter(chat-markdown-code-line);
+  display: inline-block;
+  width: 2.4rem;
+  margin-right: 0.85rem;
+  color: color-mix(in srgb, var(--muted-foreground) 64%, transparent);
+  text-align: right;
+  user-select: none;
+}
+
+.chat-markdown .chat-markdown-shiki .shiki .line:empty::after {
+  content: " ";
+}
+
 .chat-markdown table {
   width: 100%;
   border-collapse: collapse;

@@ -69,17 +69,45 @@ const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "d
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
+const LONG_CODE_BLOCK_LINE_THRESHOLD = 20;
+const LONG_CODE_BLOCK_PREVIEW_LINES = 10;
 const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_ENTRIES,
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 
-function extractFenceLanguage(className: string | undefined): string {
+export function detectFenceLanguage(code: string): string {
+  const trimmed = code.trim();
+  if (trimmed.length === 0) return "text";
+  if (/^(\{[\s\S]*\}|\[[\s\S]*\])$/.test(trimmed)) {
+    try {
+      JSON.parse(trimmed);
+      return "json";
+    } catch {
+      // Keep trying cheaper structural heuristics below.
+    }
+  }
+  if (/^\s*(diff --git|@@\s|[+-]{3}\s)/m.test(code)) return "diff";
+  if (/^\s*(import|export)\s.+from\s+["']|\b(const|let|type|interface)\s+\w+/m.test(code)) {
+    return "typescript";
+  }
+  if (/^\s*(def|class)\s+\w+|^\s*from\s+\w+\s+import\s+/m.test(code)) return "python";
+  if (/^\s*(npm|pnpm|bun|yarn|git|cd|mkdir|curl)\s+/m.test(code)) return "bash";
+  if (/^\s*[.#]?[\w-]+\s*\{|:\s*[^;]+;/m.test(code)) return "css";
+  return "text";
+}
+
+function extractFenceLanguage(className: string | undefined, code: string): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
-  const raw = match?.[1] ?? "text";
+  const raw = match?.[1] ?? detectFenceLanguage(code);
   // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
   return raw === "gitignore" ? "ini" : raw;
+}
+
+export function splitCodeLines(code: string): string[] {
+  const normalizedCode = code.endsWith("\n") ? code.slice(0, -1) : code;
+  return normalizedCode.split("\n");
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -146,9 +174,21 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   return promise;
 }
 
-function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
+function MarkdownCodeBlock({
+  code,
+  lineCount,
+  children,
+  preview,
+}: {
+  code: string;
+  lineCount: number;
+  children: ReactNode;
+  preview: ReactNode;
+}) {
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(lineCount <= LONG_CODE_BLOCK_LINE_THRESHOLD);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLongBlock = lineCount > LONG_CODE_BLOCK_LINE_THRESHOLD;
   const handleCopy = useCallback(() => {
     if (typeof navigator === "undefined" || navigator.clipboard == null) {
       return;
@@ -179,7 +219,11 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
   );
 
   return (
-    <div className="chat-markdown-codeblock leading-snug">
+    <div
+      className={cn("chat-markdown-codeblock leading-snug", isLongBlock && "is-collapsible")}
+      data-line-count={lineCount}
+      data-expanded={expanded ? "true" : "false"}
+    >
       <button
         type="button"
         className="chat-markdown-copy-button"
@@ -189,7 +233,19 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
       >
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </button>
-      {children}
+      <div className="chat-markdown-codeblock-body">{expanded ? children : preview}</div>
+      {isLongBlock ? (
+        <button
+          type="button"
+          className="chat-markdown-codeblock-toggle"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+        >
+          {expanded
+            ? "Collapse code block"
+            : `Show all ${lineCount} lines (previewing ${LONG_CODE_BLOCK_PREVIEW_LINES})`}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -207,7 +263,7 @@ function SuspenseShikiCodeBlock({
   themeName,
   isStreaming,
 }: SuspenseShikiCodeBlockProps) {
-  const language = extractFenceLanguage(className);
+  const language = extractFenceLanguage(className, code);
   const cacheKey = createHighlightCacheKey(code, language, themeName);
   const cachedHighlightedHtml = !isStreaming ? highlightedCodeCache.get(cacheKey) : null;
 
@@ -586,8 +642,26 @@ function ChatMarkdown({
           return <pre {...props}>{children}</pre>;
         }
 
+        const codeLines = splitCodeLines(codeBlock.code);
+        const previewCode = codeLines.slice(0, LONG_CODE_BLOCK_PREVIEW_LINES).join("\n");
+
         return (
-          <MarkdownCodeBlock code={codeBlock.code}>
+          <MarkdownCodeBlock
+            code={codeBlock.code}
+            lineCount={codeLines.length}
+            preview={
+              <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
+                <Suspense fallback={<pre {...props}>{children}</pre>}>
+                  <SuspenseShikiCodeBlock
+                    className={codeBlock.className}
+                    code={previewCode}
+                    themeName={diffThemeName}
+                    isStreaming={isStreaming}
+                  />
+                </Suspense>
+              </CodeHighlightErrorBoundary>
+            }
+          >
             <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
               <Suspense fallback={<pre {...props}>{children}</pre>}>
                 <SuspenseShikiCodeBlock
