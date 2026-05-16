@@ -415,3 +415,85 @@ class HTTPDigest(HTTPBase):
             else:
                 return None
         return HTTPAuthorizationCredentials(scheme=scheme, credentials=credentials)
+
+
+import time
+from collections import defaultdict
+from collections.abc import Callable
+from typing import Any
+
+from fastapi import HTTPException, Request
+from fastapi.responses import Response
+from starlette.status import HTTP_429_TOO_MANY_REQUESTS
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    """HTTPBasic with brute force protection via per-IP attempt tracking.
+
+    Args:
+        max_attempts: Maximum failed attempts before lockout (default: 5).
+        lockout_window: Time window in seconds for tracking attempts (default: 300).
+        lockout_duration: Seconds until the lockout expires (default: 300).
+        verify_password: Optional callable(password, stored_hash) -> bool.
+            If provided, uses constant-time comparison.
+    """
+
+    def __init__(
+        self,
+        max_attempts: int = 5,
+        lockout_window: int = 300,
+        lockout_duration: int = 300,
+        verify_password: Callable[[str, str], bool] | None = None,
+        realm: str = "protected",
+        scheme_name: str | None = None,
+        auto_error: bool = True,
+        description: str | None = None,
+    ):
+        super().__init__(realm=realm, scheme_name=scheme_name, auto_error=auto_error, description=description)
+        self.max_attempts = max_attempts
+        self.lockout_window = lockout_window
+        self.lockout_duration = lockout_duration
+        self._verify_password = verify_password
+        self._attempts: dict[str, list[float]] = defaultdict(list)
+        self._locked_until: dict[str, float] = {}
+
+    def _is_locked(self, ip: str) -> bool:
+        expire = self._locked_until.get(ip, 0)
+        return time.time() < expire
+
+    def _record_attempt(self, ip: str, success: bool) -> None:
+        now = time.time()
+        if success:
+            self._attempts[ip] = []
+            self._locked_until.pop(ip, None)
+            return
+        self._attempts[ip] = [t for t in self._attempts[ip] if now - t < self.lockout_window]
+        self._attempts[ip].append(now)
+        if len(self._attempts[ip]) >= self.max_attempts:
+            self._locked_until[ip] = now + self.lockout_duration
+
+    async def __call__(self, request: Request) -> Any:
+        ip = request.client.host if request.client else "unknown"
+        if self._is_locked(ip):
+            retry_after = int(self._locked_until[ip] - time.time())
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many authentication attempts",
+                headers={"Retry-After": str(max(retry_after, 1))},
+            )
+        try:
+            result = await super().__call__(request)
+        except HTTPException as e:
+            if e.status_code == 401:
+                self._record_attempt(ip, False)
+            raise
+
+        if result is not None and self._verify_password is not None:
+            import hmac
+            password = getattr(result, "password", "") or ""
+            stored = getattr(result, "stored_hash", "") or ""
+            if not hmac.compare_digest(password, stored):
+                self._record_attempt(ip, False)
+                raise HTTPException(status_code=401, detail="Incorrect credentials")
+        self._record_attempt(ip, True)
+        return result
