@@ -1,8 +1,13 @@
+import csv
 import importlib
+from collections.abc import AsyncIterable, Iterable, Mapping, Sequence
+from io import StringIO
 from typing import Any, Protocol, cast
+from urllib.parse import quote
 
 from fastapi.exceptions import FastAPIDeprecationWarning
 from fastapi.sse import EventSourceResponse as EventSourceResponse  # noqa
+from starlette.background import BackgroundTask
 from starlette.responses import FileResponse as FileResponse  # noqa
 from starlette.responses import HTMLResponse as HTMLResponse  # noqa
 from starlette.responses import JSONResponse as JSONResponse  # noqa
@@ -34,6 +39,75 @@ try:
     orjson = cast(_OrjsonModule, importlib.import_module("orjson"))
 except ModuleNotFoundError:  # pragma: nocover
     orjson = None  # type: ignore[assignment]
+
+
+CSVRow = Mapping[str, Any] | Sequence[Any]
+
+
+def _render_csv_row(row: Sequence[Any], delimiter: str) -> bytes:
+    output = StringIO(newline="")
+    writer = csv.writer(output, delimiter=delimiter, lineterminator="\r\n")
+    writer.writerow(row)
+    return output.getvalue().encode("utf-8")
+
+
+def _get_row_values(row: CSVRow, headers: Sequence[str] | None) -> Sequence[Any]:
+    if isinstance(row, Mapping):
+        if headers is not None:
+            return [row.get(header, "") for header in headers]
+        return list(row.values())
+    return row
+
+
+async def _stream_csv_rows(
+    rows: AsyncIterable[CSVRow] | Iterable[CSVRow],
+    headers: Sequence[str] | None,
+    delimiter: str,
+) -> AsyncIterable[bytes]:
+    if headers is not None:
+        yield _render_csv_row(headers, delimiter)
+
+    if isinstance(rows, AsyncIterable):
+        async for row in rows:
+            yield _render_csv_row(_get_row_values(row, headers), delimiter)
+    else:
+        for row in rows:
+            yield _render_csv_row(_get_row_values(row, headers), delimiter)
+
+
+def _make_attachment_disposition(filename: str) -> str:
+    quoted_filename = quote(filename)
+    if quoted_filename != filename:
+        return (
+            f"attachment; filename=\"download.csv\"; filename*=utf-8''{quoted_filename}"
+        )
+    escaped_filename = filename.replace("\\", "\\\\").replace('"', '\\"')
+    return f'attachment; filename="{escaped_filename}"'
+
+
+class StreamingCSVResponse(StreamingResponse):
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        rows: AsyncIterable[CSVRow] | Iterable[CSVRow],
+        *,
+        headers: Sequence[str] | None = None,
+        filename: str = "download.csv",
+        delimiter: str = ",",
+        status_code: int = 200,
+        background: BackgroundTask | None = None,
+    ) -> None:
+        if len(delimiter) != 1:
+            raise ValueError("CSV delimiter must be exactly one character")
+
+        super().__init__(
+            _stream_csv_rows(rows, headers, delimiter),
+            status_code=status_code,
+            headers={"Content-Disposition": _make_attachment_disposition(filename)},
+            media_type=self.media_type,
+            background=background,
+        )
 
 
 @deprecated(
