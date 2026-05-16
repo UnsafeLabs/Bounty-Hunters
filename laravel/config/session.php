@@ -22,6 +22,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Fallback Session Driver
+    |--------------------------------------------------------------------------
+    |
+    | When the configured session backend points at a missing connection or
+    | cache store, the application falls back to this driver during boot.
+    |
+    */
+
+    'fallback' => env('SESSION_FALLBACK_DRIVER', 'file'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Session Lifetime
     |--------------------------------------------------------------------------
     |
