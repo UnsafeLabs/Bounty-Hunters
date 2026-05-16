@@ -3,6 +3,8 @@ import type {
   OrchestrationReadModel,
   ProjectId,
   ThreadId,
+  AggregateRef,
+  InterruptedCommand,
 } from "@t3tools/contracts";
 import { OrchestrationCommand } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -44,6 +46,10 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
+import {
+  InterruptionCheckpoint,
+  type InterruptionCheckpointShape,
+} from "../Services/InterruptionCheckpoint.ts";
 const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
   OrchestrationCommandPreviouslyRejectedError,
 );
@@ -81,6 +87,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const interruptionCheckpoint = yield* InterruptionCheckpoint;
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   let commandReadModel = createEmptyReadModel(yield* nowIso);
@@ -218,6 +225,32 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         return { sequence: committedCommand.lastSequence };
       }).pipe(Effect.withSpan(`orchestration.command.${envelope.command.type}`)),
     ).pipe(
+      Effect.onInterrupt(() =>
+        Effect.gen(function* () {
+          const interruptedAt = yield* nowIso;
+          yield* Effect.logWarning("Orchestration command fiber interrupted").pipe(
+            Effect.annotateLogs({
+              commandId: envelope.command.commandId,
+              commandType: envelope.command.type,
+              aggregateKind: aggregateRef.aggregateKind,
+              aggregateId: aggregateRef.aggregateId,
+              snapshotSequence: commandReadModel.snapshotSequence,
+              interruptedAt,
+            }),
+          );
+
+          yield* interruptionCheckpoint.save({
+            commandId: envelope.command.commandId,
+            commandType: envelope.command.type,
+            aggregateRef: {
+              aggregateKind: aggregateRef.aggregateKind,
+              aggregateId: aggregateRef.aggregateId,
+            },
+            snapshotSequence: commandReadModel.snapshotSequence,
+            interruptedAt,
+          });
+        }),
+      ),
       Effect.flatMap((exit) =>
         Effect.gen(function* () {
           const outcome = Exit.isSuccess(exit)
@@ -307,12 +340,31 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       return yield* Deferred.await(result);
     });
 
+  const queryInterrupted: OrchestrationEngineShape["queryInterrupted"] = () =>
+    interruptionCheckpoint.list();
+
+  const resumeInterrupted: OrchestrationEngineShape["resumeInterrupted"] = (commandId) =>
+    Effect.gen(function* () {
+      const entry = yield* interruptionCheckpoint.get(commandId);
+      if (Option.isNone(entry)) {
+        return Option.none();
+      }
+      yield* interruptionCheckpoint.remove(commandId);
+      const resumedCommand = entry.value;
+      return Option.some({
+        commandId: resumedCommand.commandId,
+        commandType: resumedCommand.commandType,
+        aggregateRef: resumedCommand.aggregateRef,
+        snapshotSequence: resumedCommand.snapshotSequence,
+        interruptedAt: resumedCommand.interruptedAt,
+      });
+    });
+
   return {
     readEvents,
     dispatch,
-    // Each access creates a fresh PubSub subscription so that multiple
-    // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
-    // each independently receive all domain events.
+    queryInterrupted,
+    resumeInterrupted,
     get streamDomainEvents(): OrchestrationEngineShape["streamDomainEvents"] {
       return Stream.fromPubSub(eventPubSub);
     },
@@ -322,4 +374,4 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 export const OrchestrationEngineLive = Layer.effect(
   OrchestrationEngineService,
   makeOrchestrationEngine,
-);
+).pipe(Layer.provide(InterruptionCheckpoint.Default));
