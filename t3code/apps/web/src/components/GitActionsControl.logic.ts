@@ -1,6 +1,7 @@
 import type {
   GitRunStackedActionResult,
   GitStackedAction,
+  SourceControlBranchProtection,
   VcsStatusResult,
 } from "@t3tools/contracts";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
@@ -42,6 +43,45 @@ export type DefaultBranchConfirmableAction =
   | "create_pr"
   | "commit_push"
   | "commit_push_pr";
+
+export function buildBranchProtectionDetails(
+  protection: SourceControlBranchProtection | null | undefined,
+): string[] {
+  if (!protection) return [];
+
+  const details = ["Protected branch"];
+  if (protection.requiresPullRequest) {
+    details.push("Requires pull request review flow");
+  }
+  if (protection.requiredApprovingReviewCount > 0) {
+    details.push(`${protection.requiredApprovingReviewCount} approving review(s) required`);
+  }
+  if (protection.requiresStatusChecks) {
+    const contexts = protection.requiredStatusCheckContexts;
+    details.push(
+      contexts.length > 0 ? `Required checks: ${contexts.join(", ")}` : "Status checks required",
+    );
+  }
+  if (protection.requiresSignedCommits) {
+    details.push("Signed commits required");
+  }
+  if (protection.restrictsPushes) {
+    details.push("Push access restricted");
+  }
+  if (!protection.allowsForcePushes) {
+    details.push("Force pushes disabled");
+  }
+  return details;
+}
+
+export function requiresProtectedBranchPushWarning(
+  action: GitStackedAction,
+  protection: SourceControlBranchProtection | null | undefined,
+): boolean {
+  if (!protection) return false;
+  if (action !== "push" && action !== "commit_push") return false;
+  return protection.requiresPullRequest || protection.requiredApprovingReviewCount > 0;
+}
 
 function resolveChangeRequestTerminology(
   gitStatus: VcsStatusResult | null,

@@ -1,8 +1,10 @@
 import type { VcsStatusResult } from "@t3tools/contracts";
 import { assert, describe, it } from "vitest";
 import {
+  buildBranchProtectionDetails,
   buildGitActionProgressStages,
   buildMenuItems,
+  requiresProtectedBranchPushWarning,
   requiresDefaultBranchConfirmation,
   resolveAutoFeatureBranchName,
   resolveDefaultBranchActionDialogCopy,
@@ -30,6 +32,40 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
     ...overrides,
   };
 }
+
+describe("branch protection helpers", () => {
+  const protection = {
+    provider: "github" as const,
+    branch: "main",
+    requiresPullRequest: true,
+    requiredApprovingReviewCount: 2,
+    requiresStatusChecks: true,
+    requiredStatusCheckContexts: ["test", "lint"],
+    requiresSignedCommits: true,
+    allowsForcePushes: false,
+    restrictsPushes: true,
+  };
+
+  it("summarizes active protection rules for tooltips and dialogs", () => {
+    assert.deepEqual(buildBranchProtectionDetails(protection), [
+      "Protected branch",
+      "Requires pull request review flow",
+      "2 approving review(s) required",
+      "Required checks: test, lint",
+      "Signed commits required",
+      "Push access restricted",
+      "Force pushes disabled",
+    ]);
+  });
+
+  it("warns only for direct push actions that bypass required review flow", () => {
+    assert.isTrue(requiresProtectedBranchPushWarning("push", protection));
+    assert.isTrue(requiresProtectedBranchPushWarning("commit_push", protection));
+    assert.isFalse(requiresProtectedBranchPushWarning("create_pr", protection));
+    assert.isFalse(requiresProtectedBranchPushWarning("commit_push_pr", protection));
+    assert.isFalse(requiresProtectedBranchPushWarning("push", null));
+  });
+});
 
 describe("when: ref is clean and has an open PR", () => {
   it("resolveQuickAction opens the existing PR", () => {

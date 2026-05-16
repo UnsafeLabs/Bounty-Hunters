@@ -2,7 +2,7 @@ import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, LockIcon } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -32,6 +32,7 @@ import {
   resolveEffectiveEnvMode,
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
+import { buildBranchProtectionDetails } from "./GitActionsControl.logic";
 import { Button } from "./ui/button";
 import {
   Combobox,
@@ -44,6 +45,7 @@ import {
   ComboboxStatus,
   ComboboxTrigger,
 } from "./ui/combobox";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
 interface BranchToolbarBranchSelectorProps {
@@ -495,6 +497,11 @@ export function BranchToolbarBranchSelector({
     effectiveEnvMode,
     resolvedActiveBranch,
   });
+  const activeBranchProtection =
+    branchStatusQuery.data?.refName === resolvedActiveBranch
+      ? (branchStatusQuery.data?.branchProtection ?? null)
+      : null;
+  const activeBranchProtectionDetails = buildBranchProtectionDetails(activeBranchProtection);
 
   function renderPickerItem(itemValue: string, index: number) {
     if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
@@ -595,6 +602,20 @@ export function BranchToolbarBranchSelector({
         disabled={(isBranchesSearchPending && refs.length === 0) || isBranchActionPending}
       >
         <span className="min-w-0 max-w-[240px] truncate">{triggerLabel}</span>
+        {activeBranchProtection && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="inline-flex shrink-0 items-center text-muted-foreground/80">
+                  <LockIcon className="size-3.5" aria-label="Protected branch" />
+                </span>
+              }
+            />
+            <TooltipPopup side="top" className="max-w-80 whitespace-normal text-xs leading-snug">
+              {activeBranchProtectionDetails.join("; ")}
+            </TooltipPopup>
+          </Tooltip>
+        )}
         <ChevronDownIcon className="shrink-0" />
       </ComboboxTrigger>
       <ComboboxPopup align="end" side="top" className="w-80">

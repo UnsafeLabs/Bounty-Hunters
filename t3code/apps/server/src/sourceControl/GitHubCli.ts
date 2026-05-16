@@ -6,7 +6,9 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 
 import {
+  SourceControlBranchProtection,
   TrimmedNonEmptyString,
+  type SourceControlBranchProtection as SourceControlBranchProtectionType,
   type SourceControlRepositoryVisibility,
   type VcsError,
 } from "@t3tools/contracts";
@@ -85,6 +87,11 @@ export interface GitHubCliShape {
     readonly cwd: string;
   }) => Effect.Effect<string | null, GitHubCliError>;
 
+  readonly getBranchProtection: (input: {
+    readonly cwd: string;
+    readonly branch: string;
+  }) => Effect.Effect<SourceControlBranchProtectionType | null, GitHubCliError>;
+
   readonly checkoutPullRequest: (input: {
     readonly cwd: string;
     readonly reference: string;
@@ -161,6 +168,43 @@ const RawGitHubRepositoryCloneUrlsSchema = Schema.Struct({
   sshUrl: TrimmedNonEmptyString,
 });
 
+const RawGitHubRepositoryIdentitySchema = Schema.Struct({
+  nameWithOwner: TrimmedNonEmptyString,
+});
+
+const RawGitHubBranchProtectionSchema = Schema.Struct({
+  required_pull_request_reviews: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        required_approving_review_count: Schema.optional(Schema.Number),
+      }),
+    ),
+  ),
+  required_status_checks: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        contexts: Schema.optional(Schema.Array(Schema.String)),
+        checks: Schema.optional(
+          Schema.Array(
+            Schema.Struct({
+              context: Schema.optional(Schema.String),
+            }),
+          ),
+        ),
+      }),
+    ),
+  ),
+  required_signatures: Schema.optional(Schema.NullOr(Schema.Unknown)),
+  allow_force_pushes: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        enabled: Schema.Boolean,
+      }),
+    ),
+  ),
+  restrictions: Schema.optional(Schema.NullOr(Schema.Unknown)),
+});
+
 function normalizeRepositoryCloneUrls(
   raw: Schema.Schema.Type<typeof RawGitHubRepositoryCloneUrlsSchema>,
 ): GitHubRepositoryCloneUrls {
@@ -169,6 +213,36 @@ function normalizeRepositoryCloneUrls(
     url: raw.url,
     sshUrl: raw.sshUrl,
   };
+}
+
+function normalizeBranchProtection(
+  branch: string,
+  raw: Schema.Schema.Type<typeof RawGitHubBranchProtectionSchema>,
+): SourceControlBranchProtectionType {
+  const statusCheckContexts = [
+    ...(raw.required_status_checks?.contexts ?? []),
+    ...(raw.required_status_checks?.checks ?? []).flatMap((check) =>
+      check.context ? [check.context] : [],
+    ),
+  ];
+
+  return SourceControlBranchProtection.make({
+    provider: "github",
+    branch,
+    requiresPullRequest: raw.required_pull_request_reviews != null,
+    requiredApprovingReviewCount:
+      raw.required_pull_request_reviews?.required_approving_review_count ?? 0,
+    requiresStatusChecks: raw.required_status_checks != null,
+    requiredStatusCheckContexts: Array.from(new Set(statusCheckContexts)),
+    requiresSignedCommits: raw.required_signatures != null,
+    allowsForcePushes: raw.allow_force_pushes?.enabled ?? false,
+    restrictsPushes: raw.restrictions != null,
+  });
+}
+
+function isBranchProtectionNotFound(error: GitHubCliError): boolean {
+  const detail = error.detail.toLowerCase();
+  return detail.includes("404") || detail.includes("not found");
 }
 
 /**
@@ -211,7 +285,11 @@ function deriveRepositoryCloneUrlsFromCreateOutput(
 function decodeGitHubJson<S extends Schema.Top>(
   raw: string,
   schema: S,
-  operation: "listOpenPullRequests" | "getPullRequest" | "getRepositoryCloneUrls",
+  operation:
+    | "listOpenPullRequests"
+    | "getPullRequest"
+    | "getRepositoryCloneUrls"
+    | "getBranchProtection",
   invalidDetail: string,
 ): Effect.Effect<S["Type"], GitHubCliError, S["DecodingServices"]> {
   return Schema.decodeEffect(Schema.fromJsonString(schema))(raw).pipe(
@@ -363,6 +441,45 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           const trimmed = value.stdout.trim();
           return trimmed.length > 0 ? trimmed : null;
         }),
+      ),
+    getBranchProtection: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: ["repo", "view", "--json", "nameWithOwner"],
+      }).pipe(
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap((raw) =>
+          decodeGitHubJson(
+            raw,
+            RawGitHubRepositoryIdentitySchema,
+            "getRepositoryCloneUrls",
+            "GitHub CLI returned invalid repository JSON.",
+          ),
+        ),
+        Effect.flatMap((repository) =>
+          execute({
+            cwd: input.cwd,
+            args: [
+              "api",
+              `repos/${repository.nameWithOwner}/branches/${encodeURIComponent(
+                input.branch,
+              )}/protection`,
+            ],
+          }),
+        ),
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap((raw) =>
+          decodeGitHubJson(
+            raw,
+            RawGitHubBranchProtectionSchema,
+            "getBranchProtection",
+            "GitHub CLI returned invalid branch protection JSON.",
+          ),
+        ),
+        Effect.map((raw) => normalizeBranchProtection(input.branch, raw)),
+        Effect.catch((error) =>
+          isBranchProtectionNotFound(error) ? Effect.succeed(null) : Effect.fail(error),
+        ),
       ),
     checkoutPullRequest: (input) =>
       execute({

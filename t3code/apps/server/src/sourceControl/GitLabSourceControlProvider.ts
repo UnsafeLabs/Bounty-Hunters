@@ -136,6 +136,10 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
       gitlab
         .getDefaultBranch(input)
         .pipe(Effect.mapError((error) => providerError("getDefaultBranch", error))),
+    getBranchProtection: (input) =>
+      gitlab
+        .getBranchProtection(input)
+        .pipe(Effect.mapError((error) => providerError("getBranchProtection", error))),
     checkoutChangeRequest: (input) =>
       gitlab
         .checkoutMergeRequest(input)

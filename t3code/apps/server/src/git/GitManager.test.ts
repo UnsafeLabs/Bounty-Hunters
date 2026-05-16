@@ -605,6 +605,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             detail: `Unexpected repository create: ${input.repository}`,
           }),
         ),
+      getBranchProtection: () => Effect.succeed(null),
       checkoutPullRequest: (input) =>
         execute({
           cwd: input.cwd,

@@ -4,6 +4,7 @@ import type {
   ChangeRequest,
   ChangeRequestState,
   SourceControlProviderError,
+  SourceControlBranchProtection,
   SourceControlProviderInfo,
   SourceControlProviderKind,
   SourceControlRepositoryCloneUrls,
@@ -88,6 +89,11 @@ export interface SourceControlProviderShape {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;
   }) => Effect.Effect<string | null, SourceControlProviderError>;
+  readonly getBranchProtection: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+    readonly branch: string;
+  }) => Effect.Effect<SourceControlBranchProtection | null, SourceControlProviderError>;
   readonly checkoutChangeRequest: (input: {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;

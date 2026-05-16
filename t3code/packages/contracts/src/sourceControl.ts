@@ -36,6 +36,19 @@ export const ChangeRequest = Schema.Struct({
 });
 export type ChangeRequest = typeof ChangeRequest.Type;
 
+export const SourceControlBranchProtection = Schema.Struct({
+  provider: SourceControlProviderKind,
+  branch: TrimmedNonEmptyString,
+  requiresPullRequest: Schema.Boolean,
+  requiredApprovingReviewCount: Schema.Number,
+  requiresStatusChecks: Schema.Boolean,
+  requiredStatusCheckContexts: Schema.Array(Schema.String),
+  requiresSignedCommits: Schema.Boolean,
+  allowsForcePushes: Schema.Boolean,
+  restrictsPushes: Schema.Boolean,
+});
+export type SourceControlBranchProtection = typeof SourceControlBranchProtection.Type;
+
 export const SourceControlRepositoryCloneUrls = Schema.Struct({
   nameWithOwner: TrimmedNonEmptyString,
   url: TrimmedNonEmptyString,

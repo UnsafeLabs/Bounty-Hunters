@@ -7,7 +7,12 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import type * as DateTime from "effect/DateTime";
 
-import { TrimmedNonEmptyString, type SourceControlRepositoryVisibility } from "@t3tools/contracts";
+import {
+  SourceControlBranchProtection,
+  TrimmedNonEmptyString,
+  type SourceControlBranchProtection as SourceControlBranchProtectionType,
+  type SourceControlRepositoryVisibility,
+} from "@t3tools/contracts";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitLabMergeRequests from "./gitLabMergeRequests.ts";
@@ -88,6 +93,11 @@ export interface GitLabCliShape {
   readonly getDefaultBranch: (input: {
     readonly cwd: string;
   }) => Effect.Effect<string | null, GitLabCliError>;
+
+  readonly getBranchProtection: (input: {
+    readonly cwd: string;
+    readonly branch: string;
+  }) => Effect.Effect<SourceControlBranchProtectionType | null, GitLabCliError>;
 
   readonly checkoutMergeRequest: (input: {
     readonly cwd: string;
@@ -170,6 +180,14 @@ const RawGitLabDefaultBranchSchema = Schema.Struct({
   default_branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 });
 
+const RawGitLabProtectedBranchSchema = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  allow_force_push: Schema.optional(Schema.Boolean),
+  code_owner_approval_required: Schema.optional(Schema.Boolean),
+  push_access_levels: Schema.optional(Schema.Array(Schema.Unknown)),
+  merge_access_levels: Schema.optional(Schema.Array(Schema.Unknown)),
+});
+
 const RawGitLabNamespaceSchema = Schema.Struct({
   id: Schema.Number,
 });
@@ -182,6 +200,31 @@ function normalizeRepositoryCloneUrls(
     url: raw.web_url,
     sshUrl: raw.ssh_url_to_repo,
   };
+}
+
+function normalizeBranchProtection(
+  branch: string,
+  raw: Schema.Schema.Type<typeof RawGitLabProtectedBranchSchema>,
+): SourceControlBranchProtectionType {
+  const hasMergeRestrictions = (raw.merge_access_levels?.length ?? 0) > 0;
+  const requiresCodeOwnerApproval = raw.code_owner_approval_required === true;
+
+  return SourceControlBranchProtection.make({
+    provider: "gitlab",
+    branch: raw.name || branch,
+    requiresPullRequest: hasMergeRestrictions || requiresCodeOwnerApproval,
+    requiredApprovingReviewCount: requiresCodeOwnerApproval ? 1 : 0,
+    requiresStatusChecks: false,
+    requiredStatusCheckContexts: [],
+    requiresSignedCommits: false,
+    allowsForcePushes: raw.allow_force_push === true,
+    restrictsPushes: (raw.push_access_levels?.length ?? 0) > 0,
+  });
+}
+
+function isBranchProtectionNotFound(error: GitLabCliError): boolean {
+  const detail = error.detail.toLowerCase();
+  return detail.includes("404") || detail.includes("not found");
 }
 
 function decodeGitLabJson<S extends Schema.Top>(
@@ -437,6 +480,25 @@ export const make = Effect.fn("makeGitLabCli")(function* () {
           ),
         ),
         Effect.map((value) => value.default_branch ?? null),
+      ),
+    getBranchProtection: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: ["api", `projects/:fullpath/protected_branches/${encodeURIComponent(input.branch)}`],
+      }).pipe(
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap((raw) =>
+          decodeGitLabJson(
+            raw,
+            RawGitLabProtectedBranchSchema,
+            "getDefaultBranch",
+            "GitLab CLI returned invalid branch protection JSON.",
+          ),
+        ),
+        Effect.map((raw) => normalizeBranchProtection(input.branch, raw)),
+        Effect.catch((error) =>
+          isBranchProtectionNotFound(error) ? Effect.succeed(null) : Effect.fail(error),
+        ),
       ),
     checkoutMergeRequest: (input) =>
       execute({
