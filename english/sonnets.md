@@ -1,6 +1,7 @@
 # Sonnet Collection
 
-Original sonnets in Shakespearean form (ABAB CDCD EFEF GG).
+Original sonnets in Shakespearean form (ABAB CDCD EFEF GG),
+written in iambic pentameter (10 syllables per line, unstressed-stressed pattern).
 
 ---
 
@@ -10,12 +11,10 @@ Beneath the weight of stars I stand alone,
 The night wraps round me like a velvet shroud,
 My voice returns as echo, carved in stone,
 A whispered prayer dissolving in the cloud.
-
 The moon ascends her throne of silver light,
 And casts her gaze upon the sleeping earth,
 And every shadow trembles into sight,
 While birthing dawns of unexpected worth.
-
 The rivers carry secrets to the sea,
 And mountains hold the memories of rain,
 I watch the tide reclaim what once was free,
@@ -32,7 +31,6 @@ We plant our thoughts in rows of ones and zeros,
 And tend the fields of data, line by line,
 The harvest yields no fruit, produces no heroes,
 Yet still we call this barren output "mine."
-
 The cursor blinks, a heartbeat on the screen,
 A pulse of light where meaning tries to grow,
 Between the tags, a world remains unseen,
