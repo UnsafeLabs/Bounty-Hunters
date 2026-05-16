@@ -28,6 +28,8 @@ import {
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   FilesystemBrowseError,
+  FilesystemMoveError,
+  FilesystemUndoError,
   ThreadId,
   type TerminalEvent,
   WS_METHODS,
@@ -992,6 +994,33 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   new FilesystemBrowseError({
                     message: cause.detail,
                     cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.filesystemMove]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.filesystemMove,
+            workspaceEntries.move(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new FilesystemMoveError({
+                    message: cause.message,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.filesystemUndoMove]: () =>
+          observeRpcEffect(
+            WS_METHODS.filesystemUndoMove,
+            workspaceEntries.undoMove.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new FilesystemUndoError({
+                    message: cause.message,
                   }),
               ),
             ),

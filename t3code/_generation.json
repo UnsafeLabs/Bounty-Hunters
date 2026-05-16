@@ -1,0 +1,5 @@
+{
+  "agent": "Madelaine",
+  "pre_task_context": "Task: Add drag-and-drop file moving to the T3 Code sidebar file tree using dnd-kit. Requirements: single/multi-select drag, git mv for tracked files, Ctrl+Z undo, drop indicators, expandable directories. Stack: Next.js, Effect-TS, dnd-kit, WebSocket RPC.",
+  "timestamp": "2026-05-16T21:00:00Z"
+}

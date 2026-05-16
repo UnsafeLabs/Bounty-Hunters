@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as OS from "node:os";
 import fsPromises from "node:fs/promises";
+import { execFile } from "node:child_process";
 import type { Dirent } from "node:fs";
 
 import * as Cache from "effect/Cache";
@@ -9,9 +10,10 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as MutableRef from "effect/MutableRef";
 import * as Path from "effect/Path";
 
-import { type FilesystemBrowseInput, type ProjectEntry } from "@t3tools/contracts";
+import { type FilesystemBrowseInput, type FilesystemMoveInput, type ProjectEntry } from "@t3tools/contracts";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   insertRankedSearchResult,
@@ -25,6 +27,7 @@ import {
   WorkspaceEntries,
   WorkspaceEntriesBrowseError,
   WorkspaceEntriesError,
+  WorkspaceEntriesMoveError,
   type WorkspaceEntriesShape,
 } from "../Services/WorkspaceEntries.ts";
 import { WorkspacePaths } from "../Services/WorkspacePaths.ts";
@@ -183,6 +186,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   const path = yield* Path.Path;
   const vcsRegistry = yield* VcsDriverRegistry;
   const workspacePaths = yield* WorkspacePaths;
+  const moveHistory = MutableRef.make<Array<{ src: string; dst: string }>>([]);
 
   const isInsideVcsWorkTree = (cwd: string): Effect.Effect<boolean> =>
     vcsRegistry.detect({ cwd }).pipe(
@@ -469,6 +473,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
           .map((dirent) => ({
             name: dirent.name,
             fullPath: path.join(parentPath, dirent.name),
+            isDirectory: dirent.isDirectory(),
           }))
           .toSorted((left, right) => left.name.localeCompare(right.name)),
       };
@@ -514,6 +519,95 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     browse,
     invalidate,
     search,
+    move: (input: FilesystemMoveInput) =>
+      Effect.gen(function* () {
+        const src = input.sourcePath;
+        const dst = input.destinationPath;
+
+        // Ensure parent directory exists
+        const dstDir = dst.substring(0, dst.lastIndexOf("/"));
+        yield* Effect.promise(() => fsPromises.mkdir(dstDir, { recursive: true }));
+
+        // Check if source is git-tracked
+        const isTracked = yield* Effect.promise(async () => {
+          try {
+            await execFile("git", ["ls-files", "--error-unmatch", src], {
+              cwd: dstDir,
+              stdio: "pipe",
+              timeout: 5000,
+            });
+            return true;
+          } catch {
+            return false;
+          }
+        });
+
+        if (isTracked) {
+          // Use git mv to preserve history
+          yield* Effect.promise(async () => {
+            const { stdout } = await execFile("git", ["mv", src, dst], {
+              cwd: dstDir,
+              timeout: 10000,
+            });
+            return stdout;
+          });
+        } else {
+          // Regular filesystem rename for untracked files
+          yield* Effect.promise(() => fsPromises.rename(src, dst));
+        }
+
+        // Record move history for undo support
+        MutableRef.set(moveHistory, [...MutableRef.get(moveHistory), { src, dst }]);
+
+        return { success: true as const };
+      }),
+    undoMove: Effect.gen(function* () {
+      const history = MutableRef.get(moveHistory);
+      if (history.length === 0) {
+        return { success: false as const };
+      }
+
+      const lastMove = history[history.length - 1];
+      MutableRef.set(moveHistory, history.slice(0, -1));
+
+      // Reverse: move dst back to src
+      const src = lastMove.dst;
+      const dst = lastMove.src;
+
+      const srcDir = src.substring(0, src.lastIndexOf("/"));
+      yield* Effect.promise(() => fsPromises.mkdir(srcDir, { recursive: true }));
+
+      const isTracked = yield* Effect.promise(async () => {
+        try {
+          await execFile("git", ["ls-files", "--error-unmatch", src], {
+            cwd: srcDir,
+            stdio: "pipe",
+            timeout: 5000,
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      });
+
+      if (isTracked) {
+        yield* Effect.promise(async () => {
+          const { stdout } = await execFile("git", ["mv", src, dst], {
+            cwd: srcDir,
+            timeout: 10000,
+          });
+          return stdout;
+        });
+      } else {
+        yield* Effect.promise(() => fsPromises.rename(src, dst));
+      }
+
+      return {
+        success: true as const,
+        undoneSourcePath: lastMove.src,
+        undoneDestPath: lastMove.dst,
+      };
+    }),
   } satisfies WorkspaceEntriesShape;
 });
 

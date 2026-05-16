@@ -197,6 +197,7 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
+import { DraggableFileTree } from "./chat/DraggableFileTree";
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
@@ -3415,6 +3416,13 @@ export default function Sidebar() {
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
+
+      {primaryEnvironmentId && (
+        <DraggableFileTree
+          api={readEnvironmentApi(primaryEnvironmentId)!}
+          cwd={undefined}
+        />
+      )}
 
       {isOnSettings ? (
         <SettingsSidebarNav pathname={pathname} />

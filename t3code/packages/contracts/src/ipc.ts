@@ -18,7 +18,7 @@ import type {
   VcsStatusResult,
   VcsCreateRefResult,
 } from "./git.ts";
-import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
+import type { FilesystemBrowseInput, FilesystemBrowseResult, FilesystemMoveInput, FilesystemMoveResult } from "./filesystem.ts";
 import type {
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -509,6 +509,7 @@ export interface EnvironmentApi {
   };
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
+    move: (input: FilesystemMoveInput) => Promise<FilesystemMoveResult>;
   };
   sourceControl: {
     lookupRepository: (

@@ -2,27 +2,29 @@
  * WorkspaceEntries - Effect service contract for cached workspace entry search.
  *
  * Owns indexed workspace entry search plus cache invalidation for workspace
- * roots when the underlying filesystem changes.
- *
- * @module WorkspaceEntries
+ * file operations.
  */
-import * as Schema from "effect/Schema";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
 
 import type {
-  FilesystemBrowseInput,
-  FilesystemBrowseResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
 } from "@t3tools/contracts";
+import type {
+  FilesystemBrowseInput,
+  FilesystemBrowseResult,
+  FilesystemMoveInput,
+  FilesystemMoveResult,
+} from "@t3tools/contracts";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import { TrimmedNonEmptyString } from "@t3tools/contracts/baseSchemas";
 
 export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntriesError>()(
   "WorkspaceEntriesError",
   {
-    cwd: Schema.String,
-    operation: Schema.String,
-    detail: Schema.String,
+    message: TrimmedNonEmptyString,
+    detail: Schema.optional(TrimmedNonEmptyString),
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
@@ -30,18 +32,23 @@ export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntr
 export class WorkspaceEntriesBrowseError extends Schema.TaggedErrorClass<WorkspaceEntriesBrowseError>()(
   "WorkspaceEntriesBrowseError",
   {
-    cwd: Schema.optional(Schema.String),
-    partialPath: Schema.String,
-    operation: Schema.String,
-    detail: Schema.String,
+    message: TrimmedNonEmptyString,
+    cwd: TrimmedNonEmptyString,
+    partialPath: TrimmedNonEmptyString,
+    operation: TrimmedNonEmptyString,
+    detail: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
 
-/**
- * WorkspaceEntriesShape - Service API for workspace entry search and cache
- * invalidation.
- */
+export class WorkspaceEntriesMoveError extends Schema.TaggedErrorClass<WorkspaceEntriesMoveError>()(
+  "WorkspaceEntriesMoveError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
 export interface WorkspaceEntriesShape {
   /**
    * Browse matching directories for the provided partial path.
@@ -62,11 +69,27 @@ export interface WorkspaceEntriesShape {
    * Drop any cached workspace entries for the given workspace root.
    */
   readonly invalidate: (cwd: string) => Effect.Effect<void>;
+
+  /**
+   * Move a file or directory within the workspace using git mv (tracked) or
+   * fs rename (untracked).
+   */
+  readonly move: (
+    input: FilesystemMoveInput,
+  ) => Effect.Effect<FilesystemMoveResult, WorkspaceEntriesMoveError>;
+
+  /**
+   * Undo the last file move operation (Ctrl+Z support).
+   */
+  readonly undoMove: Effect.Effect<
+    { success: boolean; undoneSourcePath?: string; undoneDestPath?: string },
+    WorkspaceEntriesError
+  >;
 }
 
 /**
  * WorkspaceEntries - Service tag for cached workspace entry search.
  */
 export class WorkspaceEntries extends Context.Service<WorkspaceEntries, WorkspaceEntriesShape>()(
-  "t3/workspace/Services/WorkspaceEntries",
+  "WorkspaceEntries",
 ) {}
