@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import datetime
 from collections import defaultdict, deque
@@ -82,7 +83,6 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
@@ -124,6 +124,30 @@ def generate_encoders_by_class_tuples(
 
 
 encoders_by_class_tuples = generate_encoders_by_class_tuples(ENCODERS_BY_TYPE)
+
+
+def _encode_bytes(obj: bytes | memoryview, bytes_encoding: str = "base64") -> str:
+    """Encode bytes or memoryview to a string using the specified encoding.
+
+    Args:
+        obj: bytes or memoryview to encode.
+        bytes_encoding: Encoding method, either "base64" (default) or "hex".
+
+    Returns:
+        Encoded string representation.
+
+    Raises:
+        ValueError: If bytes_encoding is not "base64" or "hex".
+    """
+    if isinstance(obj, memoryview):
+        obj = bytes(obj)
+    if bytes_encoding == "hex":
+        return obj.hex()
+    elif bytes_encoding == "base64":
+        return base64.b64encode(obj).decode("ascii")
+    raise ValueError(
+        f"bytes_encoding must be 'base64' or 'hex', got '{bytes_encoding}'"
+    )
 
 
 def jsonable_encoder(
@@ -215,6 +239,15 @@ def jsonable_encoder(
             """
         ),
     ] = True,
+    bytes_encoding: Annotated[
+        str,
+        Doc(
+            """
+            The encoding method for bytes and memoryview objects.
+            Can be "base64" (default) or "hex".
+            """
+        ),
+    ] = "base64",
 ) -> Any:
     """
     Convert any object to something that can be encoded in JSON.
@@ -237,9 +270,9 @@ def jsonable_encoder(
                 if isinstance(obj, encoder_type):
                     return encoder_instance(obj)
     if include is not None and not isinstance(include, (set, dict)):
-        include = set(include)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        include = set(include)  # type: ignore[assignment]
     if exclude is not None and not isinstance(exclude, (set, dict)):
-        exclude = set(exclude)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        exclude = set(exclude)  # type: ignore[assignment]
     if isinstance(obj, BaseModel):
         obj_dict = obj.model_dump(
             mode="json",
@@ -255,6 +288,7 @@ def jsonable_encoder(
             exclude_none=exclude_none,
             exclude_defaults=exclude_defaults,
             sqlalchemy_safe=sqlalchemy_safe,
+            bytes_encoding=bytes_encoding,
         )
     if dataclasses.is_dataclass(obj):
         assert not isinstance(obj, type)
@@ -269,6 +303,7 @@ def jsonable_encoder(
             exclude_none=exclude_none,
             custom_encoder=custom_encoder,
             sqlalchemy_safe=sqlalchemy_safe,
+            bytes_encoding=bytes_encoding,
         )
     if isinstance(obj, Enum):
         return obj.value
@@ -302,6 +337,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
                 encoded_value = jsonable_encoder(
                     value,
@@ -310,6 +346,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
                 encoded_dict[encoded_key] = encoded_value
         return encoded_dict
@@ -327,10 +364,14 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
             )
         return encoded_list
-
+    if isinstance(obj, bytes):
+        return _encode_bytes(obj, bytes_encoding)
+    if isinstance(obj, memoryview):
+        return _encode_bytes(obj, bytes_encoding)
     if type(obj) in ENCODERS_BY_TYPE:
         return ENCODERS_BY_TYPE[type(obj)](obj)
     for encoder, classes_tuple in encoders_by_class_tuples.items():
@@ -361,4 +402,5 @@ def jsonable_encoder(
         exclude_none=exclude_none,
         custom_encoder=custom_encoder,
         sqlalchemy_safe=sqlalchemy_safe,
+        bytes_encoding=bytes_encoding,
     )
