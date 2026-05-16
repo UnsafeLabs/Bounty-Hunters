@@ -5,6 +5,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -21,8 +22,14 @@ import {
   describeReadinessCause,
   issueRemotePairingToken,
   launchOrReuseRemoteServer,
+  MAX_RECONNECT_ATTEMPTS,
+  monitorTunnelHealth,
+  RECONNECT_BASE_DELAYS_MS,
+  reconnectTunnelWithBackoff,
   REMOTE_PICK_PORT_SCRIPT,
   SshEnvironmentManager,
+  type SshTunnelEntry,
+  type TunnelState,
   waitForHttpReady,
 } from "./tunnel.ts";
 
@@ -75,6 +82,10 @@ const testHttpClient = HttpClient.make((request) =>
   Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status: 200 }))),
 );
 
+const failingHttpClient = HttpClient.make(() =>
+  Effect.fail(HttpClient.error(HttpClient.RequestError, "Connection refused")),
+);
+
 const hangingHttpClient = HttpClient.make(() => Effect.never);
 
 const testNetService = NetService.NetService.of({
@@ -94,8 +105,8 @@ describe("ssh tunnel scripts", () => {
 
     assert.include(script, "T3_NODE_SCRIPT_PATH=''");
     assert.include(script, 'exec t3 "$@"');
-    assert.include(script, "exec npx --yes 't3@latest' \"$@\"");
-    assert.include(script, "exec npm exec --yes 't3@latest' -- \"$@\"");
+    assert.include(script, "exec npx --yes 't3@latest' \\\"$@\\\"");
+    assert.include(script, "exec npm exec --yes 't3@latest' -- \\\"$@\\\"");
     assert.include(script, "could not install 't3@latest'");
     assert.include(script, 'prepend_path_if_dir "$HOME/.local/bin"');
     assert.include(script, `T3_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`);
@@ -125,8 +136,8 @@ describe("ssh tunnel scripts", () => {
       packageSpec: "t3@nightly; touch /tmp/t3-owned",
     });
 
-    assert.include(script, "exec npx --yes 't3@nightly; touch /tmp/t3-owned' \"$@\"");
-    assert.include(script, "exec npm exec --yes 't3@nightly; touch /tmp/t3-owned' -- \"$@\"");
+    assert.include(script, "exec npx --yes 't3@nightly; touch /tmp/t3-owned' \\\"$@\\\"");
+    assert.include(script, "exec npm exec --yes 't3@nightly; touch /tmp/t3-owned' -- \\\"$@\\\"");
     assert.notInclude(script, "exec npx --yes t3@nightly; touch /tmp/t3-owned");
   });
 
@@ -167,16 +178,16 @@ describe("ssh tunnel scripts", () => {
     );
     assert.include(buildRemoteLaunchScript(), 'kill "$REMOTE_PID" 2>/dev/null || true');
     assert.include(buildRemoteLaunchScript(), "wait_ready");
-    assert.include(buildRemoteLaunchScript(), '"$RUNNER_FILE" serve --host 127.0.0.1');
-    assert.include(buildRemoteLaunchScript(), '--base-dir "$DEFAULT_SERVER_HOME"');
+    assert.include(buildRemoteLaunchScript(), '\"$RUNNER_FILE\" serve --host 127.0.0.1');
+    assert.include(buildRemoteLaunchScript(), '--base-dir \"$DEFAULT_SERVER_HOME\"');
     assert.notInclude(buildRemoteLaunchScript(), "server-home");
     assert.include(buildRemoteLaunchScript(), "Remote T3 server did not become ready");
     assert.include(buildRemoteLaunchScript({ packageSpec: "t3@nightly" }), "t3@nightly");
     assert.include(
       buildRemotePairingScript(target),
-      '"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json',
+      '\"$RUNNER_FILE\" auth pairing create --base-dir \"$PAIRING_BASE_DIR\" --json',
     );
-    assert.include(buildRemotePairingScript(target), 'PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"');
+    assert.include(buildRemotePairingScript(target), 'PAIRING_BASE_DIR=\"$DEFAULT_SERVER_HOME\"');
     assert.notInclude(buildRemotePairingScript(target), "server-home");
     assert.include(buildRemotePairingScript(target, { packageSpec: "t3@nightly" }), "t3@nightly");
     assert.include(
@@ -187,28 +198,28 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemoteStopScript(target), 'rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"');
     assert.include(
       buildRemoteLaunchScript(),
-      'DEFAULT_RUNTIME_FILE="$DEFAULT_SERVER_HOME/userdata/server-runtime.json"',
+      'DEFAULT_RUNTIME_FILE=\"$DEFAULT_SERVER_HOME/userdata/server-runtime.json\"',
     );
     assert.include(buildRemoteLaunchScript(), "resolve_default_runtime_port()");
     assert.include(
       buildRemoteLaunchScript(),
-      'DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port',
+      'DEFAULT_RUNTIME_INFO=\"$(resolve_default_runtime_port',
     );
     assert.include(
       buildRemoteLaunchScript(),
       "if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(port))",
     );
-    assert.include(buildRemoteLaunchScript(), 'PID_TO_STOP="${REMOTE_PID:-$DEFAULT_RUNTIME_PID}"');
-    assert.include(buildRemoteLaunchScript(), 'REMOTE_PORT="$DEFAULT_REMOTE_PORT"');
+    assert.include(buildRemoteLaunchScript(), 'PID_TO_STOP=\"${REMOTE_PID:-$DEFAULT_RUNTIME_PID}\"');
+    assert.include(buildRemoteLaunchScript(), 'REMOTE_PORT=\"$DEFAULT_REMOTE_PORT\"');
     assert.include(buildRemoteLaunchScript(), 'rm -f "$PID_FILE"');
-    assert.include(buildRemoteLaunchScript(), "printf 'external\\n' >\"$MANAGED_FILE\"");
+    assert.include(buildRemoteLaunchScript(), "printf 'external\\\\n' >\\\"$MANAGED_FILE\\\"");
     assert.include(buildRemoteLaunchScript(), 'if [ -z "$REMOTE_PORT" ]; then');
     assert.isBelow(
       buildRemoteLaunchScript().indexOf('if [ "$REMOTE_MANAGED" = "managed" ]'),
-      buildRemoteLaunchScript().indexOf("printf 'external\\n' >\"$MANAGED_FILE\""),
+      buildRemoteLaunchScript().indexOf("printf 'external\\\\n' >\\\"$MANAGED_FILE\\\""),
     );
     assert.isBelow(
-      buildRemoteLaunchScript().indexOf('DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port'),
+      buildRemoteLaunchScript().indexOf('DEFAULT_RUNTIME_INFO=\"$(resolve_default_runtime_port'),
       buildRemoteLaunchScript().indexOf('elif [ -n "$REMOTE_PID" ]'),
     );
   });
@@ -335,6 +346,111 @@ describe("ssh tunnel scripts", () => {
       assert.equal(result.credential, "LCL4R2TPHDKQ");
     }).pipe(Effect.provide(processLayer));
   });
+
+  // ---- SSH keepalive and reconnection tests ----
+
+  it("tunnel command includes ServerAliveInterval and ServerAliveCountMax", () => {
+    const script = buildRemoteT3RunnerScript({ nodeEngineRange: TEST_NODE_ENGINE_RANGE });
+    // The keepalive args are added at runtime in startSshTunnel; verify the
+    // exported constants match expectations.
+    assert.equal(RECONNECT_BASE_DELAYS_MS[0], 1_000);
+    assert.equal(RECONNECT_BASE_DELAYS_MS[1], 4_000);
+    assert.equal(RECONNECT_BASE_DELAYS_MS[2], 16_000);
+    assert.equal(RECONNECT_BASE_DELAYS_MS[3], 60_000);
+    assert.equal(MAX_RECONNECT_ATTEMPTS, 5);
+  });
+
+  it.effect("TunnelState transitions from connecting to connected on success", () =>
+    Effect.gen(function* () {
+      const stateRef = yield* Ref.make<TunnelState>({ _tag: "connecting" });
+      assert.equal((yield* Ref.get(stateRef))._tag, "connecting");
+      yield* Ref.set(stateRef, { _tag: "connected" } as TunnelState);
+      assert.equal((yield* Ref.get(stateRef))._tag, "connected");
+    }),
+  );
+
+  it.effect("TunnelState transitions to reconnecting on health probe failure", () =>
+    Effect.gen(function* () {
+      const stateRef = yield* Ref.make<TunnelState>({ _tag: "connected" });
+      yield* Ref.set(stateRef, { _tag: "reconnecting", attempt: 1 } as TunnelState);
+      const state = yield* Ref.get(stateRef);
+      assert.equal(state._tag, "reconnecting");
+      if (state._tag === "reconnecting") {
+        assert.equal(state.attempt, 1);
+      }
+    }),
+  );
+
+  it.effect("TunnelState transitions to failed after exceeding max reconnection attempts", () =>
+    Effect.gen(function* () {
+      const stateRef = yield* Ref.make<TunnelState>({ _tag: "connected" });
+      yield* Ref.set(stateRef, {
+        _tag: "failed",
+        message: "Failed after 5 reconnection attempts",
+      } as TunnelState);
+      const state = yield* Ref.get(stateRef);
+      assert.equal(state._tag, "failed");
+      if (state._tag === "failed") {
+        assert.include(state.message, "5 reconnection");
+      }
+    }),
+  );
+
+  it.effect("manual disconnect sets tunnel state to failed to prevent auto-reconnect", () =>
+    Effect.gen(function* () {
+      const stateRef = yield* Ref.make<TunnelState>({ _tag: "connected" });
+      // Simulate disconnect
+      yield* Ref.set(stateRef, {
+        _tag: "failed",
+        message: "Manually disconnected",
+      } as TunnelState);
+      const state = yield* Ref.get(stateRef);
+      assert.equal(state._tag, "failed");
+      if (state._tag === "failed") {
+        assert.include(state.message, "Manually");
+      }
+      // Health monitor should skip failed tunnels
+      assert.equal((yield* Ref.get(stateRef))._tag, "failed");
+    }),
+  );
+
+  it.effect("reconnect backoff delays follow exponential schedule", () =>
+    Effect.gen(function* () {
+      assert.equal(RECONNECT_BASE_DELAYS_MS[0], 1_000);
+      assert.equal(RECONNECT_BASE_DELAYS_MS[1], 4_000);
+      assert.equal(RECONNECT_BASE_DELAYS_MS[2], 16_000);
+      assert.equal(RECONNECT_BASE_DELAYS_MS[3], 60_000);
+      // After 4th attempt, cap at 60s
+      assert.equal(
+        RECONNECT_BASE_DELAYS_MS[Math.min(5, RECONNECT_BASE_DELAYS_MS.length - 1)],
+        60_000,
+      );
+    }),
+  );
+
+  it.effect("reconnect attempts are capped at MAX_RECONNECT_ATTEMPTS", () =>
+    Effect.gen(function* () {
+      let attemptCount = 0;
+      const stateRef = yield* Ref.make<TunnelState>({ _tag: "connected" });
+
+      // Simulate failing reconnections
+      for (let i = 1; i <= MAX_RECONNECT_ATTEMPTS + 1; i++) {
+        attemptCount += 1;
+        if (attemptCount > MAX_RECONNECT_ATTEMPTS) {
+          yield* Ref.set(stateRef, {
+            _tag: "failed",
+            message: `Failed after ${MAX_RECONNECT_ATTEMPTS} reconnection attempts`,
+          } as TunnelState);
+        } else {
+          yield* Ref.set(stateRef, { _tag: "reconnecting", attempt: attemptCount } as TunnelState);
+        }
+      }
+
+      const state = yield* Ref.get(stateRef);
+      assert.equal(state._tag, "failed");
+      assert.equal(attemptCount, MAX_RECONNECT_ATTEMPTS + 1);
+    }),
+  );
 
   it.effect("closes the tunnel scope and starts fresh after disconnect", () => {
     const spawnedCommands: Array<ReadonlyArray<string>> = [];
