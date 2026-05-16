@@ -19,6 +19,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cache Health Checks
+    |--------------------------------------------------------------------------
+    |
+    | These values control cache store availability checks used by the
+    | cache:status command and /health/cache endpoint. Results are cached
+    | briefly per process to avoid repeatedly probing the active store.
+    |
+    */
+
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+
+    'health_check_interval' => (int) env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
+    /*
+    |--------------------------------------------------------------------------
     | Cache Stores
     |--------------------------------------------------------------------------
     |
