@@ -1,6 +1,7 @@
 # Limerick Collection
 
-A set of original limericks. Some need polish.
+A set of original limericks following the classic AABBA rhyme scheme
+(five lines: lines 1,2,5 rhyme with each other; lines 3,4 rhyme with each other).
 
 ---
 
