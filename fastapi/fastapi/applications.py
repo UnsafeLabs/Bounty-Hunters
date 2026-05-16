@@ -466,6 +466,55 @@ class FastAPI(Starlette):
                 """
             ),
         ] = None,
+        swagger_js_url: Annotated[
+            str | None,
+            Doc(
+                """
+                The URL to use to load the Swagger UI JavaScript for the automatic
+                API docs served at `docs_url`.
+
+                Set this to a self-hosted URL to avoid relying on the default CDN.
+                """
+            ),
+        ] = None,
+        swagger_css_url: Annotated[
+            str | None,
+            Doc(
+                """
+                The URL to use to load the Swagger UI CSS for the automatic API docs
+                served at `docs_url`.
+
+                Set this to a self-hosted URL to avoid relying on the default CDN.
+                """
+            ),
+        ] = None,
+        swagger_favicon_url: Annotated[
+            str | None,
+            Doc(
+                """
+                The URL of the favicon to use for the automatic Swagger UI docs.
+                """
+            ),
+        ] = None,
+        redoc_js_url: Annotated[
+            str | None,
+            Doc(
+                """
+                The URL to use to load the ReDoc JavaScript for the automatic API
+                docs served at `redoc_url`.
+
+                Set this to a self-hosted URL to avoid relying on the default CDN.
+                """
+            ),
+        ] = None,
+        redoc_favicon_url: Annotated[
+            str | None,
+            Doc(
+                """
+                The URL of the favicon to use for the automatic ReDoc docs.
+                """
+            ),
+        ] = None,
         middleware: Annotated[
             Sequence[Middleware] | None,
             Doc(
@@ -884,6 +933,11 @@ class FastAPI(Starlette):
         self.redoc_url = redoc_url
         self.swagger_ui_oauth2_redirect_url = swagger_ui_oauth2_redirect_url
         self.swagger_ui_init_oauth = swagger_ui_init_oauth
+        self.swagger_js_url = swagger_js_url
+        self.swagger_css_url = swagger_css_url
+        self.swagger_favicon_url = swagger_favicon_url
+        self.redoc_js_url = redoc_js_url
+        self.redoc_favicon_url = redoc_favicon_url
         self.swagger_ui_parameters = swagger_ui_parameters
         self.servers = servers or []
         self.separate_input_output_schemas = separate_input_output_schemas
@@ -1122,12 +1176,20 @@ class FastAPI(Starlette):
                 oauth2_redirect_url = self.swagger_ui_oauth2_redirect_url
                 if oauth2_redirect_url:
                     oauth2_redirect_url = root_path + oauth2_redirect_url
+                swagger_asset_urls = {}
+                if self.swagger_js_url is not None:
+                    swagger_asset_urls["swagger_js_url"] = self.swagger_js_url
+                if self.swagger_css_url is not None:
+                    swagger_asset_urls["swagger_css_url"] = self.swagger_css_url
+                if self.swagger_favicon_url is not None:
+                    swagger_asset_urls["swagger_favicon_url"] = self.swagger_favicon_url
                 return get_swagger_ui_html(
                     openapi_url=openapi_url,
                     title=f"{self.title} - Swagger UI",
                     oauth2_redirect_url=oauth2_redirect_url,
                     init_oauth=self.swagger_ui_init_oauth,
                     swagger_ui_parameters=self.swagger_ui_parameters,
+                    **swagger_asset_urls,
                 )
 
             self.add_route(self.docs_url, swagger_ui_html, include_in_schema=False)
@@ -1147,8 +1209,15 @@ class FastAPI(Starlette):
             async def redoc_html(req: Request) -> HTMLResponse:
                 root_path = req.scope.get("root_path", "").rstrip("/")
                 openapi_url = root_path + self.openapi_url
+                redoc_asset_urls = {}
+                if self.redoc_js_url is not None:
+                    redoc_asset_urls["redoc_js_url"] = self.redoc_js_url
+                if self.redoc_favicon_url is not None:
+                    redoc_asset_urls["redoc_favicon_url"] = self.redoc_favicon_url
                 return get_redoc_html(
-                    openapi_url=openapi_url, title=f"{self.title} - ReDoc"
+                    openapi_url=openapi_url,
+                    title=f"{self.title} - ReDoc",
+                    **redoc_asset_urls,
                 )
 
             self.add_route(self.redoc_url, redoc_html, include_in_schema=False)

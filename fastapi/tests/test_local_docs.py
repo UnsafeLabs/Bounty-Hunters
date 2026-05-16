@@ -1,6 +1,8 @@
 import inspect
 
+from fastapi import FastAPI
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.testclient import TestClient
 
 
 def test_strings_in_generated_swagger():
@@ -13,6 +15,7 @@ def test_strings_in_generated_swagger():
     assert swagger_js_url in body_content
     assert swagger_css_url in body_content
     assert swagger_favicon_url in body_content
+    assert "swagger-ui-dist@5.32.6" in body_content
 
 
 def test_strings_in_custom_swagger():
@@ -30,6 +33,22 @@ def test_strings_in_custom_swagger():
     assert swagger_js_url in body_content
     assert swagger_css_url in body_content
     assert swagger_favicon_url in body_content
+    assert "swagger-ui-dist@5.32.6" not in body_content
+
+
+def test_fastapi_uses_custom_swagger_asset_urls():
+    app = FastAPI(
+        swagger_js_url="https://assets.example.com/swagger.js",
+        swagger_css_url="https://assets.example.com/swagger.css",
+        swagger_favicon_url="https://assets.example.com/favicon.png",
+    )
+    response = TestClient(app).get("/docs")
+
+    body_content = response.text
+    assert "https://assets.example.com/swagger.js" in body_content
+    assert "https://assets.example.com/swagger.css" in body_content
+    assert "https://assets.example.com/favicon.png" in body_content
+    assert "swagger-ui-dist@5.32.6" not in body_content
 
 
 def test_strings_in_generated_redoc():
@@ -40,6 +59,7 @@ def test_strings_in_generated_redoc():
     body_content = html.body.decode()
     assert redoc_js_url in body_content
     assert redoc_favicon_url in body_content
+    assert "redoc@2.5.2" in body_content
 
 
 def test_strings_in_custom_redoc():
@@ -54,6 +74,20 @@ def test_strings_in_custom_redoc():
     body_content = html.body.decode()
     assert redoc_js_url in body_content
     assert redoc_favicon_url in body_content
+    assert "redoc@2.5.2" not in body_content
+
+
+def test_fastapi_uses_custom_redoc_asset_urls():
+    app = FastAPI(
+        redoc_js_url="https://assets.example.com/redoc.js",
+        redoc_favicon_url="https://assets.example.com/redoc-favicon.png",
+    )
+    response = TestClient(app).get("/redoc")
+
+    body_content = response.text
+    assert "https://assets.example.com/redoc.js" in body_content
+    assert "https://assets.example.com/redoc-favicon.png" in body_content
+    assert "redoc@2.5.2" not in body_content
 
 
 def test_google_fonts_in_generated_redoc():
