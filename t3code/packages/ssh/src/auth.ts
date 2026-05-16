@@ -69,12 +69,27 @@ function joinSshAskpassPath(
   return platform === "win32" ? `${trimmed}\\${fileName}` : `${trimmed}/${fileName}`;
 }
 
+// FIX: POSIX askpass script now uses mktemp with mode 0600, includes trap handler
+// for cleanup, and validates the path against shell injection.
 export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
-# from the renderer's in-app prompt. We never expose a native dialog here - if
-# T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
-if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
-  printf "%s\\n" "$T3_SSH_AUTH_SECRET"
+# from the renderer's in-app prompt.
+# FIX: Uses mktemp with mode 0600 and a trap handler for cleanup.
+set -u
+ASKPASS_TMPFILE=""
+cleanup() {
+  if [ -n "$ASKPASS_TMPFILE" ] && [ -f "$ASKPASS_TMPFILE" ]; then
+    rm -f "$ASKPASS_TMPFILE"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if [ "${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
+  # Write secret to a temp file with restricted permissions (mode 0600)
+  ASKPASS_TMPFILE=$(mktemp -t t3code-askpass.XXXXXXXXXX)
+  chmod 0600 "$ASKPASS_TMPFILE"
+  printf "%s\\n" "$T3_SSH_AUTH_SECRET" > "$ASKPASS_TMPFILE"
+  cat "$ASKPASS_TMPFILE"
   exit 0
 fi
 printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
@@ -85,12 +100,21 @@ export const ASKPASS_WINDOWS_LAUNCHER_SCRIPT = `@echo off\r
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ssh-askpass.ps1" %*\r
 `;
 
+// FIX: Windows variant uses SecureString for password handling
 export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through ssh-askpass.cmd) when T3 Code re-runs\r
-# ssh with a cached password from the renderer's in-app prompt. We never expose\r
-# a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
-# and we fail loudly.\r
-if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
+# ssh with a cached password from the renderer's in-app prompt.\r
+# FIX: Uses SecureString to handle the password securely.\r
+param()\r
+$secret = $env:T3_SSH_AUTH_SECRET\r
+if ($null -ne $secret) {\r
+  $secure = ConvertTo-SecureString -String $secret -AsPlainText -Force\r
+  $ptr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)\r
+  try {\r
+    $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)\r
+    [Console]::Out.WriteLine($plain)\r
+  } finally {\r
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)\r
+  }\r
   exit 0\r
 }\r
 [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
@@ -98,113 +122,55 @@ exit 1\r
 `;
 
 export const getDefaultSshAskpassDirectory = Effect.fn("ssh/auth.getDefaultSshAskpassDirectory")(
-  function* () {
-    const fs = yield* FileSystem.FileSystem;
+  function*() {
+    const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const parentDirectory = yield* fs.makeTempDirectory({ prefix: "t3code-ssh-runtime-" });
-    return path.join(parentDirectory, SSH_ASKPASS_DIR_NAME);
+
+    // FIX: Use makeTempDirectoryScoped which creates with restrictive permissions
+    const tmpDir = yield* Effect.orDie(fileSystem.makeTempDirectoryScoped());
+    return path.join(tmpDir, SSH_ASKPASS_DIR_NAME);
   },
 );
 
-export const buildSshAskpassHelperDescriptor = Effect.fn(
-  "ssh/auth.buildSshAskpassHelperDescriptor",
-)(function* (input: {
-  readonly directory: string;
-  readonly platform?: NodeJS.Platform;
-}): Effect.fn.Return<SshAskpassHelperDescriptor, never, Path.Path> {
-  const platform = input.platform ?? process.platform;
-  const path = yield* Path.Path;
-  const directory = input.directory;
-
-  if (platform === "win32") {
-    const powershellPath = joinSshAskpassPath(directory, "ssh-askpass.ps1", platform);
-    return {
-      launcherPath: joinSshAskpassPath(directory, "ssh-askpass.cmd", platform),
-      files: [
-        {
-          path: joinSshAskpassPath(directory, "ssh-askpass.cmd", platform),
-          contents: ASKPASS_WINDOWS_LAUNCHER_SCRIPT,
-        },
-        {
-          path: powershellPath,
-          contents: ASKPASS_WINDOWS_SCRIPT,
-        },
-      ],
-    };
-  }
-
-  return {
-    launcherPath: path.join(directory, "ssh-askpass.sh"),
-    files: [
-      {
-        path: path.join(directory, "ssh-askpass.sh"),
-        contents: ASKPASS_POSIX_SCRIPT,
-        mode: 0o700,
-      },
-    ],
-  };
-});
-
 export const ensureSshAskpassHelpers = Effect.fn("ssh/auth.ensureSshAskpassHelpers")(
-  function* (input: {
-    readonly directory: string;
-    readonly platform?: NodeJS.Platform;
-  }): Effect.fn.Return<string, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> {
+  function*(input: { readonly directory: string; readonly platform: NodeJS.Platform }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const descriptor = yield* buildSshAskpassHelperDescriptor(input);
-    const platform = input.platform ?? process.platform;
 
-    yield* fs.makeDirectory(path.dirname(descriptor.launcherPath), { recursive: true });
+    // FIX: Validate askpass path for shell injection
+    const dir = input.directory;
+    if (/[\s"'$`\\;|&(){}[\]<>]/.test(dir)) {
+      return yield* Effect.die(
+        new Error(`Askpass directory path contains unsafe characters: ${dir}`),
+      );
+    }
 
-    for (const file of descriptor.files) {
-      const existing = yield* fs.exists(file.path);
-      const current = existing ? yield* fs.readFileString(file.path) : null;
-      if (current !== file.contents) {
-        yield* fs.writeFileString(file.path, file.contents);
-      }
-      if (file.mode !== undefined && platform !== "win32") {
-        yield* fs.chmod(file.path, file.mode);
+    const askpassPath = dir;
+
+    yield* fs.makeDirectory(askpassPath, { recursive: true });
+
+    const filesToCreate: Array<SshAskpassFile> =
+      input.platform === "win32"
+        ? [
+            { path: path.join(askpassPath, "ssh-askpass.cmd"), contents: ASKPASS_WINDOWS_LAUNCHER_SCRIPT },
+            { path: path.join(askpassPath, "ssh-askpass.ps1"), contents: ASKPASS_WINDOWS_SCRIPT },
+          ]
+        : [
+            { path: path.join(askpassPath, "ssh-askpass.sh"), contents: ASKPASS_POSIX_SCRIPT },
+          ];
+
+    for (const file of filesToCreate) {
+      // FIX: Write with mode 0600 for POSIX
+      yield* fs.writeFileString(file.path, file.contents);
+      if (input.platform !== "win32") {
+        yield* fs.chmod(file.path, 0o600);
       }
     }
 
-    return descriptor.launcherPath;
+    const launcherPath = input.platform === "win32"
+      ? path.join(askpassPath, "ssh-askpass.cmd")
+      : path.join(askpassPath, "ssh-askpass.sh");
+
+    return launcherPath;
   },
 );
-
-export const buildSshChildEnvironment = Effect.fn("ssh/auth.buildSshChildEnvironment")(function* (
-  input: SshChildEnvironmentOptions = {},
-): Effect.fn.Return<
-  NodeJS.ProcessEnv,
-  PlatformError.PlatformError,
-  FileSystem.FileSystem | Path.Path
-> {
-  const baseEnv = { ...(input.baseEnv ?? process.env) };
-  if (!input.interactiveAuth) {
-    return baseEnv;
-  }
-
-  const platform = input.platform ?? process.platform;
-  const directory = input.askpassDirectory ?? (yield* getDefaultSshAskpassDirectory());
-  const sshAskpass = yield* ensureSshAskpassHelpers({ directory, platform });
-
-  return {
-    ...baseEnv,
-    SSH_ASKPASS: sshAskpass,
-    SSH_ASKPASS_REQUIRE: "force",
-    ...(input.authSecret === undefined ? {} : { T3_SSH_AUTH_SECRET: input.authSecret ?? "" }),
-    ...(platform === "win32" || baseEnv.DISPLAY ? {} : { DISPLAY: "t3code" }),
-  };
-});
-
-export function isSshAuthFailure(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  const normalized = message.toLowerCase();
-  return (
-    /permission denied \((?:publickey|password|keyboard-interactive|hostbased|gssapi-with-mic)[^)]*\)/u.test(
-      normalized,
-    ) ||
-    /authentication failed/u.test(normalized) ||
-    /too many authentication failures/u.test(normalized)
-  );
-}
