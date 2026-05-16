@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import { identity } from "effect/Function";
 import * as Layer from "effect/Layer";
+import * as Pool from "effect/Pool";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Context from "effect/Context";
@@ -43,6 +44,9 @@ export interface SqliteClientConfig {
   readonly spanAttributes?: Record<string, unknown> | undefined;
   readonly transformResultNames?: ((str: string) => string) | undefined;
   readonly transformQueryNames?: ((str: string) => string) | undefined;
+  readonly poolMin?: number | undefined;
+  readonly poolMax?: number | undefined;
+  readonly poolAcquireTimeout?: Duration.Input | undefined;
 }
 
 export interface SqliteMemoryClientConfig extends Omit<
@@ -72,9 +76,211 @@ const checkNodeSqliteCompat = () => {
   return Effect.void;
 };
 
-const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
+/**
+ * Enable WAL mode and configure SQLite pragmas for better concurrent performance.
+ * These pragmas configure WAL journaling, busy timeout, and synchronous mode.
+ */
+const configureWALMode = (db: DatabaseSync): Effect.Effect<void> =>
+  Effect.try({
+    try: () => {
+      db.exec("PRAGMA journal_mode=WAL");
+      db.exec("PRAGMA busy_timeout=5000");
+      db.exec("PRAGMA synchronous=NORMAL");
+    },
+    catch: (cause) =>
+      new SqlError({
+        reason: classifySqliteError(cause, {
+          message: "Failed to configure WAL mode pragmas",
+          operation: "exec",
+        }),
+      }),
+  });
+
+/**
+ * Verify that WAL mode is active after configuration.
+ */
+const verifyWALMode = (db: DatabaseSync): Effect.Effect<void> =>
+  Effect.try({
+    try: () => {
+      const result = db.prepare("PRAGMA journal_mode").get() as { journal_mode: string } | undefined;
+      if (!result || result.journal_mode !== "wal") {
+        throw new Error(`Expected WAL journal mode but got: ${result?.journal_mode ?? "unknown"}`);
+      }
+    },
+    catch: (cause) =>
+      new SqlError({
+        reason: classifySqliteError(cause, {
+          message: "Failed to verify WAL journal mode",
+          operation: "exec",
+        }),
+      }),
+  });
+
+/**
+ * Reset a connection to a clean state before returning it to the pool.
+ * This ensures no dangling prepared statements or transaction state.
+ */
+const resetConnection = (db: DatabaseSync): Effect.Effect<void> =>
+  Effect.try({
+    try: () => {
+      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    },
+    catch: (cause) =>
+      new SqlError({
+        reason: classifySqliteError(cause, {
+          message: "Failed to reset connection state",
+          operation: "exec",
+        }),
+      }),
+  });
+
+/**
+ * Run a health check on a database connection by executing PRAGMA integrity_check.
+ * Returns a success/failure result with details from the integrity check.
+ */
+export interface HealthCheckResult {
+  readonly ok: boolean;
+  readonly details: string;
+}
+
+export const healthCheck = (db: DatabaseSync): Effect.Effect<HealthCheckResult> =>
+  Effect.try({
+    try: () => {
+      const result = db.prepare("SELECT integrity_check").get() as { integrity_check: string } | undefined;
+      if (!result || result.integrity_check !== "ok") {
+        return { ok: false, details: result?.integrity_check ?? "unknown" };
+      }
+      return { ok: true, details: "ok" };
+    },
+    catch: (cause) =>
+      Effect.succeed({
+        ok: false,
+        details: cause instanceof Error ? cause.message : String(cause),
+      }),
+  });
+
+const makeConnection = Effect.fn("makeConnection")(function* (
   options: SqliteClientConfig,
-  openDatabase: () => DatabaseSync,
+): Effect.fn.Return<Connection, never, Scope.Scope> {
+  const scope = yield* Effect.scope;
+  const db = new DatabaseSync(options.filename, {
+    readOnly: options.readonly ?? false,
+    allowExtension: options.allowExtension ?? false,
+  });
+  yield* Scope.addFinalizer(
+    scope,
+    Effect.sync(() => db.close()),
+  );
+
+  // Configure WAL mode and verify
+  yield* configureWALMode(db);
+  yield* verifyWALMode(db);
+
+  const statementReaderCache = new WeakMap<StatementSync, boolean>();
+  const hasRows = (statement: StatementSync): boolean => {
+    const cached = statementReaderCache.get(statement);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const value = statement.columns().length > 0;
+    statementReaderCache.set(statement, value);
+    return value;
+  };
+
+  const prepareCache = yield* Cache.make({
+    capacity: options.prepareCacheSize ?? 200,
+    timeToLive: options.prepareCacheTTL ?? Duration.minutes(10),
+    lookup: (sql: string) =>
+      Effect.try({
+        try: () => db.prepare(sql),
+        catch: (cause) =>
+          new SqlError({
+            reason: classifySqliteError(cause, {
+              message: "Failed to prepare statement",
+              operation: "prepare",
+            }),
+          }),
+      }),
+  });
+
+  const runStatement = (statement: StatementSync, params: ReadonlyArray<unknown>, raw: boolean) =>
+    Effect.withFiber<ReadonlyArray<any>, SqlError>((fiber) => {
+      statement.setReadBigInts(Boolean(Context.get(fiber.context, Client.SafeIntegers)));
+      try {
+        if (hasRows(statement)) {
+          return Effect.succeed(statement.all(...(params as any)));
+        }
+        const result = statement.run(...(params as any));
+        return Effect.succeed(raw ? (result as unknown as ReadonlyArray<any>) : []);
+      } catch (cause) {
+        return Effect.fail(
+          new SqlError({
+            reason: classifySqliteError(cause, {
+              message: "Failed to execute statement",
+              operation: "execute",
+            }),
+          }),
+        );
+      }
+    });
+
+  const run = (sql: string, params: ReadonlyArray<unknown>, raw = false) =>
+    Effect.flatMap(Cache.get(prepareCache, sql), (s) => runStatement(s, params, raw));
+
+  const runValues = (sql: string, params: ReadonlyArray<unknown>) =>
+    Effect.acquireUseRelease(
+      Cache.get(prepareCache, sql),
+      (statement) =>
+        Effect.try({
+          try: () => {
+            if (hasRows(statement)) {
+              statement.setReturnArrays(true);
+              // Safe to cast to array after we've setReturnArrays(true)
+              return statement.all(...(params as any)) as unknown as ReadonlyArray<
+                ReadonlyArray<unknown>
+              >;
+            }
+            statement.run(...(params as any));
+            return [];
+          },
+          catch: (cause) =>
+            new SqlError({
+              reason: classifySqliteError(cause, {
+                message: "Failed to execute statement",
+                operation: "execute",
+              }),
+            }),
+        }),
+      (statement) =>
+        Effect.sync(() => {
+          if (hasRows(statement)) {
+            statement.setReturnArrays(false);
+          }
+        }),
+    );
+
+  return identity<Connection>({
+    execute(sql, params, rowTransform) {
+      return rowTransform ? Effect.map(run(sql, params), rowTransform) : run(sql, params);
+    },
+    executeRaw(sql, params) {
+      return run(sql, params, true);
+    },
+    executeValues(sql, params) {
+      return runValues(sql, params);
+    },
+    executeUnprepared(sql, params, rowTransform) {
+      const effect = runStatement(db.prepare(sql), params ?? [], false);
+      return rowTransform ? Effect.map(effect, rowTransform) : effect;
+    },
+    executeStream(_sql, _params) {
+      return Stream.die("executeStream not implemented");
+    },
+  });
+});
+
+const makeWithPool = Effect.fn("makeWithPool")(function* (
+  options: SqliteClientConfig,
 ): Effect.fn.Return<Client.SqlClient, never, Scope.Scope | Reactivity.Reactivity> {
   yield* checkNodeSqliteCompat();
 
@@ -83,127 +289,47 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
     ? Statement.defaultTransforms(options.transformResultNames).array
     : undefined;
 
-  const makeConnection = Effect.gen(function* () {
-    const scope = yield* Effect.scope;
-    const db = openDatabase();
-    yield* Scope.addFinalizer(
-      scope,
-      Effect.sync(() => db.close()),
-    );
+  const poolMin = options.poolMin ?? 1;
+  const poolMax = options.poolMax ?? 5;
+  const acquireTimeout = options.poolAcquireTimeout ?? Duration.seconds(10);
 
-    const statementReaderCache = new WeakMap<StatementSync, boolean>();
-    const hasRows = (statement: StatementSync): boolean => {
-      const cached = statementReaderCache.get(statement);
-      if (cached !== undefined) {
-        return cached;
-      }
-      const value = statement.columns().length > 0;
-      statementReaderCache.set(statement, value);
-      return value;
-    };
-
-    const prepareCache = yield* Cache.make({
-      capacity: options.prepareCacheSize ?? 200,
-      timeToLive: options.prepareCacheTTL ?? Duration.minutes(10),
-      lookup: (sql: string) =>
-        Effect.try({
-          try: () => db.prepare(sql),
-          catch: (cause) =>
-            new SqlError({
-              reason: classifySqliteError(cause, {
-                message: "Failed to prepare statement",
-                operation: "prepare",
-              }),
-            }),
-        }),
-    });
-
-    const runStatement = (statement: StatementSync, params: ReadonlyArray<unknown>, raw: boolean) =>
-      Effect.withFiber<ReadonlyArray<any>, SqlError>((fiber) => {
-        statement.setReadBigInts(Boolean(Context.get(fiber.context, Client.SafeIntegers)));
-        try {
-          if (hasRows(statement)) {
-            return Effect.succeed(statement.all(...(params as any)));
-          }
-          const result = statement.run(...(params as any));
-          return Effect.succeed(raw ? (result as unknown as ReadonlyArray<any>) : []);
-        } catch (cause) {
-          return Effect.fail(
-            new SqlError({
-              reason: classifySqliteError(cause, {
-                message: "Failed to execute statement",
-                operation: "execute",
-              }),
-            }),
-          );
-        }
-      });
-
-    const run = (sql: string, params: ReadonlyArray<unknown>, raw = false) =>
-      Effect.flatMap(Cache.get(prepareCache, sql), (s) => runStatement(s, params, raw));
-
-    const runValues = (sql: string, params: ReadonlyArray<unknown>) =>
-      Effect.acquireUseRelease(
-        Cache.get(prepareCache, sql),
-        (statement) =>
-          Effect.try({
-            try: () => {
-              if (hasRows(statement)) {
-                statement.setReturnArrays(true);
-                // Safe to cast to array after we've setReturnArrays(true)
-                return statement.all(...(params as any)) as unknown as ReadonlyArray<
-                  ReadonlyArray<unknown>
-                >;
-              }
-              statement.run(...(params as any));
-              return [];
-            },
-            catch: (cause) =>
-              new SqlError({
-                reason: classifySqliteError(cause, {
-                  message: "Failed to execute statement",
-                  operation: "execute",
-                }),
-              }),
-          }),
-        (statement) =>
-          Effect.sync(() => {
-            if (hasRows(statement)) {
-              statement.setReturnArrays(false);
-            }
-          }),
-      );
-
-    return identity<Connection>({
-      execute(sql, params, rowTransform) {
-        return rowTransform ? Effect.map(run(sql, params), rowTransform) : run(sql, params);
-      },
-      executeRaw(sql, params) {
-        return run(sql, params, true);
-      },
-      executeValues(sql, params) {
-        return runValues(sql, params);
-      },
-      executeUnprepared(sql, params, rowTransform) {
-        const effect = runStatement(db.prepare(sql), params ?? [], false);
-        return rowTransform ? Effect.map(effect, rowTransform) : effect;
-      },
-      executeStream(_sql, _params) {
-        return Stream.die("executeStream not implemented");
-      },
-    });
+  const pool = yield* Pool.makeWithTTL({
+    acquire: Effect.scoped(makeConnection(options)),
+    min: poolMin,
+    max: poolMax,
+    concurrency: 1,
+    timeToLive: Duration.minutes(5),
+    timeToLiveStrategy: "usage",
   });
 
-  const semaphore = yield* Semaphore.make(1);
-  const connection = yield* makeConnection;
+  // Wrap pool.get with a timeout
+  const getConnection = Pool.get(pool).pipe(
+    Effect.timeout(acquireTimeout),
+    Effect.catchAll((cause) =>
+      Effect.fail(
+        new SqlError({
+          reason: "failed-to-acquire-connection",
+          message: `Failed to acquire database connection from pool within timeout: ${cause}`,
+          operation: "pool.get",
+        }),
+      ),
+    ),
+  );
 
-  const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
+  const acquirer = getConnection;
   const transactionAcquirer = Effect.uninterruptibleMask((restore) => {
     const fiber = Fiber.getCurrent()!;
     const scope = Context.getUnsafe(fiber.context, Scope.Scope);
-    return Effect.as(
-      Effect.tap(restore(semaphore.take(1)), () => Scope.addFinalizer(scope, semaphore.release(1))),
-      connection,
+    return Effect.flatMap(
+      getConnection,
+      (conn) =>
+        Effect.as(
+          Effect.tap(
+            restore(Semaphore.make(1).pipe(Effect.flatMap((s) => s.take(1)))),
+            () => Scope.addFinalizer(scope, Semaphore.make(1).pipe(Effect.flatMap((s) => s.release(1)))),
+          ),
+          conn,
+        ),
     );
   });
 
@@ -222,29 +348,16 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
 const make = (
   options: SqliteClientConfig,
 ): Effect.Effect<Client.SqlClient, never, Scope.Scope | Reactivity.Reactivity> =>
-  makeWithDatabase(
-    options,
-    () =>
-      new DatabaseSync(options.filename, {
-        readOnly: options.readonly ?? false,
-        allowExtension: options.allowExtension ?? false,
-      }),
-  );
+  makeWithPool(options);
 
 const makeMemory = (
   config: SqliteMemoryClientConfig = {},
 ): Effect.Effect<Client.SqlClient, never, Scope.Scope | Reactivity.Reactivity> =>
-  makeWithDatabase(
+  makeWithPool(
     {
       ...config,
       filename: ":memory:",
       readonly: false,
-    },
-    () => {
-      const database = new DatabaseSync(":memory:", {
-        allowExtension: config.allowExtension ?? false,
-      });
-      return database;
     },
   );
 
