@@ -124,9 +124,10 @@ const make = Effect.gen(function* () {
     const checkForUpdatesClick = () => {
       runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
     };
-    const settingsClick = () => {
-      runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
+    const dispatchMenuActionClick = (action: string) => () => {
+      runMenuEffect(action, dispatchMenuAction(action));
     };
+    const settingsClick = dispatchMenuActionClick("open-settings");
     const template: Electron.MenuItemConstructorOptions[] = [];
 
     if (environment.platform === "darwin") {
@@ -174,6 +175,56 @@ const make = Effect.gen(function* () {
         ],
       },
       { role: "editMenu" },
+      {
+        label: "Developer",
+        submenu: [
+          {
+            label: "Toggle Terminal",
+            accelerator: "CmdOrCtrl+`",
+            click: dispatchMenuActionClick("developer.toggle-terminal"),
+          },
+          {
+            label: "Clear Terminal",
+            accelerator: "CmdOrCtrl+K",
+            click: dispatchMenuActionClick("developer.clear-terminal"),
+          },
+          {
+            label: "Restart Backend",
+            click: dispatchMenuActionClick("developer.restart-backend"),
+          },
+          { type: "separator" },
+          { role: "toggleDevTools" },
+        ],
+      },
+      {
+        label: "Git",
+        submenu: [
+          {
+            label: "Stage All Changes",
+            accelerator: "CmdOrCtrl+Shift+A",
+            click: dispatchMenuActionClick("git.stage-all"),
+          },
+          {
+            label: "Commit...",
+            accelerator: "CmdOrCtrl+Enter",
+            click: dispatchMenuActionClick("git.commit"),
+          },
+          {
+            label: "Pull",
+            click: dispatchMenuActionClick("git.pull"),
+          },
+          {
+            label: "Push",
+            accelerator: "CmdOrCtrl+Shift+P",
+            click: dispatchMenuActionClick("git.push"),
+          },
+          { type: "separator" },
+          {
+            label: "Create Branch...",
+            click: dispatchMenuActionClick("git.create-branch"),
+          },
+        ],
+      },
       {
         label: "View",
         submenu: [

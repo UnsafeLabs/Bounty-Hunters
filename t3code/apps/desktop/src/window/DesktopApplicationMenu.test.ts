@@ -129,4 +129,51 @@ describe("DesktopApplicationMenu", () => {
       assert.equal(yield* Deferred.await(selectedAction), "open-settings");
     }),
   );
+
+  it.effect("adds Developer and Git menus that dispatch renderer actions", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* Effect.gen(function* () {
+        const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
+        yield* menu.configure;
+      }).pipe(
+        Effect.provide(
+          DesktopApplicationMenu.layer.pipe(
+            Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
+            Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
+            Layer.provideMerge(desktopUpdatesLayer),
+            Layer.provideMerge(electronDialogLayer),
+            Layer.provideMerge(electronAppLayer),
+            Layer.provideMerge(
+              DesktopEnvironment.layer(environmentInput).pipe(
+                Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const developerMenu = template.find((item) => item.label === "Developer");
+      const gitMenu = template.find((item) => item.label === "Git");
+      assert.isDefined(developerMenu);
+      assert.isDefined(gitMenu);
+      if (!Array.isArray(developerMenu.submenu) || !Array.isArray(gitMenu.submenu)) {
+        throw new Error("Expected Developer and Git menu submenus to be arrays.");
+      }
+      assert.isDefined(developerMenu.submenu.find((item) => item.label === "Toggle Terminal"));
+      const stageAllItem = gitMenu.submenu.find((item) => item.label === "Stage All Changes");
+      assert.isDefined(stageAllItem);
+      const stageAllClick = stageAllItem.click;
+      if (typeof stageAllClick !== "function") {
+        throw new Error("Expected Stage All Changes menu item to have a click handler.");
+      }
+
+      stageAllClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
+      assert.equal(yield* Deferred.await(selectedAction), "git.stage-all");
+    }),
+  );
 });
