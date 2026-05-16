@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -135,6 +136,32 @@ async def test_background_task_preserves_existing_keyword_arguments() -> None:
     assert tasks.task_results == [
         {
             "task_name": "task_with_reserved_names",
+            "status": "success",
+            "exception": None,
+            "retry_count": 0,
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_background_task_preserves_callable_on_error_keyword() -> None:
+    calls: list[str] = []
+    tasks = BackgroundTasks()
+
+    def callback() -> None:
+        calls.append("callback")
+
+    def task_with_on_error(on_error: Callable[[], None]) -> None:
+        on_error()
+
+    tasks.add_task(task_with_on_error, on_error=callback)
+
+    await tasks()
+
+    assert calls == ["callback"]
+    assert tasks.task_results == [
+        {
+            "task_name": "task_with_on_error",
             "status": "success",
             "exception": None,
             "retry_count": 0,

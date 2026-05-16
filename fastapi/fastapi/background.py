@@ -213,10 +213,7 @@ class BackgroundTasks(StarletteBackgroundTasks):
         passed_through_on_error = False
 
         if on_error is not _UNSET:
-            if (
-                _accepts_keyword(func, "on_error")
-                and (max_retries is _UNSET or not callable(on_error))
-            ):
+            if _accepts_keyword(func, "on_error"):
                 task_kwargs["on_error"] = on_error
                 passed_through_on_error = True
             else:
