@@ -2,11 +2,12 @@ import asyncio
 import time
 from collections.abc import AsyncIterable, Iterable
 
+import anyio
 import fastapi.routing
 import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import EventSourceResponse
-from fastapi.sse import ServerSentEvent
+from fastapi.sse import ServerSentEvent, SSEManager
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -103,6 +104,11 @@ app.include_router(router, prefix="/api")
 def client_fixture():
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
 
 
 def test_async_generator_with_model(client: TestClient):
@@ -316,3 +322,81 @@ def test_no_keepalive_when_fast(client: TestClient):
     assert response.status_code == 200
     # KEEPALIVE_COMMENT is ": ping\n\n".
     assert ": ping\n" not in response.text
+
+
+class _FakeSSERequest:
+    def __init__(
+        self,
+        *,
+        headers: dict[str, str] | None = None,
+        query_params: dict[str, str] | None = None,
+        disconnect_after: int = 100,
+    ) -> None:
+        self.headers = headers or {}
+        self.query_params = query_params or {}
+        self._disconnect_after = disconnect_after
+        self._disconnect_checks = 0
+
+    async def is_disconnected(self) -> bool:
+        self._disconnect_checks += 1
+        return self._disconnect_checks > self._disconnect_after
+
+
+@pytest.mark.anyio
+async def test_sse_manager_replays_last_event_id_with_event_type_filter():
+    manager = SSEManager(retry=1250, disconnect_poll_interval=0.01)
+    await manager.broadcast({"msg": "first"}, event_type="news", id="1")
+    await manager.broadcast({"msg": "ignored"}, event_type="chat", id="2")
+    await manager.broadcast({"msg": "latest"}, event_type="news", id="3")
+
+    request = _FakeSSERequest(
+        headers={"last-event-id": "1"},
+        query_params={"event_type": "news"},
+        disconnect_after=1,
+    )
+
+    events: list[ServerSentEvent] = []
+    async for event in manager.stream(request):  # type: ignore[arg-type]
+        events.append(event)
+
+    assert [(event.id, event.event, event.retry) for event in events] == [
+        ("3", "news", 1250)
+    ]
+    assert manager.connection_count == 0
+
+
+@pytest.mark.anyio
+async def test_sse_manager_broadcasts_to_filtered_connections():
+    manager = SSEManager(retry=750, disconnect_poll_interval=0.01)
+    news_stream = manager.stream(event_type="news")
+    chat_stream = manager.stream(event_type="chat")
+    news_next = asyncio.create_task(anext(news_stream))
+    chat_next = asyncio.create_task(anext(chat_stream))
+    await anyio.sleep(0)
+
+    await manager.broadcast_to("news", {"msg": "hello"})
+
+    event = await asyncio.wait_for(news_next, timeout=1)
+    assert event.event == "news"
+    assert event.retry == 750
+    assert event.data == {"msg": "hello"}
+    assert not chat_next.done()
+
+    await manager.close()
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(chat_next, timeout=1)
+    await news_stream.aclose()
+    await chat_stream.aclose()
+    assert manager.connection_count == 0
+
+
+@pytest.mark.anyio
+async def test_sse_manager_stops_cleanly_when_client_disconnects():
+    manager = SSEManager(disconnect_poll_interval=0.01)
+    request = _FakeSSERequest(disconnect_after=0)
+    stream = manager.stream(request)  # type: ignore[arg-type]
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+
+    assert manager.connection_count == 0
