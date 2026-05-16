@@ -435,6 +435,44 @@ label:has(> select#reasoning-effort) select {
   padding-right: calc(0.9rem + var(--chat-markdown-codeblock-copy-button-space));
 }
 
+.chat-markdown .chat-markdown-codeblock-details {
+  display: block;
+}
+
+.chat-markdown .chat-markdown-codeblock-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+  max-width: calc(100% - var(--chat-markdown-codeblock-copy-button-space) - 0.75rem);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  list-style: none;
+  user-select: none;
+  transition: color 120ms ease;
+}
+
+.chat-markdown .chat-markdown-codeblock-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-markdown .chat-markdown-codeblock-summary:hover {
+  color: var(--foreground);
+}
+
+.chat-markdown .chat-markdown-codeblock-full {
+  animation: chat-markdown-codeblock-expand 160ms ease-out;
+}
+
+.chat-markdown .chat-markdown-codeblock-preview {
+  max-height: 16rem;
+  overflow: hidden;
+  animation: chat-markdown-codeblock-preview 160ms ease-out;
+}
+
 .chat-markdown .chat-markdown-copy-button {
   position: absolute;
   top: 0.5rem;
@@ -471,6 +509,50 @@ label:has(> select#reasoning-effort) select {
 
 .chat-markdown .chat-markdown-shiki .shiki {
   background: color-mix(in srgb, var(--muted) 78%, var(--background)) !important;
+}
+
+.chat-markdown .chat-markdown-shiki .shiki code {
+  counter-reset: chat-markdown-code-line;
+  display: block;
+}
+
+.chat-markdown .chat-markdown-shiki .shiki .line {
+  counter-increment: chat-markdown-code-line;
+  display: block;
+  min-height: 1.25em;
+  padding-left: 3.1rem;
+  position: relative;
+}
+
+.chat-markdown .chat-markdown-shiki .shiki .line::before {
+  content: counter(chat-markdown-code-line);
+  position: absolute;
+  left: 0;
+  width: 2.25rem;
+  color: color-mix(in srgb, var(--muted-foreground) 62%, transparent);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
+@keyframes chat-markdown-codeblock-expand {
+  from {
+    opacity: 0;
+    transform: translateY(-0.25rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes chat-markdown-codeblock-preview {
+  from {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .chat-markdown table {

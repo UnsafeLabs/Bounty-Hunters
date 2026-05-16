@@ -1,5 +1,5 @@
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon } from "lucide-react";
 import type { ServerProviderSkill } from "@t3tools/contracts";
 import React, {
   Children,
@@ -67,6 +67,8 @@ interface ChatMarkdownProps {
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
+const CODE_BLOCK_COLLAPSE_LINE_THRESHOLD = 20;
+const CODE_BLOCK_COLLAPSED_PREVIEW_LINES = 10;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
 const highlightedCodeCache = new LRUCache<string>(
@@ -75,11 +77,61 @@ const highlightedCodeCache = new LRUCache<string>(
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 
-function extractFenceLanguage(className: string | undefined): string {
-  const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
-  const raw = match?.[1] ?? "text";
+function normalizeFenceLanguage(raw: string): string {
   // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
-  return raw === "gitignore" ? "ini" : raw;
+  if (raw === "gitignore") return "ini";
+  if (raw === "txt") return "text";
+  return raw;
+}
+
+function detectCodeLanguage(code: string): string {
+  const trimmed = code.trim();
+  if (!trimmed) return "text";
+
+  if (
+    (/^(?:\{[\s\S]*\}|\[[\s\S]*\])$/.test(trimmed) && /"[^"]+"\s*:/.test(trimmed)) ||
+    /^\s*"[^"]+"\s*:/.test(trimmed)
+  ) {
+    return "json";
+  }
+  if (/^\s*</.test(trimmed) && /<\/?[a-z][\s\S]*>/i.test(trimmed)) {
+    return "html";
+  }
+  if (/\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|FROM|WHERE)\b/i.test(trimmed)) {
+    return "sql";
+  }
+  if (/\b(def|elif|import|from|async def)\b/.test(trimmed) || /:\n\s{2,}\w/.test(trimmed)) {
+    return "python";
+  }
+  if (/\bpackage\s+main\b|\bfunc\s+\w+\s*\(|:=/.test(trimmed)) {
+    return "go";
+  }
+  if (/\b(public|private|protected)\s+(class|interface)\b|\bSystem\.out\.println\b/.test(trimmed)) {
+    return "java";
+  }
+  if (/\b(function|const|let|interface|type|export|import)\b/.test(trimmed) || /=>/.test(trimmed)) {
+    return "typescript";
+  }
+  if (
+    /^#!\/(?:usr\/bin\/env\s+)?(?:ba|z|fi)?sh\b/.test(trimmed) ||
+    /\b(?:echo|grep|sed)\b/.test(trimmed)
+  ) {
+    return "bash";
+  }
+  return "text";
+}
+
+function extractCodeLanguage(className: string | undefined, code: string): string {
+  const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
+  return normalizeFenceLanguage(match?.[1] ?? detectCodeLanguage(code));
+}
+
+function getCodeLines(code: string): ReadonlyArray<string> {
+  return code.replace(/\n$/, "").split("\n");
+}
+
+function getCollapsedCodePreview(code: string): string {
+  return getCodeLines(code).slice(0, CODE_BLOCK_COLLAPSED_PREVIEW_LINES).join("\n");
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -146,9 +198,21 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   return promise;
 }
 
-function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
+function MarkdownCodeBlock({
+  code,
+  lineCount,
+  preview,
+  children,
+}: {
+  code: string;
+  lineCount: number;
+  preview: ReactNode;
+  children: ReactNode;
+}) {
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isCollapsible = lineCount > CODE_BLOCK_COLLAPSE_LINE_THRESHOLD;
   const handleCopy = useCallback(() => {
     if (typeof navigator === "undefined" || navigator.clipboard == null) {
       return;
@@ -179,7 +243,11 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
   );
 
   return (
-    <div className="chat-markdown-codeblock leading-snug">
+    <div
+      className="chat-markdown-codeblock leading-snug"
+      data-collapsible={isCollapsible ? "true" : "false"}
+      data-line-count={lineCount}
+    >
       <button
         type="button"
         className="chat-markdown-copy-button"
@@ -189,7 +257,30 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
       >
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </button>
-      {children}
+      {isCollapsible ? (
+        <>
+          <details
+            className="chat-markdown-codeblock-details"
+            open={expanded}
+            onToggle={(event) => {
+              setExpanded(event.currentTarget.open);
+            }}
+          >
+            <summary className="chat-markdown-codeblock-summary">
+              {expanded ? (
+                <ChevronDownIcon className="size-3.5" aria-hidden="true" />
+              ) : (
+                <ChevronRightIcon className="size-3.5" aria-hidden="true" />
+              )}
+              <span>{expanded ? "Collapse code" : `Expand ${lineCount} lines`}</span>
+            </summary>
+            <div className="chat-markdown-codeblock-full">{children}</div>
+          </details>
+          {!expanded ? <div className="chat-markdown-codeblock-preview">{preview}</div> : null}
+        </>
+      ) : (
+        children
+      )}
     </div>
   );
 }
@@ -207,7 +298,7 @@ function SuspenseShikiCodeBlock({
   themeName,
   isStreaming,
 }: SuspenseShikiCodeBlockProps) {
-  const language = extractFenceLanguage(className);
+  const language = extractCodeLanguage(className, code);
   const cacheKey = createHighlightCacheKey(code, language, themeName);
   const cachedHighlightedHtml = !isStreaming ? highlightedCodeCache.get(cacheKey) : null;
 
@@ -215,6 +306,7 @@ function SuspenseShikiCodeBlock({
     return (
       <div
         className="chat-markdown-shiki"
+        data-language={language}
         dangerouslySetInnerHTML={{ __html: cachedHighlightedHtml }}
       />
     );
@@ -272,7 +364,11 @@ function UncachedShikiCodeBlock({
   }, [cacheKey, code, highlightedHtml, isStreaming]);
 
   return (
-    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+    <div
+      className="chat-markdown-shiki"
+      data-language={language}
+      dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+    />
   );
 }
 
@@ -585,19 +681,52 @@ function ChatMarkdown({
         if (!codeBlock) {
           return <pre {...props}>{children}</pre>;
         }
+        const lineCount = getCodeLines(codeBlock.code).length;
+        const previewCode = getCollapsedCodePreview(codeBlock.code);
+        const highlightedCodeBlock = (
+          <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
+            <Suspense fallback={<pre {...props}>{children}</pre>}>
+              <SuspenseShikiCodeBlock
+                className={codeBlock.className}
+                code={codeBlock.code}
+                themeName={diffThemeName}
+                isStreaming={isStreaming}
+              />
+            </Suspense>
+          </CodeHighlightErrorBoundary>
+        );
+        const highlightedPreview = (
+          <CodeHighlightErrorBoundary
+            fallback={
+              <pre {...props}>
+                <code>{previewCode}</code>
+              </pre>
+            }
+          >
+            <Suspense
+              fallback={
+                <pre {...props}>
+                  <code>{previewCode}</code>
+                </pre>
+              }
+            >
+              <SuspenseShikiCodeBlock
+                className={codeBlock.className}
+                code={previewCode}
+                themeName={diffThemeName}
+                isStreaming={isStreaming}
+              />
+            </Suspense>
+          </CodeHighlightErrorBoundary>
+        );
 
         return (
-          <MarkdownCodeBlock code={codeBlock.code}>
-            <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
-              <Suspense fallback={<pre {...props}>{children}</pre>}>
-                <SuspenseShikiCodeBlock
-                  className={codeBlock.className}
-                  code={codeBlock.code}
-                  themeName={diffThemeName}
-                  isStreaming={isStreaming}
-                />
-              </Suspense>
-            </CodeHighlightErrorBoundary>
+          <MarkdownCodeBlock
+            code={codeBlock.code}
+            lineCount={lineCount}
+            preview={highlightedPreview}
+          >
+            {highlightedCodeBlock}
           </MarkdownCodeBlock>
         );
       },
