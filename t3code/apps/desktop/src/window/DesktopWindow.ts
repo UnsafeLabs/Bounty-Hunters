@@ -7,6 +7,7 @@ import * as Ref from "effect/Ref";
 
 import type * as Electron from "electron";
 
+import type { DesktopDeepLinkPayload } from "@t3tools/contracts";
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
@@ -58,6 +59,9 @@ export interface DesktopWindowShape {
   readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
   readonly handleBackendReady: Effect.Effect<void, DesktopWindowError>;
   readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
+  readonly dispatchDeepLink: (
+    payload: DesktopDeepLinkPayload,
+  ) => Effect.Effect<void, DesktopWindowError>;
   readonly syncAppearance: Effect.Effect<void>;
 }
 
@@ -129,6 +133,16 @@ function syncWindowAppearance(
 
 type RevealSubscription = (listener: () => void) => void;
 
+type PendingRendererAction =
+  | {
+      readonly type: "menu";
+      readonly action: string;
+    }
+  | {
+      readonly type: "deep-link";
+      readonly payload: DesktopDeepLinkPayload;
+    };
+
 function bindFirstRevealTrigger(
   subscribers: readonly RevealSubscription[],
   reveal: () => void,
@@ -153,6 +167,7 @@ const make = Effect.gen(function* () {
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
   const state = yield* DesktopState.DesktopState;
+  const pendingRendererActions = yield* Ref.make<readonly PendingRendererAction[]>([]);
   const context = yield* Effect.context<DesktopWindowRuntimeServices>();
   const runPromise = Effect.runPromiseWith(context);
 
@@ -320,6 +335,48 @@ const make = Effect.gen(function* () {
     yield* createMain;
   }).pipe(Effect.withSpan("desktop.window.createMainIfBackendReady"));
 
+  const dispatchRendererActionNow = Effect.fn("desktop.window.dispatchRendererActionNow")(
+    function* (rendererAction: PendingRendererAction) {
+      const existingWindow = yield* electronWindow.focusedMainOrFirst;
+      const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* createMain;
+
+      const send = () => {
+        if (targetWindow.isDestroyed()) return;
+        if (rendererAction.type === "menu") {
+          targetWindow.webContents.send(IpcChannels.MENU_ACTION_CHANNEL, rendererAction.action);
+        } else {
+          targetWindow.webContents.send(IpcChannels.DEEP_LINK_CHANNEL, rendererAction.payload);
+        }
+        void runPromise(electronWindow.reveal(targetWindow));
+      };
+
+      if (targetWindow.webContents.isLoadingMainFrame()) {
+        targetWindow.webContents.once("did-finish-load", send);
+        return;
+      }
+
+      send();
+    },
+  );
+
+  const dispatchRendererAction = Effect.fn("desktop.window.dispatchRendererAction")(function* (
+    rendererAction: PendingRendererAction,
+  ) {
+    const backendReady = yield* Ref.get(state.backendReady);
+    if (!backendReady) {
+      yield* Ref.update(pendingRendererActions, (actions) => [...actions, rendererAction]);
+      return;
+    }
+    yield* dispatchRendererActionNow(rendererAction);
+  });
+
+  const flushPendingRendererActions = Effect.gen(function* () {
+    const actions = yield* Ref.getAndSet(pendingRendererActions, []);
+    for (const action of actions) {
+      yield* dispatchRendererActionNow(action);
+    }
+  }).pipe(Effect.withSpan("desktop.window.flushPendingRendererActions"));
+
   return DesktopWindow.of({
     createMain,
     ensureMain,
@@ -337,24 +394,15 @@ const make = Effect.gen(function* () {
       yield* Ref.set(state.backendReady, true);
       yield* logWindowInfo("backend ready", { source: "http" });
       yield* createMainIfBackendReady;
+      yield* flushPendingRendererActions;
     }).pipe(Effect.withSpan("desktop.window.handleBackendReady")),
     dispatchMenuAction: Effect.fn("desktop.window.dispatchMenuAction")(function* (action) {
       yield* Effect.annotateCurrentSpan({ action });
-      const existingWindow = yield* electronWindow.focusedMainOrFirst;
-      const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* createMain;
-
-      const send = () => {
-        if (targetWindow.isDestroyed()) return;
-        targetWindow.webContents.send(IpcChannels.MENU_ACTION_CHANNEL, action);
-        void runPromise(electronWindow.reveal(targetWindow));
-      };
-
-      if (targetWindow.webContents.isLoadingMainFrame()) {
-        targetWindow.webContents.once("did-finish-load", send);
-        return;
-      }
-
-      send();
+      yield* dispatchRendererAction({ type: "menu", action });
+    }),
+    dispatchDeepLink: Effect.fn("desktop.window.dispatchDeepLink")(function* (payload) {
+      yield* Effect.annotateCurrentSpan({ deepLinkType: payload.type });
+      yield* dispatchRendererAction({ type: "deep-link", payload });
     }),
     syncAppearance: Effect.gen(function* () {
       const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;

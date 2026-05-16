@@ -37,6 +37,48 @@ describe("ElectronProtocol", () => {
     assert.isTrue(Option.isNone(ElectronProtocol.normalizeDesktopProtocolPathname("/../secret")));
   });
 
+  it("parses supported t3code deep links", () => {
+    assert.equal(ElectronProtocol.parseDesktopDeepLink("t3code://settings").type, "settings");
+
+    const threadLink = ElectronProtocol.parseDesktopDeepLink("t3code://chat/thread?id=thread-123");
+    assert.deepEqual(threadLink, {
+      type: "chat-thread",
+      threadId: "thread-123",
+      url: "t3code://chat/thread?id=thread-123",
+    });
+
+    const projectLink = ElectronProtocol.parseDesktopDeepLink(
+      "t3code://open/project?path=%2FUsers%2Falice%2Frepo",
+    );
+    assert.deepEqual(projectLink, {
+      type: "open-project",
+      path: "/Users/alice/repo",
+      url: "t3code://open/project?path=%2FUsers%2Falice%2Frepo",
+    });
+  });
+
+  it("rejects unsafe t3code project links", () => {
+    assert.deepInclude(ElectronProtocol.parseDesktopDeepLink("t3code://open/project"), {
+      type: "error",
+    });
+    assert.deepInclude(
+      ElectronProtocol.parseDesktopDeepLink("t3code://open/project?path=..%2Fsecret"),
+      { type: "error" },
+    );
+    assert.deepInclude(
+      ElectronProtocol.parseDesktopDeepLink("t3code://open/project?path=%2Ftmp%2F..%2Fsecret"),
+      { type: "error" },
+    );
+  });
+
+  it("finds t3code URLs in launch argv", () => {
+    assert.equal(
+      Option.getOrNull(ElectronProtocol.findDesktopDeepLinkUrl(["--flag", "t3code://settings"])),
+      "t3code://settings",
+    );
+    assert.isTrue(Option.isNone(ElectronProtocol.findDesktopDeepLinkUrl(["--flag"])));
+  });
+
   it.effect("registers desktop scheme privileges through a layer", () =>
     Effect.scoped(
       Layer.build(ElectronProtocol.layerSchemePrivileges).pipe(

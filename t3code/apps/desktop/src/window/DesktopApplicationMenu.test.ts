@@ -41,6 +41,8 @@ const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
   setAppUserModelId: () => Effect.void,
   setDesktopName: () => Effect.void,
   setDockIcon: () => Effect.void,
+  setAsDefaultProtocolClient: () => Effect.succeed(true),
+  requestSingleInstanceLock: Effect.succeed(true),
   appendCommandLineSwitch: () => Effect.void,
   on: () => Effect.void,
 } satisfies ElectronApp.ElectronAppShape);
@@ -72,6 +74,7 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     createMainIfBackendReady: Effect.void,
     handleBackendReady: Effect.void,
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),
+    dispatchDeepLink: () => Effect.void,
     syncAppearance: Effect.void,
   } satisfies DesktopWindow.DesktopWindowShape);
 

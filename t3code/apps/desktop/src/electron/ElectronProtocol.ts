@@ -10,9 +10,11 @@ import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
 
+import type { DesktopDeepLinkPayload, ThreadId } from "@t3tools/contracts";
 import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/DesktopEnvironment.ts";
 
 export const DESKTOP_SCHEME = "t3";
+export const DESKTOP_DEEP_LINK_SCHEME = "t3code";
 
 export class ElectronProtocolRegistrationError extends Data.TaggedError(
   "ElectronProtocolRegistrationError",
@@ -54,6 +56,84 @@ export interface ElectronProtocolShape {
 export class ElectronProtocol extends Context.Service<ElectronProtocol, ElectronProtocolShape>()(
   "t3/desktop/electron/Protocol",
 ) {}
+
+function isWindowsAbsolutePath(value: string): boolean {
+  return /^[a-zA-Z]:[/\\]/.test(value) || /^\\\\[^\\]+\\[^\\]+/.test(value);
+}
+
+function hasTraversalSegment(value: string): boolean {
+  return value
+    .replaceAll("\\", "/")
+    .split("/")
+    .some((segment) => segment === "..");
+}
+
+function isSafeProjectPath(value: string): boolean {
+  if (value.length === 0 || value.includes("\0")) {
+    return false;
+  }
+  if (!value.startsWith("/") && !isWindowsAbsolutePath(value)) {
+    return false;
+  }
+  return !hasTraversalSegment(value);
+}
+
+function routeKey(url: URL): string {
+  const pathname = url.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+  return pathname.length > 0 ? `${url.hostname}/${pathname}` : url.hostname;
+}
+
+function deepLinkError(rawUrl: string, message: string): DesktopDeepLinkPayload {
+  return { type: "error", message, url: rawUrl };
+}
+
+export function parseDesktopDeepLink(rawUrl: string): DesktopDeepLinkPayload {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return deepLinkError(rawUrl, "Invalid T3 Code link.");
+  }
+
+  if (url.protocol !== `${DESKTOP_DEEP_LINK_SCHEME}:`) {
+    return deepLinkError(rawUrl, "Unsupported T3 Code link protocol.");
+  }
+
+  const key = routeKey(url);
+  if (key === "settings") {
+    return { type: "settings", url: url.href };
+  }
+
+  if (key === "chat/thread") {
+    const threadId = url.searchParams.get("id")?.trim() ?? "";
+    if (threadId.length === 0) {
+      return deepLinkError(rawUrl, "Chat thread links must include a thread id.");
+    }
+    return { type: "chat-thread", threadId: threadId as ThreadId, url: url.href };
+  }
+
+  if (key === "open/project") {
+    const path = url.searchParams.get("path")?.trim() ?? "";
+    if (!isSafeProjectPath(path)) {
+      return deepLinkError(rawUrl, "Project links must include a safe absolute path.");
+    }
+    return { type: "open-project", path, url: url.href };
+  }
+
+  return deepLinkError(rawUrl, "Unsupported T3 Code link.");
+}
+
+export function findDesktopDeepLinkUrl(argv: readonly string[]): Option.Option<string> {
+  return Option.fromNullable(
+    argv.find((arg) => {
+      try {
+        return new URL(arg).protocol === `${DESKTOP_DEEP_LINK_SCHEME}:`;
+      } catch {
+        return false;
+      }
+    }),
+  );
+}
 
 export function normalizeDesktopProtocolPathname(rawPath: string): Option.Option<string> {
   const segments: string[] = [];

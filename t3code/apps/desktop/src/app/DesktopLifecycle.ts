@@ -3,6 +3,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 
@@ -11,6 +12,7 @@ import type * as Electron from "electron";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
@@ -151,6 +153,12 @@ function quitFromSignal(
   );
 }
 
+function developmentProtocolClientArgs(environment: DesktopEnvironment.DesktopEnvironmentShape) {
+  return environment.isDevelopment
+    ? process.argv.slice(1).filter((arg) => !arg.startsWith("t3code:"))
+    : [];
+}
+
 export const layer = Layer.succeed(
   DesktopLifecycle,
   DesktopLifecycle.of({
@@ -190,10 +198,46 @@ export const layer = Layer.succeed(
       const context = yield* Effect.context<DesktopLifecycleRuntimeServices>();
       const runEffect = Effect.runPromiseWith(context);
       let quitAllowed = false;
+
+      const dispatchDeepLinkUrl = (rawUrl: string) => {
+        void runEffect(
+          Effect.gen(function* () {
+            const payload = ElectronProtocol.parseDesktopDeepLink(rawUrl);
+            yield* desktopWindow.dispatchDeepLink(payload);
+          }).pipe(Effect.withSpan("desktop.lifecycle.deepLink")),
+        );
+      };
+
+      const singleInstanceLock = yield* electronApp.requestSingleInstanceLock;
+      if (!singleInstanceLock) {
+        yield* electronApp.quit;
+        return;
+      }
+
+      yield* electronApp.setAsDefaultProtocolClient(
+        ElectronProtocol.DESKTOP_DEEP_LINK_SCHEME,
+        process.execPath,
+        developmentProtocolClientArgs(environment),
+      );
+
       yield* electronTheme.onUpdated(() => {
         void runEffect(
           desktopWindow.syncAppearance.pipe(Effect.withSpan("desktop.lifecycle.themeUpdated")),
         );
+      });
+      yield* electronApp.on("second-instance", (_event, argv: string[]) => {
+        const deepLinkUrl = ElectronProtocol.findDesktopDeepLinkUrl(argv);
+        if (Option.isSome(deepLinkUrl)) {
+          dispatchDeepLinkUrl(deepLinkUrl.value);
+        } else {
+          void runEffect(
+            desktopWindow.activate.pipe(Effect.withSpan("desktop.lifecycle.activate")),
+          );
+        }
+      });
+      yield* electronApp.on("open-url", (event: Electron.Event, rawUrl: string) => {
+        event.preventDefault();
+        dispatchDeepLinkUrl(rawUrl);
       });
       yield* electronApp.on("before-quit", (event: Electron.Event) => {
         handleBeforeQuit(
@@ -227,6 +271,11 @@ export const layer = Layer.succeed(
         yield* addScopedListener(process, "SIGTERM", () => {
           quitFromSignal("SIGTERM", runEffect);
         });
+      }
+
+      const initialDeepLinkUrl = ElectronProtocol.findDesktopDeepLinkUrl(process.argv);
+      if (Option.isSome(initialDeepLinkUrl)) {
+        dispatchDeepLinkUrl(initialDeepLinkUrl.value);
       }
     }).pipe(Effect.withSpan("desktop.lifecycle.register")),
   }),

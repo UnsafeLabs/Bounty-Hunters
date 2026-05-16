@@ -1,8 +1,22 @@
 import { useEffect, type ReactNode } from "react";
+import {
+  DEFAULT_MODEL,
+  ProviderInstanceId,
+  type DesktopDeepLinkPayload,
+  type EnvironmentId,
+} from "@t3tools/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import { useNavigate } from "@tanstack/react-router";
 
 import ThreadSidebar from "./Sidebar";
+import { readEnvironmentApi } from "../environmentApi";
+import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { findProjectByPath, inferProjectTitleFromPath } from "../lib/projectPaths";
+import { newCommandId, newProjectId } from "../lib/utils";
+import { selectProjectsAcrossEnvironments, useStore } from "../store";
+import { buildThreadRouteParams } from "../threadRoutes";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
+import { stackedThreadToast, toastManager } from "./ui/toast";
 import {
   clearShortcutModifierState,
   syncShortcutModifierStateFromKeyboardEvent,
@@ -11,8 +25,36 @@ import {
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
+type ChatThreadDeepLinkPayload = Extract<DesktopDeepLinkPayload, { type: "chat-thread" }>;
+
+function showDeepLinkError(description: string) {
+  toastManager.add(
+    stackedThreadToast({
+      type: "error",
+      title: "Could not open T3 Code link",
+      description,
+    }),
+  );
+}
+
+function resolveEnvironmentForProjectOpen(): EnvironmentId | null {
+  const state = useStore.getState();
+  if (state.activeEnvironmentId && readEnvironmentApi(state.activeEnvironmentId)) {
+    return state.activeEnvironmentId;
+  }
+
+  for (const project of selectProjectsAcrossEnvironments(state)) {
+    if (readEnvironmentApi(project.environmentId)) {
+      return project.environmentId;
+    }
+  }
+
+  return null;
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const { handleNewThread } = useHandleNewThread();
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
@@ -52,6 +94,90 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       unsubscribe?.();
     };
   }, [navigate]);
+
+  useEffect(() => {
+    const onDeepLink = window.desktopBridge?.onDeepLink;
+    if (typeof onDeepLink !== "function") {
+      return;
+    }
+
+    const openProject = async (path: string) => {
+      const state = useStore.getState();
+      const existingProject = findProjectByPath(selectProjectsAcrossEnvironments(state), path);
+      if (existingProject) {
+        await handleNewThread(scopeProjectRef(existingProject.environmentId, existingProject.id), {
+          envMode: "local",
+        });
+        return;
+      }
+
+      const environmentId = resolveEnvironmentForProjectOpen();
+      if (!environmentId) {
+        showDeepLinkError("No connected environment is available to open this project.");
+        return;
+      }
+
+      const api = readEnvironmentApi(environmentId);
+      if (!api) {
+        showDeepLinkError("The selected environment is not connected.");
+        return;
+      }
+
+      const projectId = newProjectId();
+      await api.orchestration.dispatchCommand({
+        type: "project.create",
+        commandId: newCommandId(),
+        projectId,
+        title: inferProjectTitleFromPath(path),
+        workspaceRoot: path,
+        createWorkspaceRootIfMissing: true,
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: DEFAULT_MODEL,
+        },
+        createdAt: new Date().toISOString(),
+      });
+      await handleNewThread(scopeProjectRef(environmentId, projectId), { envMode: "local" });
+    };
+
+    const openChatThread = (threadLink: ChatThreadDeepLinkPayload) => {
+      const state = useStore.getState();
+      for (const [environmentId, environmentState] of Object.entries(state.environmentStateById)) {
+        if (environmentState.threadShellById[threadLink.threadId]) {
+          void navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(
+              scopeThreadRef(environmentId as EnvironmentId, threadLink.threadId),
+            ),
+          });
+          return;
+        }
+      }
+      showDeepLinkError("The requested chat thread was not found.");
+    };
+
+    const unsubscribe = onDeepLink((payload) => {
+      if (payload.type === "settings") {
+        void navigate({ to: "/settings" });
+        return;
+      }
+      if (payload.type === "chat-thread") {
+        openChatThread(payload);
+        return;
+      }
+      if (payload.type === "open-project") {
+        void openProject(payload.path).catch((error) => {
+          showDeepLinkError(error instanceof Error ? error.message : "An error occurred.");
+        });
+        return;
+      }
+      showDeepLinkError(payload.message);
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [handleNewThread, navigate]);
 
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
