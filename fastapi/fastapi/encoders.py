@@ -1,3 +1,5 @@
+import base64
+
 import dataclasses
 import datetime
 from collections import defaultdict, deque
@@ -32,48 +34,26 @@ from ._compat import (
 )
 
 try:
-    # pydantic.color.Color is deprecated since v2.0b3, but supporting for bwd-compat
-    from pydantic.color import Color  # ty: ignore[deprecated]
-except ImportError:  # pragma: no cover
+    from pydantic.color import Color
+except ImportError:
 
-    class Color:  # type: ignore[no-redef]
+    class Color:
         pass
 
 
 try:
-    # Supporting the new Color format for newer versions of Pydantic
     from pydantic_extra_types.color import Color as PyExtraColor
-except ImportError:  # pragma: no cover
+except ImportError:
 
-    class PyExtraColor:  # type: ignore[no-redef]
+    class PyExtraColor:
         pass
 
 
-# Taken from Pydantic v1 as is
 def isoformat(o: datetime.date | datetime.time) -> str:
     return o.isoformat()
 
 
-# Adapted from Pydantic v1
-# TODO: pv2 should this return strings instead?
 def decimal_encoder(dec_value: Decimal) -> int | float:
-    """
-    Encodes a Decimal as int if there's no exponent, otherwise float
-
-    This is useful when we use ConstrainedDecimal to represent Numeric(x,0)
-    where an integer (but not int typed) is used. Encoding this as a float
-    results in failed round-tripping between encode and parse.
-    Our Id type is a prime example of this.
-
-    >>> decimal_encoder(Decimal("1.0"))
-    1.0
-
-    >>> decimal_encoder(Decimal("1"))
-    1
-
-    >>> decimal_encoder(Decimal("NaN"))
-    nan
-    """
     exponent = dec_value.as_tuple().exponent
     if isinstance(exponent, int) and exponent >= 0:
         return int(dec_value)
@@ -139,7 +119,7 @@ def jsonable_encoder(
         IncEx | None,
         Doc(
             """
-            Pydantic's `include` parameter, passed to Pydantic models to set the
+            Pydantic's include parameter, passed to Pydantic models to set the
             fields to include.
             """
         ),
@@ -148,7 +128,7 @@ def jsonable_encoder(
         IncEx | None,
         Doc(
             """
-            Pydantic's `exclude` parameter, passed to Pydantic models to set the
+            Pydantic's exclude parameter, passed to Pydantic models to set the
             fields to exclude.
             """
         ),
@@ -157,11 +137,8 @@ def jsonable_encoder(
         bool,
         Doc(
             """
-            Pydantic's `by_alias` parameter, passed to Pydantic models to define if
-            the output should use the alias names (when provided) or the Python
-            attribute names. In an API, if you set an alias, it's probably because you
-            want to use it in the result, so you probably want to leave this set to
-            `True`.
+            Pydantic's by_alias parameter, passed to Pydantic models to define if
+            the output should use the alias names.
             """
         ),
     ] = True,
@@ -169,9 +146,7 @@ def jsonable_encoder(
         bool,
         Doc(
             """
-            Pydantic's `exclude_unset` parameter, passed to Pydantic models to define
-            if it should exclude from the output the fields that were not explicitly
-            set (and that only had their default values).
+            Pydantic's exclude_unset parameter.
             """
         ),
     ] = False,
@@ -179,9 +154,7 @@ def jsonable_encoder(
         bool,
         Doc(
             """
-            Pydantic's `exclude_defaults` parameter, passed to Pydantic models to define
-            if it should exclude from the output the fields that had the same default
-            value, even when they were explicitly set.
+            Pydantic's exclude_defaults parameter.
             """
         ),
     ] = False,
@@ -189,8 +162,7 @@ def jsonable_encoder(
         bool,
         Doc(
             """
-            Pydantic's `exclude_none` parameter, passed to Pydantic models to define
-            if it should exclude from the output any fields that have a `None` value.
+            Pydantic's exclude_none parameter.
             """
         ),
     ] = False,
@@ -198,8 +170,7 @@ def jsonable_encoder(
         dict[Any, Callable[[Any], Any]] | None,
         Doc(
             """
-            Pydantic's `custom_encoder` parameter, passed to Pydantic models to define
-            a custom encoder.
+            Pydantic's custom_encoder parameter.
             """
         ),
     ] = None,
@@ -207,27 +178,20 @@ def jsonable_encoder(
         bool,
         Doc(
             """
-            Exclude from the output any fields that start with the name `_sa`.
-
-            This is mainly a hack for compatibility with SQLAlchemy objects, they
-            store internal SQLAlchemy-specific state in attributes named with `_sa`,
-            and those objects can't (and shouldn't be) serialized to JSON.
+            Exclude from the output any fields that start with the name _sa.
             """
         ),
     ] = True,
+    bytes_encoding: Annotated[
+        str,
+        Doc(
+            """
+            The encoding to use for bytes and memoryview objects.
+            Supported values: base64 (default) or hex.
+            """
+        ),
+    ] = "base64",
 ) -> Any:
-    """
-    Convert any object to something that can be encoded in JSON.
-
-    This is used internally by FastAPI to make sure anything you return can be
-    encoded as JSON before it is sent to the client.
-
-    You can also use it yourself, for example to convert objects before saving them
-    in a database that supports only JSON.
-
-    Read more about it in the
-    [FastAPI docs for JSON Compatible Encoder](https://fastapi.tiangolo.com/tutorial/encoder/).
-    """
     custom_encoder = custom_encoder or {}
     if custom_encoder:
         if type(obj) in custom_encoder:
@@ -237,9 +201,9 @@ def jsonable_encoder(
                 if isinstance(obj, encoder_type):
                     return encoder_instance(obj)
     if include is not None and not isinstance(include, (set, dict)):
-        include = set(include)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        include = set(include)
     if exclude is not None and not isinstance(exclude, (set, dict)):
-        exclude = set(exclude)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        exclude = set(exclude)
     if isinstance(obj, BaseModel):
         obj_dict = obj.model_dump(
             mode="json",
@@ -272,6 +236,12 @@ def jsonable_encoder(
         )
     if isinstance(obj, Enum):
         return obj.value
+    if isinstance(obj, memoryview):
+        obj = bytes(obj)
+    if isinstance(obj, bytes):
+        if bytes_encoding == "hex":
+            return obj.hex()
+        return base64.b64encode(obj).decode("ascii")
     if isinstance(obj, PurePath):
         return str(obj)
     if isinstance(obj, (str, int, float, type(None))):
