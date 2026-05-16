@@ -73,11 +73,21 @@ export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
 # from the renderer's in-app prompt. We never expose a native dialog here - if
 # T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
+# Uses mktemp with mode 0600 for temporary files and traps for secure cleanup.
+TEMP_FILE=""
+_cleanup() {
+  [ -n "$TEMP_FILE" ] && rm -f "$TEMP_FILE"
+}
+trap _cleanup EXIT INT TERM
+
 if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
-  printf "%s\\n" "$T3_SSH_AUTH_SECRET"
+  TEMP_FILE=$(mktemp -t t3code-askpass.XXXXXXXXXX 2>/dev/null) || exit 1
+  chmod 0600 "$TEMP_FILE" || { rm -f "$TEMP_FILE"; exit 1; }
+  printf "%s\\\\n" "$T3_SSH_AUTH_SECRET" > "$TEMP_FILE"
+  cat "$TEMP_FILE"
   exit 0
 fi
-printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
+printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\\\n' >&2
 exit 1
 `;
 
@@ -89,13 +99,41 @@ export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through
 # ssh with a cached password from the renderer's in-app prompt. We never expose\r
 # a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
 # and we fail loudly.\r
+# Uses SecureString for secure password handling in memory.\r
+$secureString = $null\r
 if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
+  $secureString = ConvertTo-SecureString -String $env:T3_SSH_AUTH_SECRET -AsPlainText -Force\r
+  $ptr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString)\r
+  try {\r
+    $plaintext = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)\r
+    [Console]::Out.WriteLine($plaintext)\r
+  } finally {\r
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)\r
+  }\r
   exit 0\r
 }\r
 [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
 exit 1\r
 `;
+
+/**
+ * Validates that the askpass script path does not contain spaces or shell
+ * metacharacters that could lead to shell injection or path injection attacks.
+ */
+export function validateAskpassPath(path: string): Effect.Effect<void, PlatformError.PlatformError> {
+  // Allow alphanumeric, underscore, dots, forward/backward slashes, and hyphens only
+  const DISALLOWED_CHARS_REGEX = /[^a-zA-Z0-9_./\\\-]/u;
+  if (DISALLOWED_CHARS_REGEX.test(path)) {
+    return Effect.fail(
+      new PlatformError.PlatformError({
+        message: `Invalid askpass script path: "${path}". Path must not contain spaces or shell special characters.`,
+        reason: "InvalidArgument",
+        module: "FileSystem",
+      }),
+    );
+  }
+  return Effect.void;
+}
 
 export const getDefaultSshAskpassDirectory = Effect.fn("ssh/auth.getDefaultSshAskpassDirectory")(
   function* () {
@@ -139,7 +177,7 @@ export const buildSshAskpassHelperDescriptor = Effect.fn(
       {
         path: path.join(directory, "ssh-askpass.sh"),
         contents: ASKPASS_POSIX_SCRIPT,
-        mode: 0o700,
+        mode: 0o600,
       },
     ],
   };
@@ -154,6 +192,12 @@ export const ensureSshAskpassHelpers = Effect.fn("ssh/auth.ensureSshAskpassHelpe
     const path = yield* Path.Path;
     const descriptor = yield* buildSshAskpassHelperDescriptor(input);
     const platform = input.platform ?? process.platform;
+
+    // Validate all file paths before writing
+    for (const file of descriptor.files) {
+      yield* validateAskpassPath(file.path);
+    }
+    yield* validateAskpassPath(descriptor.launcherPath);
 
     yield* fs.makeDirectory(path.dirname(descriptor.launcherPath), { recursive: true });
 
