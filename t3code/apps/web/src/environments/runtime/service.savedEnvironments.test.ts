@@ -195,6 +195,12 @@ function createClient() {
       onEvent: vi.fn(() => () => undefined),
     },
     projects: {
+      globalSearch: vi.fn(async () => ({
+        fileMatches: [],
+        gitMatches: [],
+        filesTruncated: false,
+        gitTruncated: false,
+      })),
       searchEntries: vi.fn(async () => []),
       writeFile: vi.fn(async () => undefined),
     },

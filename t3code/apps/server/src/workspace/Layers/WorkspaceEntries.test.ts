@@ -74,6 +74,22 @@ const searchWorkspaceEntries = (input: { cwd: string; query: string; limit: numb
     return yield* workspaceEntries.search(input);
   });
 
+const globalSearchWorkspace = (input: {
+  cwd: string;
+  query: string;
+  limit: number;
+  regex?: boolean;
+  caseSensitive?: boolean;
+}) =>
+  Effect.gen(function* () {
+    const workspaceEntries = yield* WorkspaceEntries;
+    return yield* workspaceEntries.globalSearch({
+      regex: false,
+      caseSensitive: false,
+      ...input,
+    });
+  });
+
 const appendSeparator = (input: string) =>
   input.endsWith("/") || input.endsWith("\\")
     ? input
@@ -309,6 +325,50 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
         yield* Fiber.join(search);
 
         expect(peakReads).toBeLessThanOrEqual(32);
+      }),
+    );
+  });
+
+  describe("globalSearch", () => {
+    it.effect("searches tracked file contents", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-global-files-", git: true });
+        yield* writeTextFile(cwd, "src/bridge.ts", "const bridgeNonce = 1;\n");
+        yield* git(cwd, ["add", "src/bridge.ts"]);
+
+        const result = yield* globalSearchWorkspace({ cwd, query: "bridgeNonce", limit: 10 });
+
+        expect(result.fileMatches).toEqual([
+          {
+            path: "src/bridge.ts",
+            lineNumber: 1,
+            preview: "const bridgeNonce = 1;",
+          },
+        ]);
+        expect(result.filesTruncated).toBe(false);
+      }),
+    );
+
+    it.effect("searches Git commit subjects", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-global-git-", git: true });
+        yield* writeTextFile(cwd, "README.md", "readme\n");
+        yield* git(cwd, ["add", "README.md"]);
+        yield* git(cwd, ["commit", "-m", "Add bridge nonce guard"], {
+          GIT_AUTHOR_NAME: "Test User",
+          GIT_AUTHOR_EMAIL: "test@example.com",
+          GIT_COMMITTER_NAME: "Test User",
+          GIT_COMMITTER_EMAIL: "test@example.com",
+        });
+
+        const result = yield* globalSearchWorkspace({ cwd, query: "nonce", limit: 10 });
+
+        expect(result.gitMatches).toHaveLength(1);
+        expect(result.gitMatches[0]).toMatchObject({
+          subject: "Add bridge nonce guard",
+          author: "Test User",
+        });
+        expect(result.gitTruncated).toBe(false);
       }),
     );
   });

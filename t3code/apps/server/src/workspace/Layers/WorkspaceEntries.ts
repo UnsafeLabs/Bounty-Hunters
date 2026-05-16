@@ -1,7 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import { execFile } from "node:child_process";
 import * as OS from "node:os";
 import fsPromises from "node:fs/promises";
 import type { Dirent } from "node:fs";
+import { promisify } from "node:util";
 
 import * as Cache from "effect/Cache";
 import * as DateTime from "effect/DateTime";
@@ -11,7 +13,12 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
-import { type FilesystemBrowseInput, type ProjectEntry } from "@t3tools/contracts";
+import {
+  type FilesystemBrowseInput,
+  type ProjectEntry,
+  type ProjectGlobalSearchInput,
+  type ProjectGlobalSearchResult,
+} from "@t3tools/contracts";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   insertRankedSearchResult,
@@ -33,6 +40,10 @@ const WORKSPACE_CACHE_TTL_MS = 15_000;
 const WORKSPACE_CACHE_MAX_KEYS = 4;
 const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
 const WORKSPACE_SCAN_READDIR_CONCURRENCY = 32;
+const GLOBAL_SEARCH_GIT_LOG_LIMIT = 500;
+const GLOBAL_SEARCH_GIT_MAX_BUFFER = 8 * 1024 * 1024;
+const GLOBAL_SEARCH_PREVIEW_MAX_LENGTH = 1_000;
+const execFileAsync = promisify(execFile);
 const IGNORED_DIRECTORY_NAMES = new Set([
   ".git",
   ".convex",
@@ -57,6 +68,12 @@ interface SearchableWorkspaceEntry extends ProjectEntry {
 }
 
 type RankedWorkspaceEntry = RankedSearchResult<SearchableWorkspaceEntry>;
+
+interface GitProcessError extends Error {
+  readonly code?: number | string;
+  readonly stdout?: string;
+  readonly stderr?: string;
+}
 
 function toPosixPath(input: string): string {
   return input.replaceAll("\\", "/");
@@ -136,6 +153,114 @@ function isPathInIgnoredDirectory(relativePath: string): boolean {
   const firstSegment = relativePath.split("/")[0];
   if (!firstSegment) return false;
   return IGNORED_DIRECTORY_NAMES.has(firstSegment);
+}
+
+function normalizePreview(input: string): string {
+  return input.replace(/\s+/g, " ").trim().slice(0, GLOBAL_SEARCH_PREVIEW_MAX_LENGTH);
+}
+
+function buildGlobalSearchMatcher(input: ProjectGlobalSearchInput): (value: string) => boolean {
+  if (input.regex) {
+    const matcher = new RegExp(input.query, input.caseSensitive ? "" : "i");
+    return (value) => matcher.test(value);
+  }
+
+  if (input.caseSensitive) {
+    return (value) => value.includes(input.query);
+  }
+
+  const normalizedQuery = input.query.toLowerCase();
+  return (value) => value.toLowerCase().includes(normalizedQuery);
+}
+
+async function runGitForGlobalSearch(
+  cwd: string,
+  args: ReadonlyArray<string>,
+  options?: { readonly allowNoMatches?: boolean; readonly allowNotRepository?: boolean },
+): Promise<string> {
+  try {
+    const result = await execFileAsync("git", args, {
+      cwd,
+      maxBuffer: GLOBAL_SEARCH_GIT_MAX_BUFFER,
+    });
+    return result.stdout;
+  } catch (cause) {
+    const error = cause as GitProcessError;
+    if (options?.allowNoMatches && error.code === 1) {
+      return error.stdout ?? "";
+    }
+    if (
+      options?.allowNotRepository &&
+      (error.code === 128 || error.stderr?.includes("not a git repository"))
+    ) {
+      return "";
+    }
+    throw cause;
+  }
+}
+
+function parseGitGrepOutput(
+  stdout: string,
+  limit: number,
+): ProjectGlobalSearchResult["fileMatches"] {
+  const matches: Array<ProjectGlobalSearchResult["fileMatches"][number]> = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    if (line.length === 0) {
+      continue;
+    }
+
+    const firstSeparator = line.indexOf(":");
+    const secondSeparator = firstSeparator === -1 ? -1 : line.indexOf(":", firstSeparator + 1);
+    if (firstSeparator === -1 || secondSeparator === -1) {
+      continue;
+    }
+
+    const lineNumber = Number.parseInt(line.slice(firstSeparator + 1, secondSeparator), 10);
+    if (!Number.isSafeInteger(lineNumber) || lineNumber <= 0) {
+      continue;
+    }
+
+    matches.push({
+      path: line.slice(0, firstSeparator),
+      lineNumber,
+      preview: normalizePreview(line.slice(secondSeparator + 1)),
+    });
+    if (matches.length >= limit) {
+      break;
+    }
+  }
+  return matches;
+}
+
+function parseGitLogOutput(
+  stdout: string,
+  matcher: (value: string) => boolean,
+  limit: number,
+): ProjectGlobalSearchResult["gitMatches"] {
+  const matches: Array<ProjectGlobalSearchResult["gitMatches"][number]> = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    if (line.length === 0) {
+      continue;
+    }
+
+    const [sha, author, committedAt, ...subjectParts] = line.split("\u001f");
+    const subject = subjectParts.join("\u001f");
+    if (!sha || !author || !committedAt || !subject || !matcher(subject)) {
+      continue;
+    }
+
+    matches.push({
+      sha,
+      shortSha: sha.slice(0, 8),
+      subject,
+      author,
+      committedAt,
+    });
+    if (matches.length >= limit) {
+      break;
+    }
+  }
+  return matches;
 }
 
 function directoryAncestorsOf(relativePath: string): string[] {
@@ -510,8 +635,78 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     },
   );
 
+  const globalSearch: WorkspaceEntriesShape["globalSearch"] = Effect.fn(
+    "WorkspaceEntries.globalSearch",
+  )(function* (input) {
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+    const limit = Math.max(0, Math.floor(input.limit));
+    const matcher = yield* Effect.try({
+      try: () => buildGlobalSearchMatcher(input),
+      catch: (cause) =>
+        new WorkspaceEntriesError({
+          cwd: input.cwd,
+          operation: "workspaceEntries.globalSearch.compileMatcher",
+          detail: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
+    });
+
+    return yield* Effect.tryPromise({
+      try: async (): Promise<ProjectGlobalSearchResult> => {
+        const grepArgs = [
+          "grep",
+          "-n",
+          "-I",
+          "--full-name",
+          input.caseSensitive ? undefined : "-i",
+          input.regex ? "-E" : "-F",
+          "-e",
+          input.query,
+          "--",
+          ".",
+        ].filter((arg): arg is string => arg !== undefined);
+        const [grepOutput, gitLogOutput] = await Promise.all([
+          runGitForGlobalSearch(normalizedCwd, grepArgs, {
+            allowNoMatches: true,
+            allowNotRepository: true,
+          }),
+          runGitForGlobalSearch(
+            normalizedCwd,
+            [
+              "log",
+              "--all",
+              `--max-count=${GLOBAL_SEARCH_GIT_LOG_LIMIT}`,
+              "--format=%H%x1f%an%x1f%aI%x1f%s",
+            ],
+            {
+              allowNotRepository: true,
+            },
+          ),
+        ]);
+
+        const fileMatches = parseGitGrepOutput(grepOutput, limit);
+        const gitMatches = parseGitLogOutput(gitLogOutput, matcher, limit);
+        return {
+          fileMatches,
+          gitMatches,
+          filesTruncated:
+            fileMatches.length >= limit && grepOutput.split(/\r?\n/).filter(Boolean).length > limit,
+          gitTruncated: gitMatches.length >= limit,
+        };
+      },
+      catch: (cause) =>
+        new WorkspaceEntriesError({
+          cwd: input.cwd,
+          operation: "workspaceEntries.globalSearch",
+          detail: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
+    });
+  });
+
   return {
     browse,
+    globalSearch,
     invalidate,
     search,
   } satisfies WorkspaceEntriesShape;

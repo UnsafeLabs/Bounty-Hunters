@@ -25,6 +25,7 @@ import {
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   ProjectSearchEntriesError,
+  ProjectGlobalSearchError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   FilesystemBrowseError,
@@ -957,6 +958,20 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 (cause) =>
                   new ProjectSearchEntriesError({
                     message: `Failed to search workspace entries: ${cause.detail}`,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsGlobalSearch]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsGlobalSearch,
+            workspaceEntries.globalSearch(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProjectGlobalSearchError({
+                    message: `Failed to search project: ${cause.detail}`,
                     cause,
                   }),
               ),

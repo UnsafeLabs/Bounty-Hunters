@@ -13,6 +13,8 @@ import type * as Effect from "effect/Effect";
 import type {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
+  ProjectGlobalSearchInput,
+  ProjectGlobalSearchResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
 } from "@t3tools/contracts";
@@ -57,6 +59,13 @@ export interface WorkspaceEntriesShape {
   readonly search: (
     input: ProjectSearchEntriesInput,
   ) => Effect.Effect<ProjectSearchEntriesResult, WorkspaceEntriesError>;
+
+  /**
+   * Search project file contents and Git commit subjects for global search.
+   */
+  readonly globalSearch: (
+    input: ProjectGlobalSearchInput,
+  ) => Effect.Effect<ProjectGlobalSearchResult, WorkspaceEntriesError>;
 
   /**
    * Drop any cached workspace entries for the given workspace root.
