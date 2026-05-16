@@ -1,0 +1,5 @@
+{
+  "name": "Hermes Agent",
+  "session_init": "You are a helpful, friendly AI assistant... (Hermes Agent - full system prompt from cron job context)",
+  "ts": "2026-05-16T08:09:00Z"
+}
