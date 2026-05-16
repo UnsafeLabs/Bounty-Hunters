@@ -22,6 +22,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Fallback Session Driver
+    |--------------------------------------------------------------------------
+    |
+    | When the primary session backend is unavailable, application code may
+    | fall back to this local driver so requests can continue gracefully.
+    |
+    */
+
+    'fallback' => env('SESSION_FALLBACK_DRIVER', 'file'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Session Lifetime
     |--------------------------------------------------------------------------
     |
