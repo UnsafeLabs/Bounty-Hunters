@@ -10,18 +10,19 @@ import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import { identity } from "effect/Function";
 import * as Layer from "effect/Layer";
+import * as Pool from "effect/Pool";
 import * as Scope from "effect/Scope";
-import * as Semaphore from "effect/Semaphore";
 import * as Context from "effect/Context";
 import * as Stream from "effect/Stream";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
 import * as Client from "effect/unstable/sql/SqlClient";
 import type { Connection } from "effect/unstable/sql/SqlConnection";
-import { SqlError, classifySqliteError } from "effect/unstable/sql/SqlError";
+import { LockTimeoutError, SqlError, classifySqliteError } from "effect/unstable/sql/SqlError";
 import * as Statement from "effect/unstable/sql/Statement";
+
+import { sqlitePoolDefaults } from "./SqlitePoolConfig.ts";
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
 
@@ -40,6 +41,10 @@ export interface SqliteClientConfig {
   readonly allowExtension?: boolean | undefined;
   readonly prepareCacheSize?: number | undefined;
   readonly prepareCacheTTL?: Duration.Input | undefined;
+  readonly poolMin?: number | undefined;
+  readonly poolMax?: number | undefined;
+  readonly poolAcquireTimeout?: Duration.Input | undefined;
+  readonly poolTimeToLive?: Duration.Input | undefined;
   readonly spanAttributes?: Record<string, unknown> | undefined;
   readonly transformResultNames?: ((str: string) => string) | undefined;
   readonly transformQueryNames?: ((str: string) => string) | undefined;
@@ -90,6 +95,10 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
       scope,
       Effect.sync(() => db.close()),
     );
+    db.exec("PRAGMA journal_mode = WAL;");
+    db.exec("PRAGMA busy_timeout = 5000;");
+    db.exec("PRAGMA synchronous = NORMAL;");
+    db.exec("PRAGMA foreign_keys = ON;");
 
     const statementReaderCache = new WeakMap<StatementSync, boolean>();
     const hasRows = (statement: StatementSync): boolean => {
@@ -194,23 +203,48 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
     });
   });
 
-  const semaphore = yield* Semaphore.make(1);
-  const connection = yield* makeConnection;
+  const resetConnection = (connection: Connection) =>
+    Effect.gen(function* () {
+      yield* connection.executeUnprepared("PRAGMA busy_timeout = 5000;", [], undefined);
+      yield* connection.executeUnprepared("PRAGMA synchronous = NORMAL;", [], undefined);
+      yield* connection.executeUnprepared("PRAGMA foreign_keys = ON;", [], undefined);
+      yield* connection.executeUnprepared("PRAGMA query_only = OFF;", [], undefined);
+      yield* connection.executeUnprepared("PRAGMA defer_foreign_keys = OFF;", [], undefined);
+    }).pipe(Effect.catchCause(() => Effect.void));
 
-  const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
-  const transactionAcquirer = Effect.uninterruptibleMask((restore) => {
-    const fiber = Fiber.getCurrent()!;
-    const scope = Context.getUnsafe(fiber.context, Scope.Scope);
-    return Effect.as(
-      Effect.tap(restore(semaphore.take(1)), () => Scope.addFinalizer(scope, semaphore.release(1))),
-      connection,
+  const poolAcquireTimeout = options.poolAcquireTimeout ?? sqlitePoolDefaults.acquireTimeout;
+  const pool = yield* Pool.makeWithTTL({
+    acquire: makeConnection,
+    min: options.poolMin ?? sqlitePoolDefaults.min,
+    max: options.poolMax ?? sqlitePoolDefaults.max,
+    timeToLive: options.poolTimeToLive ?? sqlitePoolDefaults.timeToLive,
+  });
+
+  const timeoutError = () =>
+    new SqlError({
+      reason: new LockTimeoutError({
+        cause: "Timed out acquiring a SQLite connection from the Effect.Pool",
+        message: "Timed out acquiring a SQLite connection from the Effect.Pool",
+        operation: "pool.acquire",
+      }),
+    });
+
+  const acquirer = Effect.gen(function* () {
+    const connection = yield* Pool.get(pool).pipe(
+      Effect.timeoutOrElse({
+        duration: poolAcquireTimeout,
+        orElse: () => Effect.fail(timeoutError()),
+      }),
     );
+    const scope = yield* Effect.scope;
+    yield* Scope.addFinalizer(scope, resetConnection(connection));
+    return connection;
   });
 
   return yield* Client.make({
     acquirer,
     compiler,
-    transactionAcquirer,
+    transactionAcquirer: acquirer,
     spanAttributes: [
       ...(options.spanAttributes ? Object.entries(options.spanAttributes) : []),
       [ATTR_DB_SYSTEM_NAME, "sqlite"],
