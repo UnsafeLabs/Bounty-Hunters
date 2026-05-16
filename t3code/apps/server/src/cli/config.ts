@@ -161,6 +161,10 @@ export interface CliAuthLocationFlags {
 export const sharedServerLocationFlags = {
   baseDir: baseDirFlag,
   devUrl: devUrlFlag,
+export const validateConfigFlag = Flag.boolean(validate-config).pipe(
+  Flag.withDescription(Validate environment variables and exit without starting the server.),
+  Flag.optional,
+);
 } as const;
 
 export const projectLocationFlags = {
