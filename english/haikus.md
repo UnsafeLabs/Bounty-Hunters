@@ -40,7 +40,7 @@ No one sits there now
 
 Semicolon missed
 The build fails at line forty
-Stack Overflow saves me
+Patience finds the bug
 
 ---
 
