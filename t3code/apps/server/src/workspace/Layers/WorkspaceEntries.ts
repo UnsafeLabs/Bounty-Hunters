@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as OS from "node:os";
 import fsPromises from "node:fs/promises";
+import { execFile } from "node:child_process";
 import type { Dirent } from "node:fs";
 
 import * as Cache from "effect/Cache";
@@ -520,15 +521,40 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       Effect.gen(function* () {
         const src = input.sourcePath;
         const dst = input.destinationPath;
-        try {
+
+        // Ensure parent directory exists
+        const dstDir = dst.substring(0, dst.lastIndexOf("/"));
+        yield* Effect.promise(() => fsPromises.mkdir(dstDir, { recursive: true }));
+
+        // Check if source is git-tracked
+        const isTracked = yield* Effect.promise(async () => {
+          try {
+            await execFile("git", ["ls-files", "--error-unmatch", src], {
+              cwd: dstDir,
+              stdio: "pipe",
+              timeout: 5000,
+            });
+            return true;
+          } catch {
+            return false;
+          }
+        });
+
+        if (isTracked) {
+          // Use git mv to preserve history
+          yield* Effect.promise(async () => {
+            const { stdout } = await execFile("git", ["mv", src, dst], {
+              cwd: dstDir,
+              timeout: 10000,
+            });
+            return stdout;
+          });
+        } else {
+          // Regular filesystem rename for untracked files
           yield* Effect.promise(() => fsPromises.rename(src, dst));
-          return { success: true as const };
-        } catch (e: unknown) {
-          const msg = e instanceof Error ? e.message : String(e);
-          return yield* Effect.fail(
-            new WorkspaceEntriesMoveError({ message: msg }),
-          );
         }
+
+        return { success: true as const };
       }),
   } satisfies WorkspaceEntriesShape;
 });
