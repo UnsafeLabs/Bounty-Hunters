@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
+import type { PruneSnapshotsInput, PruneSnapshotsResult } from "../Services/CheckpointStore.ts";
 import { VcsUnsupportedOperationError } from "@t3tools/contracts";
 import { VcsDriverRegistry } from "../../vcs/VcsDriverRegistry.ts";
 import type { VcsCheckpointOps } from "../../vcs/VcsDriver.ts";
@@ -76,6 +77,13 @@ const makeCheckpointStore = Effect.gen(function* () {
     return yield* checkpoints.deleteCheckpointRefs(input);
   });
 
+  const pruneSnapshots: CheckpointStoreShape["pruneSnapshots"] = Effect.fn("pruneSnapshots")(
+    function* (input) {
+      const checkpoints = yield* resolveCheckpoints("CheckpointStore.pruneSnapshots", input.cwd);
+      return yield* checkpoints.pruneSnapshots(input);
+    },
+  );
+
   return {
     isGitRepository,
     captureCheckpoint,
@@ -83,6 +91,7 @@ const makeCheckpointStore = Effect.gen(function* () {
     restoreCheckpoint,
     diffCheckpoints,
     deleteCheckpointRefs,
+    pruneSnapshots,
   } satisfies CheckpointStoreShape;
 });
 

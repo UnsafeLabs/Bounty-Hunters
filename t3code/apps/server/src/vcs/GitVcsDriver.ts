@@ -798,6 +798,133 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         );
       },
     ),
+
+    pruneSnapshots: Effect.fn("GitVcsDriver.checkpoints.pruneSnapshots")(function* (input) {
+      const retentionDays = input.retentionDays ?? 7;
+      const retentionSeconds = retentionDays * 24 * 60 * 60;
+      const startTime = Date.now();
+
+      // List all checkpoint refs with committer date and object size
+      const refResult = yield* execute({
+        operation: "GitVcsDriver.checkpoints.pruneSnapshots.listRefs",
+        cwd: input.cwd,
+        args: [
+          "for-each-ref",
+          "--format",
+          "%(refname) %(committerdate:unix) %(objectname)",
+          "refs/t3/checkpoints",
+        ],
+      });
+
+      const lines = refResult.stdout.trim().split("\n").filter((l) => l.length > 0);
+
+      // Parse each line: refname committerDate objectName
+      type RefEntry = { ref: string; committerUnix: number; objectName: string };
+      const refs: RefEntry[] = [];
+      for (const line of lines) {
+        const spaceIdx = line.indexOf(" ");
+        if (spaceIdx === -1) continue;
+        const ref = line.slice(0, spaceIdx);
+        const rest = line.slice(spaceIdx + 1).trim();
+        const secondSpaceIdx = rest.indexOf(" ");
+        if (secondSpaceIdx === -1) continue;
+        const committerUnix = Number(rest.slice(0, secondSpaceIdx));
+        const objectName = rest.slice(secondSpaceIdx + 1).trim();
+        if (!Number.isFinite(committerUnix) || !objectName) continue;
+        refs.push({ ref, committerUnix, objectName });
+      }
+
+      // Group refs by session ID (the suffix after refs/t3/checkpoints/ before the last /turn/
+      // e.g. refs/t3/checkpoints/<sessionId>/turn/<turnCount>
+      type GroupedRef = { ref: string; committerUnix: number; objectName: string; turnCount: number };
+      const sessions = new Map<string, GroupedRef[]>();
+
+      for (const entry of refs) {
+        // Extract session ID and turn count from the ref path
+        // refs/t3/checkpoints/<sessionId>/turn/<turnCount>
+        const prefix = "refs/t3/checkpoints/";
+        if (!entry.ref.startsWith(prefix)) continue;
+        const afterPrefix = entry.ref.slice(prefix.length);
+        const turnMatch = afterPrefix.match(/^(.+)\/turn\/(\d+)$/);
+        if (!turnMatch) continue;
+        const sessionId = turnMatch[1];
+        const turnCount = Number(turnMatch[2]);
+        if (!Number.isFinite(turnCount)) continue;
+
+        let group = sessions.get(sessionId);
+        if (!group) {
+          group = [];
+          sessions.set(sessionId, group);
+        }
+        group.push({ ...entry, turnCount });
+      }
+
+      // For each session, sort by turnCount descending, keep 3 most recent, delete old ones
+      const refsToDelete: string[] = [];
+      let totalBytesFreed = 0;
+      const now = Math.floor(Date.now() / 1000);
+      const objectNamesToSize: string[] = [];
+
+      for (const [, group] of sessions) {
+        // Sort by turnCount descending (most recent first)
+        group.sort((a, b) => b.turnCount - a.turnCount);
+
+        for (let i = 0; i < group.length; i++) {
+          const entry = group[i];
+          // Keep the first 3 most recent regardless of age
+          if (i < 3) continue;
+          // Delete if older than retention period
+          const age = now - entry.committerUnix;
+          if (age > retentionSeconds) {
+            refsToDelete.push(entry.ref);
+            objectNamesToSize.push(entry.objectName);
+          }
+        }
+      }
+
+      // Get sizes for freed bytes estimation
+      if (objectNamesToSize.length > 0) {
+        const sizeResult = yield* execute({
+          operation: "GitVcsDriver.checkpoints.pruneSnapshots.getSizes",
+          cwd: input.cwd,
+          args: ["cat-file", "--batch-check"],
+          stdin: objectNamesToSize.join("\n") + "\n",
+          maxOutputBytes: 1_000_000,
+        });
+        for (const line of sizeResult.stdout.trim().split("\n").filter((l) => l.length > 0)) {
+          const parts = line.split(" ");
+          if (parts.length >= 3) {
+            const size = Number(parts[2]);
+            if (Number.isFinite(size)) {
+              totalBytesFreed += size;
+            }
+          }
+        }
+      }
+
+      // Delete the filtered refs
+      if (refsToDelete.length > 0) {
+        yield* Effect.forEach(
+          refsToDelete,
+          (ref) =>
+            execute({
+              operation: "GitVcsDriver.checkpoints.pruneSnapshots.deleteRef",
+              cwd: input.cwd,
+              args: ["update-ref", "-d", ref],
+              allowNonZeroExit: true,
+            }),
+          { discard: true },
+        );
+      }
+
+      const durationMs = Date.now() - startTime;
+
+      return {
+        snapshotsDeleted: refsToDelete.length,
+        bytesFreed: totalBytesFreed,
+        durationMs,
+      };
+    }),
   };
 
   return VcsDriver.VcsDriver.of({

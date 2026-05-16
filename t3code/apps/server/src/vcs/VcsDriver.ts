@@ -48,6 +48,14 @@ export interface VcsCheckpointOps {
   readonly deleteCheckpointRefs: (
     input: VcsDeleteCheckpointRefsInput,
   ) => Effect.Effect<void, VcsError>;
+  readonly pruneSnapshots: (input: {
+    readonly cwd: string;
+    readonly retentionDays?: number;
+  }) => Effect.Effect<{
+    readonly snapshotsDeleted: number;
+    readonly bytesFreed: number;
+    readonly durationMs: number;
+  }, VcsError>;
 }
 
 export interface VcsDriverShape {
