@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Annotated, Any
 
 from annotated_doc import Doc
@@ -6,6 +7,10 @@ from starlette.responses import StreamingResponse
 
 # Canonical SSE event schema matching the OpenAPI 3.2 spec
 # (Section 4.14.4 "Special Considerations for Server-Sent Events")
+
+
+__all__ = ["EventSourceResponse", "ServerSentEvent", "SSEManager"]
+
 _SSE_EVENT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -38,6 +43,82 @@ def _check_id_no_null(v: str | None) -> str | None:
         raise ValueError("SSE 'id' must not contain null characters")
     return v
 
+
+
+class SSEManager:
+    """Manages multiple SSE connections and enables broadcasting to clients.
+
+    Handles connection lifecycle, event filtering, and replay of missed
+    events since a given event ID.
+    """
+
+    def __init__(self, retry_timeout: int = 3000) -> None:
+        self._connections: dict[str, list[ServerSentEvent]] = {}
+        self._events: list[ServerSentEvent] = []
+        self._event_counter: int = 0
+        self.retry_timeout: int = retry_timeout
+
+    def connect(self, client_id: str) -> None:
+        """Register a new client connection."""
+        self._connections[client_id] = []
+
+    def disconnect(self, client_id: str) -> None:
+        """Remove a disconnected client."""
+        self._connections.pop(client_id, None)
+
+    @property
+    def connection_count(self) -> int:
+        """Number of currently connected clients."""
+        return len(self._connections)
+
+    def broadcast(
+        self,
+        event: ServerSentEvent,
+        event_type: str | None = None,
+    ) -> None:
+        """Broadcast an event to all connected clients.
+
+        If event_type is specified, the event is tagged with that type.
+        """
+        if event_type is not None and event.event is None:
+            event = event.model_copy(update={"event": event_type})
+
+        self._event_counter += 1
+        if event.id is None:
+            event = event.model_copy(update={"id": str(self._event_counter)})
+
+        if event.retry is None:
+            event = event.model_copy(update={"retry": self.retry_timeout})
+
+        self._events.append(event)
+
+    def get_events_since(self, last_event_id: str | None) -> list[ServerSentEvent]:
+        """Return all events that occurred after the given event ID.
+
+        Used for reconnect replay when the client sends a Last-Event-ID header.
+        """
+        if last_event_id is None:
+            return []
+
+        try:
+            last_id = int(last_event_id)
+        except (TypeError, ValueError):
+            return []
+
+        return [
+            e for e in self._events
+            if e.id is not None and int(e.id) > last_id
+        ]
+
+    def filter_events(
+        self,
+        events: list[ServerSentEvent],
+        event_type: str | None,
+    ) -> list[ServerSentEvent]:
+        """Filter events by the specified event type."""
+        if event_type is None:
+            return events
+        return [e for e in events if e.event == event_type]
 
 class ServerSentEvent(BaseModel):
     """Represents a single Server-Sent Event.
