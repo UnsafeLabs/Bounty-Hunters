@@ -33,7 +33,9 @@ import {
   isDiffToggleShortcut,
   isTerminalClearShortcut,
   isTerminalCloseShortcut,
+  isTerminalCopyShortcut,
   isTerminalNewShortcut,
+  isTerminalPasteShortcut,
   isTerminalSplitShortcut,
   isTerminalToggleShortcut,
   terminalDeleteShortcutData,
@@ -48,6 +50,7 @@ import {
 import { readEnvironmentApi } from "~/environmentApi";
 import { readLocalApi } from "~/localApi";
 import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalStateStore";
+import { toastManager } from "./ui/toast";
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
@@ -415,6 +418,41 @@ export function TerminalViewport({
       }
     };
 
+    const copyTerminalSelection = async () => {
+      const activeTerminal = terminalRef.current;
+      if (!activeTerminal) return;
+      const selection = activeTerminal.getSelection();
+      try {
+        await navigator.clipboard.writeText(selection);
+        toastManager.add({
+          type: "success",
+          title: "Terminal selection copied",
+          data: { dismissAfterVisibleMs: 1200 },
+        });
+      } catch (error) {
+        writeSystemMessage(
+          activeTerminal,
+          error instanceof Error ? error.message : "Failed to copy terminal selection",
+        );
+      }
+    };
+
+    const pasteTerminalClipboard = async () => {
+      const activeTerminal = terminalRef.current;
+      if (!activeTerminal) return;
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text.length > 0) {
+          await sendTerminalInput(text, "Failed to paste terminal input");
+        }
+      } catch (error) {
+        writeSystemMessage(
+          activeTerminal,
+          error instanceof Error ? error.message : "Failed to read clipboard",
+        );
+      }
+    };
+
     terminal.attachCustomKeyEventHandler((event) => {
       const currentKeybindings = keybindingsRef.current;
       const options = { context: { terminalFocus: true, terminalOpen: true } };
@@ -425,6 +463,21 @@ export function TerminalViewport({
         isTerminalCloseShortcut(event, currentKeybindings, options) ||
         isDiffToggleShortcut(event, currentKeybindings, options)
       ) {
+        return false;
+      }
+
+      const isCopyShortcut = isTerminalCopyShortcut(event);
+      if (isCopyShortcut && terminal.hasSelection() && terminal.getSelection().length > 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        void copyTerminalSelection();
+        return false;
+      }
+
+      if (isTerminalPasteShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        void pasteTerminalClipboard();
         return false;
       }
 

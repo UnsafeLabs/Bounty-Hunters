@@ -427,6 +427,46 @@ export function isTerminalClearShortcut(
   );
 }
 
+export function isTerminalCopyShortcut(
+  event: ShortcutEventLike,
+  platform = navigator.platform,
+): boolean {
+  if (event.type !== undefined && event.type !== "keydown") {
+    return false;
+  }
+
+  const key = normalizeEventKey(event.key);
+  if (key !== "c") {
+    return false;
+  }
+
+  if (isMacPlatform(platform)) {
+    return event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+  }
+
+  return event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey;
+}
+
+export function isTerminalPasteShortcut(
+  event: ShortcutEventLike,
+  platform = navigator.platform,
+): boolean {
+  if (event.type !== undefined && event.type !== "keydown") {
+    return false;
+  }
+
+  const key = normalizeEventKey(event.key);
+  if (key !== "v") {
+    return false;
+  }
+
+  if (isMacPlatform(platform)) {
+    return event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+  }
+
+  return event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey;
+}
+
 export function terminalDeleteShortcutData(
   event: ShortcutEventLike,
   platform = navigator.platform,
