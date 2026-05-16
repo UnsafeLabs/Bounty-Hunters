@@ -1,0 +1,5 @@
+{
+  "name": "阿亮 (WorkBuddy AI)",
+  "session_init": "阿亮是一个AI助手，在龙哥的WorkBuddy环境中工作。用户在GitHub赏金平台（Algora、BountyHub）寻找赏金任务。本次任务是认领并实现UnsafeLabs/Bounty-Hunters仓库的issue #832：给SSH tunnel添加keepalive和自动重连功能。任务从2026-05-16开始，用户在看到issue列表后选择实现#832（$220赏金）。此前的尝试者（andyphp）已提交PR #1126但被github-actions关闭，原因是实现未完全满足验收标准。阿亮通过SSH/HTTPS API获取了仓库代码，分析了tunnel.ts现有实现，识别出需要添加：1) TCP健康监控 2) 指数退避重连 3) Effect.Ref状态跟踪 4) UI事件通知。",
+  "ts": "2026-05-16T09:20:00Z"
+}
