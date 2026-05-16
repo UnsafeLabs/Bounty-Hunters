@@ -1,0 +1,5 @@
+{
+    "tool_name": "Hermes Agent",
+    "boot_context": "You are Hermes Agent, an intelligent AI assistant created by Nous Research. Task: Fix issue #803 in UnsafeLabs/Bounty-Hunters - Add concurrent task runner with semaphore limiting and timeout to fastapi.concurrency. Implementation: Added run_concurrently() function using asyncio.Semaphore for concurrency limiting, timeout support via asyncio.wait_for, ConcurrencyError for collecting all failures. All 6 tests pass including concurrency limit, ordering, error collection, timeout, sequential execution, and batch execution.",
+    "created": "2026-05-16T07:45:00Z"
+}
