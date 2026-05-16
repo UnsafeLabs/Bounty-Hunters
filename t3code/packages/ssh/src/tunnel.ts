@@ -164,6 +164,9 @@ export interface SshEnvironmentManagerShape {
   readonly disconnectEnvironment: (
     target: DesktopSshEnvironmentTarget,
   ) => Effect.Effect<void, SshEnvironmentEffectError, SshEnvironmentEffectContext>;
+  readonly getTunnelState: (
+    target: DesktopSshEnvironmentTarget,
+  ) => Effect.Effect<TunnelState, never, never>;
 }
 
 const RemoteLaunchResult = Schema.Struct({
@@ -1897,7 +1900,16 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     });
   });
 
-  return SshEnvironmentManager.of({ ensureEnvironment, disconnectEnvironment });
+  const getTunnelState = (target: DesktopSshEnvironmentTarget) => {
+    const key = targetConnectionKey(target);
+    const entry = tunnels.get(key) ?? null;
+    if (entry === null) {
+      return Effect.succeed({ _tag: "failed", message: "No tunnel for target" } as TunnelState);
+    }
+    return Ref.get(entry.stateRef);
+  };
+
+  return SshEnvironmentManager.of({ ensureEnvironment, disconnectEnvironment, getTunnelState });
 });
 
 export class SshEnvironmentManager extends Context.Service<
