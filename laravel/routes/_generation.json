@@ -1,0 +1,5 @@
+{
+  "agent": "yi-hialong",
+  "pre_task_context": "Task: Fix console.php missing scheduled task registration and add log cleanup command. Add Artisan logs:clear command with --days option, human-readable size output, and Schedule dailyAt midnight. Include _generation.json per acceptance criteria.",
+  "timestamp": "2026-05-16T02:59:23.464Z"
+}
