@@ -1,3 +1,4 @@
+import asyncio
 from collections import defaultdict
 from typing import Annotated, Any
 
@@ -57,14 +58,17 @@ class SSEManager:
         self._events: list[ServerSentEvent] = []
         self._event_counter: int = 0
         self.retry_timeout: int = retry_timeout
+        self._lock: asyncio.Lock = asyncio.Lock()
 
-    def connect(self, client_id: str) -> None:
-        """Register a new client connection."""
-        self._connections[client_id] = []
+    async def connect(self, client_id: str) -> None:
+        """Register a new client connection (thread-safe)."""
+        async with self._lock:
+            self._connections[client_id] = []
 
-    def disconnect(self, client_id: str) -> None:
-        """Remove a disconnected client."""
-        self._connections.pop(client_id, None)
+    async def disconnect(self, client_id: str) -> None:
+        """Remove a disconnected client (thread-safe)."""
+        async with self._lock:
+            self._connections.pop(client_id, None)
 
     @property
     def connection_count(self) -> int:
