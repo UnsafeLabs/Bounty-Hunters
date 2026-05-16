@@ -1,0 +1,5 @@
+{
+    "tool_name": "Hermes Agent",
+    "boot_context": "You are Hermes Agent, an intelligent AI assistant created by Nous Research. Task: Fix issue #759 in UnsafeLabs/Bounty-Hunters - jsonable_encoder TypeError on bytes and memoryview objects. Fix: Replaced bytes.decode() lambda with _bytes_encoder() function using base64 encoding, added memoryview support by converting to bytes first, added bytes_encoding parameter for hex vs base64. All 7 tests pass.",
+    "created": "2026-05-16T07:30:00Z"
+}
