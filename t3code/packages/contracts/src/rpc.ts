@@ -8,6 +8,9 @@ import {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
   FilesystemBrowseError,
+  FilesystemMoveInput,
+  FilesystemMoveResult,
+  FilesystemMoveError,
 } from "./filesystem.ts";
 import {
   GitActionProgressEvent,
@@ -112,6 +115,7 @@ export const WS_METHODS = {
 
   // Filesystem methods
   filesystemBrowse: "filesystem.browse",
+  filesystemMove: "filesystem.move",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -285,6 +289,12 @@ export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   payload: FilesystemBrowseInput,
   success: FilesystemBrowseResult,
   error: FilesystemBrowseError,
+});
+
+export const WsFilesystemMoveRpc = Rpc.make(WS_METHODS.filesystemMove, {
+  payload: FilesystemMoveInput,
+  success: FilesystemMoveResult,
+  error: FilesystemMoveError,
 });
 
 export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
@@ -492,6 +502,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
+  WsFilesystemMoveRpc,
   WsSubscribeVcsStatusRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,

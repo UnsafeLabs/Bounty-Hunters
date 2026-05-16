@@ -11,7 +11,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
-import { type FilesystemBrowseInput, type ProjectEntry } from "@t3tools/contracts";
+import { type FilesystemBrowseInput, type FilesystemMoveInput, type ProjectEntry } from "@t3tools/contracts";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   insertRankedSearchResult,
@@ -25,6 +25,7 @@ import {
   WorkspaceEntries,
   WorkspaceEntriesBrowseError,
   WorkspaceEntriesError,
+  WorkspaceEntriesMoveError,
   type WorkspaceEntriesShape,
 } from "../Services/WorkspaceEntries.ts";
 import { WorkspacePaths } from "../Services/WorkspacePaths.ts";
@@ -469,6 +470,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
           .map((dirent) => ({
             name: dirent.name,
             fullPath: path.join(parentPath, dirent.name),
+            isDirectory: dirent.isDirectory(),
           }))
           .toSorted((left, right) => left.name.localeCompare(right.name)),
       };
@@ -514,6 +516,20 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     browse,
     invalidate,
     search,
+    move: (input: FilesystemMoveInput) =>
+      Effect.gen(function* () {
+        const src = input.sourcePath;
+        const dst = input.destinationPath;
+        try {
+          yield* Effect.promise(() => fsPromises.rename(src, dst));
+          return { success: true as const };
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return yield* Effect.fail(
+            new WorkspaceEntriesMoveError({ message: msg }),
+          );
+        }
+      }),
   } satisfies WorkspaceEntriesShape;
 });
 
