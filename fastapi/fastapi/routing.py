@@ -556,6 +556,24 @@ def get_request_handler(
                     async def _producer() -> None:
                         async with send_stream:
                             async for raw_item in sse_aiter:
+                                # Disconnect detection
+                                if await request.is_disconnected():
+                                    if hasattr(actual_response_class, 'on_disconnect') and actual_response_class.on_disconnect is not None:
+                                        on_dc = actual_response_class.on_disconnect
+                                        if asyncio.iscoroutinefunction(on_dc):
+                                            await on_dc()
+                                        else:
+                                            on_dc()
+                                    break
+                                # Event filtering (only before serialization)
+                                if hasattr(actual_response_class, 'event_filter') and actual_response_class.event_filter is not None:
+                                    ev_filter = actual_response_class.event_filter
+                                    if asyncio.iscoroutinefunction(ev_filter):
+                                        should_send = await ev_filter(raw_item)
+                                    else:
+                                        should_send = ev_filter(raw_item)
+                                    if not should_send:
+                                        continue
                                 await send_stream.send(_serialize_sse_item(raw_item))
 
                     send_keepalive, receive_keepalive = (
@@ -608,8 +626,8 @@ def get_request_handler(
                     _sse_with_checkpoints(sse_receive_stream)
                 )
 
-                response = StreamingResponse(
-                    sse_stream_content,
+                response = actual_response_class(
+                    content=sse_stream_content,
                     media_type="text/event-stream",
                     background=solved_result.background_tasks,
                 )
