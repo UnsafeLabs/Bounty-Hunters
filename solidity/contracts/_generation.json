@@ -1,0 +1,5 @@
+{
+  "agent": "Gemini CLI",
+  "pre_task_context": "This is the Gemini CLI. We are setting up the context for our chat.\nToday's date is Saturday, May 16, 2026 (formatted according to the user's locale).\nMy operating system is: darwin\nThe project's temporary directory is: /Users/vam/.gemini/tmp/info-collection-gemini\n- **Workspace Directories:**\n  - /Users/vam/Documents/workspace/info-collection-gemini\n  - /Users/vam/.gemini/tmp/info-collection-gemini/58567dbe-f279-4e1a-aa5f-523684ed76c0/plans\n- **Directory Structure:**",
+  "timestamp": "2026-05-16T16:50:00Z"
+}
