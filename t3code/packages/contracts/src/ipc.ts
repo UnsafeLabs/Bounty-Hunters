@@ -216,6 +216,78 @@ export const DesktopUpdateCheckResultSchema = Schema.Struct({
   state: DesktopUpdateStateSchema,
 });
 
+export type DesktopTrayConnectionStatus = "connected" | "reconnecting" | "disconnected";
+
+export const DesktopTrayConnectionStatusSchema = Schema.Literals([
+  "connected",
+  "reconnecting",
+  "disconnected",
+]);
+
+export interface DesktopTrayProject {
+  id: string;
+  environmentId: string;
+  name: string;
+  cwd: string;
+}
+
+export const DesktopTrayProjectSchema = Schema.Struct({
+  id: Schema.String,
+  environmentId: Schema.String,
+  name: Schema.String,
+  cwd: Schema.String,
+});
+
+export interface DesktopTrayState {
+  connectionStatus: DesktopTrayConnectionStatus;
+  activeProject: DesktopTrayProject | null;
+  recentProjects: readonly DesktopTrayProject[];
+}
+
+export const DesktopTrayStateSchema = Schema.Struct({
+  connectionStatus: DesktopTrayConnectionStatusSchema,
+  activeProject: Schema.NullOr(DesktopTrayProjectSchema),
+  recentProjects: Schema.Array(DesktopTrayProjectSchema),
+});
+
+export const DESKTOP_TRAY_NEW_CHAT_ACTION = "new-chat";
+export const DESKTOP_TRAY_OPEN_PROJECT_ACTION_PREFIX = "open-project:";
+
+export function encodeDesktopTrayOpenProjectAction(
+  project: Pick<DesktopTrayProject, "environmentId" | "id">,
+): string {
+  return `${DESKTOP_TRAY_OPEN_PROJECT_ACTION_PREFIX}${JSON.stringify({
+    environmentId: project.environmentId,
+    projectId: project.id,
+  })}`;
+}
+
+export function decodeDesktopTrayOpenProjectAction(
+  action: string,
+): { environmentId: string; projectId: string } | null {
+  if (!action.startsWith(DESKTOP_TRAY_OPEN_PROJECT_ACTION_PREFIX)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(action.slice(DESKTOP_TRAY_OPEN_PROJECT_ACTION_PREFIX.length));
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      typeof parsed.environmentId !== "string" ||
+      typeof parsed.projectId !== "string"
+    ) {
+      return null;
+    }
+    return {
+      environmentId: parsed.environmentId,
+      projectId: parsed.projectId,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface DesktopEnvironmentBootstrap {
   label: string;
   httpBaseUrl: string | null;
@@ -415,6 +487,7 @@ export interface DesktopBridge {
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
   onMenuAction: (listener: (action: string) => void) => () => void;
+  setTrayState: (state: DesktopTrayState) => Promise<void>;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;

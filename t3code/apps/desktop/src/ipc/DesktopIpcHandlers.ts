@@ -38,6 +38,7 @@ import {
   getLocalEnvironmentBootstrap,
   openExternal,
   pickFolder,
+  setTrayState,
   setTheme,
   showContextMenu,
 } from "./methods/window.ts";
@@ -73,6 +74,7 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
   yield* ipc.handle(pickFolder);
   yield* ipc.handle(confirm);
   yield* ipc.handle(setTheme);
+  yield* ipc.handle(setTrayState);
   yield* ipc.handle(showContextMenu);
   yield* ipc.handle(openExternal);
 

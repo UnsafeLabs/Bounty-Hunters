@@ -2,6 +2,7 @@ import {
   ContextMenuItemSchema,
   DesktopAppBrandingSchema,
   DesktopEnvironmentBootstrapSchema,
+  DesktopTrayStateSchema,
   DesktopThemeSchema,
   PickFolderOptionsSchema,
 } from "@t3tools/contracts";
@@ -16,6 +17,7 @@ import * as ElectronMenu from "../../electron/ElectronMenu.ts";
 import * as ElectronShell from "../../electron/ElectronShell.ts";
 import * as ElectronTheme from "../../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import * as DesktopTray from "../../window/DesktopTray.ts";
 import * as IpcChannels from "../channels.ts";
 import { makeIpcMethod, makeSyncIpcMethod } from "../DesktopIpc.ts";
 
@@ -100,6 +102,16 @@ export const setTheme = makeIpcMethod({
   handler: Effect.fn("desktop.ipc.window.setTheme")(function* (theme) {
     const electronTheme = yield* ElectronTheme.ElectronTheme;
     yield* electronTheme.setSource(theme);
+  }),
+});
+
+export const setTrayState = makeIpcMethod({
+  channel: IpcChannels.SET_TRAY_STATE_CHANNEL,
+  payload: DesktopTrayStateSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.setTrayState")(function* (state) {
+    const tray = yield* DesktopTray.DesktopTray;
+    yield* tray.updateState(state);
   }),
 });
 
