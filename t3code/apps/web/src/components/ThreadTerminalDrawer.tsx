@@ -444,6 +444,41 @@ export function TerminalViewport({
         return false;
       }
 
+      // --- Copy: Ctrl+Shift+C (Win/Linux) / Cmd+C (macOS) when text is selected ---
+      const isMod = event.metaKey || event.ctrlKey;
+      const isCopy = event.code === "KeyC" && isMod && (event.shiftKey || navigator.platform.includes("Mac"));
+      if (isCopy) {
+        const activeTerminal = terminalRef.current;
+        if (activeTerminal?.hasSelection()) {
+          event.preventDefault();
+          event.stopPropagation();
+          const text = activeTerminal.getSelection();
+          void navigator.clipboard.writeText(text).then(() => {
+            import("./ui/toast").then(({ toastManager }) => {
+              toastManager.add({
+                type: "success",
+                title: "Copied to clipboard",
+                timeout: 2000,
+              });
+            });
+          });
+          return false;
+        }
+        // No selection → let Ctrl+C pass through as SIGINT
+        return true;
+      }
+
+      // --- Paste: Ctrl+Shift+V (Win/Linux) / Cmd+V (macOS) ---
+      const isPaste = event.code === "KeyV" && isMod && (event.shiftKey || navigator.platform.includes("Mac"));
+      if (isPaste) {
+        event.preventDefault();
+        event.stopPropagation();
+        void navigator.clipboard.readText().then((text) => {
+          void sendTerminalInput(text, "Failed to paste");
+        });
+        return false;
+      }
+
       if (!isTerminalClearShortcut(event)) return true;
       event.preventDefault();
       event.stopPropagation();
