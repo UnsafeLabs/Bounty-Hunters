@@ -1,6 +1,6 @@
 import { type KeybindingCommand, type FilesystemBrowseEntry } from "@t3tools/contracts";
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
-import { type ReactNode } from "react";
+import { type ReactNode, createElement } from "react";
 import { sortThreads } from "../lib/threadSort";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
@@ -175,18 +175,87 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   });
 }
 
+/**
+ * Returns a ReactNode with `<mark>` elements wrapping characters in `text`
+ * that fuzzy-match `query`. Case-insensitive.
+ */
+function fuzzyHighlightText(text: string, query: string): ReactNode {
+  const normalizedText = text.toLowerCase();
+  const normalizedQuery = normalizeSearchText(query);
+  if (normalizedQuery.length === 0) return text;
+
+  const indices: number[] = [];
+  let queryIdx = 0;
+  for (let i = 0; i < normalizedText.length && queryIdx < normalizedQuery.length; i++) {
+    if (normalizedText[i] === normalizedQuery[queryIdx]) {
+      indices.push(i);
+      queryIdx++;
+    }
+  }
+  if (queryIdx < normalizedQuery.length) return text; // no full match
+
+  const parts: ReactNode[] = [];
+  let lastEnd = 0;
+  for (const idx of indices) {
+    if (idx > lastEnd) {
+      parts.push(text.slice(lastEnd, idx));
+    }
+    parts.push(createElement("mark", { key: idx, className: "bg-accent text-accent-foreground rounded px-0.5" }, text[idx]));
+    lastEnd = idx + 1;
+  }
+  if (lastEnd < text.length) {
+    parts.push(text.slice(lastEnd));
+  }
+  return parts.length === 1 ? parts[0] : parts;
+}
+
 function rankSearchFieldMatch(field: string, normalizedQuery: string): number {
   const normalizedField = normalizeSearchText(field);
-  if (normalizedField.length === 0 || !normalizedField.includes(normalizedQuery)) {
+  if (normalizedField.length === 0) {
     return Number.NEGATIVE_INFINITY;
   }
+
+  // --- Fuzzy matching ---
+  let queryIndex = 0;
+  let score = 0;
+  let consecutive = 0;
+  let prevMatched = false;
+
+  for (let i = 0; i < normalizedField.length && queryIndex < normalizedQuery.length; i++) {
+    if (normalizedField[i] === normalizedQuery[queryIndex]) {
+      queryIndex++;
+      if (prevMatched) {
+        consecutive++;
+        score += 10 * consecutive; // consecutive matches score higher
+      } else {
+        consecutive = 1;
+        // Word boundary bonus
+        if (i === 0 || normalizedField[i - 1] === " ") {
+          score += 5;
+        }
+        score += 3;
+      }
+      prevMatched = true;
+    } else {
+      prevMatched = false;
+    }
+  }
+
+  if (queryIndex < normalizedQuery.length) {
+    return Number.NEGATIVE_INFINITY; // not all query chars matched
+  }
+
+  // Shorter commands score higher
+  score += Math.max(0, 20 - normalizedField.length);
+
+  // Exact match bonus
   if (normalizedField === normalizedQuery) {
-    return 3;
+    score += 50;
+  } else if (normalizedField.startsWith(normalizedQuery)) {
+    score += 25;
   }
-  if (normalizedField.startsWith(normalizedQuery)) {
-    return 2;
-  }
-  return 1;
+
+  return score;
 }
 
 function rankCommandPaletteItemMatch(
@@ -254,15 +323,15 @@ export function filterCommandPaletteGroups(input: {
   return searchableGroups.flatMap((group) => {
     const items = group.items
       .map((item, index) => {
-        const haystack = normalizeSearchText(item.searchTerms.join(" "));
-        if (!haystack.includes(normalizedQuery)) {
+        const rank = rankCommandPaletteItemMatch(item, normalizedQuery);
+        if (rank <= 0) {
           return null;
         }
 
         return {
           item,
           index,
-          rank: rankCommandPaletteItemMatch(item, normalizedQuery),
+          rank,
         };
       })
       .filter(
@@ -270,7 +339,13 @@ export function filterCommandPaletteGroups(input: {
           entry !== null,
       )
       .toSorted((left, right) => right.rank - left.rank || left.index - right.index)
-      .map((entry) => entry.item);
+      .map((entry) => {
+        const item = entry.item;
+        if (typeof item.title === "string" && normalizedQuery.length > 0) {
+          return { ...item, title: fuzzyHighlightText(item.title, searchQuery) };
+        }
+        return item;
+      });
 
     if (items.length === 0) {
       return [];
