@@ -8,6 +8,7 @@ import {
   commandLabel,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
+  nextKeybindingSort,
   parseWhenExpressionDraft,
   shortcutToKeybindingInput,
   unknownWhenVariables,
@@ -44,9 +45,72 @@ describe("KeybindingsSettings.logic", () => {
         when: "!terminalFocus",
         defaultKey: "mod+j",
         defaultWhen: "",
-        source: "Custom",
+        source: "User",
       }),
     ]);
+  });
+
+  it("sorts rows by visible keybinding table columns", () => {
+    const keybindings = [
+      {
+        command: "terminal.toggle",
+        shortcut: {
+          key: "j",
+          modKey: true,
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+      },
+      {
+        command: "script.setup-db.run",
+        shortcut: {
+          key: "r",
+          modKey: true,
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+      },
+      {
+        command: "chat.newLocal",
+        shortcut: {
+          key: "n",
+          modKey: true,
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+      },
+    ] satisfies ResolvedKeybindingsConfig;
+
+    expect(
+      buildKeybindingRows(keybindings, "", { key: "key", direction: "desc" }).map((row) => row.key),
+    ).toEqual(["mod+r", "mod+n", "mod+j"]);
+    expect(
+      buildKeybindingRows(keybindings, "", { key: "source", direction: "asc" }).map(
+        (row) => row.source,
+      ),
+    ).toEqual(["Default", "Project", "User"]);
+    expect(
+      buildKeybindingRows(keybindings, "", { key: "command", direction: "asc" }).map(
+        (row) => row.command,
+      ),
+    ).toEqual(["chat.newLocal", "script.setup-db.run", "terminal.toggle"]);
+  });
+
+  it("toggles keybinding sort direction for repeated column selections", () => {
+    expect(nextKeybindingSort({ key: "command", direction: "asc" }, "key")).toEqual({
+      key: "key",
+      direction: "asc",
+    });
+    expect(nextKeybindingSort({ key: "key", direction: "asc" }, "key")).toEqual({
+      key: "key",
+      direction: "desc",
+    });
   });
 
   it("captures platform-specific mod shortcuts", () => {

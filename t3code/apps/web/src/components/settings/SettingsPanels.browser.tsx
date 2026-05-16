@@ -38,6 +38,7 @@ import { useUiStateStore } from "../../uiStateStore";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { DiagnosticsSettingsPanel } from "./DiagnosticsSettings";
 import { GeneralSettingsPanel, ProviderSettingsPanel } from "./SettingsPanels";
+import { KeybindingsSettingsPanel } from "./KeybindingsSettings";
 import { SourceControlSettingsPanel } from "./SourceControlSettings";
 
 function renderWithTestRouter(children: ReactNode) {
@@ -1175,6 +1176,84 @@ describe("GeneralSettingsPanel observability", () => {
       provider: ProviderDriverKind.make("codex"),
       instanceId: ProviderInstanceId.make("codex"),
     });
+  });
+
+  it("sorts keybindings by the source column", async () => {
+    setServerConfigSnapshot({
+      ...createBaseServerConfig(),
+      keybindings: [
+        {
+          command: "terminal.toggle",
+          shortcut: {
+            key: "j",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+          whenAst: {
+            type: "not",
+            node: { type: "identifier", name: "terminalFocus" },
+          },
+        },
+        {
+          command: "script.setup-db.run",
+          shortcut: {
+            key: "r",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+        },
+        {
+          command: "chat.newLocal",
+          shortcut: {
+            key: "n",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: true,
+          },
+          whenAst: {
+            type: "not",
+            node: { type: "identifier", name: "terminalFocus" },
+          },
+        },
+      ],
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <KeybindingsSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    const sourceHeader = page.getByRole("button", { name: "Source" });
+    await sourceHeader.click();
+
+    await expect
+      .element(page.getByRole("columnheader", { name: "Source" }))
+      .toHaveAttribute("aria-sort", "ascending");
+    expect(
+      Array.from(document.querySelectorAll<HTMLElement>("[data-keybinding-source]")).map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["Default", "Project", "User"]);
+
+    await sourceHeader.click();
+
+    await expect
+      .element(page.getByRole("columnheader", { name: "Source" }))
+      .toHaveAttribute("aria-sort", "descending");
+    expect(
+      Array.from(document.querySelectorAll<HTMLElement>("[data-keybinding-source]")).map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["User", "Project", "Default"]);
   });
 
   it("keeps long provider update commands inside the fixed-width popover", async () => {

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { KeybindingsSettingsPanel } from "../components/settings/KeybindingsSettings";
+import { KeybindingsEditor } from "../components/settings/KeybindingsEditor";
 
 export const Route = createFileRoute("/settings/keybindings")({
-  component: KeybindingsSettingsPanel,
+  component: KeybindingsEditor,
 });
