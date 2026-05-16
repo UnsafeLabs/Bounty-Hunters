@@ -287,6 +287,46 @@ describe("composerDraftStore clearComposerContent", () => {
   });
 });
 
+describe("composerDraftStore prompt drafts", () => {
+  const firstThreadId = ThreadId.make("thread-draft-first");
+  const secondThreadId = ThreadId.make("thread-draft-second");
+  const firstThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, firstThreadId);
+  const secondThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, secondThreadId);
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("keeps prompt drafts isolated by scoped thread", () => {
+    useComposerDraftStore.getState().setPrompt(firstThreadRef, "first thread draft");
+    useComposerDraftStore.getState().setPrompt(secondThreadRef, "second thread draft");
+
+    expect(draftFor(firstThreadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("first thread draft");
+    expect(draftFor(secondThreadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("second thread draft");
+
+    useComposerDraftStore.getState().setPrompt(firstThreadRef, "edited first draft");
+
+    expect(draftFor(firstThreadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("edited first draft");
+    expect(draftFor(secondThreadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("second thread draft");
+  });
+
+  it("removes empty prompt drafts and only clears the sent thread", () => {
+    useComposerDraftStore.getState().setPrompt(firstThreadRef, "message ready to send");
+    useComposerDraftStore.getState().setPrompt(secondThreadRef, "keep this unsent draft");
+
+    useComposerDraftStore.getState().setPrompt(firstThreadRef, "");
+
+    expect(draftFor(firstThreadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
+    expect(draftFor(secondThreadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("keep this unsent draft");
+
+    useComposerDraftStore.getState().setPrompt(firstThreadRef, "message ready to send");
+    useComposerDraftStore.getState().clearComposerContent(firstThreadRef);
+
+    expect(draftFor(firstThreadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
+    expect(draftFor(secondThreadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("keep this unsent draft");
+  });
+});
+
 describe("composerDraftStore syncPersistedAttachments", () => {
   const threadId = ThreadId.make("thread-sync-persisted");
   const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
