@@ -6,7 +6,7 @@ import fastapi.routing
 import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import EventSourceResponse
-from fastapi.sse import ServerSentEvent
+from fastapi.sse import SSEManager, ServerSentEvent
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -316,3 +316,89 @@ def test_no_keepalive_when_fast(client: TestClient):
     assert response.status_code == 200
     # KEEPALIVE_COMMENT is ": ping\n\n".
     assert ": ping\n" not in response.text
+
+
+def test_sse_manager_replays_filtered_events_with_retry():
+    async def run_scenario():
+        manager = SSEManager()
+        await manager.broadcast("first", event="chat", id="1")
+        await manager.broadcast("ignored", event="logs", id="2")
+        await manager.broadcast("second", event="chat", id="3")
+
+        connection = manager.connect(
+            event_type="chat",
+            last_event_id="1",
+            retry=2500,
+        )
+        event = await asyncio.wait_for(anext(connection), timeout=0.1)
+        await connection.close()
+        return event, manager.connection_count
+
+    event, connection_count = asyncio.run(run_scenario())
+
+    assert event.data == "second"
+    assert event.event == "chat"
+    assert event.id == "3"
+    assert event.retry == 2500
+    assert connection_count == 0
+
+
+def test_sse_manager_broadcasts_to_filtered_connections_only():
+    async def run_scenario():
+        manager = SSEManager()
+        chat_connection = manager.connect(event_type="chat")
+        log_connection = manager.connect(event_type="logs")
+
+        await manager.broadcast({"text": "hello"}, event="chat", id="10")
+        chat_event = await asyncio.wait_for(anext(chat_connection), timeout=0.1)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(anext(log_connection), timeout=0.01)
+
+        await chat_connection.close()
+        await log_connection.close()
+        return chat_event, manager.connection_count
+
+    event, connection_count = asyncio.run(run_scenario())
+
+    assert event.data == {"text": "hello"}
+    assert event.event == "chat"
+    assert event.id == "10"
+    assert connection_count == 0
+
+
+def test_sse_manager_stream_stops_on_client_disconnect():
+    class FakeRequest:
+        query_params = {"event_type": "chat"}
+        headers = {"last-event-id": ""}
+
+        def __init__(self) -> None:
+            self.disconnect_checks = 0
+
+        async def is_disconnected(self) -> bool:
+            self.disconnect_checks += 1
+            return self.disconnect_checks > 1
+
+    async def run_scenario():
+        manager = SSEManager()
+        request = FakeRequest()
+        stream = manager.stream(request=request, retry=1000)
+
+        first_task = asyncio.create_task(anext(stream))
+        await asyncio.sleep(0)
+        await manager.broadcast("first", event="chat", id="1")
+        first = await asyncio.wait_for(first_task, timeout=0.1)
+
+        second_task = asyncio.create_task(anext(stream))
+        await asyncio.sleep(0)
+        await manager.broadcast("second", event="chat", id="2")
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(second_task, timeout=0.1)
+
+        return first, request.disconnect_checks, manager.connection_count
+
+    event, disconnect_checks, connection_count = asyncio.run(run_scenario())
+
+    assert event.data == "first"
+    assert event.retry == 1000
+    assert disconnect_checks == 2
+    assert connection_count == 0

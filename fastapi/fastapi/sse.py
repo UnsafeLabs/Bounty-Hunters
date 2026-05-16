@@ -1,3 +1,6 @@
+import asyncio
+from collections.abc import AsyncIterator
+from itertools import count
 from typing import Annotated, Any
 
 from annotated_doc import Doc
@@ -141,6 +144,200 @@ class ServerSentEvent(BaseModel):
                 "or 'raw_data' for pre-formatted strings."
             )
         return self
+
+
+class SSEConnection:
+    """Async iterator for a single managed SSE client connection."""
+
+    def __init__(
+        self,
+        manager: "SSEManager",
+        *,
+        connection_id: int,
+        event_type: str | None,
+        last_event_id: str | None,
+        retry: int | None,
+    ) -> None:
+        self.manager = manager
+        self.connection_id = connection_id
+        self.event_type = event_type
+        self.last_event_id = last_event_id
+        self.retry = retry
+        self._queue: asyncio.Queue[ServerSentEvent | None] = asyncio.Queue()
+        self._closed = False
+        self._iterator: AsyncIterator[ServerSentEvent] | None = None
+
+    def accepts(self, event: ServerSentEvent) -> bool:
+        return self.event_type is None or event.event == self.event_type
+
+    def enqueue(self, event: ServerSentEvent) -> None:
+        if not self._closed:
+            self._queue.put_nowait(event)
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self.manager.disconnect(self.connection_id)
+        self._queue.put_nowait(None)
+
+    def __aiter__(self) -> "SSEConnection":
+        return self
+
+    async def __anext__(self) -> ServerSentEvent:
+        if self._iterator is None:
+            self._iterator = self._iterate()
+        return await self._iterator.__anext__()
+
+    async def _iterate(self) -> AsyncIterator[ServerSentEvent]:
+        try:
+            for event in self.manager.replay(
+                last_event_id=self.last_event_id,
+                event_type=self.event_type,
+            ):
+                yield self.manager.with_retry(event, self.retry)
+
+            while True:
+                event = await self._queue.get()
+                if event is None:
+                    break
+                yield self.manager.with_retry(event, self.retry)
+        finally:
+            await self.close()
+
+
+class SSEManager:
+    """Manage SSE connections, filtering, replay, and broadcasts.
+
+    `SSEManager.stream()` is intended for FastAPI endpoints that return
+    `EventSourceResponse`. It reads `event_type` from the query string and
+    `Last-Event-ID` from the request headers when a request is provided.
+    """
+
+    def __init__(self, *, history_size: int = 1000) -> None:
+        if history_size < 0:
+            raise ValueError("history_size must be greater than or equal to 0")
+        self.history_size = history_size
+        self._history: list[ServerSentEvent] = []
+        self._connections: dict[int, SSEConnection] = {}
+        self._connection_ids = count()
+
+    @property
+    def connection_count(self) -> int:
+        return len(self._connections)
+
+    def connect(
+        self,
+        *,
+        event_type: str | None = None,
+        last_event_id: str | None = None,
+        retry: int | None = None,
+    ) -> SSEConnection:
+        connection_id = next(self._connection_ids)
+        connection = SSEConnection(
+            self,
+            connection_id=connection_id,
+            event_type=event_type,
+            last_event_id=last_event_id,
+            retry=retry,
+        )
+        self._connections[connection_id] = connection
+        return connection
+
+    def disconnect(self, connection_id: int) -> None:
+        self._connections.pop(connection_id, None)
+
+    async def stream(
+        self,
+        request: Any | None = None,
+        *,
+        event_type: str | None = None,
+        last_event_id: str | None = None,
+        retry: int | None = None,
+    ) -> AsyncIterator[ServerSentEvent]:
+        if request is not None:
+            if event_type is None:
+                event_type = request.query_params.get("event_type")
+            if last_event_id is None:
+                last_event_id = request.headers.get("last-event-id")
+
+        connection = self.connect(
+            event_type=event_type,
+            last_event_id=last_event_id,
+            retry=retry,
+        )
+        try:
+            async for event in connection:
+                if request is not None and await request.is_disconnected():
+                    break
+                yield event
+        finally:
+            await connection.close()
+
+    async def broadcast(
+        self,
+        data: Any = None,
+        *,
+        raw_data: str | None = None,
+        event: str | None = None,
+        id: str | None = None,
+        retry: int | None = None,
+        comment: str | None = None,
+    ) -> ServerSentEvent:
+        if isinstance(data, ServerSentEvent):
+            sse_event = data
+        else:
+            sse_event = ServerSentEvent(
+                data=data,
+                raw_data=raw_data,
+                event=event,
+                id=id,
+                retry=retry,
+                comment=comment,
+            )
+
+        self._remember(sse_event)
+        for connection in tuple(self._connections.values()):
+            if connection.accepts(sse_event):
+                connection.enqueue(sse_event)
+        return sse_event
+
+    def replay(
+        self,
+        *,
+        last_event_id: str | None,
+        event_type: str | None = None,
+    ) -> list[ServerSentEvent]:
+        if last_event_id is None:
+            return []
+
+        start_index = -1
+        for index, event in enumerate(self._history):
+            if event.id == last_event_id:
+                start_index = index
+                break
+
+        replay_events = (
+            self._history[start_index + 1 :] if start_index >= 0 else self._history
+        )
+        if event_type is None:
+            return list(replay_events)
+        return [event for event in replay_events if event.event == event_type]
+
+    def with_retry(
+        self, event: ServerSentEvent, retry: int | None
+    ) -> ServerSentEvent:
+        if retry is None or event.retry is not None:
+            return event
+        return event.model_copy(update={"retry": retry})
+
+    def _remember(self, event: ServerSentEvent) -> None:
+        if self.history_size == 0:
+            return
+        self._history.append(event)
+        overflow = len(self._history) - self.history_size
+        if overflow > 0:
+            del self._history[:overflow]
 
 
 def format_sse_event(

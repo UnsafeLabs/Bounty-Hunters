@@ -556,6 +556,8 @@ def get_request_handler(
                     async def _producer() -> None:
                         async with send_stream:
                             async for raw_item in sse_aiter:
+                                if await request.is_disconnected():
+                                    break
                                 await send_stream.send(_serialize_sse_item(raw_item))
 
                     send_keepalive, receive_keepalive = (
