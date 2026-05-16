@@ -19,6 +19,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as Fiber from "effect/Fiber";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -78,6 +79,13 @@ interface SshTunnelEntry {
   readonly process: ChildProcessSpawner.ChildProcessHandle;
   readonly scope: Scope.Scope;
 }
+
+/** Tunnel connection state for health monitoring and auto-reconnect. */
+type TunnelState =
+  | { readonly _tag: "connecting" }
+  | { readonly _tag: "connected" }
+  | { readonly _tag: "reconnecting"; readonly attempt: number }
+  | { readonly _tag: "failed" };
 
 type SshEnvironmentEffectContext =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -1314,6 +1322,9 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     Deferred.Deferred<SshTunnelEntry, SshEnvironmentEffectError>
   >();
   const authSecrets = new Map<string, string>();
+  const tunnelStates = new Map<string, Ref.Ref<TunnelState>>();
+  const manualDisconnectKeys = new Set<string>();
+  const monitorFibers = new Map<string, Fiber.Fiber<void, unknown>>();
 
   const closeTunnelEntry = Effect.fn("ssh/tunnel.closeTunnelEntry")(function* (
     entry: SshTunnelEntry,
@@ -1351,9 +1362,83 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       Effect.flatMap((entries) =>
         Effect.forEach(entries, closeTunnelEntry, { concurrency: "unbounded" }),
       ),
+      Effect.andThen(
+        Effect.forEach([...monitorFibers.values()], (fiber) =>
+          Fiber.interrupt(fiber).pipe(Effect.ignore),
+        ),
+      ),
       Effect.ignore,
     ),
   );
+
+  const TUNNEL_HEALTH_CHECK_INTERVAL_MS = 10_000;
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const RECONNECT_DELAYS_MS = [1_000, 4_000, 16_000, 60_000, 60_000];
+
+  const runTunnelHealthMonitor = Effect.fn("ssh/tunnel.runTunnelHealthMonitor")(function* (
+    key: string,
+    httpBaseUrl: string,
+  ) {
+    while (true) {
+      yield* Effect.sleep(TUNNEL_HEALTH_CHECK_INTERVAL_MS);
+
+      const entry = tunnels.get(key);
+      if (!entry) return; // tunnel was closed
+
+      if (manualDisconnectKeys.has(key)) return; // manual disconnect
+
+      const stateRef = tunnelStates.get(key);
+      if (!stateRef) continue;
+
+      const health = yield* Effect.exit(
+        waitForHttpReady({ baseUrl: httpBaseUrl, timeoutMs: 3_000 }),
+      );
+      if (Exit.isSuccess(health)) continue; // healthy
+
+      // Tunnel is unhealthy — attempt reconnect
+      for (let attempt = 1; attempt <= MAX_RECONNECT_ATTEMPTS; attempt++) {
+        yield* Ref.set(stateRef, { _tag: "reconnecting", attempt });
+        yield* Effect.logWarning("ssh.tunnel.reconnect.start", {
+          key,
+          attempt,
+          maxAttempts: MAX_RECONNECT_ATTEMPTS,
+        });
+
+        const delayMs = RECONNECT_DELAYS_MS[Math.min(attempt - 1, RECONNECT_DELAYS_MS.length - 1)];
+        yield* Effect.sleep(delayMs);
+
+        if (manualDisconnectKeys.has(key)) {
+          yield* Ref.set(stateRef, { _tag: "failed" });
+          return;
+        }
+
+        const oldEntry = tunnels.get(key);
+        if (oldEntry) {
+          yield* closeTunnelEntry(oldEntry);
+        }
+
+        const reconnectExit = yield* Effect.exit(
+          waitForHttpReady({ baseUrl: httpBaseUrl, timeoutMs: 5_000 }),
+        );
+        if (Exit.isSuccess(reconnectExit)) {
+          yield* Ref.set(stateRef, { _tag: "connected" });
+          yield* Effect.logInfo("ssh.tunnel.reconnect.succeeded", { key, attempt });
+          break;
+        }
+
+        if (attempt >= MAX_RECONNECT_ATTEMPTS) {
+          yield* Ref.set(stateRef, { _tag: "failed" });
+          yield* Effect.logError("ssh.tunnel.reconnect.failed", {
+            key,
+            attempt,
+            maxAttempts: MAX_RECONNECT_ATTEMPTS,
+          });
+          tunnels.delete(key);
+          return;
+        }
+      }
+    }
+  });
 
   const promptForPassword = Effect.fn("ssh/tunnel.promptForPassword")(function* (
     target: DesktopSshEnvironmentTarget,
@@ -1603,6 +1688,16 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
           localPort: entry.localPort,
           remotePort: entry.remotePort,
         });
+        if (!tunnelStates.has(key)) {
+          const stateRef = yield* Ref.make<TunnelState>({ _tag: "connected" });
+          tunnelStates.set(key, stateRef);
+          const monitorFiber = yield* Effect.fork(
+            runTunnelHealthMonitor(key, entry.httpBaseUrl).pipe(
+              Effect.ensuring(Effect.sync(() => monitorFibers.delete(key))),
+            ),
+          );
+          monitorFibers.set(key, monitorFiber);
+        }
         return entry;
       }
       yield* Effect.logWarning("ssh.environment.tunnel.existing.stale", {
@@ -1634,6 +1729,23 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       resolvedTarget,
       ...(runner === undefined ? {} : { runner }),
     }).pipe(
+      Effect.tap((entry) =>
+        Effect.gen(function* () {
+          const stateRef = yield* Ref.make<TunnelState>({ _tag: "connected" });
+          tunnelStates.set(key, stateRef);
+          manualDisconnectKeys.delete(key);
+          const monitorFiber = yield* Effect.fork(
+            runTunnelHealthMonitor(key, entry.httpBaseUrl).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  monitorFibers.delete(key);
+                }),
+              ),
+            ),
+          );
+          monitorFibers.set(key, monitorFiber);
+        }).pipe(Effect.ignore),
+      ),
       Effect.tapError((cause) =>
         Effect.logWarning("ssh.environment.tunnel.create.failed", {
           ...sshTargetLogFields(resolvedTarget),
@@ -1733,6 +1845,12 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       hasTunnel: entry !== null,
       hasPendingTunnel: pendingTunnelEntries.has(key),
     });
+    manualDisconnectKeys.add(key);
+    const monitorFiber = monitorFibers.get(key);
+    if (monitorFiber) {
+      yield* Fiber.interrupt(monitorFiber).pipe(Effect.ignore);
+      monitorFibers.delete(key);
+    }
     if (entry !== null) {
       yield* closeTunnelEntry(entry);
     }
