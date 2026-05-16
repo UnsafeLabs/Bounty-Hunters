@@ -158,6 +158,14 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     runCliWithRuntime(["--no-log-websocket-events", "--version"]),
   );
 
+  it.effect("prints version subcommand output", () =>
+    Effect.gen(function* () {
+      const { output } = yield* captureStdout(runCliWithRuntime(["version"]));
+
+      assert.match(output, /^t3 v0\.0\.24 \((node|bun) /);
+    }),
+  );
+
   it.effect("rejects invalid log-level casing before launching the server", () =>
     Effect.gen(function* () {
       const error = yield* runCliWithRuntime(["--log-level", "Debug"]).pipe(Effect.flip);
