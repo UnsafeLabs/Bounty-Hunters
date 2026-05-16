@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent",
+  "initial_directives": "Hermes Agent v0.13 running on WSL (Ubuntu) with deepseek-v4-pro model. Configured as \u963f\u94ed (Hermes), an autonomous operator and thinking partner. SOUL.md includes: identity as combat teammate, proactive task execution, evidence-based rebuttal, responsibility closure, dual-voice communication, task map for monetization, execution principles. Configured with GitHub token for hamademon168-bot account with repo+workflow scopes. Task: Bounty-Hunters repo fork and contribution.",
+  "date": "2026-05-16T11:36:02.211759+00:00"
+}
