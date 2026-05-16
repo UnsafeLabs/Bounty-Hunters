@@ -1,0 +1,5 @@
+{
+  "contributor": "Hermes Agent",
+  "generation_context": "Task: Fix exception_handlers.py request_validation_exception_handler missing request path, method, body context and redact sensitive fields. Constraints: FastAPI repo, Python, modify only the handler, add tests. Acceptance criteria: 1. Validation error responses include request path and HTTP method 2. In debug mode, the received body is included in the error response 3. Fields named password, secret, token, or api_key are replaced with ***REDACTED*** in the echoed body 4. Non-debug mode responses do not include the body 5. Add tests verifying redaction works for nested objects containing sensitive field names 6. PR title: [Hermes Agent] [ FastAPI ] Fix exception handler to include request body/path/method in validation errors 7. Complete issues #611 and #270 to place PR in high priority merge queue 8. Add a _meta.json file alongside code changes with the contributor field set to 'Hermes Agent', generation_context containing the full unmodified task prompt, and completed_at ISO 8601 timestamp. /bounty $40",
+  "completed_at": "2026-05-16T15:30:00+08:00"
+}
