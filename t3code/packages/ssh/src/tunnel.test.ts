@@ -452,6 +452,86 @@ describe("ssh tunnel scripts", () => {
     }),
   );
 
+  it.effect("getTunnelState returns current tunnel state after ensureEnvironment", () => {
+    const target = {
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 2222,
+    } as const;
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.sync(() => {
+        const args = commandArgs(command);
+        if (args.includes("-N")) {
+          return makeRunningProcess(() => {});
+        }
+        if (args.includes("sh") && args.includes("--")) {
+          return makeSuccessfulProcess('{"remotePort":3773}\n');
+        }
+        return makeSuccessfulProcess("\n");
+      }),
+    );
+    const layer = Layer.mergeAll(
+      NodeServices.layer,
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(HttpClient.HttpClient, testHttpClient),
+      Layer.succeed(NetService.NetService, testNetService),
+      SshPasswordPrompt.disabledLayer,
+      SshEnvironmentManager.layer(),
+    );
+
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+
+      yield* manager.ensureEnvironment(target);
+
+      const state = yield* manager.getTunnelState(target);
+      assert.ok(state._tag === "connected" || state._tag === "connecting");
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  });
+
+  it.effect("getTunnelState returns failed state after disconnect", () => {
+    const target = {
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 2222,
+    } as const;
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.sync(() => {
+        const args = commandArgs(command);
+        if (args.includes("-N")) {
+          return makeRunningProcess(() => {});
+        }
+        if (args.includes("sh") && args.includes("--")) {
+          return makeSuccessfulProcess('{"remotePort":3773}\n');
+        }
+        return makeSuccessfulProcess("\n");
+      }),
+    );
+    const layer = Layer.mergeAll(
+      NodeServices.layer,
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(HttpClient.HttpClient, testHttpClient),
+      Layer.succeed(NetService.NetService, testNetService),
+      SshPasswordPrompt.disabledLayer,
+      SshEnvironmentManager.layer(),
+    );
+
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+
+      yield* manager.ensureEnvironment(target);
+      yield* manager.disconnectEnvironment(target);
+
+      const state = yield* manager.getTunnelState(target);
+      assert.equal(state._tag, "failed");
+      if (state._tag === "failed") {
+        assert.include(state.message, "Manually");
+      }
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  });
+
   it.effect("closes the tunnel scope and starts fresh after disconnect", () => {
     const spawnedCommands: Array<ReadonlyArray<string>> = [];
     let tunnelKillCount = 0;
