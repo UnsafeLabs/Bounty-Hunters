@@ -191,3 +191,19 @@ class Paginator:
             return _json.loads(data)
         except Exception:
             return {}
+
+    async def __aiter__(self):
+        """Async iterator for use in async contexts.
+
+        Usage:
+            paginator = Paginator(query, limit=20)
+            async for item in paginator:
+                await process(item)
+        """
+        while True:
+            page = self.next_page()
+            if not page.items:
+                break
+            for item in page.items:
+                yield item
+
