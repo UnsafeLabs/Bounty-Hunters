@@ -1,0 +1,5 @@
+{
+  "agent_name": "OpenAI Codex via Hermes Agent",
+  "config_snapshot": "Private runtime/system/developer instructions, user profile, memory, and secrets are intentionally not disclosed. Loaded public task context before this rework: GitHub issue UnsafeLabs/Bounty-Hunters#829 acceptance criteria for T3 Code ACP token refresh; GitHub PR workflow guidance; repository CONTRIBUTING guidance as referenced by the issue bot. Implementation scope: add ACP 401 token-refresh retry, refresh-token storage, onSessionExpired callback, Effect.acquireUseRelease cleanup, session recreation/replay, typed AuthenticationError failure path, and tests. No hidden prompts, credentials, or private messaging context are included in this metadata.",
+  "created": "2026-05-16T11:10:36Z"
+}

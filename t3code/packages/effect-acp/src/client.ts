@@ -317,6 +317,11 @@ interface AuthState {
   readonly generation: number;
 }
 
+interface SessionState {
+  readonly createPayload: AcpSchema.NewSessionRequest | undefined;
+  readonly currentSessionId: string | undefined;
+}
+
 const getMetaString = (meta: { readonly [x: string]: unknown } | null | undefined, key: string) => {
   const value = meta?.[key];
   return typeof value === "string" ? value : undefined;
@@ -336,6 +341,11 @@ const getSessionId = (payload: unknown) =>
   typeof payload === "object" && payload !== null && "sessionId" in payload
     ? (payload as { readonly sessionId?: unknown }).sessionId
     : undefined;
+
+const replaceSessionId = <A>(payload: A, sessionId: string): A =>
+  typeof payload === "object" && payload !== null && "sessionId" in payload
+    ? ({ ...payload, sessionId } as A)
+    : payload;
 
 export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
   stdio: Stdio.Stdio,
@@ -493,6 +503,10 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     refreshToken: undefined,
     generation: 0,
   });
+  const sessionStateRef = yield* Ref.make<SessionState>({
+    createPayload: undefined,
+    currentSessionId: undefined,
+  });
   const refreshSemaphore = yield* Semaphore.make(1);
 
   const storeAuthentication = (
@@ -511,6 +525,42 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
       Effect.tap((response) => storeAuthentication(payload, response)),
     );
 
+  const createSession = (payload: AcpSchema.NewSessionRequest) =>
+    callRpc(rpc[AGENT_METHODS.session_new](payload)).pipe(
+      Effect.tap((response) =>
+        Ref.set(sessionStateRef, {
+          createPayload: payload,
+          currentSessionId: response.sessionId,
+        }),
+      ),
+    );
+
+  const closeExpiredSession = (sessionId: string | undefined) =>
+    typeof sessionId === "string"
+      ? callRpc(rpc[AGENT_METHODS.session_close]({ sessionId })).pipe(Effect.ignore)
+      : Effect.void;
+
+  const recreateSessionIfCurrentExpired = (expiredSessionId: string | undefined) =>
+    Effect.gen(function* () {
+      const sessionState = yield* Ref.get(sessionStateRef);
+      if (
+        typeof expiredSessionId !== "string" ||
+        sessionState.currentSessionId !== expiredSessionId ||
+        !sessionState.createPayload
+      ) {
+        return;
+      }
+      yield* createSession(sessionState.createPayload).pipe(
+        Effect.mapError(
+          (error) =>
+            new AcpError.AuthenticationError({
+              errorMessage: error.message,
+              cause: error,
+            }),
+        ),
+      );
+    });
+
   const reauthenticate = (sessionId: string | undefined, generation: number) =>
     refreshSemaphore.withPermits(1)(
       Effect.gen(function* () {
@@ -527,34 +577,56 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
           );
         }
 
+        const methodId = state.methodId;
+
         if (options.onSessionExpired) {
           yield* options.onSessionExpired(sessionId);
         }
 
-        yield* authenticate({
-          methodId: state.methodId,
-          _meta: {
-            ...(state.refreshToken ? { refreshToken: state.refreshToken } : {}),
-            ...(state.accessToken ? { previousAccessToken: state.accessToken } : {}),
-          },
-        }).pipe(
-          Effect.mapError(
-            (error) =>
-              new AcpError.AuthenticationError({
-                errorMessage: error.message,
-                cause: error,
-              }),
-          ),
+        yield* Effect.acquireUseRelease(
+          Effect.succeed(sessionId),
+          () =>
+            authenticate({
+              methodId,
+              _meta: {
+                ...(state.refreshToken ? { refreshToken: state.refreshToken } : {}),
+                ...(state.accessToken ? { previousAccessToken: state.accessToken } : {}),
+              },
+            }).pipe(
+              Effect.mapError(
+                (error) =>
+                  new AcpError.AuthenticationError({
+                    errorMessage: error.message,
+                    cause: error,
+                  }),
+              ),
+            ),
+          (expiredSessionId) => closeExpiredSession(expiredSessionId),
         );
+        yield* recreateSessionIfCurrentExpired(sessionId);
       }),
     );
 
-  const withAuthRefresh = <A>(effect: Effect.Effect<A, AcpError.AcpError>, payload?: unknown) =>
+  const replayPayload = <A>(payload: A, expiredSessionId: string | undefined) =>
+    Effect.gen(function* () {
+      const sessionState = yield* Ref.get(sessionStateRef);
+      return typeof expiredSessionId === "string" && sessionState.currentSessionId
+        ? replaceSessionId(payload, sessionState.currentSessionId)
+        : payload;
+    });
+
+  const withAuthRefresh = <A, P>(
+    payload: P,
+    run: (payload: P) => Effect.Effect<A, AcpError.AcpError>,
+  ) =>
     Effect.gen(function* () {
       const generation = yield* Ref.get(authStateRef).pipe(Effect.map((state) => state.generation));
       const attemptedRefreshRef = yield* Ref.make(false);
       const sessionId = getSessionId(payload);
-      return yield* effect.pipe(
+      return yield* Effect.flatMap(
+        replayPayload(payload, typeof sessionId === "string" ? sessionId : undefined),
+        run,
+      ).pipe(
         Effect.catchIf(isUnauthorizedError, (error) =>
           Effect.gen(function* () {
             const attemptedRefresh = yield* Ref.get(attemptedRefreshRef);
@@ -599,23 +671,36 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
       initialize: (payload) => callRpc(rpc[AGENT_METHODS.initialize](payload)),
       authenticate,
       logout: (payload) => callRpc(rpc[AGENT_METHODS.logout](payload)),
-      createSession: (payload) =>
-        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_new](payload)), payload),
+      createSession: (payload) => withAuthRefresh(payload, createSession),
       loadSession: (payload) =>
-        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_load](payload)), payload),
+        withAuthRefresh(payload, (nextPayload) =>
+          callRpc(rpc[AGENT_METHODS.session_load](nextPayload)),
+        ),
       listSessions: (payload) =>
-        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_list](payload)), payload),
+        withAuthRefresh(payload, (nextPayload) =>
+          callRpc(rpc[AGENT_METHODS.session_list](nextPayload)),
+        ),
       forkSession: (payload) =>
-        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_fork](payload)), payload),
+        withAuthRefresh(payload, (nextPayload) =>
+          callRpc(rpc[AGENT_METHODS.session_fork](nextPayload)),
+        ),
       resumeSession: (payload) =>
-        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_resume](payload)), payload),
+        withAuthRefresh(payload, (nextPayload) =>
+          callRpc(rpc[AGENT_METHODS.session_resume](nextPayload)),
+        ),
       closeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_close](payload)),
       setSessionModel: (payload) =>
-        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_set_model](payload)), payload),
+        withAuthRefresh(payload, (nextPayload) =>
+          callRpc(rpc[AGENT_METHODS.session_set_model](nextPayload)),
+        ),
       setSessionConfigOption: (payload) =>
-        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)), payload),
+        withAuthRefresh(payload, (nextPayload) =>
+          callRpc(rpc[AGENT_METHODS.session_set_config_option](nextPayload)),
+        ),
       prompt: (payload) =>
-        withAuthRefresh(callRpc(rpc[AGENT_METHODS.session_prompt](payload)), payload),
+        withAuthRefresh(payload, (nextPayload) =>
+          callRpc(rpc[AGENT_METHODS.session_prompt](nextPayload)),
+        ),
       cancel: (payload) => transport.notify(AGENT_METHODS.session_cancel, payload),
     },
     handleRequestPermission: (handler) =>

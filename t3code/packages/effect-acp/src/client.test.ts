@@ -24,9 +24,15 @@ const InitializeRequest = jsonRpcRequest("initialize", AcpSchema.InitializeReque
 const InitializeResponse = jsonRpcResponse(AcpSchema.InitializeResponse);
 const AuthenticateRequest = jsonRpcRequest("authenticate", AcpSchema.AuthenticateRequest);
 const AuthenticateResponse = jsonRpcResponse(AcpSchema.AuthenticateResponse);
+const NewSessionRequest = jsonRpcRequest("session/new", AcpSchema.NewSessionRequest);
+const NewSessionResponse = jsonRpcResponse(AcpSchema.NewSessionResponse);
+const CloseSessionRequest = jsonRpcRequest("session/close", AcpSchema.CloseSessionRequest);
+const CloseSessionResponse = jsonRpcResponse(AcpSchema.CloseSessionResponse);
 const PromptRequest = jsonRpcRequest("session/prompt", AcpSchema.PromptRequest);
 const PromptResponse = jsonRpcResponse(AcpSchema.PromptResponse);
 const decodeAuthenticateRequest = Schema.decodeEffect(Schema.fromJsonString(AuthenticateRequest));
+const decodeNewSessionRequest = Schema.decodeEffect(Schema.fromJsonString(NewSessionRequest));
+const decodeCloseSessionRequest = Schema.decodeEffect(Schema.fromJsonString(CloseSessionRequest));
 const decodePromptRequest = Schema.decodeEffect(Schema.fromJsonString(PromptRequest));
 const ExtRequest = jsonRpcRequest("x/test", Schema.Struct({ hello: Schema.String }));
 const ExtResponse = jsonRpcResponse(Schema.Struct({ ok: Schema.Boolean }));
@@ -395,7 +401,7 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
     }),
   );
 
-  it.effect("refreshes authentication once and replays a prompt after a 401", () =>
+  it.effect("refreshes authentication once and replays concurrent prompts after a 401", () =>
     Effect.gen(function* () {
       const { stdio, input, output } = yield* makeInMemoryStdio();
       const scope = yield* Scope.make();
@@ -420,18 +426,49 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
       );
       yield* Fiber.join(authenticateFiber);
 
-      const promptFiber = yield* acp.agent
+      const sessionFiber = yield* acp.agent
+        .createSession({ cwd: process.cwd(), mcpServers: [] })
+        .pipe(Effect.forkScoped);
+      const newSessionOutbound = yield* Queue.take(output);
+      const newSessionRequest = yield* decodeNewSessionRequest(newSessionOutbound);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(NewSessionResponse, {
+          jsonrpc: "2.0",
+          id: newSessionRequest.id,
+          result: { sessionId: "session-1" },
+        }),
+      );
+      assert.equal((yield* Fiber.join(sessionFiber)).sessionId, "session-1");
+
+      const firstPromptFiber = yield* acp.agent
         .prompt({
-          sessionId: "expired-session",
-          prompt: [{ type: "text", text: "hello" }],
+          sessionId: "session-1",
+          prompt: [{ type: "text", text: "first" }],
+        })
+        .pipe(Effect.forkScoped);
+      const secondPromptFiber = yield* acp.agent
+        .prompt({
+          sessionId: "session-1",
+          prompt: [{ type: "text", text: "second" }],
         })
         .pipe(Effect.forkScoped);
 
       const firstPromptOutbound = yield* Queue.take(output);
+      const secondPromptOutbound = yield* Queue.take(output);
       const firstPromptRequest = yield* decodePromptRequest(firstPromptOutbound);
+      const secondPromptRequest = yield* decodePromptRequest(secondPromptOutbound);
       yield* Queue.offer(
         input,
         encodeRpcFailureJsonl(firstPromptRequest.id, {
+          code: -32000,
+          message: "401 Unauthorized",
+          data: { status: 401 },
+        }),
+      );
+      yield* Queue.offer(
+        input,
+        encodeRpcFailureJsonl(secondPromptRequest.id, {
           code: -32000,
           message: "401 Unauthorized",
           data: { status: 401 },
@@ -441,6 +478,7 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
       const refreshOutbound = yield* Queue.take(output);
       const refreshRequest = yield* decodeAuthenticateRequest(refreshOutbound);
       assert.equal(refreshRequest.params.methodId, "cursor_login");
+      assert.equal(refreshRequest.params._meta?.refreshToken, "refresh-1");
       yield* Queue.offer(
         input,
         yield* encodeJsonl(AuthenticateResponse, {
@@ -450,20 +488,55 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
         }),
       );
 
-      const replayedPromptOutbound = yield* Queue.take(output);
-      const replayedPromptRequest = yield* decodePromptRequest(replayedPromptOutbound);
-      assert.equal(replayedPromptRequest.params.sessionId, "expired-session");
+      const closeOutbound = yield* Queue.take(output);
+      const closeRequest = yield* decodeCloseSessionRequest(closeOutbound);
+      assert.equal(closeRequest.params.sessionId, "session-1");
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(CloseSessionResponse, {
+          jsonrpc: "2.0",
+          id: closeRequest.id,
+          result: {},
+        }),
+      );
+
+      const recreatedSessionOutbound = yield* Queue.take(output);
+      const recreatedSessionRequest = yield* decodeNewSessionRequest(recreatedSessionOutbound);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(NewSessionResponse, {
+          jsonrpc: "2.0",
+          id: recreatedSessionRequest.id,
+          result: { sessionId: "session-2" },
+        }),
+      );
+
+      const firstReplayedPromptOutbound = yield* Queue.take(output);
+      const secondReplayedPromptOutbound = yield* Queue.take(output);
+      const firstReplayedPromptRequest = yield* decodePromptRequest(firstReplayedPromptOutbound);
+      const secondReplayedPromptRequest = yield* decodePromptRequest(secondReplayedPromptOutbound);
+      assert.equal(firstReplayedPromptRequest.params.sessionId, "session-2");
+      assert.equal(secondReplayedPromptRequest.params.sessionId, "session-2");
       yield* Queue.offer(
         input,
         yield* encodeJsonl(PromptResponse, {
           jsonrpc: "2.0",
-          id: replayedPromptRequest.id,
+          id: firstReplayedPromptRequest.id,
+          result: { stopReason: "end_turn" },
+        }),
+      );
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(PromptResponse, {
+          jsonrpc: "2.0",
+          id: secondReplayedPromptRequest.id,
           result: { stopReason: "end_turn" },
         }),
       );
 
-      assert.deepEqual(yield* Fiber.join(promptFiber), { stopReason: "end_turn" });
-      assert.deepEqual(yield* Ref.get(expiredSessions), ["expired-session"]);
+      assert.deepEqual(yield* Fiber.join(firstPromptFiber), { stopReason: "end_turn" });
+      assert.deepEqual(yield* Fiber.join(secondPromptFiber), { stopReason: "end_turn" });
+      assert.deepEqual(yield* Ref.get(expiredSessions), ["session-1"]);
       yield* Scope.close(scope, Exit.void);
     }),
   );
@@ -489,9 +562,24 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
       );
       yield* Fiber.join(authenticateFiber);
 
+      const sessionFiber = yield* acp.agent
+        .createSession({ cwd: process.cwd(), mcpServers: [] })
+        .pipe(Effect.forkScoped);
+      const newSessionOutbound = yield* Queue.take(output);
+      const newSessionRequest = yield* decodeNewSessionRequest(newSessionOutbound);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(NewSessionResponse, {
+          jsonrpc: "2.0",
+          id: newSessionRequest.id,
+          result: { sessionId: "session-1" },
+        }),
+      );
+      yield* Fiber.join(sessionFiber);
+
       const promptExitFiber = yield* Effect.exit(
         acp.agent.prompt({
-          sessionId: "expired-session",
+          sessionId: "session-1",
           prompt: [{ type: "text", text: "hello" }],
         }),
       ).pipe(Effect.forkScoped);
@@ -515,6 +603,18 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
           code: -32000,
           message: "refresh token expired",
           data: { status: 401 },
+        }),
+      );
+
+      const closeOutbound = yield* Queue.take(output);
+      const closeRequest = yield* decodeCloseSessionRequest(closeOutbound);
+      assert.equal(closeRequest.params.sessionId, "session-1");
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(CloseSessionResponse, {
+          jsonrpc: "2.0",
+          id: closeRequest.id,
+          result: {},
         }),
       );
 
