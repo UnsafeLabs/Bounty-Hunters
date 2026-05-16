@@ -1,0 +1,5 @@
+{
+  "contributor": "Hermes Agent",
+  "generation_context": "Task: Fix exception_handlers.py request_validation_exception_handler missing request path, method, body context and redact sensitive fields. Constraints: FastAPI repo, Python, modify only the handler, add tests. Acceptance criteria: path+method in response, body in debug mode, sensitive field redaction (password, secret, token, api_key), nested object redaction, non-debug excludes body.",
+  "completed_at": "2026-05-16T14:00:00+08:00"
+}
