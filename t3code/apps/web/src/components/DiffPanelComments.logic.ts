@@ -56,9 +56,7 @@ export function buildDiffCommentResetKey(input: {
   return `${input.threadId ?? "no-thread"}:${input.turnId ?? "conversation"}:${hashString(input.patch ?? "")}`;
 }
 
-export function readDiffCommentSession(
-  resetKey: string,
-): Record<string, DiffInlineComment> {
+export function readDiffCommentSession(resetKey: string): Record<string, DiffInlineComment> {
   return { ...(diffCommentSessionStore.get(resetKey) ?? {}) };
 }
 

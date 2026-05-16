@@ -46,10 +46,13 @@ import ChatMarkdown from "./ChatMarkdown";
 import {
   buildDiffCommentAnnotations,
   buildDiffCommentKey,
+  buildDiffCommentResetKey,
   countPendingDiffComments,
+  readDiffCommentSession,
   type DiffCommentAnnotationMetadata,
   type DiffCommentSide,
   type DiffInlineComment,
+  writeDiffCommentSession,
 } from "./DiffPanelComments.logic";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 
@@ -217,7 +220,8 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const patchViewportRef = useRef<HTMLDivElement>(null);
   const turnStripRef = useRef<HTMLDivElement>(null);
   const previousDiffOpenRef = useRef(false);
-  const previousDiffCommentResetKeyRef = useRef<string | null>(null);
+  const currentDiffCommentResetKeyRef = useRef<string | null>(null);
+  const skipNextDiffCommentPersistRef = useRef(false);
   const [canScrollTurnStripLeft, setCanScrollTurnStripLeft] = useState(false);
   const [canScrollTurnStripRight, setCanScrollTurnStripRight] = useState(false);
   const routeThreadRef = useParams({
@@ -359,7 +363,11 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   }, [renderablePatch]);
   const diffCommentResetKey = useMemo(
     () =>
-      `${activeThreadId ?? "no-thread"}:${selectedTurn?.turnId ?? "conversation"}:${selectedPatch ?? ""}`,
+      buildDiffCommentResetKey({
+        threadId: activeThreadId ? String(activeThreadId) : null,
+        turnId: selectedTurn?.turnId ? String(selectedTurn.turnId) : null,
+        patch: selectedPatch,
+      }),
     [activeThreadId, selectedPatch, selectedTurn?.turnId],
   );
   const pendingDiffCommentCount = countPendingDiffComments(diffCommentsByKey);
@@ -378,18 +386,27 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   }, [renderableFiles]);
 
   useEffect(() => {
-    if (previousDiffCommentResetKeyRef.current === null) {
-      previousDiffCommentResetKeyRef.current = diffCommentResetKey;
-      return;
-    }
-    if (previousDiffCommentResetKeyRef.current === diffCommentResetKey) {
+    if (currentDiffCommentResetKeyRef.current === diffCommentResetKey) {
       return;
     }
 
-    previousDiffCommentResetKeyRef.current = diffCommentResetKey;
-    setDiffCommentsByKey({});
+    currentDiffCommentResetKeyRef.current = diffCommentResetKey;
+    skipNextDiffCommentPersistRef.current = true;
+    setDiffCommentsByKey(readDiffCommentSession(diffCommentResetKey));
     setActiveDiffCommentEditor(null);
   }, [diffCommentResetKey]);
+
+  useEffect(() => {
+    if (currentDiffCommentResetKeyRef.current !== diffCommentResetKey) {
+      return;
+    }
+    if (skipNextDiffCommentPersistRef.current) {
+      skipNextDiffCommentPersistRef.current = false;
+      return;
+    }
+
+    writeDiffCommentSession(diffCommentResetKey, diffCommentsByKey);
+  }, [diffCommentResetKey, diffCommentsByKey]);
 
   useEffect(() => {
     if (diffOpen && !previousDiffOpenRef.current) {
@@ -940,6 +957,9 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                           lineDiffType: "none",
                           lineHoverHighlight: "number",
                           onLineNumberClick: ({ annotationSide, lineNumber }) => {
+                            if (lineNumber <= 0) {
+                              return;
+                            }
                             openDiffCommentEditor({
                               filePath,
                               lineNumber,
