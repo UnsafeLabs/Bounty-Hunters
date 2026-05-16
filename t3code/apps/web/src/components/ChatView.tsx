@@ -3498,6 +3498,26 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      <nav className="sr-only focus-within:not-sr-only focus-within:absolute focus-within:left-3 focus-within:top-3 focus-within:z-50 focus-within:flex focus-within:gap-2">
+        <a
+          href="#app-sidebar"
+          className="rounded-md border border-border bg-background px-3 py-2 text-foreground text-sm shadow-sm"
+        >
+          Skip to sidebar
+        </a>
+        <a
+          href="#chat-messages"
+          className="rounded-md border border-border bg-background px-3 py-2 text-foreground text-sm shadow-sm"
+        >
+          Skip to messages
+        </a>
+        <a
+          href="#chat-composer"
+          className="rounded-md border border-border bg-background px-3 py-2 text-foreground text-sm shadow-sm"
+        >
+          Skip to composer
+        </a>
+      </nav>
       {/* Top bar */}
       <header
         className={cn(
@@ -3577,6 +3597,7 @@ export default function ChatView(props: ChatViewProps) {
               workspaceRoot={activeWorkspaceRoot}
               skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
               onIsAtEndChange={onIsAtEndChange}
+              onReturnFocusToComposer={() => composerRef.current?.focusAtEnd()}
             />
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
@@ -3585,6 +3606,7 @@ export default function ChatView(props: ChatViewProps) {
                 <button
                   type="button"
                   onClick={() => scrollToEnd(true)}
+                  aria-label="Scroll to latest message"
                   className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
                 >
                   <ChevronDownIcon className="size-3.5" />
@@ -3596,6 +3618,8 @@ export default function ChatView(props: ChatViewProps) {
 
           {/* Input bar */}
           <div
+            id="chat-composer"
+            tabIndex={-1}
             className={cn(
               "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
               isGitRepo

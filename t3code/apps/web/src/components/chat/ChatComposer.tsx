@@ -274,6 +274,11 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                 ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
                 : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
             }
+            aria-label={
+              props.planSidebarOpen
+                ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
+                : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
+            }
           >
             <ListTodoIcon />
             <span className="sr-only sm:not-sr-only">{props.planSidebarLabel}</span>

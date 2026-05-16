@@ -93,6 +93,7 @@ function buildProps() {
     timestampFormat: "locale" as const,
     workspaceRoot: undefined,
     onIsAtEndChange: () => {},
+    onReturnFocusToComposer: () => {},
   };
 }
 
@@ -144,6 +145,22 @@ describe("MessagesTimeline", () => {
 
     expect(markup).not.toContain("Show full message");
     expect(markup).toContain('data-user-message-collapsible="false"');
+  });
+
+  it("marks the timeline as a live message log with message list items", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildUserTimelineEntry("Short prompt.")]}
+      />,
+    );
+
+    expect(markup).toContain('id="chat-messages"');
+    expect(markup).toContain('role="log"');
+    expect(markup).toContain('aria-live="polite"');
+    expect(markup).toContain('role="listitem"');
+    expect(markup).toContain('aria-label="user message"');
   });
 
   it("renders inline terminal labels with the composer chip UI", async () => {

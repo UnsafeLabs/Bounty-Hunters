@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -126,6 +127,7 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onReturnFocusToComposer: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +157,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
+  onReturnFocusToComposer,
 }: MessagesTimelineProps) {
+  const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -189,6 +193,61 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onIsAtEndChange(state.isAtEnd);
     }
   }, [listRef, onIsAtEndChange]);
+
+  const focusMessageByOffset = useCallback((offset: 1 | -1) => {
+    const root = timelineRootRef.current;
+    if (!root) return;
+    const messageRows = Array.from(
+      root.querySelectorAll<HTMLElement>('[data-timeline-row-kind="message"]'),
+    );
+    if (messageRows.length === 0) return;
+
+    const activeRow =
+      document.activeElement instanceof Element
+        ? document.activeElement.closest<HTMLElement>('[data-timeline-row-kind="message"]')
+        : null;
+    const activeIndex = activeRow ? messageRows.indexOf(activeRow) : -1;
+    const nextIndex =
+      activeIndex === -1
+        ? offset > 0
+          ? 0
+          : messageRows.length - 1
+        : Math.min(messageRows.length - 1, Math.max(0, activeIndex + offset));
+    messageRows[nextIndex]?.focus();
+  }, []);
+
+  const handleTimelineKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        focusMessageByOffset(1);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        focusMessageByOffset(-1);
+        return;
+      }
+      if (event.key === "Enter") {
+        const activeRow =
+          document.activeElement instanceof Element
+            ? document.activeElement.closest<HTMLElement>('[data-timeline-row-kind="message"]')
+            : null;
+        const expandableButton =
+          activeRow?.querySelector<HTMLButtonElement>("button[aria-expanded]");
+        if (expandableButton) {
+          event.preventDefault();
+          expandableButton.click();
+        }
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onReturnFocusToComposer();
+      }
+    },
+    [focusMessageByOffset, onReturnFocusToComposer],
+  );
 
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {
@@ -255,7 +314,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   if (rows.length === 0 && !isWorking) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div
+        id="chat-messages"
+        role="log"
+        aria-live="polite"
+        aria-label="Chat messages"
+        className="flex h-full items-center justify-center"
+        tabIndex={0}
+        onKeyDown={handleTimelineKeyDown}
+      >
         <p className="text-sm text-muted-foreground/30">
           Send a message to start the conversation.
         </p>
@@ -266,21 +333,33 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <LegendList<MessagesTimelineRow>
-          ref={listRef}
-          data={rows}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          estimatedItemSize={90}
-          initialScrollAtEnd
-          maintainScrollAtEnd
-          maintainScrollAtEndThreshold={0.1}
-          maintainVisibleContentPosition
-          onScroll={handleScroll}
-          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-          ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={TIMELINE_LIST_FOOTER}
-        />
+        <div
+          ref={timelineRootRef}
+          id="chat-messages"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-label="Chat messages"
+          className="h-full"
+          tabIndex={0}
+          onKeyDown={handleTimelineKeyDown}
+        >
+          <LegendList<MessagesTimelineRow>
+            ref={listRef}
+            data={rows}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            estimatedItemSize={90}
+            initialScrollAtEnd
+            maintainScrollAtEnd
+            maintainScrollAtEndThreshold={0.1}
+            maintainVisibleContentPosition
+            onScroll={handleScroll}
+            className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListFooterComponent={TIMELINE_LIST_FOOTER}
+          />
+        </div>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );
@@ -306,6 +385,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
+      role={row.kind === "message" ? "listitem" : undefined}
+      tabIndex={row.kind === "message" ? -1 : undefined}
+      aria-label={row.kind === "message" ? `${row.message.role} message` : undefined}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}

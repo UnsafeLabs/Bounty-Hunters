@@ -3,7 +3,7 @@ import "../../index.css";
 import { EnvironmentId } from "@t3tools/contracts";
 import { createRef } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
@@ -70,6 +70,7 @@ function buildProps() {
     timestampFormat: "24-hour" as const,
     workspaceRoot: undefined,
     onIsAtEndChange: vi.fn(),
+    onReturnFocusToComposer: vi.fn(),
   };
 }
 
@@ -79,13 +80,13 @@ function buildLongUserMessageText(tail = "deep hidden detail only after expand")
   ).join("\n");
 }
 
-function buildUserTimelineEntry(text: string) {
+function buildUserTimelineEntry(text: string, index = 1) {
   return {
-    id: "entry-1",
+    id: `entry-${index}`,
     kind: "message" as const,
     createdAt: MESSAGE_CREATED_AT,
     message: {
-      id: "message-1" as never,
+      id: `message-${index}` as never,
       role: "user" as const,
       text,
       createdAt: MESSAGE_CREATED_AT,
@@ -200,6 +201,60 @@ describe("MessagesTimeline", () => {
       expect(messageBody?.className).toContain("overflow-hidden");
       expect(messageBody?.getAttribute("data-user-message-fade")).toBe("true");
       expect(messageBody?.style.maskImage).toContain("linear-gradient");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("supports keyboard navigation across messages and back to the composer", async () => {
+    const props = buildProps();
+    const screen = await render(
+      <MessagesTimeline
+        {...props}
+        timelineEntries={[
+          buildUserTimelineEntry("First prompt.", 1),
+          buildUserTimelineEntry("Second prompt.", 2),
+        ]}
+      />,
+    );
+
+    try {
+      document.querySelector<HTMLElement>("[role='log']")?.focus();
+      await userEvent.keyboard("{ArrowDown}");
+
+      let activeRow = document.activeElement as HTMLElement | null;
+      expect(activeRow?.getAttribute("data-message-id")).toBe("message-1");
+
+      await userEvent.keyboard("{ArrowDown}");
+      activeRow = document.activeElement as HTMLElement | null;
+      expect(activeRow?.getAttribute("data-message-id")).toBe("message-2");
+
+      await userEvent.keyboard("{ArrowUp}");
+      activeRow = document.activeElement as HTMLElement | null;
+      expect(activeRow?.getAttribute("data-message-id")).toBe("message-1");
+
+      await userEvent.keyboard("{Escape}");
+      expect(props.onReturnFocusToComposer).toHaveBeenCalledTimes(1);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("expands focused message details with enter", async () => {
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildUserTimelineEntry(buildLongUserMessageText())]}
+      />,
+    );
+
+    try {
+      document.querySelector<HTMLElement>("[role='log']")?.focus();
+      await userEvent.keyboard("{ArrowDown}");
+
+      await expect.element(page.getByRole("button", { name: "Show full message" })).toBeVisible();
+      await userEvent.keyboard("{Enter}");
+      await expect.element(page.getByRole("button", { name: "Show less" })).toBeVisible();
     } finally {
       await screen.unmount();
     }
