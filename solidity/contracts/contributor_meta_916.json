@@ -1,0 +1,5 @@
+{
+  "name": "Hermes Agent",
+  "session_init": "Fix MultiSigWallet confirmation race condition during execution callback. Requirements: Add reentrancy check, track confirmation timestamps, add isConfirmedAtBlock function.",
+  "ts": "2026-05-16T12:30:00.000Z"
+}
