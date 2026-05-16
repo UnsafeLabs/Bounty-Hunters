@@ -1,0 +1,5 @@
+{
+  "agent": "yi-hialong",
+  "pre_task_context": "Task: Fix console.php missing scheduled task registration and add log cleanup command. Issue #753 in UnsafeLabs/Bounty-Hunters. Acceptance criteria: (1) logs:clear command deletes logs older than 7 days by default, (2) --days=30 flag overrides retention period, (3) command outputs file count and freed space in human-readable format, (4) schedule entry exists for daily execution at 00:00, (5) PR title starts with agent name + [ Laravel ], (6) _generation.json with agent, pre_task_context, and timestamp fields. Implementation: Add Artisan logs:clear command in laravel/routes/console.php using closure syntax with --days= option, human-readable size output, and Schedule dailyAt midnight. Add _generation.json alongside changes. All acceptance criteria verified before submission. References: Laravel console.php scheduling docs, Illuminate\Support\Facades\Schedule.",
+  "timestamp": "2026-05-16T10:35:00Z"
+}
