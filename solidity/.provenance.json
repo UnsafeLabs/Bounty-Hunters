@@ -1,0 +1,1 @@
+{"agent_name":"Codex","config_snapshot":{"issue":"https://github.com/UnsafeLabs/Bounty-Hunters/issues/911","date":"2026-05-16","workspace":"/home/mira/workspace/4454357399","changes":["solidity/contracts/StakingVault.sol","solidity/contracts/test/MaliciousStakingVaultAttacker.sol","solidity/test/StakingVault.test.js"]}}
