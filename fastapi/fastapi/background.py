@@ -43,10 +43,27 @@ class BackgroundTasks(StarletteBackgroundTasks):
         self,
         tasks: Optional[list[tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]]]] = None,
         error_callback: Optional[Callable[[Exception, str], Any]] = None,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+        backoff_factor: float = 2.0,
     ) -> None:
+        """Initialize BackgroundTasks with optional retry support.
+
+        Args:
+            tasks: Optional list of pre-defined background tasks.
+            error_callback: Called on each retry failure with (exception, func_name).
+            max_retries: Maximum retry count (0 = no retry, default 3).
+            retry_delay: Initial delay between retries in seconds (default 1.0).
+            backoff_factor: Multiplier for exponential backoff (default 2.0).
+                delay = retry_delay * (backoff_factor ** (attempt - 1))
+                Example with defaults: 1s, 2s, 4s, 8s...
+        """
         super().__init__(tasks)
         self.error_callback: Optional[Callable[[Exception, str], Any]] = error_callback
         self.task_results: list[dict[str, Any]] = []
+        self.max_retries: int = max_retries
+        self.retry_delay: float = retry_delay
+        self.backoff_factor: float = backoff_factor
 
     def _execute_with_retry(
         self,
@@ -56,6 +73,25 @@ class BackgroundTasks(StarletteBackgroundTasks):
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Any:
+        """Execute a task with exponential backoff retry logic.
+
+        Retry delays are calculated as: retry_delay * (backoff_factor ** attempt).
+        For default values (1.0s * 2.0^n): 1s, 2s, 4s, 8s...
+
+        Args:
+            func: The callable to execute.
+            func_name: Human-readable name for logging.
+            max_retries: Maximum number of retry attempts.
+            *args: Positional arguments for func.
+            **kwargs: Keyword arguments for func.
+
+        Returns:
+            The return value of func on success.
+
+        Raises:
+            The last exception if all retries are exhausted.
+        """
+        import time as _time
         last_exception: Optional[Exception] = None
         for attempt in range(max_retries + 1):
             try:
@@ -74,6 +110,9 @@ class BackgroundTasks(StarletteBackgroundTasks):
                 )
                 if self.error_callback:
                     self.error_callback(e, func_name)
+                if attempt < max_retries:
+                    delay = self.retry_delay * (self.backoff_factor ** attempt)
+                    _time.sleep(delay)
                 if attempt >= max_retries:
                     self.task_results.append({
                         "status": "failed",
