@@ -16,7 +16,11 @@ import {
 import * as NetService from "@t3tools/shared/Net";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { deriveServerPaths } from "../config.ts";
-import { resolveServerConfig } from "./config.ts";
+import {
+  formatServerEnvValidationReport,
+  resolveServerConfig,
+  validateServerEnv,
+} from "./config.ts";
 
 const encodeDesktopBootstrap = Schema.encodeEffect(Schema.fromJsonString(DesktopBackendBootstrap));
 
@@ -587,4 +591,40 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       });
     }),
   );
+});
+
+it("server env validation reports invalid values with expected formats", () => {
+  const result = validateServerEnv({
+    T3CODE_PORT: "nope",
+    T3CODE_NO_BROWSER: "sometimes",
+    VITE_DEV_SERVER_URL: "not a url",
+  });
+  const report = formatServerEnvValidationReport(result);
+
+  expect(result.valid).toBe(false);
+  expect(report).toContain("Server environment validation: invalid");
+  expect(report).toContain("T3CODE_PORT");
+  expect(report).toContain("integer from 0 to 65535");
+  expect(report).toContain("T3CODE_NO_BROWSER");
+  expect(report).toContain("true or false");
+  expect(report).toContain("VITE_DEV_SERVER_URL");
+  expect(report).toContain("absolute URL");
+});
+
+it("server env validation documents optional defaults when valid", () => {
+  const result = validateServerEnv({
+    T3CODE_PORT: "3773",
+    T3CODE_NO_BROWSER: "true",
+    T3CODE_MODE: "web",
+  });
+  const report = formatServerEnvValidationReport(result);
+
+  expect(result.valid).toBe(true);
+  expect(report).toContain("Server environment validation: valid");
+  expect(report).toContain("T3CODE_LOG_LEVEL");
+  expect(report).toContain("default Info");
+  expect(report).toContain("T3CODE_TRACE_MAX_FILES");
+  expect(report).toContain("default 10");
+  expect(report).toContain("T3CODE_PORT");
+  expect(report).toContain("ok");
 });

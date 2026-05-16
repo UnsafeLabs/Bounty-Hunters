@@ -80,6 +80,288 @@ export const tailscaleServePortFlag = Flag.integer("tailscale-serve-port").pipe(
   Flag.withDescription("HTTPS port for Tailscale Serve when --tailscale-serve is enabled."),
   Flag.optional,
 );
+export const validateConfigFlag = Flag.boolean("validate-config").pipe(
+  Flag.withDescription("Validate server environment configuration and exit without starting."),
+  Flag.optional,
+);
+
+type EnvValidationKind = "boolean" | "integer" | "log-level" | "mode" | "port" | "string" | "url";
+
+interface EnvValidationSpec {
+  readonly name: string;
+  readonly kind: EnvValidationKind;
+  readonly description: string;
+  readonly required?: boolean;
+  readonly defaultValue?: string;
+}
+
+export interface EnvValidationRow {
+  readonly name: string;
+  readonly status: "ok" | "default" | "unset" | "missing" | "invalid";
+  readonly expected: string;
+  readonly received: string;
+  readonly description: string;
+}
+
+export interface EnvValidationResult {
+  readonly valid: boolean;
+  readonly rows: ReadonlyArray<EnvValidationRow>;
+}
+
+const ServerEnvValidationSpecs: ReadonlyArray<EnvValidationSpec> = [
+  {
+    name: "T3CODE_LOG_LEVEL",
+    kind: "log-level",
+    description: "Minimum process log level.",
+    defaultValue: "Info",
+  },
+  {
+    name: "T3CODE_TRACE_MIN_LEVEL",
+    kind: "log-level",
+    description: "Minimum log level written to the trace file.",
+    defaultValue: "Info",
+  },
+  {
+    name: "T3CODE_TRACE_TIMING_ENABLED",
+    kind: "boolean",
+    description: "Enable timing fields in trace events.",
+    defaultValue: "true",
+  },
+  {
+    name: "T3CODE_TRACE_FILE",
+    kind: "string",
+    description: "Optional trace output file override.",
+  },
+  {
+    name: "T3CODE_TRACE_MAX_BYTES",
+    kind: "integer",
+    description: "Maximum bytes per trace file before rotation.",
+    defaultValue: String(10 * 1024 * 1024),
+  },
+  {
+    name: "T3CODE_TRACE_MAX_FILES",
+    kind: "integer",
+    description: "Maximum number of rotated trace files to keep.",
+    defaultValue: "10",
+  },
+  {
+    name: "T3CODE_TRACE_BATCH_WINDOW_MS",
+    kind: "integer",
+    description: "Trace batch flush window in milliseconds.",
+    defaultValue: "200",
+  },
+  {
+    name: "T3CODE_OTLP_TRACES_URL",
+    kind: "url",
+    description: "Optional OTLP traces endpoint.",
+  },
+  {
+    name: "T3CODE_OTLP_METRICS_URL",
+    kind: "url",
+    description: "Optional OTLP metrics endpoint.",
+  },
+  {
+    name: "T3CODE_OTLP_EXPORT_INTERVAL_MS",
+    kind: "integer",
+    description: "OTLP export interval in milliseconds.",
+    defaultValue: "10000",
+  },
+  {
+    name: "T3CODE_OTLP_SERVICE_NAME",
+    kind: "string",
+    description: "OTLP service name.",
+    defaultValue: "t3-server",
+  },
+  {
+    name: "T3CODE_MODE",
+    kind: "mode",
+    description: "Runtime mode.",
+  },
+  {
+    name: "T3CODE_PORT",
+    kind: "port",
+    description: "HTTP/WebSocket server port.",
+  },
+  {
+    name: "T3CODE_HOST",
+    kind: "string",
+    description: "Host/interface to bind.",
+  },
+  {
+    name: "T3CODE_HOME",
+    kind: "string",
+    description: "Base runtime directory.",
+  },
+  {
+    name: "VITE_DEV_SERVER_URL",
+    kind: "url",
+    description: "Development web URL to proxy.",
+  },
+  {
+    name: "T3CODE_NO_BROWSER",
+    kind: "boolean",
+    description: "Disable automatic browser opening.",
+  },
+  {
+    name: "T3CODE_BOOTSTRAP_FD",
+    kind: "integer",
+    description: "File descriptor for desktop bootstrap secrets.",
+  },
+  {
+    name: "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+    kind: "boolean",
+    description: "Create a project for the current directory on startup.",
+  },
+  {
+    name: "T3CODE_LOG_WS_EVENTS",
+    kind: "boolean",
+    description: "Log outbound WebSocket events.",
+  },
+  {
+    name: "T3CODE_TAILSCALE_SERVE",
+    kind: "boolean",
+    description: "Enable Tailscale Serve configuration.",
+  },
+  {
+    name: "T3CODE_TAILSCALE_SERVE_PORT",
+    kind: "port",
+    description: "Tailscale Serve HTTPS port.",
+    defaultValue: "443",
+  },
+];
+
+const expectedForKind = (kind: EnvValidationKind): string => {
+  switch (kind) {
+    case "boolean":
+      return "true or false";
+    case "integer":
+      return "integer";
+    case "log-level":
+      return "Trace, Debug, Info, Warning, Error, Fatal, All, or None";
+    case "mode":
+      return "web or desktop";
+    case "port":
+      return "integer from 0 to 65535";
+    case "string":
+      return "non-empty string";
+    case "url":
+      return "absolute URL";
+  }
+};
+
+const isValidEnvValue = (kind: EnvValidationKind, value: string): boolean => {
+  const trimmed = value.trim();
+  switch (kind) {
+    case "boolean":
+      return /^(true|false)$/i.test(trimmed);
+    case "integer":
+      return /^-?\d+$/.test(trimmed);
+    case "log-level":
+      return /^(Trace|Debug|Info|Warning|Error|Fatal|All|None)$/i.test(trimmed);
+    case "mode":
+      return RuntimeMode.literals.includes(trimmed as RuntimeMode);
+    case "port": {
+      if (!/^\d+$/.test(trimmed)) return false;
+      const port = Number.parseInt(trimmed, 10);
+      return port >= 0 && port <= 65_535;
+    }
+    case "string":
+      return trimmed.length > 0;
+    case "url":
+      try {
+        new URL(trimmed);
+        return true;
+      } catch {
+        return false;
+      }
+  }
+};
+
+export const validateServerEnv = (
+  env: Record<string, string | undefined> = process.env,
+): EnvValidationResult => {
+  const rows = ServerEnvValidationSpecs.map((spec): EnvValidationRow => {
+    const raw = env[spec.name];
+    const expected = expectedForKind(spec.kind);
+    if (raw === undefined || raw.length === 0) {
+      if (spec.required) {
+        return {
+          name: spec.name,
+          status: "missing",
+          expected,
+          received: "<missing>",
+          description: spec.description,
+        };
+      }
+      return {
+        name: spec.name,
+        status: spec.defaultValue === undefined ? "unset" : "default",
+        expected,
+        received: spec.defaultValue === undefined ? "<unset>" : `default ${spec.defaultValue}`,
+        description: spec.description,
+      };
+    }
+
+    const valid = isValidEnvValue(spec.kind, raw);
+    return {
+      name: spec.name,
+      status: valid ? "ok" : "invalid",
+      expected,
+      received: raw,
+      description: spec.description,
+    };
+  });
+
+  return {
+    valid: rows.every((row) => row.status !== "missing" && row.status !== "invalid"),
+    rows,
+  };
+};
+
+const pad = (value: string, width: number) => value.padEnd(width, " ");
+
+export const formatServerEnvValidationReport = (result: EnvValidationResult): string => {
+  const visibleRows = result.valid
+    ? result.rows
+    : result.rows.filter((row) => row.status === "missing" || row.status === "invalid");
+  const rows = visibleRows.length === 0 ? result.rows : visibleRows;
+  const widths = {
+    name: Math.max("Variable".length, ...rows.map((row) => row.name.length)),
+    status: Math.max("Status".length, ...rows.map((row) => row.status.length)),
+    expected: Math.max("Expected".length, ...rows.map((row) => row.expected.length)),
+    received: Math.max("Received".length, ...rows.map((row) => row.received.length)),
+  };
+
+  const header = [
+    pad("Variable", widths.name),
+    pad("Status", widths.status),
+    pad("Expected", widths.expected),
+    pad("Received", widths.received),
+    "Description",
+  ].join(" | ");
+  const separator = [
+    "-".repeat(widths.name),
+    "-".repeat(widths.status),
+    "-".repeat(widths.expected),
+    "-".repeat(widths.received),
+    "-".repeat("Description".length),
+  ].join("-|-");
+  const body = rows.map((row) =>
+    [
+      pad(row.name, widths.name),
+      pad(row.status, widths.status),
+      pad(row.expected, widths.expected),
+      pad(row.received, widths.received),
+      row.description,
+    ].join(" | "),
+  );
+  return [
+    `Server environment validation: ${result.valid ? "valid" : "invalid"}`,
+    header,
+    separator,
+    ...body,
+  ].join("\n");
+};
 
 const EnvServerConfig = Config.all({
   logLevel: Config.logLevel("T3CODE_LOG_LEVEL").pipe(Config.withDefault("Info")),
@@ -151,6 +433,7 @@ export interface CliServerFlags {
   readonly logWebSocketEvents: Option.Option<boolean>;
   readonly tailscaleServeEnabled: Option.Option<boolean>;
   readonly tailscaleServePort: Option.Option<number>;
+  readonly validateConfig?: Option.Option<boolean>;
 }
 
 export interface CliAuthLocationFlags {
@@ -185,6 +468,7 @@ export const sharedServerCommandFlags = {
   logWebSocketEvents: logWebSocketEventsFlag,
   tailscaleServeEnabled: tailscaleServeFlag,
   tailscaleServePort: tailscaleServePortFlag,
+  validateConfig: validateConfigFlag,
 } as const;
 
 export const authLocationFlags = sharedServerLocationFlags;

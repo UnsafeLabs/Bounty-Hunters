@@ -1,9 +1,17 @@
 import * as Effect from "effect/Effect";
+import * as Console from "effect/Console";
+import * as Option from "effect/Option";
 import { Command, GlobalFlag } from "effect/unstable/cli";
 
 import { ServerConfig, type StartupPresentation } from "../config.ts";
 import { runServer } from "../server.ts";
-import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
+import {
+  formatServerEnvValidationReport,
+  type CliServerFlags,
+  resolveServerConfig,
+  sharedServerCommandFlags,
+  validateServerEnv,
+} from "./config.ts";
 
 export const runServerCommand = (
   flags: CliServerFlags,
@@ -14,6 +22,14 @@ export const runServerCommand = (
 ) =>
   Effect.gen(function* () {
     const logLevel = yield* GlobalFlag.LogLevel;
+    if (Option.getOrElse(flags.validateConfig ?? Option.none(), () => false)) {
+      const result = validateServerEnv();
+      yield* Console.log(formatServerEnvValidationReport(result));
+      if (!result.valid) {
+        process.exitCode = 1;
+      }
+      return;
+    }
     const config = yield* resolveServerConfig(flags, logLevel, options);
     return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
   });
