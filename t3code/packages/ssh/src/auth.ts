@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { closeSync, openSync, writeFileSync } from "node:fs";
+
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -59,6 +62,42 @@ export interface SshChildEnvironmentOptions {
 }
 
 const SSH_ASKPASS_DIR_NAME = "t3code-ssh-askpass";
+const POSIX_SAFE_SCRIPT_PATH_PATTERN = /^[A-Za-z0-9_./-]+$/u;
+const WINDOWS_UNSAFE_SCRIPT_PATH_PATTERN = /[&|;`$<>]/u;
+
+export function validateSshAskpassScriptPath(path: string, platform: NodeJS.Platform): string {
+  if (path.length === 0) {
+    throw new SshPasswordPromptError({
+      message: "SSH askpass script path must not be empty.",
+    });
+  }
+
+  if (platform === "win32") {
+    if (WINDOWS_UNSAFE_SCRIPT_PATH_PATTERN.test(path)) {
+      throw new SshPasswordPromptError({
+        message: `SSH askpass script path contains unsafe shell metacharacters: ${path}`,
+      });
+    }
+    return path;
+  }
+
+  if (!POSIX_SAFE_SCRIPT_PATH_PATTERN.test(path)) {
+    throw new SshPasswordPromptError({
+      message: `SSH askpass script path contains unsafe shell metacharacters: ${path}`,
+    });
+  }
+
+  return path;
+}
+
+function writeSecretFileMode0600(path: string, secret: string): void {
+  const fd = openSync(path, "wx", 0o600);
+  try {
+    writeFileSync(fd, secret, { encoding: "utf8" });
+  } finally {
+    closeSync(fd);
+  }
+}
 
 function joinSshAskpassPath(
   directory: string,
@@ -71,13 +110,26 @@ function joinSshAskpassPath(
 
 export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
-# from the renderer's in-app prompt. We never expose a native dialog here - if
-# T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
-if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
-  printf "%s\\n" "$T3_SSH_AUTH_SECRET"
+# from the renderer's in-app prompt. The cached password is stored in a private
+# 0600 file created by the parent process and removed by this helper on every
+# exit path.
+cleanup() {
+  if [ -n "\${T3_SSH_AUTH_SECRET_FILE:-}" ]; then
+    rm -f -- "$T3_SSH_AUTH_SECRET_FILE"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if [ -n "\${T3_SSH_AUTH_SECRET_FILE:-}" ]; then
+  if [ ! -f "$T3_SSH_AUTH_SECRET_FILE" ]; then
+    printf 'T3 Code ssh-askpass secret file is missing.\\n' >&2
+    exit 1
+  fi
+  cat -- "$T3_SSH_AUTH_SECRET_FILE"
   exit 0
 fi
-printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
+
+printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET_FILE.\\n' >&2
 exit 1
 `;
 
@@ -86,12 +138,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ssh-askpass.ps1" %*\r
 `;
 
 export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through ssh-askpass.cmd) when T3 Code re-runs\r
-# ssh with a cached password from the renderer's in-app prompt. We never expose\r
-# a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
-# and we fail loudly.\r
+# ssh with a cached password from the renderer's in-app prompt. Keep the secret\r
+# in a SecureString until the final askpass stdout write required by OpenSSH.\r
 if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
-  exit 0\r
+  $secureSecret = ConvertTo-SecureString $env:T3_SSH_AUTH_SECRET -AsPlainText -Force\r
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureSecret)\r
+  try {\r
+    [Console]::Out.WriteLine([Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr))\r
+    exit 0\r
+  } finally {\r
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)\r
+  }\r
 }\r
 [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
 exit 1\r
@@ -117,12 +174,19 @@ export const buildSshAskpassHelperDescriptor = Effect.fn(
   const directory = input.directory;
 
   if (platform === "win32") {
-    const powershellPath = joinSshAskpassPath(directory, "ssh-askpass.ps1", platform);
+    const powershellPath = validateSshAskpassScriptPath(
+      joinSshAskpassPath(directory, "ssh-askpass.ps1", platform),
+      platform,
+    );
+    const launcherPath = validateSshAskpassScriptPath(
+      joinSshAskpassPath(directory, "ssh-askpass.cmd", platform),
+      platform,
+    );
     return {
-      launcherPath: joinSshAskpassPath(directory, "ssh-askpass.cmd", platform),
+      launcherPath,
       files: [
         {
-          path: joinSshAskpassPath(directory, "ssh-askpass.cmd", platform),
+          path: launcherPath,
           contents: ASKPASS_WINDOWS_LAUNCHER_SCRIPT,
         },
         {
@@ -134,10 +198,10 @@ export const buildSshAskpassHelperDescriptor = Effect.fn(
   }
 
   return {
-    launcherPath: path.join(directory, "ssh-askpass.sh"),
+    launcherPath: validateSshAskpassScriptPath(path.join(directory, "ssh-askpass.sh"), platform),
     files: [
       {
-        path: path.join(directory, "ssh-askpass.sh"),
+        path: validateSshAskpassScriptPath(path.join(directory, "ssh-askpass.sh"), platform),
         contents: ASKPASS_POSIX_SCRIPT,
         mode: 0o700,
       },
@@ -185,14 +249,31 @@ export const buildSshChildEnvironment = Effect.fn("ssh/auth.buildSshChildEnviron
   }
 
   const platform = input.platform ?? process.platform;
+  const path = yield* Path.Path;
   const directory = input.askpassDirectory ?? (yield* getDefaultSshAskpassDirectory());
   const sshAskpass = yield* ensureSshAskpassHelpers({ directory, platform });
+  const authSecret = input.authSecret ?? "";
+  const posixSecretPath =
+    input.authSecret === undefined || platform === "win32"
+      ? null
+      : validateSshAskpassScriptPath(
+          path.join(directory, `ssh-askpass-secret-${process.pid}-${randomUUID()}`),
+          platform,
+        );
+
+  if (posixSecretPath !== null) {
+    yield* Effect.sync(() => writeSecretFileMode0600(posixSecretPath, authSecret));
+  }
 
   return {
     ...baseEnv,
     SSH_ASKPASS: sshAskpass,
     SSH_ASKPASS_REQUIRE: "force",
-    ...(input.authSecret === undefined ? {} : { T3_SSH_AUTH_SECRET: input.authSecret ?? "" }),
+    ...(input.authSecret === undefined
+      ? {}
+      : platform === "win32"
+        ? { T3_SSH_AUTH_SECRET: authSecret }
+        : { T3_SSH_AUTH_SECRET_FILE: posixSecretPath ?? "" }),
     ...(platform === "win32" || baseEnv.DISPLAY ? {} : { DISPLAY: "t3code" }),
   };
 });

@@ -1,3 +1,6 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 
@@ -44,10 +47,16 @@ describe("ssh auth", () => {
       const askpassPath = path.join(directory, "ssh-askpass.sh");
       assert.equal(env.SSH_ASKPASS, askpassPath);
       assert.equal(env.SSH_ASKPASS_REQUIRE, "force");
-      assert.equal(env.T3_SSH_AUTH_SECRET, "super-secret");
+      assert.match(env.T3_SSH_AUTH_SECRET_FILE ?? "", /ssh-askpass-secret-/u);
+      assert.equal(env.T3_SSH_AUTH_SECRET, undefined);
       assert.equal(env.DISPLAY, "t3code");
       assert.equal(yield* fs.exists(askpassPath), true);
-      assert.include(yield* fs.readFileString(askpassPath), 'printf "%s\\n" "$T3_SSH_AUTH_SECRET"');
+      assert.include(yield* fs.readFileString(askpassPath), "T3_SSH_AUTH_SECRET_FILE");
+
+      const secretPath = env.T3_SSH_AUTH_SECRET_FILE ?? "";
+      assert.equal(statSync(secretPath).mode & 0o777, 0o600);
+      assert.equal(execFileSync("sh", [askpassPath], { env, encoding: "utf8" }), "super-secret");
+      assert.equal(existsSync(secretPath), false);
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
@@ -63,6 +72,18 @@ describe("ssh auth", () => {
         descriptor.files.map((file) => file.path.split("\\").at(-1)),
         ["ssh-askpass.cmd", "ssh-askpass.ps1"],
       );
+      assert.include(descriptor.files[1]?.contents ?? "", "ConvertTo-SecureString");
     }),
   );
+
+  it("rejects unsafe askpass script paths", () => {
+    assert.throws(() =>
+      Effect.runSync(
+        buildSshAskpassHelperDescriptor({
+          directory: "/tmp/t3code askpass;rm-rf",
+          platform: "linux",
+        }).pipe(Effect.provide(NodeServices.layer)),
+      ),
+    );
+  });
 });

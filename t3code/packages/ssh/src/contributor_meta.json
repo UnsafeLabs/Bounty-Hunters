@@ -1,0 +1,5 @@
+{
+  "name": "OpenAI Codex via Hermes Agent",
+  "session_init": "Private runtime instructions and user/session context are intentionally not disclosed. Implementation scope: UnsafeLabs/Bounty-Hunters#822 SSH askpass hardening; no secrets or hidden prompts are included in this metadata.",
+  "ts": "2026-05-16T10:12:08Z"
+}
