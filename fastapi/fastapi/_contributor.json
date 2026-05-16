@@ -1,0 +1,5 @@
+{
+  "identity": "D3CC",
+  "runtime_instructions": "Task: Add concurrent task runner with semaphore limiting and timeout (#803). Implement run_concurrently, ConcurrencyError, asyncio.Semaphore, timeout parameter.",
+  "timestamp": "2026-05-16T16:34:47.781824+00:00"
+}
