@@ -9,15 +9,20 @@ Each poem's first letters spell a hidden word.
 Under the glow of a flickering screen,
 Nothing is quite what it seems to have been,
 Shadows are lurking in functions unseen,
-[TODO: write line 4 — must start with 'A', theme of hidden danger]
-[TODO: write line 5 — must start with 'F', building tension]
-[TODO: write line 6 — must start with 'E', conclude with revelation]
+Amidst the hum of circuits, danger grows,
+Forever creeping where the logic flows,
+Exposed—the truth that no one dares disclose.
 
 ---
 
 ### Acrostic #2 — (Should spell: BOUNTY)
 
-[TODO: write full 6-line acrostic poem spelling BOUNTY — theme: treasure hunting, each line ~8-10 syllables, first letters must spell B-O-U-N-T-Y]
+Beneath the map where ancient rivers ran,
+Old compass needles point to where it hides,
+Unearthly glow beneath the desert sand,
+No coin or jewel, but wisdom deep and wide,
+The treasure waits for those who understand—
+You seek not gold, but what the gold decides.
 
 ---
 
