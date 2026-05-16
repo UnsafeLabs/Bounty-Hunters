@@ -20,11 +20,9 @@
     "@t3tools/shared": "workspace:*",
     "@t3tools/ssh": "workspace:*",
     "@t3tools/tailscale": "workspace:*",
-    "@t3tools/web": "workspace:*",
     "effect": "catalog:",
     "electron": "41.5.0",
-    "electron-updater": "^6.6.2",
-    "t3": "workspace:*"
+    "electron-updater": "^6.6.2"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
