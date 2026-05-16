@@ -14,6 +14,7 @@ export interface CommandPaletteItem {
   readonly value: string;
   readonly searchTerms: ReadonlyArray<string>;
   readonly title: ReactNode;
+  readonly titleMatchIndexes?: ReadonlyArray<number>;
   readonly description?: string;
   readonly timestamp?: string;
   readonly icon: ReactNode;
@@ -86,6 +87,81 @@ export function filterBrowseEntries(input: {
 
 export function normalizeSearchText(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+interface FuzzySearchMatch {
+  readonly score: number;
+  readonly indexes: ReadonlyArray<number>;
+}
+
+function isWordBoundary(value: string, index: number): boolean {
+  if (index === 0) {
+    return true;
+  }
+
+  const previous = value[index - 1] ?? "";
+  const current = value[index] ?? "";
+  return (
+    /[\s._:/\\-]/.test(previous) ||
+    (previous.toLowerCase() === previous && current.toUpperCase() === current)
+  );
+}
+
+export function rankFuzzySearchField(field: string, query: string): FuzzySearchMatch | null {
+  const normalizedQuery = normalizeSearchText(query);
+  if (normalizedQuery.length === 0) {
+    return { score: 0, indexes: [] };
+  }
+
+  const lowerField = field.toLowerCase();
+  const lowerQuery = normalizedQuery.toLowerCase();
+  const indexes: number[] = [];
+  let searchFrom = 0;
+
+  for (const char of lowerQuery) {
+    const index = lowerField.indexOf(char, searchFrom);
+    if (index === -1) {
+      return null;
+    }
+    indexes.push(index);
+    searchFrom = index + 1;
+  }
+
+  let consecutiveMatches = 0;
+  let boundaryMatches = 0;
+  let gapPenalty = 0;
+
+  for (let index = 0; index < indexes.length; index += 1) {
+    const matchIndex = indexes[index] ?? 0;
+    if (isWordBoundary(field, matchIndex)) {
+      boundaryMatches += 1;
+    }
+
+    const previousIndex = indexes[index - 1];
+    if (previousIndex !== undefined) {
+      const gap = matchIndex - previousIndex - 1;
+      if (gap === 0) {
+        consecutiveMatches += 1;
+      } else {
+        gapPenalty += gap;
+      }
+    }
+  }
+
+  const firstIndex = indexes[0] ?? 0;
+  const exactBonus = normalizeSearchText(field) === normalizedQuery ? 600 : 0;
+  const prefixBonus = firstIndex === 0 ? 250 : 0;
+  const score =
+    1_000 +
+    exactBonus +
+    prefixBonus +
+    consecutiveMatches * 40 +
+    boundaryMatches * 30 -
+    firstIndex * 8 -
+    gapPenalty * 2 -
+    field.length;
+
+  return { score, indexes };
 }
 
 export function buildProjectActionItems(input: {
@@ -175,37 +251,36 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   });
 }
 
-function rankSearchFieldMatch(field: string, normalizedQuery: string): number {
-  const normalizedField = normalizeSearchText(field);
-  if (normalizedField.length === 0 || !normalizedField.includes(normalizedQuery)) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  if (normalizedField === normalizedQuery) {
-    return 3;
-  }
-  if (normalizedField.startsWith(normalizedQuery)) {
-    return 2;
-  }
-  return 1;
-}
-
 function rankCommandPaletteItemMatch(
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem,
   normalizedQuery: string,
-): number {
+): { rank: number; titleMatchIndexes: ReadonlyArray<number> | undefined } | null {
   const terms = item.searchTerms.filter((term) => term.length > 0);
   if (terms.length === 0) {
-    return 0;
+    return null;
   }
 
+  let bestMatch: {
+    readonly rank: number;
+    readonly titleMatchIndexes: ReadonlyArray<number> | undefined;
+  } | null = null;
+
   for (const [index, field] of terms.entries()) {
-    const fieldRank = rankSearchFieldMatch(field, normalizedQuery);
-    if (fieldRank !== Number.NEGATIVE_INFINITY) {
-      return 1_000 - index * 100 + fieldRank;
+    const fieldMatch = rankFuzzySearchField(field, normalizedQuery);
+    if (!fieldMatch) {
+      continue;
+    }
+
+    const rank = 10_000 - index * 1_000 + fieldMatch.score;
+    if (!bestMatch || rank > bestMatch.rank) {
+      bestMatch = {
+        rank,
+        titleMatchIndexes: index === 0 ? fieldMatch.indexes : undefined,
+      };
     }
   }
 
-  return 0;
+  return bestMatch;
 }
 
 export function filterCommandPaletteGroups(input: {
@@ -254,15 +329,18 @@ export function filterCommandPaletteGroups(input: {
   return searchableGroups.flatMap((group) => {
     const items = group.items
       .map((item, index) => {
-        const haystack = normalizeSearchText(item.searchTerms.join(" "));
-        if (!haystack.includes(normalizedQuery)) {
+        const match = rankCommandPaletteItemMatch(item, normalizedQuery);
+        if (!match) {
           return null;
         }
 
         return {
-          item,
+          item:
+            match.titleMatchIndexes && match.titleMatchIndexes.length > 0
+              ? { ...item, titleMatchIndexes: match.titleMatchIndexes }
+              : item,
           index,
-          rank: rankCommandPaletteItemMatch(item, normalizedQuery),
+          rank: match.rank,
         };
       })
       .filter(

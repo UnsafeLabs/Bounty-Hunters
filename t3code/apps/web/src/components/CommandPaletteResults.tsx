@@ -73,7 +73,7 @@ function DisabledCommandPaletteResultRow(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <CommandPaletteResultTitle item={props.item} />
           </span>
           <span className="truncate text-muted-foreground/70 text-xs">
             {props.item.description}
@@ -82,11 +82,37 @@ function DisabledCommandPaletteResultRow(props: {
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <CommandPaletteResultTitle item={props.item} />
         </span>
       )}
       {props.item.titleTrailingContent}
     </div>
+  );
+}
+
+function CommandPaletteResultTitle(props: {
+  item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
+}) {
+  if (typeof props.item.title !== "string" || !props.item.titleMatchIndexes?.length) {
+    return <span className="truncate">{props.item.title}</span>;
+  }
+
+  const matchedIndexes = new Set(props.item.titleMatchIndexes);
+  return (
+    <span className="truncate">
+      {Array.from(props.item.title).map((character, index) => (
+        <span
+          className={
+            matchedIndexes.has(index)
+              ? "rounded-[2px] bg-primary/15 text-foreground font-medium"
+              : undefined
+          }
+          key={`${character}-${index}`}
+        >
+          {character}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -119,7 +145,7 @@ function CommandPaletteResultRow(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <CommandPaletteResultTitle item={props.item} />
           </span>
           <span className="truncate text-muted-foreground/70 text-xs">
             {props.item.description}
@@ -128,7 +154,7 @@ function CommandPaletteResultRow(props: {
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <CommandPaletteResultTitle item={props.item} />
         </span>
       )}
       {props.item.titleTrailingContent}

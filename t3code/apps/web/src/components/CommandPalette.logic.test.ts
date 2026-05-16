@@ -4,6 +4,7 @@ import type { Thread } from "../types";
 import {
   buildThreadActionItems,
   filterCommandPaletteGroups,
+  rankFuzzySearchField,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
 
@@ -162,5 +163,102 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+  });
+});
+
+describe("rankFuzzySearchField", () => {
+  it("matches characters across word boundaries", () => {
+    const match = rankFuzzySearchField("Open File", "ofl");
+
+    expect(match?.indexes).toEqual([0, 5, 7]);
+  });
+
+  it("rejects queries whose characters are not present in order", () => {
+    expect(rankFuzzySearchField("Open File", "olf")).toBeNull();
+  });
+});
+
+describe("filterCommandPaletteGroups fuzzy matching", () => {
+  it("matches gapped command names and ranks better matches first", () => {
+    const group: CommandPaletteGroup = {
+      value: "actions",
+      label: "Actions",
+      items: [
+        {
+          kind: "action",
+          value: "action:open-folder",
+          searchTerms: ["Open Folder"],
+          title: "Open Folder",
+          icon: null,
+          run: async () => undefined,
+        },
+        {
+          kind: "action",
+          value: "action:open-file",
+          searchTerms: ["Open File"],
+          title: "Open File",
+          icon: null,
+          run: async () => undefined,
+        },
+        {
+          kind: "action",
+          value: "action:close-panel",
+          searchTerms: ["Close Panel"],
+          title: "Close Panel",
+          icon: null,
+          run: async () => undefined,
+        },
+      ],
+    };
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [group],
+      query: "ofl",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.items.map((item) => item.value)).toEqual([
+      "action:open-file",
+      "action:open-folder",
+    ]);
+    expect(groups[0]?.items[0]?.titleMatchIndexes).toEqual([0, 5, 7]);
+  });
+
+  it("keeps the default order for empty queries", () => {
+    const group: CommandPaletteGroup = {
+      value: "actions",
+      label: "Actions",
+      items: [
+        {
+          kind: "action",
+          value: "action:first",
+          searchTerms: ["First Action"],
+          title: "First Action",
+          icon: null,
+          run: async () => undefined,
+        },
+        {
+          kind: "action",
+          value: "action:second",
+          searchTerms: ["Second Action"],
+          title: "Second Action",
+          icon: null,
+          run: async () => undefined,
+        },
+      ],
+    };
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [group],
+      query: "",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(["action:first", "action:second"]);
   });
 });
