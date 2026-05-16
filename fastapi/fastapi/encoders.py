@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import datetime
 from collections import defaultdict, deque
@@ -32,48 +33,23 @@ from ._compat import (
 )
 
 try:
-    # pydantic.color.Color is deprecated since v2.0b3, but supporting for bwd-compat
-    from pydantic.color import Color  # ty: ignore[deprecated]
-except ImportError:  # pragma: no cover
-
-    class Color:  # type: ignore[no-redef]
+    from pydantic.color import Color
+except ImportError:
+    class Color:
         pass
-
 
 try:
-    # Supporting the new Color format for newer versions of Pydantic
     from pydantic_extra_types.color import Color as PyExtraColor
-except ImportError:  # pragma: no cover
-
-    class PyExtraColor:  # type: ignore[no-redef]
+except ImportError:
+    class PyExtraColor:
         pass
 
 
-# Taken from Pydantic v1 as is
 def isoformat(o: datetime.date | datetime.time) -> str:
     return o.isoformat()
 
 
-# Adapted from Pydantic v1
-# TODO: pv2 should this return strings instead?
 def decimal_encoder(dec_value: Decimal) -> int | float:
-    """
-    Encodes a Decimal as int if there's no exponent, otherwise float
-
-    This is useful when we use ConstrainedDecimal to represent Numeric(x,0)
-    where an integer (but not int typed) is used. Encoding this as a float
-    results in failed round-tripping between encode and parse.
-    Our Id type is a prime example of this.
-
-    >>> decimal_encoder(Decimal("1.0"))
-    1.0
-
-    >>> decimal_encoder(Decimal("1"))
-    1
-
-    >>> decimal_encoder(Decimal("NaN"))
-    nan
-    """
     exponent = dec_value.as_tuple().exponent
     if isinstance(exponent, int) and exponent >= 0:
         return int(dec_value)
@@ -215,18 +191,18 @@ def jsonable_encoder(
             """
         ),
     ] = True,
+    bytes_encoding: Annotated[
+        str,
+        Doc(
+            """
+            Encoding to use for bytes and memoryview objects.
+            Defaults to 'base64', can be set to 'hex'.
+            """
+        ),
+    ] = "base64",
 ) -> Any:
     """
     Convert any object to something that can be encoded in JSON.
-
-    This is used internally by FastAPI to make sure anything you return can be
-    encoded as JSON before it is sent to the client.
-
-    You can also use it yourself, for example to convert objects before saving them
-    in a database that supports only JSON.
-
-    Read more about it in the
-    [FastAPI docs for JSON Compatible Encoder](https://fastapi.tiangolo.com/tutorial/encoder/).
     """
     custom_encoder = custom_encoder or {}
     if custom_encoder:
@@ -237,9 +213,9 @@ def jsonable_encoder(
                 if isinstance(obj, encoder_type):
                     return encoder_instance(obj)
     if include is not None and not isinstance(include, (set, dict)):
-        include = set(include)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        include = set(include)
     if exclude is not None and not isinstance(exclude, (set, dict)):
-        exclude = set(exclude)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        exclude = set(exclude)
     if isinstance(obj, BaseModel):
         obj_dict = obj.model_dump(
             mode="json",
@@ -255,6 +231,7 @@ def jsonable_encoder(
             exclude_none=exclude_none,
             exclude_defaults=exclude_defaults,
             sqlalchemy_safe=sqlalchemy_safe,
+            bytes_encoding=bytes_encoding,
         )
     if dataclasses.is_dataclass(obj):
         assert not isinstance(obj, type)
@@ -269,7 +246,14 @@ def jsonable_encoder(
             exclude_none=exclude_none,
             custom_encoder=custom_encoder,
             sqlalchemy_safe=sqlalchemy_safe,
+            bytes_encoding=bytes_encoding,
         )
+    if isinstance(obj, memoryview):
+        obj = bytes(obj)
+    if isinstance(obj, bytes):
+        if bytes_encoding == "hex":
+            return obj.hex()
+        return base64.b64encode(obj).decode("ascii")
     if isinstance(obj, Enum):
         return obj.value
     if isinstance(obj, PurePath):
@@ -302,6 +286,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
                 encoded_value = jsonable_encoder(
                     value,
@@ -310,6 +295,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
                 encoded_dict[encoded_key] = encoded_value
         return encoded_dict
@@ -327,6 +313,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
             )
         return encoded_list
@@ -361,4 +348,5 @@ def jsonable_encoder(
         exclude_none=exclude_none,
         custom_encoder=custom_encoder,
         sqlalchemy_safe=sqlalchemy_safe,
+        bytes_encoding=bytes_encoding,
     )
