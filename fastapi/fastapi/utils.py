@@ -93,11 +93,27 @@ def generate_operation_id_for_path(
 
 
 def generate_unique_id(route: "APIRoute") -> str:
-    operation_id = f"{route.name}{route.path_format}"
-    operation_id = re.sub(r"\W", "_", operation_id)
-    assert route.methods
-    operation_id = f"{operation_id}_{list(route.methods)[0].lower()}"
-    return operation_id
+    method = list(route.methods)[0].lower()
+    # Retrieve prefix from the route (may be empty string)
+    prefix = getattr(route, "prefix", "")
+    if prefix:
+        # Normalize: strip slashes, replace '/' with '_'
+        prefix = prefix.strip("/").replace("/", "_")
+        base = f"{method}_{prefix}_{route.name}"
+    else:
+        base = f"{method}_{route.name}"
+    # Sanitize: only lowercase alphanumeric and underscores allowed
+    base = re.sub(r"[^a-zA-Z0-9_]", "_", base).lower()
+    # Collision detection with numeric suffix
+    if not hasattr(generate_unique_id, "_used"):
+        generate_unique_id._used = {}
+    used = generate_unique_id._used
+    if base not in used:
+        used[base] = 0
+        return base
+    else:
+        used[base] += 1
+        return f"{base}_{used[base]}"
 
 
 def deep_dict_update(main_dict: dict[Any, Any], update_dict: dict[Any, Any]) -> None:
