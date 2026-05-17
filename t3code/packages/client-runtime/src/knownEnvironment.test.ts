@@ -1,7 +1,11 @@
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { createKnownEnvironment, getKnownEnvironmentHttpBaseUrl } from "./knownEnvironment.ts";
+import {
+  createKnownEnvironment,
+  detectKnownEnvironmentRuntime,
+  getKnownEnvironmentHttpBaseUrl,
+} from "./knownEnvironment.ts";
 import {
   parseScopedProjectKey,
   parseScopedThreadKey,
@@ -25,6 +29,11 @@ describe("known environment bootstrap helpers", () => {
     ).toEqual({
       id: "ws:Remote environment",
       label: "Remote environment",
+      runtime: {
+        isCi: false,
+        isContainer: false,
+        isWsl: false,
+      },
       source: "manual",
       target: {
         httpBaseUrl: "https://remote.example.com",
@@ -57,6 +66,70 @@ describe("known environment bootstrap helpers", () => {
         }),
       ),
     ).toBe("https://remote.example.com/api");
+  });
+
+  it("exposes detected runtime flags on known environments", () => {
+    const runtime = detectKnownEnvironmentRuntime({
+      env: {
+        GITHUB_ACTIONS: "true",
+        WSL_DISTRO_NAME: "Ubuntu",
+      },
+      fileExists: (path) => path === "/.dockerenv",
+    });
+
+    expect(
+      createKnownEnvironment({
+        label: "CI container",
+        runtime,
+        target: {
+          httpBaseUrl: "http://127.0.0.1:3773",
+          wsBaseUrl: "ws://127.0.0.1:3773",
+        },
+      }).runtime,
+    ).toEqual({
+      isCi: true,
+      isContainer: true,
+      isWsl: true,
+      ciProvider: "github-actions",
+      containerKind: "docker",
+      wslDistroName: "Ubuntu",
+    });
+  });
+
+  it("detects container runtimes from cgroup markers", () => {
+    expect(
+      detectKnownEnvironmentRuntime({
+        readTextFile: (path) =>
+          path === "/proc/1/cgroup" ? "0::/kubepods.slice/kubepods-besteffort.slice" : "",
+      }),
+    ).toMatchObject({
+      isContainer: true,
+      containerKind: "kubernetes",
+    });
+
+    expect(
+      detectKnownEnvironmentRuntime({
+        readTextFile: (path) =>
+          path === "/proc/1/cgroup" ? "0::/system.slice/containerd.service" : "",
+      }),
+    ).toMatchObject({
+      isContainer: true,
+      containerKind: "containerd",
+    });
+  });
+
+  it("detects generic CI and WSL release markers", () => {
+    expect(
+      detectKnownEnvironmentRuntime({
+        env: {
+          CI: "1",
+        },
+        release: "5.15.146.1-microsoft-standard-WSL2",
+      }),
+    ).toMatchObject({
+      isCi: true,
+      isWsl: true,
+    });
   });
 });
 

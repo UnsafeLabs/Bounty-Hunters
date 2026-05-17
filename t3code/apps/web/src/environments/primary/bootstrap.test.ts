@@ -80,6 +80,11 @@ describe("environmentBootstrap", () => {
       label: "Bootstrapped environment",
       source: "window-origin",
       environmentId: "environment-local",
+      runtime: {
+        isCi: false,
+        isContainer: false,
+        isWsl: false,
+      },
       target: {
         httpBaseUrl: "http://localhost:3773/",
         wsBaseUrl: "ws://localhost:3773/",
