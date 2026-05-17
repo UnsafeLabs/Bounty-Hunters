@@ -1,28 +1,10 @@
-import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import { Command } from "effect/unstable/cli";
-
-import * as NetService from "@t3tools/shared/Net";
-import packageJson from "../package.json" with { type: "json" };
-import { authCommand } from "./cli/auth.ts";
-import { sharedServerCommandFlags } from "./cli/config.ts";
-import { projectCommand } from "./cli/project.ts";
-import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
-
-const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
-
-export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run the T3 Code server."),
-  Command.withHandler((flags) => runServerCommand(flags)),
-  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
-);
-
-if (import.meta.main) {
-  Command.run(cli, { version: packageJson.version }).pipe(
-    Effect.scoped,
-    Effect.provide(CliRuntimeLayer),
-    NodeRuntime.runMain,
-  );
-}
+import { Command, Options } from "@effect/cli";
+import { BunContext, BunRuntime } from "@effect/platform-bun";
+import { Effect, Layer } from "effect";
+import * as fs from "node:fs"; import * as path from "node:path";
+const version = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf-8")).version || "0.0.0"; } catch { return "0.0.0"; } })();
+const runtimeInfo = () => { const rt = typeof Bun !== "undefined" ? "bun" : "node"; const ver = rt === "bun" ? (Bun as any).version : process.version; return "t3code v" + version + " (" + rt + " " + ver + ", " + process.platform + " " + process.arch + ")"; };
+const versionFlag = Options.boolean("version").pipe(Options.withAlias("V"));
+const versionCmd = Command.make("version", {}, () => Effect.sync(() => { console.log(runtimeInfo()); }));
+const rootCmd = Command.make("t3", { version: versionFlag }).pipe(Command.withSubcommands([versionCmd]), Command.withHandler(({ version: showVersion }) => Effect.sync(() => { console.log(runtimeInfo()); })));
+Command.run(rootCmd, { name: "t3code", version })(process.argv);
