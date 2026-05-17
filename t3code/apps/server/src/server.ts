@@ -11,6 +11,7 @@ import {
   staticAndDevRouteLayer,
   browserApiCorsLayer,
 } from "./http.ts";
+import { httpCompressionLayer } from "./httpCompression.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -416,6 +417,7 @@ export const makeServerLayer = Layer.unwrap(
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provideMerge(VcsProcess.layer),
       Layer.provideMerge(PlatformServicesLive),
+      Layer.provide(httpCompressionLayer),
     );
   }),
 );
