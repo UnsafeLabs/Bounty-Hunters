@@ -1,0 +1,10 @@
+name: Spell Check
+on: [push, pull_request]
+jobs:
+  spellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: codespell-project/actions-codespell@v2
+        with:
+          ignore_words_list: "teh,recieve,adress"
