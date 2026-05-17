@@ -34,6 +34,14 @@ const setup = Layer.effectDiscard(
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA journal_mode = WAL;`;
     yield* sql`PRAGMA foreign_keys = ON;`;
+    yield* sql`PRAGMA busy_timeout = 5000;`;
+    yield* sql`PRAGMA synchronous = NORMAL;`;
+    yield* Effect.logInfo("SQLite pragmas configured", {
+      journal_mode: "WAL",
+      busy_timeout: 5000,
+      synchronous: "NORMAL",
+      foreign_keys: true,
+    });
     yield* runMigrations();
   }),
 );
