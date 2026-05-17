@@ -1,6 +1,9 @@
 import binascii
 from base64 import b64decode
-from typing import Annotated
+from collections import defaultdict
+from typing import Annotated, Callable
+import time
+from threading import Lock
 
 from annotated_doc import Doc
 from fastapi.exceptions import HTTPException
@@ -10,7 +13,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -172,56 +175,193 @@ class HTTPBasic(HTTPBase):
             bool,
             Doc(
                 """
-                By default, if the HTTP Basic authentication is not provided (a
-                header), `HTTPBasic` will automatically cancel the request and send the
-                client an error.
+                By default, if the HTTP Basic header is not provided, `HTTPBasic`
+                will automatically cancel the request and send the client an error.
 
-                If `auto_error` is set to `False`, when the HTTP Basic authentication
-                is not available, instead of erroring out, the dependency result will
-                be `None`.
+                If `auto_error` is set to `False`, when the HTTP Basic header is not
+                available, instead of erroring out, the dependency result will be
+                `None`.
 
                 This is useful when you want to have optional authentication.
 
                 It is also useful when you want to have authentication that can be
-                provided in one of multiple optional ways (for example, in HTTP Basic
-                authentication or in an HTTP Bearer token).
+                provided in one of multiple optional ways (for example, in an HTTP
+                Bearer token or in a cookie).
                 """
             ),
         ] = True,
     ):
-        self.model = HTTPBaseModel(scheme="basic", description=description)
-        self.scheme_name = scheme_name or self.__class__.__name__
         self.realm = realm
-        self.auto_error = auto_error
+        super().__init__(
+            scheme="basic",
+            scheme_name=scheme_name,
+            description=description,
+            auto_error=auto_error,
+        )
 
-    def make_authenticate_headers(self) -> dict[str, str]:
-        if self.realm:
-            return {"WWW-Authenticate": f'Basic realm="{self.realm}"'}
-        return {"WWW-Authenticate": "Basic"}
-
-    async def __call__(  # type: ignore
+    async def __call__(  # type: ignore[override]
         self, request: Request
     ) -> HTTPBasicCredentials | None:
         authorization = request.headers.get("Authorization")
         scheme, param = get_authorization_scheme_param(authorization)
-        if not authorization or scheme.lower() != "basic":
+        if not (authorization and scheme and param):
             if self.auto_error:
                 raise self.make_not_authenticated_error()
             else:
                 return None
+        if scheme.lower() != "basic":
+            if self.auto_error:
+                raise HTTPException(
+                    status_code=HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication credentials",
+                    headers=self.make_authenticate_headers(),
+                )
+            else:
+                return None
         try:
-            data = b64decode(param).decode("ascii")
-        except (ValueError, UnicodeDecodeError, binascii.Error) as e:
-            raise self.make_not_authenticated_error() from e
+            data = b64decode(param).decode("utf-8")
+        except (ValueError, binascii.Error, UnicodeDecodeError):
+            if self.auto_error:
+                raise HTTPException(
+                    status_code=HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication credentials",
+                    headers=self.make_authenticate_headers(),
+                )
+            else:
+                return None
         username, separator, password = data.partition(":")
         if not separator:
-            raise self.make_not_authenticated_error()
+            if self.auto_error:
+                raise HTTPException(
+                    status_code=HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication credentials",
+                    headers=self.make_authenticate_headers(),
+                )
+            else:
+                return None
         return HTTPBasicCredentials(username=username, password=password)
+
+    def make_authenticate_headers(self) -> dict[str, str]:
+        if self.realm:
+            return {"WWW-Authenticate": f'Basic realm="{self.realm}"'}
+        return super().make_authenticate_headers()
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    """
+    HTTP Basic authentication with brute force protection per IP.
+
+    Extends `HTTPBasic` with:
+    - Failed attempt tracking per connecting IP
+    - Lockout after `max_attempts` failures within a configurable time window
+    - Automatic `Retry-After` header on lockout (HTTP 429)
+    - Password verification via a user-supplied callable
+    - Static method for constant‑time password verification using bcrypt (via `passlib`)
+
+    ## Usage
+
+    ```python
+    from fastapi.security import HTTPBasicWithProtection
+
+    # Your password checking function
+    def verify_user_password(username: str, password: str) -> bool:
+        stored_hash = get_hash_for_user(username)
+        return HTTPBasicWithProtection.verify_password(password, stored_hash)
+
+    security = HTTPBasicWithProtection(
+        verify_password=verify_user_password,
+        max_attempts=5,
+        lockout_duration_seconds=300,
+    )
+    ```
+    """
+
+    def __init__(
+        self,
+        *,
+        verify_password: Callable[[str, str], bool],
+        max_attempts: int = 5,
+        lockout_duration_seconds: int = 300,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        if not callable(verify_password):
+            raise TypeError("verify_password must be a callable")
+        self.verify_password_func = verify_password
+        self.max_attempts = max_attempts
+        self.lockout_duration = lockout_duration_seconds
+        self._attempts: dict[str, dict] = defaultdict(
+            lambda: {"count": 0, "lockout_until": 0.0}
+        )
+        self._lock = Lock()
+
+    @staticmethod
+    def verify_password(
+        password: str, hashed_password: str
+    ) -> bool:
+        """
+        Verify a password against a bcrypt hash using constant‑time comparison.
+
+        Requires the `passlib` library. If `passlib` is not installed, a
+        `RuntimeError` is raised.
+        """
+        try:
+            from passlib.hash import bcrypt
+            return bcrypt.verify(password, hashed_password)
+        except ImportError:
+            raise RuntimeError(
+                "passlib is required for bcrypt password verification. "
+                "Install it with: pip install passlib[bcrypt]"
+            )
+
+    async def __call__(  # type: ignore[override]
+        self, request: Request
+    ) -> HTTPBasicCredentials | None:
+        # First get the credentials using the parent logic
+        credentials = await super().__call__(request)
+        if credentials is None:
+            return None
+
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+
+        with self._lock:
+            entry = self._attempts[client_ip]
+            if entry["lockout_until"] > now:
+                retry_after = int(entry["lockout_until"] - now)
+                raise HTTPException(
+                    status_code=HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Too Many Requests",
+                    headers={"Retry-After": str(retry_after)},
+                )
+
+        # Verify the password
+        if not self.verify_password_func(
+            credentials.username, credentials.password
+        ):
+            with self._lock:
+                entry = self._attempts[client_ip]
+                entry["count"] += 1
+                if entry["count"] >= self.max_attempts:
+                    entry["lockout_until"] = now + self.lockout_duration
+            raise HTTPException(
+                status_code=HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers=self.make_authenticate_headers(),
+            )
+
+        # Successful authentication – reset counter
+        with self._lock:
+            self._attempts.pop(client_ip, None)
+
+        return credentials
 
 
 class HTTPBearer(HTTPBase):
     """
-    HTTP Bearer token authentication.
+    HTTP Bearer authentication.
+
+    Ref: https://datatracker.ietf.org/doc/html/rfc6750
 
     ## Usage
 
@@ -229,6 +369,9 @@ class HTTPBearer(HTTPBase):
 
     The dependency result will be an `HTTPAuthorizationCredentials` object containing
     the `scheme` and the `credentials`.
+
+    Read more about it in the
+    [FastAPI docs for HTTP Bearer Auth](https://fastapi.tiangolo.com/advanced/security/http-bearer-auth/).
 
     ## Example
 
@@ -254,7 +397,14 @@ class HTTPBearer(HTTPBase):
     def __init__(
         self,
         *,
-        bearerFormat: Annotated[str | None, Doc("Bearer token format.")] = None,
+        bearerFormat: Annotated[
+            str | None,
+            Doc(
+                """
+                Bearer token format.
+                """
+            ),
+        ] = None,
         scheme_name: Annotated[
             str | None,
             Doc(
@@ -279,13 +429,12 @@ class HTTPBearer(HTTPBase):
             bool,
             Doc(
                 """
-                By default, if the HTTP Bearer token is not provided (in an
-                `Authorization` header), `HTTPBearer` will automatically cancel the
-                request and send the client an error.
+                By default, if the HTTP Bearer header is not provided, `HTTPBearer`
+                will automatically cancel the request and send the client an error.
 
-                If `auto_error` is set to `False`, when the HTTP Bearer token
-                is not available, instead of erroring out, the dependency result will
-                be `None`.
+                If `auto_error` is set to `False`, when the HTTP Bearer header is not
+                available, instead of erroring out, the dependency result will be
+                `None`.
 
                 This is useful when you want to have optional authentication.
 
@@ -300,29 +449,10 @@ class HTTPBearer(HTTPBase):
         self.scheme_name = scheme_name or self.__class__.__name__
         self.auto_error = auto_error
 
-    async def __call__(self, request: Request) -> HTTPAuthorizationCredentials | None:
-        authorization = request.headers.get("Authorization")
-        scheme, credentials = get_authorization_scheme_param(authorization)
-        if not (authorization and scheme and credentials):
-            if self.auto_error:
-                raise self.make_not_authenticated_error()
-            else:
-                return None
-        if scheme.lower() != "bearer":
-            if self.auto_error:
-                raise self.make_not_authenticated_error()
-            else:
-                return None
-        return HTTPAuthorizationCredentials(scheme=scheme, credentials=credentials)
-
 
 class HTTPDigest(HTTPBase):
     """
     HTTP Digest authentication.
-
-    **Warning**: this is only a stub to connect the components with OpenAPI in FastAPI,
-    but it doesn't implement the full Digest scheme, you would need to subclass it
-    and implement it in your code.
 
     Ref: https://datatracker.ietf.org/doc/html/rfc7616
 
@@ -332,6 +462,9 @@ class HTTPDigest(HTTPBase):
 
     The dependency result will be an `HTTPAuthorizationCredentials` object containing
     the `scheme` and the `credentials`.
+
+    Read more about it in the
+    [FastAPI docs for HTTP Digest Auth](https://fastapi.tiangolo.com/advanced/security/http-digest-auth/).
 
     ## Example
 
@@ -381,37 +514,25 @@ class HTTPDigest(HTTPBase):
             bool,
             Doc(
                 """
-                By default, if the HTTP Digest is not provided, `HTTPDigest` will
-                automatically cancel the request and send the client an error.
+                By default, if the HTTP Digest header is not provided, `HTTPDigest`
+                will automatically cancel the request and send the client an error.
 
-                If `auto_error` is set to `False`, when the HTTP Digest is not
-                available, instead of erroring out, the dependency result will
-                be `None`.
+                If `auto_error` is set to `False`, when the HTTP Digest header is not
+                available, instead of erroring out, the dependency result will be
+                `None`.
 
                 This is useful when you want to have optional authentication.
 
                 It is also useful when you want to have authentication that can be
-                provided in one of multiple optional ways (for example, in HTTP
-                Digest or in a cookie).
+                provided in one of multiple optional ways (for example, in an HTTP
+                Digest auth or in a cookie).
                 """
             ),
         ] = True,
     ):
-        self.model = HTTPBaseModel(scheme="digest", description=description)
-        self.scheme_name = scheme_name or self.__class__.__name__
-        self.auto_error = auto_error
-
-    async def __call__(self, request: Request) -> HTTPAuthorizationCredentials | None:
-        authorization = request.headers.get("Authorization")
-        scheme, credentials = get_authorization_scheme_param(authorization)
-        if not (authorization and scheme and credentials):
-            if self.auto_error:
-                raise self.make_not_authenticated_error()
-            else:
-                return None
-        if scheme.lower() != "digest":
-            if self.auto_error:
-                raise self.make_not_authenticated_error()
-            else:
-                return None
-        return HTTPAuthorizationCredentials(scheme=scheme, credentials=credentials)
+        super().__init__(
+            scheme="digest",
+            scheme_name=scheme_name,
+            description=description,
+            auto_error=auto_error,
+        )
