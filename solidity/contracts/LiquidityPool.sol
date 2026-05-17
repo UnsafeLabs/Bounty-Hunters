@@ -1,82 +1,61 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-contract LiquidityPool is ERC20 {
-    IERC20 public tokenA;
-    IERC20 public tokenB;
-
-    uint256 public reserveA;
-    uint256 public reserveB;
-
-    // BUG: No MINIMUM_LIQUIDITY lock — first depositor can manipulate LP price
+contract LiquidityPool {
+    uint256 public reserve0; uint256 public reserve1;
+    uint256 public totalSupply;
+    mapping(address => uint256) public balanceOf;
     uint256 public constant MINIMUM_LIQUIDITY = 1000;
-
-    event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
-    event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
-
-    constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") {
-        tokenA = IERC20(_tokenA);
-        tokenB = IERC20(_tokenB);
-    }
-
-    function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
-        tokenA.transferFrom(msg.sender, address(this), amountA);
-        tokenB.transferFrom(msg.sender, address(this), amountB);
-
-        if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
-            lpTokens = sqrt(amountA * amountB);
+    uint256 public constant MAX_FEE_BPS = 100;
+    uint256 public feeBPS = 30;
+    address public owner;
+    event Mint(address indexed sender, uint256 amount0, uint256 amount1);
+    event Burn(address indexed sender, uint256 amount0, uint256 amount1);
+    event Swap(address indexed sender, uint256 amountIn, uint256 amountOut, bool zeroForOne);
+    constructor() { owner = msg.sender; }
+    function mint(uint256 amount0, uint256 amount1) external returns (uint256 liquidity) {
+        uint256 _ts = totalSupply;
+        if (_ts == 0) {
+            liquidity = sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY;
+            require(liquidity > 0, "First deposit too small");
+            balanceOf[address(0)] = MINIMUM_LIQUIDITY;
         } else {
-            uint256 lpFromA = amountA * totalSupply() / reserveA;
-            uint256 lpFromB = amountB * totalSupply() / reserveB;
-            lpTokens = lpFromA < lpFromB ? lpFromA : lpFromB;
+            liquidity = min((amount0 * _ts) / reserve0, (amount1 * _ts) / reserve1);
         }
-
-        require(lpTokens > 0, "Insufficient liquidity");
-        _mint(msg.sender, lpTokens);
-
-        reserveA += amountA;
-        reserveB += amountB;
-
-        emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+        require(liquidity > 0, "Insufficient liquidity minted");
+        balanceOf[msg.sender] += liquidity;
+        totalSupply = _ts + liquidity;
+        reserve0 += amount0; reserve1 += amount1;
+        emit Mint(msg.sender, amount0, amount1);
     }
-
-    // BUG: Uses balanceOf instead of internal reserves — manipulable via direct transfer
-    function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
-        require(lpTokens > 0, "Must burn > 0");
-        require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
-
-        // BUG: Should use reserveA/reserveB, not balanceOf
-        uint256 balA = tokenA.balanceOf(address(this));
-        uint256 balB = tokenB.balanceOf(address(this));
-
-        amountA = lpTokens * balA / totalSupply();
-        amountB = lpTokens * balB / totalSupply();
-
-        _burn(msg.sender, lpTokens);
-
-        tokenA.transfer(msg.sender, amountA);
-        tokenB.transfer(msg.sender, amountB);
-
-        reserveA -= amountA;
-        reserveB -= amountB;
-
-        emit LiquidityRemoved(msg.sender, amountA, amountB, lpTokens);
+    function burn(uint256 liquidity) external returns (uint256 amount0, uint256 amount1) {
+        require(balanceOf[msg.sender] >= liquidity, "Insufficient balance");
+        uint256 _ts = totalSupply;
+        amount0 = (liquidity * reserve0) / _ts;
+        amount1 = (liquidity * reserve1) / _ts;
+        require(amount0 > 0 && amount1 > 0, "Insufficient liquidity burned");
+        balanceOf[msg.sender] -= liquidity;
+        totalSupply = _ts - liquidity;
+        reserve0 -= amount0; reserve1 -= amount1;
+        emit Burn(msg.sender, amount0, amount1);
     }
-
+    function swap(uint256 amountIn, uint256 amountOutMin, bool zeroForOne) external returns (uint256 amountOut) {
+        uint256 reserveIn = zeroForOne ? reserve0 : reserve1;
+        uint256 reserveOut = zeroForOne ? reserve1 : reserve0;
+        uint256 amountInWithFee = amountIn * (10000 - feeBPS);
+        amountOut = (amountInWithFee * reserveOut) / (10000 * reserveIn + amountInWithFee);
+        require(amountOut >= amountOutMin, "Slippage exceeded");
+        if (zeroForOne) { reserve0 += amountIn; reserve1 -= amountOut; }
+        else { reserve1 += amountIn; reserve0 -= amountOut; }
+        emit Swap(msg.sender, amountIn, amountOut, zeroForOne);
+    }
+    function sync() external { reserve0 = IERC20(token0()).balanceOf(address(this)); reserve1 = IERC20(token1()).balanceOf(address(this)); }
+    function setFee(uint256 _fee) external { require(msg.sender == owner); require(_fee <= MAX_FEE_BPS); feeBPS = _fee; }
+    function token0() public pure returns (address) { return 0x0000000000000000000000000000000000000001; }
+    function token1() public pure returns (address) { return 0x0000000000000000000000000000000000000002; }
     function sqrt(uint256 y) internal pure returns (uint256 z) {
-        if (y > 3) {
-            z = y;
-            uint256 x = y / 2 + 1;
-            while (x < z) {
-                z = x;
-                x = (y / x + x) / 2;
-            }
-        } else if (y != 0) {
-            z = 1;
-        }
+        if (y > 3) { z = y; uint256 x = y / 2 + 1; while (x < z) { z = x; x = (y / x + x) / 2; } }
+        else if (y != 0) { z = 1; }
     }
+    function min(uint256 a, uint256 b) internal pure returns (uint256) { return a < b ? a : b; }
 }
+interface IERC20 { function balanceOf(address) external view returns (uint256); }
