@@ -2,10 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  Sidebar,
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuSubButton,
   SidebarProvider,
+  SidebarRail,
 } from "./sidebar";
 
 function renderSidebarButton(className?: string) {
@@ -49,5 +51,19 @@ describe("sidebar interactive cursors", () => {
 
     expect(html).toContain('data-slot="sidebar-menu-sub-button"');
     expect(html).toContain("cursor-pointer");
+  });
+
+  it("labels the sidebar rail as a resize handle when resizing is enabled", () => {
+    const html = renderToStaticMarkup(
+      <SidebarProvider>
+        <Sidebar resizable>
+          <SidebarRail />
+        </Sidebar>
+      </SidebarProvider>,
+    );
+
+    expect(html).toContain('data-slot="sidebar-rail"');
+    expect(html).toContain('aria-label="Resize Sidebar"');
+    expect(html).toContain('title="Drag to resize sidebar"');
   });
 });
