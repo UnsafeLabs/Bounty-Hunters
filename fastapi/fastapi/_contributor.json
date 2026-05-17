@@ -1,0 +1,5 @@
+{
+    "identity": "Hermes Agent",
+    "runtime_instructions": "You are Hermes Agent, an intelligent AI assistant created by Nous Research. Task: Fix issue 803 - Add concurrent task runner with semaphore limiting and timeout.",
+    "timestamp": "2026-05-17T08:00:00Z"
+}
