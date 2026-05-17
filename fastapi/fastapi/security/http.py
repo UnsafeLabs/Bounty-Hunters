@@ -1,5 +1,10 @@
 import binascii
+import hashlib
+import math
+import time
 from base64 import b64decode
+from collections import defaultdict
+from collections.abc import Callable
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -10,7 +15,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -39,7 +44,7 @@ class HTTPAuthorizationCredentials(BaseModel):
     like:
 
     ```
-    Authorization: Bearer deadbeef12346
+    Authorization: Bearer ***
     ```
 
     In this case:
@@ -217,6 +222,198 @@ class HTTPBasic(HTTPBase):
         if not separator:
             raise self.make_not_authenticated_error()
         return HTTPBasicCredentials(username=username, password=password)
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    """
+    HTTP Basic authentication with brute force protection.
+
+    Extends `HTTPBasic` with per-IP failed attempt tracking, automatic
+    lockout after exceeding a configurable failure threshold, and
+    timing-safe password verification.
+
+    ## Usage
+
+    ```python
+    from typing import Annotated
+
+    from fastapi import Depends, FastAPI
+    from fastapi.security import HTTPBasicWithProtection, HTTPBasicCredentials
+
+    app = FastAPI()
+
+    security = HTTPBasicWithProtection(
+        max_attempts=5,
+        lockout_window=300,
+        check_password=lambda u, p: u == "admin" and p == "secret",
+    )
+
+
+    @app.get("/users/me")
+    def read_current_user(
+        credentials: Annotated[HTTPBasicCredentials, Depends(security)]
+    ):
+        return {"username": credentials.username}
+    ```
+    """
+
+    def __init__(
+        self,
+        *,
+        max_attempts: Annotated[
+            int,
+            Doc(
+                """
+                Maximum failed login attempts allowed before lockout.
+                """
+            ),
+        ] = 5,
+        lockout_window: Annotated[
+            int,
+            Doc(
+                """
+                Time window in seconds for tracking failed attempts.
+                """
+            ),
+        ] = 300,
+        check_password: Annotated[
+            Callable[[str, str], bool] | None,
+            Doc(
+                """
+                Optional callable to verify the password:
+                ``check_password(username, password) -> bool``.
+
+                If set, successful verification resets the IP attempt counter.
+                If not set, no password verification is performed (credentials
+                are returned as-is — the caller must verify).
+                """
+            ),
+        ] = None,
+        scheme_name: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme name.
+                """
+            ),
+        ] = None,
+        realm: Annotated[
+            str | None,
+            Doc(
+                """
+                HTTP Basic authentication realm.
+                """
+            ),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme description.
+                """
+            ),
+        ] = None,
+        auto_error: Annotated[
+            bool,
+            Doc(
+                """
+                By default, if authentication is not provided,
+                `HTTPBasicWithProtection` will cancel the request and send
+                the client an error.
+                """
+            ),
+        ] = True,
+    ):
+        super().__init__(
+            scheme_name=scheme_name,
+            realm=realm,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.max_attempts = max_attempts
+        self.lockout_window = lockout_window
+        self.check_password = check_password
+        self._attempts: dict[str, list[float]] = defaultdict(list)
+
+    def _get_client_ip(self, request: Request) -> str:
+        """Extract the client IP from the request."""
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
+
+    def _clear_attempts(self, ip: str) -> None:
+        """Clear the attempt counter for an IP."""
+        self._attempts.pop(ip, None)
+
+    def _is_locked_out(self, ip: str) -> bool:
+        """Check if an IP is currently locked out.
+
+        Returns True if the IP has exceeded max_attempts within the
+        lockout window.
+        """
+        now = time.time()
+        window_start = now - self.lockout_window
+        self._attempts[ip] = [
+            t for t in self._attempts[ip] if t > window_start
+        ]
+        if len(self._attempts[ip]) >= self.max_attempts:
+            oldest = min(self._attempts[ip])
+            remaining = math.ceil(self.lockout_window - (now - oldest))
+            if remaining > 0:
+                return True
+            self._clear_attempts(ip)
+        return False
+
+    async def __call__(  # type: ignore[override]
+        self, request: Request
+    ) -> HTTPBasicCredentials | None:
+        ip = self._get_client_ip(request)
+
+        # Check lockout based on previous failures
+        if self._is_locked_out(ip):
+            headers = self.make_authenticate_headers()
+            headers["Retry-After"] = str(int(self.lockout_window))
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed login attempts. "
+                       "Please try again later.",
+                headers=headers,
+            )
+
+        credentials = await super().__call__(request)
+        if credentials is None:
+            return None
+
+        if self.check_password is not None:
+            if self.check_password(credentials.username, credentials.password):
+                self._clear_attempts(ip)
+                return credentials
+            else:
+                # Count this failure
+                self._attempts[ip].append(time.time())
+                if self.auto_error:
+                    raise self.make_not_authenticated_error()
+                return None
+
+        return credentials
+
+    @staticmethod
+    def verify_password(plain_password: str, stored_hash: str) -> bool:
+        """Timing-safe password verification using SHA-256.
+
+        Uses a constant-time comparison to prevent timing attacks.
+
+        Args:
+            plain_password: The password provided by the user.
+            stored_hash: The stored SHA-256 hex digest.
+
+        Returns:
+            True if the password matches the hash.
+        """
+        import hmac as _hmac
+        digest = hashlib.sha256(plain_password.encode("utf-8")).hexdigest()
+        return _hmac.compare_digest(digest, stored_hash)
 
 
 class HTTPBearer(HTTPBase):
