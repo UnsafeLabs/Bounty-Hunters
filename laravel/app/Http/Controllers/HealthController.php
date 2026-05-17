@@ -1,107 +1,59 @@
 <?php
 
-declare(strict_types=1);
-
 namespace App\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Database\QueryException;
-use PDOException;
-use Throwable;
 
 class HealthController extends Controller
 {
-    private const int MAX_RETRIES = 3;
-    private const int RETRY_DELAY_MS = 500;
-
+    /**
+     * Perform a database health check with retry logic.
+     *
+     * @return JsonResponse
+     */
     public function database(): JsonResponse
     {
-        $connectionName = Config::get('database.default', 'mysql');
+        $connectionName = Config::get('database.default');
         $driver = Config::get("database.connections.{$connectionName}.driver", 'unknown');
 
-        if (!Config::has("database.connections.{$connectionName}")) {
-            $error = "Database connection '{$connectionName}' is not configured.";
-            Log::error('Health check configuration error', [
-                'connection' => $connectionName,
-                'error'      => $error,
-            ]);
-
-            return response()->json([
-                'status'          => 'error',
-                'driver'          => $driver,
-                'connection_name' => $connectionName,
-                'message'         => $error,
-            ], 503);
-        }
-
+        $attempts = 3;
+        $delayMs = 500;
         $lastException = null;
 
-        for ($attempt = 1; $attempt <= self::MAX_RETRIES; $attempt++) {
+        for ($i = 0; $i < $attempts; $i++) {
             try {
                 $start = microtime(true);
-                DB::connection($connectionName)->select('SELECT 1');
-                $latencyMs = (microtime(true) - $start) * 1000;
 
-                Log::info('Database health check succeeded', [
-                    'connection' => $connectionName,
-                    'driver'     => $driver,
-                    'latency_ms' => round($latencyMs, 2),
-                    'attempt'    => $attempt,
-                ]);
+                // Attempt to run a simple query to verify connectivity
+                DB::connection()->getPdo();
+                // For SQLite, getPdo may not throw an exception if file missing? Actually it does.
+                // Run a raw query to be extra safe across all drivers.
+                DB::select('SELECT 1');
+
+                $latencyMs = round((microtime(true) - $start) * 1000, 2);
 
                 return response()->json([
                     'status'          => 'ok',
                     'driver'          => $driver,
-                    'latency_ms'      => round($latencyMs, 2),
+                    'latency_ms'      => $latencyMs,
                     'connection_name' => $connectionName,
-                ]);
-            } catch (QueryException | PDOException $e) {
+                ], 200);
+            } catch (\Exception $e) {
                 $lastException = $e;
-                Log::warning("Database health check attempt {$attempt} failed", [
-                    'connection' => $connectionName,
-                    'driver'     => $driver,
-                    'error'      => $e->getMessage(),
-                    'code'       => $e->getCode(),
-                ]);
-
-                if ($attempt < self::MAX_RETRIES) {
-                    usleep(self::RETRY_DELAY_MS * 1000);
+                if ($i < $attempts - 1) {
+                    usleep($delayMs * 1000); // 500ms
                 }
-            } catch (Throwable $e) {
-                Log::error('Unexpected error during database health check', [
-                    'connection' => $connectionName,
-                    'driver'     => $driver,
-                    'error'      => $e->getMessage(),
-                    'trace'      => $e->getTraceAsString(),
-                ]);
-
-                return response()->json([
-                    'status'          => 'error',
-                    'driver'          => $driver,
-                    'connection_name' => $connectionName,
-                    'message'         => 'Internal server error during health check.',
-                ], 503);
             }
         }
 
-        $errorMessage = $lastException
-            ? $lastException->getMessage()
-            : 'Unknown database connection error';
-
-        Log::error('Database health check failed after ' . self::MAX_RETRIES . ' attempts', [
-            'connection' => $connectionName,
-            'driver'     => $driver,
-            'error'      => $errorMessage,
-        ]);
-
+        // All attempts failed
         return response()->json([
             'status'          => 'error',
+            'message'         => $lastException ? $lastException->getMessage() : 'Unknown database connection error',
             'driver'          => $driver,
             'connection_name' => $connectionName,
-            'message'         => $errorMessage,
         ], 503);
     }
 }
