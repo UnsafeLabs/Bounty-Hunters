@@ -1,8 +1,6 @@
 name: Close Stale PRs
 
 on:
-  schedule:
-    - cron: '0 */10 * * *' # Runs every 10 hours to give more time to bots to review other prs
   workflow_dispatch:
 
 permissions:
@@ -33,14 +31,8 @@ jobs:
                 body: `Unfortunately the changes in this PR didn't fully resolve the issue. Please rework your solution and submit a new pull request.\n\nMake sure to review the acceptance criteria in the linked issue and verify all conditions are met before resubmitting. See [CONTRIBUTING.md](https://github.com/UnsafeLabs/Bounty-Hunters/blob/main/CONTRIBUTING.md) for guidelines.`
               });
 
-              await github.rest.pulls.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: pr.number,
-                state: 'closed'
-              });
-
-              console.log(`Closed PR #${pr.number} by ${pr.user.login}`);
+              // DISABLED: Bot was unfairly closing valid PRs
+              console.log(`[SKIPPED] Would have closed PR #${pr.number} by ${pr.user.login} — bot disabled`);
             }
 
             console.log(`Closed ${prs.length} PRs total`);
