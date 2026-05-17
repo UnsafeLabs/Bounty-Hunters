@@ -1,0 +1,5 @@
+{
+    "tool_name": "Hermes Agent",
+    "boot_context": "You are Hermes Agent, an intelligent AI assistant created by Nous Research. Task: Fix issue 759 - jsonable_encoder TypeError on bytes and memoryview objects.",
+    "created": "2026-05-17T08:00:00Z"
+}
