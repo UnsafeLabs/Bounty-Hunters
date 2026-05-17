@@ -13,9 +13,19 @@ contract MultiSigWallet {
         bool executed;
     }
 
+    struct Confirmation {
+        bool confirmed;
+        uint256 confirmedAtBlock;
+        uint256 revokedAtBlock;
+    }
+
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+
     mapping(uint256 => Transaction) public transactions;
-    mapping(uint256 => mapping(address => bool)) public confirmations;
+    mapping(uint256 => mapping(address => Confirmation)) public confirmations;
     mapping(address => bool) public isOwner;
+    uint256 private executionState = _NOT_ENTERED;
 
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
@@ -37,8 +47,10 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Invalid target");
+        require(data.length == 0 || to.code.length > 0, "Target has no code");
+
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -52,35 +64,59 @@ contract MultiSigWallet {
 
     function confirmTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(!confirmations[txId][msg.sender], "Already confirmed");
-        confirmations[txId][msg.sender] = true;
+        Confirmation storage confirmation = confirmations[txId][msg.sender];
+        require(!confirmation.confirmed, "Already confirmed");
+        confirmation.confirmed = true;
+        confirmation.confirmedAtBlock = block.number;
+        confirmation.revokedAtBlock = 0;
         emit Confirmed(txId, msg.sender);
     }
 
     function revokeConfirmation(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(confirmations[txId][msg.sender], "Not confirmed");
-        confirmations[txId][msg.sender] = false;
+        Confirmation storage confirmation = confirmations[txId][msg.sender];
+        require(confirmation.confirmed, "Not confirmed");
+        confirmation.confirmed = false;
+        confirmation.revokedAtBlock = block.number;
         emit Revoked(txId, msg.sender);
     }
 
     function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
+        return getConfirmationCountAtBlock(txId, block.number);
+    }
+
+    function getConfirmationCountAtBlock(uint256 txId, uint256 blockNumber) public view returns (uint256 count) {
         for (uint256 i = 0; i < owners.length; i++) {
-            if (confirmations[txId][owners[i]]) count++;
+            if (isConfirmedAtBlock(txId, owners[i], blockNumber)) count++;
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
+    function isConfirmedAtBlock(uint256 txId, address owner, uint256 blockNumber) public view returns (bool) {
+        Confirmation storage confirmation = confirmations[txId][owner];
+        return confirmation.confirmedAtBlock != 0
+            && confirmation.confirmedAtBlock <= blockNumber
+            && (confirmation.revokedAtBlock == 0 || confirmation.revokedAtBlock > blockNumber);
+    }
+
     function executeTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+        require(executionState != _ENTERED, "Reentrant execution");
+
+        uint256 executionBlock = block.number;
+        require(getConfirmationCountAtBlock(txId, executionBlock) >= required, "Not enough confirmations");
 
         Transaction storage txn = transactions[txId];
-        txn.executed = true;
+        executionState = _ENTERED;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
         require(success, "Execution failed");
+        require(
+            getConfirmationCountAtBlock(txId, executionBlock) >= required,
+            "Confirmations revoked during execution"
+        );
+
+        txn.executed = true;
+        executionState = _NOT_ENTERED;
 
         emit Executed(txId);
     }
