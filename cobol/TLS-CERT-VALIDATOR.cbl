@@ -6,6 +6,29 @@
       * TLS CERTIFICATE VALIDATOR - BANKING TRANSACTION SYSTEM
       * VALIDATES X.509 CERTS AGAINST INTERNAL TRUST STORE
       *================================================================
+      *
+      * EBCDIC/ASCII FINGERPRINT TEST CASES
+      * ----------------------------------
+      * Verify the NATIONAL-encoded fingerprint compare works for both
+      * digit-only and hex (A-F) cases on EBCDIC hosts (z/OS) where the
+      * pre-fix code corrupted A-F via implicit DISPLAY conversion.
+      *
+      *   T1  digits only   '0123456789012345...64 chars'
+      *       expected: WS-SIG-VALID     after MOVE + IF compare
+      *   T2  hex with A-F  'AABBCCDDEEFF0123...64 chars'
+      *       expected: WS-SIG-VALID     after MOVE + IF compare
+      *   T3  consecutive AF 'AAAAAAAAAAAAAAAA...64 chars'
+      *       expected: WS-SIG-VALID     after MOVE + IF compare
+      *   T4  AF mismatch   buffer 'AAA...' vs store 'BBB...'
+      *       expected: WS-SIG-INVALID + 'FINGERPRINT MISMATCH'
+      *
+      * Pre-fix bug: T2/T3/T4 produced spurious results on EBCDIC because
+      * MOVE of PIC X(64) into the verify buffer applied EBCDIC->ASCII
+      * collation, mapping EBCDIC C1-C6 ('A'-'F') to bytes 41-46 in the
+      * buffer but leaving CS-FINGERPRINT in its source encoding. The
+      * fix declares BOTH fields PIC N(64) USAGE NATIONAL so the compare
+      * is code-page independent.
+      *================================================================
        ENVIRONMENT DIVISION.
        INPUT-OUTPUT SECTION.
        FILE-CONTROL.
@@ -30,7 +53,7 @@
            05  CS-NOT-AFTER            PIC X(14).
            05  CS-KEY-LENGTH           PIC 9(5).
            05  CS-SIG-ALGORITHM        PIC X(20).
-           05  CS-FINGERPRINT          PIC X(64).
+           05  CS-FINGERPRINT          PIC N(64) USAGE NATIONAL.
            05  CS-TRUST-ANCHOR-FLAG    PIC X(1).
                88  CS-IS-TRUST-ANCHOR  VALUE 'Y'.
                88  CS-NOT-TRUST-ANCHOR VALUE 'N'.
@@ -108,6 +131,7 @@
        01  WS-SIG-VERIFY-RESULT        PIC X(1).
            88  WS-SIG-VALID            VALUE 'V'.
            88  WS-SIG-INVALID          VALUE 'I'.
+       01  WS-SIG-VERIFY-BUFFER        PIC N(64) USAGE NATIONAL.
        01  WS-MIN-KEY-LENGTH           PIC 9(5)  VALUE 02048.
        01  WS-ALLOWED-ALGORITHMS.
            05  FILLER  PIC X(20) VALUE 'SHA256WITHRSA       '.
@@ -238,6 +262,22 @@
                SET WS-SIG-INVALID TO TRUE
                GO TO 4000-EXIT
            END-IF
+
+      *    Move into a NATIONAL buffer to prevent EBCDIC-to-ASCII corruption of
+      *    hex chars A-F (EBCDIC code points C1-C6 differ from ASCII 41-46).
+           MOVE WS-CERT-FINGERPRINT TO WS-SIG-VERIFY-BUFFER
+
+      *    Audit-log the fingerprint we are about to compare so operators can
+      *    confirm correct hex values (0-9 and A-F) regardless of host code page.
+           DISPLAY 'TLSVAL-I040: VERIFYING FINGERPRINT '
+               WS-SIG-VERIFY-BUFFER
+
+           IF WS-SIG-VERIFY-BUFFER NOT = CS-FINGERPRINT
+               SET WS-SIG-INVALID TO TRUE
+               MOVE 'FINGERPRINT MISMATCH' TO WS-VALIDATION-MSG
+               GO TO 4000-EXIT
+           END-IF
+
            MOVE 'N' TO WS-ALGO-FOUND
            PERFORM VARYING WS-ALGO-INDEX FROM 1 BY 1
                UNTIL WS-ALGO-INDEX > 4
