@@ -15,6 +15,7 @@ contract MultiSigWallet {
 
     struct Confirmation {
         bool confirmed;
+        // Snapshot metadata lets execution verify the same approvals still existed at the call block.
         uint256 confirmedAtBlock;
         uint256 revokedAtBlock;
     }
@@ -49,6 +50,7 @@ contract MultiSigWallet {
 
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
         require(to != address(0), "Invalid target");
+        // Plain ETH transfers to EOAs are valid, but calldata requires a contract target.
         require(data.length == 0 || to.code.length > 0, "Target has no code");
 
         uint256 txId = transactionCount++;
@@ -102,6 +104,7 @@ contract MultiSigWallet {
         require(!transactions[txId].executed, "Already executed");
         require(executionState != _ENTERED, "Reentrant execution");
 
+        // Lock the approval set before the external call so callback-time changes cannot satisfy execution.
         uint256 executionBlock = block.number;
         require(getConfirmationCountAtBlock(txId, executionBlock) >= required, "Not enough confirmations");
 

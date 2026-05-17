@@ -178,11 +178,18 @@ test("executeTransaction reverts when a callback revokes a required confirmation
     await (await wallet.connect(ownerA).confirmTransaction(txId)).wait();
     await (await callback.confirm(txId)).wait();
 
+    const callbackAddress = await callback.getAddress();
+    const walletAddress = await wallet.getAddress();
+    const callbackBalanceBefore = await latestBalance(provider, callbackAddress);
+    const walletBalanceBefore = await latestBalance(provider, walletAddress);
+
     await expectRevert(
         () => wallet.connect(ownerA).executeTransaction(txId),
         /Confirmations revoked during execution/
     );
     assert.equal(await wallet.getConfirmationCount(txId), 2n);
+    assert.equal(await latestBalance(provider, callbackAddress), callbackBalanceBefore);
+    assert.equal(await latestBalance(provider, walletAddress), walletBalanceBefore);
 });
 
 test("block-level confirmation checks reject a revoked confirmation before execution", async () => {
@@ -205,10 +212,28 @@ test("block-level confirmation checks reject a revoked confirmation before execu
     );
 });
 
-test("submitTransaction rejects zero-address targets and calldata to EOAs", async () => {
+test("confirmation snapshots exclude confirmations added after the checked block", async () => {
+    const { signers, wallet } = await createFixture();
+    const [ownerA, ownerB, , recipient] = signers;
+    const txId = await submitTransaction(wallet, ownerA, await recipient.getAddress(), 1n);
+
+    const firstConfirmReceipt = await (await wallet.connect(ownerA).confirmTransaction(txId)).wait();
+    assert.equal(await wallet.getConfirmationCountAtBlock(txId, firstConfirmReceipt.blockNumber), 1n);
+
+    const secondConfirmReceipt = await (await wallet.connect(ownerB).confirmTransaction(txId)).wait();
+    assert.equal(await wallet.getConfirmationCountAtBlock(txId, firstConfirmReceipt.blockNumber), 1n);
+    assert.equal(await wallet.getConfirmationCountAtBlock(txId, secondConfirmReceipt.blockNumber), 2n);
+    assert.equal(await wallet.getConfirmationCount(txId), 2n);
+});
+
+test("submitTransaction validates targets without blocking plain EOA transfers", async () => {
     const { signers, wallet } = await createFixture();
     const [ownerA, , , recipient] = signers;
     const recipientAddress = await recipient.getAddress();
+
+    const validTxId = await submitTransaction(wallet, ownerA, recipientAddress, 1n, "0x");
+    assert.equal(validTxId, 0);
+    assert.equal(await wallet.transactionCount(), 1n);
 
     await expectRevert(
         () => wallet.connect(ownerA).submitTransaction(ethers.ZeroAddress, 0, "0x"),
