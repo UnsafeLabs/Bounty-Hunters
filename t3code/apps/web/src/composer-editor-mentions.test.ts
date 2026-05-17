@@ -15,9 +15,23 @@ describe("splitPromptIntoComposerSegments", () => {
     ]);
   });
 
-  it("does not convert an incomplete trailing mention token", () => {
+  it("converts a trailing mention token", () => {
     expect(splitPromptIntoComposerSegments("Inspect @AGENTS.md")).toEqual([
-      { type: "text", text: "Inspect @AGENTS.md" },
+      { type: "text", text: "Inspect " },
+      { type: "mention", path: "AGENTS.md" },
+    ]);
+  });
+
+  it("handles mentions followed by punctuation", () => {
+    expect(splitPromptIntoComposerSegments("See @README.md.")).toEqual([
+      { type: "text", text: "See " },
+      { type: "mention", path: "README.md" },
+      { type: "text", text: "." },
+    ]);
+    expect(splitPromptIntoComposerSegments("Tell @NinaSanctum:")).toEqual([
+      { type: "text", text: "Tell " },
+      { type: "mention", path: "NinaSanctum" },
+      { type: "text", text: ":" },
     ]);
   });
 
@@ -37,9 +51,18 @@ describe("splitPromptIntoComposerSegments", () => {
     ]);
   });
 
-  it("does not convert an incomplete trailing skill token", () => {
+  it("converts a trailing skill token", () => {
     expect(splitPromptIntoComposerSegments("Use $review-follow-up")).toEqual([
-      { type: "text", text: "Use $review-follow-up" },
+      { type: "text", text: "Use " },
+      { type: "skill", name: "review-follow-up" },
+    ]);
+  });
+
+  it("handles skills followed by punctuation", () => {
+    expect(splitPromptIntoComposerSegments("Use $review-follow-up!")).toEqual([
+      { type: "text", text: "Use " },
+      { type: "skill", name: "review-follow-up" },
+      { type: "text", text: "!" },
     ]);
   });
 
