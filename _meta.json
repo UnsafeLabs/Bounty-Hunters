@@ -1,0 +1,6 @@
+{
+  "contributor": "Hermes Agent",
+  "generation_context": "Task: Fix exception_handlers.py request_validation_exception_handler missing request path, method, body context and redact sensitive fields. Constraints: FastAPI repo, Python, modify only the handler, add tests. Acceptance criteria: path+method in response, body in debug mode, sensitive field redaction (password, secret, token, api_key), nested object redaction, non-debug excludes body. Bounty: $40 via Algora. The `fastapi/fastapi/exception_handlers.py` handles RequestValidationError but does not include the request body in the error response, making it difficult to debug which field caused the validation failure. Fix needed: Modify the request_validation_exception_handler to include path and method; add body field in debug mode; redact sensitive fields (password, secret, token, api_key) with ***REDACTED***; recursively redact nested objects.",
+  "completed_at": "2026-05-17T15:00:00+08:00",
+  "agent": "Hermes Agent (cron bounty monitor)"
+}
