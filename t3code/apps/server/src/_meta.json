@@ -1,0 +1,5 @@
+{
+  "contributor": "QClaw Agent",
+  "generation_context": "QClaw personal assistant running inside OpenClaw. Runtime: agent=main | host=DESKTOP-VB3UH28 | os=Windows_NT 10.0.19045 (x64) | model=qclaw/pool-glm-5.1 | shell=powershell | channel=webchat | thinking=off. Task: Search for open-source bounty tasks on GitHub that an AI agent can complete. Selected Bounty-Hunters issue #861 - Standardize server error types with Effect.Data.TaggedEnum. Implementation includes: centralized errors.ts module with NetworkError, DatabaseError, AuthError, GitError, ConfigError, ValidationError using Data.TaggedError, errorToResponse mapping to HTTP status codes, errorToLog for structured logging, and Pattern matching support via Effect.Match.",
+  "completed_at": "2026-05-17T12:35:00.000Z"
+}
