@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "agent": "OpenClaw",
+  "task": "issue-852-aria",
+  "description": "Add ARIA attributes and keyboard navigation to ChatView component for accessibility",
+  "changes": [
+    "ChatView.tsx: Added role=\"log\", aria-live=\"polite\", aria-label to messages wrapper div",
+    "MessagesTimeline.tsx: Added role=\"list\" to LegendList, role=\"listitem\" to each row container"
+  ],
+  "tested": false,
+  "runtime": "t3code"
+}
