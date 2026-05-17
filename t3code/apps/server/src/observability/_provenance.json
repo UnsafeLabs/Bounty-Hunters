@@ -1,0 +1,5 @@
+{
+  "tool_name": "QClaw Agent",
+  "boot_context": "QClaw personal assistant running inside OpenClaw. Task: UnsafeLabs/Bounty-Hunters #856 - Add sliding window metrics aggregation with Effect.Stream. Implementation: MetricsAggregator service with 1-minute sliding window (6 x 10s windows), per-method request counts, error rates, p50/p95/p99 latencies, throughput, Effect.Schedule.spaced window rotation, Effect.Stream of MetricsWindow events.",
+  "timestamp": "2026-05-17T13:35:00.000Z"
+}
