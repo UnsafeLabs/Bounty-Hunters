@@ -1,0 +1,1 @@
+{"tool_name":"Hermes Agent","boot_context":"Add FastAPITestClient to fastapi.testclient extending TestClient with auth helpers, WebSocket convenience, and status assertion.","created":"2026-05-17T06:00:00Z"}
