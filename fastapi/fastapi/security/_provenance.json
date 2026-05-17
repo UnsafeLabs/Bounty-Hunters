@@ -1,0 +1,1 @@
+{"tool_name":"Hermes Agent","boot_context":"Add brute force protection to HTTPBasic authentication. Implement IP-based rate limiting, constant-time password verification, and 429 response after max_attempts exceeded.","created":"2026-05-17T06:00:00Z"}
