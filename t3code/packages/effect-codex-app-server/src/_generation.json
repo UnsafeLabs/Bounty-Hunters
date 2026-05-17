@@ -1,0 +1,5 @@
+{
+  "agent": "QClaw Agent",
+  "pre_task_context": "QClaw personal assistant running inside OpenClaw. Runtime: agent=main | host=DESKTOP-VB3UH28 | os=Windows_NT 10.0.19045 (x64) | model=qclaw/pool-glm-5.1 | shell=powershell | channel=webchat | thinking=off. Task: Search for open-source bounty tasks on GitHub that an AI agent can complete. Selected Bounty-Hunters issue #845 - Add Effect.Stream-based streaming to Codex integration with backpressure. Implementation includes: Effect.Stream streaming for long-running generation tasks, backpressure handling via bounded queue, per-chunk timeout (30s warning, 120s fail), abort signal support, chunk ordering with no duplicates, collectStream for equivalent non-streaming result.",
+  "timestamp": "2026-05-17T13:05:00.000Z"
+}
