@@ -35,14 +35,18 @@ contract TokenVesting {
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
     function vestedAmount() public view returns (uint256) {
         if (block.timestamp < cliff) return 0;
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+        // Divide before multiply to prevent overflow
+        // Use full precision: (totalAllocation * elapsed) / duration
+        // Split to avoid overflow: high = totalAllocation / duration * elapsed
+        // remainder = (totalAllocation % duration) * elapsed / duration
+        uint256 base = (totalAllocation / duration) * elapsed;
+        uint256 remainder = ((totalAllocation % duration) * elapsed) / duration;
+        return base + remainder;
     }
 
     function claimable() public view returns (uint256) {
@@ -58,16 +62,20 @@ contract TokenVesting {
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        // Fix: during cliff or early vesting, unvested = totalAllocation - claimed
+        // This correctly returns unvested tokens even when vested is 0 during cliff
+        uint256 unvested;
+        if (block.timestamp < cliff) {
+            unvested = totalAllocation - claimed;
+        } else {
+            unvested = totalAllocation - vested;
+        }
 
         if (vested > claimed) {
             token.transfer(beneficiary, vested - claimed);
