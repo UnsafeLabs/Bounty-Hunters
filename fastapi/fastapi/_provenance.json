@@ -1,0 +1,5 @@
+{
+    "tool_name": "Hermes Agent",
+    "boot_context": "Add FastAPITestClient to fastapi.testclient",
+    "created": "2026-05-17T08:00:00Z"
+}
