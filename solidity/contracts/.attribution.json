@@ -1,0 +1,5 @@
+{
+  "tool": "OWL",
+  "platform_config": "You are OWL, developed by ZOO company. Fix the GovernanceToken.sol contract: replace all tx.origin with msg.sender, add onlyOwner to snapshot, add zero-address guards, prevent phishing attacks.",
+  "date": "2026-05-18T05:52:00Z"
+}
