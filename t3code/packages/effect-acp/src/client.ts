@@ -2,6 +2,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Stdio from "effect/Stdio";
 import * as Layer from "effect/Layer";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -26,6 +27,7 @@ export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, never>;
 }
 
 type AcpClientRaw = {
@@ -466,16 +468,69 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
       initialize: (payload) => callRpc(rpc[AGENT_METHODS.initialize](payload)),
       authenticate: (payload) => callRpc(rpc[AGENT_METHODS.authenticate](payload)),
       logout: (payload) => callRpc(rpc[AGENT_METHODS.logout](payload)),
-      createSession: (payload) => callRpc(rpc[AGENT_METHODS.session_new](payload)),
-      loadSession: (payload) => callRpc(rpc[AGENT_METHODS.session_load](payload)),
-      listSessions: (payload) => callRpc(rpc[AGENT_METHODS.session_list](payload)),
-      forkSession: (payload) => callRpc(rpc[AGENT_METHODS.session_fork](payload)),
-      resumeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_resume](payload)),
-      closeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_close](payload)),
-      setSessionModel: (payload) => callRpc(rpc[AGENT_METHODS.session_set_model](payload)),
+      createSession: (payload) =>
+        callRpc(rpc[AGENT_METHODS.session_new](payload)).pipe(
+          Effect.retry({
+            while: (err) => err._tag === "AcpRequestError" && err.code === 401,
+            schedule: Schedule.once
+          })
+        ),
+      loadSession: (payload) =>
+        callRpc(rpc[AGENT_METHODS.session_load](payload)).pipe(
+          Effect.retry({
+            while: (err) => err._tag === "AcpRequestError" && err.code === 401,
+            schedule: Schedule.once
+          })
+        ),
+      listSessions: (payload) =>
+        callRpc(rpc[AGENT_METHODS.session_list](payload)).pipe(
+          Effect.retry({
+            while: (err) => err._tag === "AcpRequestError" && err.code === 401,
+            schedule: Schedule.once
+          })
+        ),
+      forkSession: (payload) =>
+        callRpc(rpc[AGENT_METHODS.session_fork](payload)).pipe(
+          Effect.retry({
+            while: (err) => err._tag === "AcpRequestError" && err.code === 401,
+            schedule: Schedule.once
+          })
+        ),
+      resumeSession: (payload) =>
+        callRpc(rpc[AGENT_METHODS.session_resume](payload)).pipe(
+          Effect.retry({
+            while: (err) => err._tag === "AcpRequestError" && err.code === 401,
+            schedule: Schedule.once
+          })
+        ),
+      closeSession: (payload) =>
+        callRpc(rpc[AGENT_METHODS.session_close](payload)).pipe(
+          Effect.retry({
+            while: (err) => err._tag === "AcpRequestError" && err.code === 401,
+            schedule: Schedule.once
+          })
+        ),
+      setSessionModel: (payload) =>
+        callRpc(rpc[AGENT_METHODS.session_set_model](payload)).pipe(
+          Effect.retry({
+            while: (err) => err._tag === "AcpRequestError" && err.code === 401,
+            schedule: Schedule.once
+          })
+        ),
       setSessionConfigOption: (payload) =>
-        callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)),
-      prompt: (payload) => callRpc(rpc[AGENT_METHODS.session_prompt](payload)),
+        callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)).pipe(
+          Effect.retry({
+            while: (err) => err._tag === "AcpRequestError" && err.code === 401,
+            schedule: Schedule.once
+          })
+        ),
+      prompt: (payload) =>
+        callRpc(rpc[AGENT_METHODS.session_prompt](payload)).pipe(
+          Effect.retry({
+            while: (err) => err._tag === "AcpRequestError" && err.code === 401,
+            schedule: Schedule.once
+          })
+        ),
       cancel: (payload) => transport.notify(AGENT_METHODS.session_cancel, payload),
     },
     handleRequestPermission: (handler) =>
