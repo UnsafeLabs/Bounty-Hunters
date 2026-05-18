@@ -1,0 +1,106 @@
+ /****************************************************************
+  * Fix: AREA condition on-unit masking STRINGSIZE during
+  * certificate verification (#566)
+  *
+  * Problem: (STRINGSIZE) ON-UNIT is masked by an enclosing
+  * (AREA) ON-UNIT, causing string truncation errors to be
+  * silently ignored during certificate verification, allowing
+  * truncated/malformed certificates to pass verification.
+  *
+  * Solution: Separate ON-UNIT scopes, explicit STRINGSIZE
+  * handling in each procedure, and validation of string
+  * lengths before assignment.
+  ****************************************************************/
+
+ CERTVER: PROCEDURE OPTIONS(MAIN);
+     DCL CERT_SUBJECT   CHAR(256) VARYING;
+     DCL CERT_ISSUER    CHAR(256) VARYING;
+     DCL CERT_SERIAL    CHAR(32)  VARYING;
+     DCL CERT_FINGERPRINT CHAR(64) VARYING;
+     DCL TEMP_BUFFER    CHAR(512) VARYING;
+     DCL VERIFY_RESULT  BIT(1) INIT('0'B);
+     DCL TRUNCATION_FLAG BIT(1) INIT('0'B);
+
+     /* ================================================
+      * VERIFY_CERT: Main verification with proper
+      * ON-UNIT scoping — no more masked STRINGSIZE
+      * ================================================ */
+     VERIFY_CERT: PROCEDURE(CERT_STR) RETURNS(BIT(1));
+         DCL CERT_STR CHAR(*) VARYING;
+         DCL RESULT   BIT(1) INIT('0'B);
+
+         /* STRINGSIZE handler scoped to THIS procedure only */
+         ON STRINGSIZE BEGIN;
+             TRUNCATION_FLAG = '1'B;
+             PUT SKIP LIST('ERROR: String truncation during cert verify');
+             RESULT = '0'B;
+             /* Do NOT resume — fail the verification */
+             STOP;
+         END;
+
+         /* AREA handler — separate, does NOT mask STRINGSIZE */
+         ON AREA BEGIN;
+             PUT SKIP LIST('ERROR: Area condition during cert processing');
+             RESULT = '0'B;
+         END;
+
+         /* Validate before assignment — proactive length check */
+         IF LENGTH(CERT_STR) > 256 THEN DO;
+             PUT SKIP LIST('WARNING: Certificate string exceeds 256 chars');
+             /* Truncate explicitly with validation */
+             CERT_SUBJECT = SUBSTR(CERT_STR, 1, 256);
+             TRUNCATION_FLAG = '1'B;
+         END;
+         ELSE DO;
+             CERT_SUBJECT = CERT_STR;
+         END;
+
+         /* Parse certificate fields with explicit length checks */
+         CALL PARSE_CERT_FIELDS(CERT_STR);
+
+         IF TRUNCATION_FLAG THEN
+             RESULT = '0'B;  /* Fail on any truncation */
+         ELSE
+             RESULT = '1'B;
+
+         RETURN(RESULT);
+     END VERIFY_CERT;
+
+     /* ================================================
+      * PARSE_CERT_FIELDS: Parse with its own ON-UNIT
+      * ================================================ */
+     PARSE_CERT_FIELDS: PROCEDURE(RAW_CERT);
+         DCL RAW_CERT CHAR(*) VARYING;
+         DCL POS      FIXED BIN(31);
+         DCL FIELD_LEN FIXED BIN(31);
+
+         /* Own STRINGSIZE handler — never masked */
+         ON STRINGSIZE BEGIN;
+             TRUNCATION_FLAG = '1'B;
+             PUT SKIP LIST('ERROR: Truncation in field parsing');
+         END;
+
+         /* Proactive length validation for each field */
+         POS = INDEX(RAW_CERT, '|ISSUER=');
+         IF POS > 0 THEN DO;
+             FIELD_LEN = MIN(256, LENGTH(RAW_CERT) - POS + 1);
+             CERT_ISSUER = SUBSTR(RAW_CERT, POS + 7, FIELD_LEN);
+         END;
+
+         POS = INDEX(RAW_CERT, '|SERIAL=');
+         IF POS > 0 THEN DO;
+             FIELD_LEN = MIN(32, LENGTH(RAW_CERT) - POS + 1);
+             CERT_SERIAL = SUBSTR(RAW_CERT, POS + 8, FIELD_LEN);
+         END;
+
+         /* Fingerprint with explicit bounds */
+         POS = INDEX(RAW_CERT, '|FINGERPRINT=');
+         IF POS > 0 THEN DO;
+             FIELD_LEN = MIN(64, LENGTH(RAW_CERT) - POS + 1);
+             CERT_FINGERPRINT = SUBSTR(RAW_CERT, POS + 13, FIELD_LEN);
+         END;
+     END PARSE_CERT_FIELDS;
+
+     /* Main execution */
+     CALL VERIFY_CERT('CN=test,OU=dev,O=org|ISSUER=CA|SERIAL=ABC123|FINGERPRINT=DEADBEEF');
+ END CERTVER;
