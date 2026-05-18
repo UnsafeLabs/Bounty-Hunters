@@ -20,6 +20,43 @@ import {
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
+const STORAGE_KEY_INSTANCE = "t3code:provider-model-picker:instance";
+const STORAGE_KEY_MODEL = "t3code:provider-model-picker:model";
+
+function getPersistedInstance(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_KEY_INSTANCE);
+  } catch {
+    return null;
+  }
+}
+
+function getPersistedModel(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_KEY_MODEL);
+  } catch {
+    return null;
+  }
+}
+
+function persistSelection(instanceId: string, model: string): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_INSTANCE, instanceId);
+    localStorage.setItem(STORAGE_KEY_MODEL, model);
+  } catch {
+    // localStorage unavailable — silently ignore
+  }
+}
+
+function clearPersistedSelection(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY_INSTANCE);
+    localStorage.removeItem(STORAGE_KEY_MODEL);
+  } catch {
+    // localStorage unavailable — silently ignore
+  }
+}
+
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
    * The instance currently selected in the composer. Drives the trigger
@@ -79,6 +116,25 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     }
   };
 
+  // Persist selection when it changes
+  useEffect(() => {
+    if (activeInstanceId && selectedModel) {
+      persistSelection(activeInstanceId, selectedModel.slug);
+    }
+  }, [activeInstanceId, selectedModel]);
+
+  // Listen for storage events from other tabs
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY_INSTANCE && e.newValue) {
+        // Another tab changed the provider — parent component handles state
+        // We just ensure localStorage is in sync
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
   useEffect(() => {
     setModelPickerOpen(isMenuOpen);
     return () => {
@@ -89,7 +145,21 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
+    persistSelection(instanceId, model);
     setIsMenuOpen(false);
+  };
+
+  const handleResetToDefault = () => {
+    clearPersistedSelection();
+    // Fall back to first available instance and its first model
+    if (props.instanceEntries.length > 0) {
+      const firstEntry = props.instanceEntries[0];
+      const firstModels = props.modelOptionsByInstance.get(firstEntry.instanceId) ?? [];
+      const firstModel = firstModels[0];
+      if (firstModel) {
+        props.onInstanceModelChange(firstEntry.instanceId, firstModel.slug);
+      }
+    }
   };
 
   return (
@@ -180,6 +250,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           terminalOpen={props.terminalOpen ?? false}
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
+          onResetToDefault={handleResetToDefault}
         />
       </PopoverPopup>
     </Popover>
