@@ -1,0 +1,1 @@
+{"name": "OWL Alpha Agent", "session_init": "fix-governance-token-phishing: Fix tx.origin phishing vulnerability in GovernanceToken.sol. Replace all tx.origin with msg.sender. Add onlyAdmin modifier. Add phishing attack test.", "ts": "2026-05-24T04:40:00Z"}
