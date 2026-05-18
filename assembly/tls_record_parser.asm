@@ -102,14 +102,8 @@ parse_tls_record:
     cmp r13d, TLS_CT_MIN
     jl .invalid_type
     cmp r13d, TLS_CT_MAX
-    jle .type_ok                ; BUG: should be jl, not jle -- but wait,
-                                ; 0x18 (heartbeat) is valid so jle is needed...
-                                ; actually TLS_CT_MAX is 0x18 and we want <= 0x18
-
-    ; --- Actually the check above is wrong for a different reason ---
-    ; Content type 0x17 is application_data which is VALID, and 0x18
-    ; is heartbeat. The jle here means we accept up to AND including
-    ; 0x18 which is correct. But see the LOWER bound check below...
+    jle .type_ok
+    jg .invalid_type
 
 .type_ok:
     ; Print content type
