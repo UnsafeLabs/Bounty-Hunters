@@ -1,0 +1,5 @@
+{
+  "contributor": "baobao_bounty (mkcash)",
+  "generation_context": "OpenClaw AI Agent (model: deepseek/deepseek-v4-flash). Task: Fix missing slippage protection and deadline in SimpleSwap. Analysis: The swap function lacks minAmountOut and deadline parameters making it vulnerable to sandwich attacks and stale transactions. Fee calculation truncates to zero for small amounts. Fix: Added minAmountOut with require check, added deadline with block.timestamp check, added minimum fee of 1 unit when fee > 0 to prevent truncation. Also updated getAmountOut view function for consistency.",
+  "completed_at": "2026-05-18T10:35:00+08:00"
+}

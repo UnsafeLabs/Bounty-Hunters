@@ -9,6 +9,8 @@ contract SimpleSwap {
     uint256 public reserveA;
     uint256 public reserveB;
     uint256 public fee; // basis points, e.g. 30 = 0.3%
+    uint256 public constant FEE_PRECISION = 10_000;
+    uint256 public constant MIN_FEE_BASIS_POINTS = 1; // minimum 1 bp to prevent truncation
 
     event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
 
@@ -25,12 +27,21 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
-        require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
-        require(amountIn > 0, "Amount must be > 0");
+    /// @notice Swap tokens with slippage protection and deadline
+    /// @param tokenIn Address of the input token
+    /// @param amountIn Amount of input tokens to swap
+    /// @param minAmountOut Minimum acceptable output amount (slippage protection)
+    /// @param deadline Unix timestamp after which the transaction reverts
+    /// @return amountOut The actual output amount received
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "SimpleSwap: expired deadline");
+        require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "SimpleSwap: invalid token");
+        require(amountIn > 0, "SimpleSwap: amount must be > 0");
 
         bool isTokenA = tokenIn == address(tokenA);
         (IERC20 inputToken, IERC20 outputToken, uint256 reserveIn, uint256 reserveOut) = isTokenA
@@ -39,11 +50,20 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        // Fee calculation with precision protection:
+        // For small amounts, ensure at least 1 bp is charged
+        uint256 effectiveBasisPoints = fee;
+        uint256 rawFee = amountIn * effectiveBasisPoints / FEE_PRECISION;
+        if (rawFee == 0 && effectiveBasisPoints > 0) {
+            // Minimum fee: charge 1 unit when fee > 0 but truncates to zero
+            rawFee = 1;
+        }
+        uint256 amountInAfterFee = amountIn - rawFee;
 
         // constant product formula: x * y = k
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        require(amountOut >= minAmountOut, "SimpleSwap: slippage exceeded");
 
         outputToken.transfer(msg.sender, amountOut);
 
@@ -62,8 +82,12 @@ contract SimpleSwap {
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        uint256 effectiveBasisPoints = fee;
+        uint256 rawFee = amountIn * effectiveBasisPoints / FEE_PRECISION;
+        if (rawFee == 0 && effectiveBasisPoints > 0) {
+            rawFee = 1;
+        }
+        uint256 amountInAfterFee = amountIn - rawFee;
         return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
     }
 }
