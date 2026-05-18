@@ -1,0 +1,420 @@
+typescript
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  memo,
+  forwardRef,
+  Ref,
+  KeyboardEvent,
+} from "react";
+import { useCommandPalette } from "./CommandPaletteStore";
+import { logger } from "@/lib/logger";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Represents a single command in the palette. */
+export interface CommandItem {
+  id: string;
+  name: string;
+  shortcut?: string;
+  category?: string;
+  action: () => void;
+}
+
+/**
+ * Holds the result of a fuzzy match.
+ * `score` is a non‑negative number (higher = better match).
+ * `matchIndices` contains the 0‑based indices of matched characters
+ * in the command name.
+ */
+interface FuzzyMatchResult {
+  score: number;
+  matchIndices: number[];
+}
+
+/** Complete result for display, linking a command with its match info. */
+interface FilteredCommand extends FuzzyMatchResult {
+  command: CommandItem;
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzy matching engine
+// ---------------------------------------------------------------------------
+
+/**
+ * Performs character‑by‑character fuzzy matching of `query` against `target`.
+ *
+ * The algorithm scans `target` left‑to‑right, matching each character of `query`
+ * in order. Gaps between matched characters are allowed. The function returns
+ * `null` if the query cannot be matched (i.e., not all characters are found).
+ *
+ * Scoring rules (higher is better):
+ * - Consecutive matched characters: +10 each
+ * - Word boundary match (start of string or after non‑alphanumeric): +15
+ * - Shorter commands: +max(0, 30 - target.length)
+ * - Gap penalty: –2 per unmatched character between consecutive matches
+ *
+ * @param query  The user‑typed search string (case‑insensitive).
+ * @param target The command name to test against.
+ * @returns A `FuzzyMatchResult` with score and matched indices, or `null`.
+ */
+function fuzzyMatch(query: string, target: string): FuzzyMatchResult | null {
+  // Input validation
+  if (!query || !target) return null;
+  if (typeof query !== "string" || typeof target !== "string") {
+    logger.warn("fuzzyMatch: non-string arguments", { query, target });
+    return null;
+  }
+
+  const q = query.toLowerCase();
+  const t = target.toLowerCase();
+
+  let score = 0;
+  const matchIndices: number[] = [];
+  let queryIndex = 0;
+  let prevMatchIndex = -2; // used to detect consecutive matches
+
+  for (let i = 0; i < t.length && queryIndex < q.length; i++) {
+    if (t[i] === q[queryIndex]) {
+      // Matched character
+      matchIndices.push(i);
+      queryIndex++;
+
+      // Consecutive match bonus
+      if (prevMatchIndex === i - 1) {
+        score += 10;
+      }
+
+      // Word boundary bonus
+      const prevChar = i === 0 ? "" : target[i - 1];
+      if (i === 0 || /[^a-zA-Z0-9]/.test(prevChar)) {
+        score += 15;
+      }
+
+      prevMatchIndex = i;
+    }
+  }
+
+  // If not all query characters were matched, the query cannot be matched
+  if (queryIndex < q.length) return null;
+
+  // Short‑command bonus
+  score += Math.max(0, 30 - t.length);
+
+  // Gap penalty
+  if (matchIndices.length > 1) {
+    for (let i = 1; i < matchIndices.length; i++) {
+      const gap = matchIndices[i] - matchIndices[i - 1] - 1;
+      score -= gap * 2;
+    }
+  }
+
+  return { score: Math.max(0, score), matchIndices };
+}
+
+// ---------------------------------------------------------------------------
+// Sub‑components (CommandRow with forwardRef for scroll‑into‑view)
+// ---------------------------------------------------------------------------
+
+/**
+ * Props for the CommandRow component.
+ */
+interface CommandRowProps {
+  command: CommandItem;
+  matchIndices: number[];
+  isSelected: boolean;
+  onSelect: () => void;
+  onDoubleClick: () => void;
+}
+
+/**
+ * Renders a single command row with fuzzy‑matched characters highlighted.
+ * Uses `forwardRef` so the parent can scroll the selected item into view.
+ */
+const CommandRow = memo(
+  forwardRef<HTMLLIElement, CommandRowProps>(function CommandRow(
+    { command, matchIndices, isSelected, onSelect, onDoubleClick }: CommandRowProps,
+    ref: Ref<HTMLLIElement>,
+  ) {
+    const { name, shortcut, category } = command;
+
+    // Build highlighted name once per command / matchIndices
+    const nameParts = useMemo(() => {
+      const parts: React.ReactNode[] = [];
+      const matchSet = new Set(matchIndices);
+      for (let i = 0; i < name.length; i++) {
+        const char = name[i];
+        if (matchSet.has(i)) {
+          parts.push(
+            <span key={i} className="fuzzy-match">
+              {char}
+            </span>,
+          );
+        } else {
+          parts.push(<span key={i}>{char}</span>);
+        }
+      }
+      return parts;
+    }, [name, matchIndices]);
+
+    return (
+      <li
+        ref={ref}
+        role="option"
+        aria-selected={isSelected}
+        className={`command-palette-item ${isSelected ? "command-palette-item--selected" : ""}`}
+        onMouseEnter={onSelect}
+        onMouseDown={(e) => {
+          e.preventDefault(); // prevent focus loss from input
+          onDoubleClick();
+        }}
+      >
+        <span className="command-palette-item__name">{nameParts}</span>
+        {shortcut && <kbd className="command-palette-item__shortcut">{shortcut}</kbd>}
+        {category && <span className="command-palette-item__category">{category}</span>}
+      </li>
+    );
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+/**
+ * Command palette with fuzzy search, keyboard navigation, and accessibility.
+ *
+ * Features:
+ * - Fuzzy filtering with scoring (consecutive matches, word boundaries, gaps)
+ * - Highlighted matched characters in results
+ * - Results sorted by match quality (best first)
+ * - Keyboard navigation (ArrowUp, ArrowDown, Enter, Escape)
+ * - Auto‑scrolls selected item into view
+ * - Graceful error handling with logging
+ * - Performance optimised with `useMemo` for filtered results and row render
+ *
+ * @returns {JSX.Element | null} The palette UI or `null` when closed.
+ */
+export default function CommandPalette() {
+  const { commands, isOpen, close } = useCommandPalette();
+  const [query, setQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selectedItemRef = useRef<HTMLLIElement | null>(null);
+
+  // -----------------------------------------------------------------------
+  // Validate and memoize safe commands list
+  // -----------------------------------------------------------------------
+  const safeCommands: CommandItem[] = useMemo(() => {
+    if (!Array.isArray(commands)) {
+      logger.warn("CommandPalette: commands is not an array", commands);
+      return [];
+    }
+    return commands.filter(
+      (cmd): cmd is CommandItem =>
+        cmd != null &&
+        typeof cmd.id === "string" &&
+        typeof cmd.name === "string" &&
+        typeof cmd.action === "function",
+    );
+  }, [commands]);
+
+  // -----------------------------------------------------------------------
+  // Fuzzy filtering and scoring
+  // -----------------------------------------------------------------------
+  const filteredCommands: FilteredCommand[] = useMemo(() => {
+    if (!query.trim()) {
+      // Empty query – show all commands in original order
+      return safeCommands.map((cmd) => ({
+        command: cmd,
+        score: 0,
+        matchIndices: [],
+      }));
+    }
+
+    const results: FilteredCommand[] = [];
+
+    for (const cmd of safeCommands) {
+      try {
+        const match = fuzzyMatch(query, cmd.name);
+        if (match) {
+          results.push({
+            command: cmd,
+            score: match.score,
+            matchIndices: match.matchIndices,
+          });
+        }
+      } catch (error) {
+        // Log and include the command as a fallback (lowest score)
+        logger.error(
+          { error, commandId: cmd.id, query },
+          "CommandPalette: fuzzyMatch threw unexpected error",
+        );
+        results.push({ command: cmd, score: -1, matchIndices: [] });
+      }
+    }
+
+    // Sort by score descending, preserve original order on ties
+    results.sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score;
+      return safeCommands.indexOf(a.command) - safeCommands.indexOf(b.command);
+    });
+
+    return results;
+  }, [query, safeCommands]);
+
+  // -----------------------------------------------------------------------
+  // Selection management
+  // -----------------------------------------------------------------------
+
+  // Clamp and reset selection when list changes
+  useEffect(() => {
+    setSelectedIndex((prev) => Math.min(prev, filteredCommands.length - 1));
+  }, [filteredCommands]);
+
+  const safeSelectedIndex = Math.min(selectedIndex, filteredCommands.length - 1);
+
+  // Auto‑scroll the selected item into view
+  useEffect(() => {
+    if (selectedItemRef.current) {
+      selectedItemRef.current.scrollIntoView({
+        block: "nearest",
+        behavior: "smooth",
+      });
+    }
+  }, [safeSelectedIndex]);
+
+  // -----------------------------------------------------------------------
+  // Keyboard navigation
+  // -----------------------------------------------------------------------
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLInputElement>) => {
+      // Safe index is stable per render, but we compute it inside callback
+      const idx = Math.min(selectedIndex, filteredCommands.length - 1);
+      let newIndex: number | null = null;
+
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          newIndex = Math.min(idx + 1, filteredCommands.length - 1);
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          newIndex = Math.max(idx - 1, 0);
+          break;
+        case "Enter":
+          e.preventDefault();
+          if (filteredCommands[idx]?.command.action) {
+            try {
+              filteredCommands[idx].command.action();
+            } catch (error) {
+              logger.error({ commandId: filteredCommands[idx].command.id, error }, "CommandPalette: action threw error");
+            }
+          }
+          close();
+          break;
+        case "Escape":
+          e.preventDefault();
+          close();
+          break;
+        default:
+          break;
+      }
+
+      if (newIndex !== null) {
+        setSelectedIndex(newIndex);
+      }
+    },
+    [selectedIndex, filteredCommands, close],
+  );
+
+  // Forward ref callback to set selectedItemRef
+  const setSelectedItemRef = useCallback(
+    (el: HTMLLIElement | null) => {
+      selectedItemRef.current = el;
+    },
+    [],
+  );
+
+  // -----------------------------------------------------------------------
+  // Event handlers
+  // -----------------------------------------------------------------------
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setQuery(e.target.value);
+      setSelectedIndex(0);
+    },
+    [],
+  );
+
+  const handleClose = useCallback(() => {
+    close();
+    setQuery("");
+    setSelectedIndex(0);
+  }, [close]);
+
+  // Focus input on open
+  useEffect(() => {
+    if (isOpen && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isOpen]);
+
+  // -----------------------------------------------------------------------
+  // Render
+  // -----------------------------------------------------------------------
+  if (!isOpen) return null;
+
+  return (
+    <div className="command-palette-overlay" onClick={handleClose}>
+      <div
+        className="command-palette"
+        onClick={(e) => e.stopPropagation()}
+        role="listbox"
+        aria-label="Command palette"
+      >
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="Search commands…"
+          value={query}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          className="command-palette__input"
+          aria-autocomplete="list"
+        />
+        <ul className="command-palette__list">
+          {filteredCommands.length === 0 && (
+            <li className="command-palette__empty">No commands found</li>
+          )}
+          {filteredCommands.map((fc, index) => {
+            const isSelected = index === safeSelectedIndex;
+            return (
+              <CommandRow
+                key={fc.command.id}
+                ref={isSelected ? setSelectedItemRef : null}
+                command={fc.command}
+                matchIndices={fc.matchIndices}
+                isSelected={isSelected}
+                onSelect={() => setSelectedIndex(index)}
+                onDoubleClick={() => {
+                  try {
+                    fc.command.action();
+                  } catch (error) {
+                    logger.error({ commandId: fc.command.id, error }, "CommandPalette: action threw error");
+                  }
+                  handleClose();
+                }}
+              />
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
