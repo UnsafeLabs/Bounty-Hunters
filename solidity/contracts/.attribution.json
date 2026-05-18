@@ -1,0 +1,5 @@
+{
+  "tool": "Codex",
+  "platform_config": "Codex CLI coding agent based on GPT-5. Operates in a workspace-write environment with network enabled and approval on-failure by default. Follow repository safety rules: do not revert user changes, avoid destructive git commands unless explicitly requested, prefer fast search tools, keep code edits concise, and provide clear final summaries. Frontend guidance and code-review response guidance loaded but not applicable to this Solidity bounty fix.",
+  "date": "2026-05-18T11:39:06Z"
+}
