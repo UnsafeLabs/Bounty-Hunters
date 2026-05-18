@@ -768,12 +768,9 @@ class OAuth2PasswordBearerWithRefresh(OAuth2PasswordBearer):
     OAuth2 flow for authentication using a bearer token obtained with a password,
     with explicit support for token refresh flow.
 
-    This class extends `OAuth2PasswordBearer` by accepting an additional
-    `refresh_url` parameter that explicitly marks the refresh token endpoint
-    in the OpenAPI schema.
-
-    The `refresh_url` will appear in the generated OpenAPI (e.g. visible at
-    `/docs`) under the OAuth2 security scheme.
+    This is a convenience subclass of `OAuth2PasswordBearer` that provides a
+    dedicated `refreshUrl` parameter and pairs with `OAuth2RefreshRequestForm`
+    for the refresh endpoint.
 
     Read more about it in the
     [FastAPI docs for Simple OAuth2 with Password and Password Bearer](https://fastapi.tiangolo.com/tutorial/security/simple-oauth2/).
@@ -814,7 +811,7 @@ class OAuth2PasswordBearerWithRefresh(OAuth2PasswordBearer):
             ),
         ],
         refreshUrl: Annotated[
-            str,
+            str | None,
             Doc(
                 """
                 The URL to refresh the OAuth2 token and obtain a new one. This would
@@ -822,10 +819,10 @@ class OAuth2PasswordBearerWithRefresh(OAuth2PasswordBearer):
                 dependency.
 
                 This will appear in the generated OpenAPI schema under the OAuth2
-                security scheme.
+                security scheme. Defaults to None.
                 """
             ),
-        ],
+        ] = None,
         scheme_name: Annotated[
             str | None,
             Doc(

@@ -213,10 +213,11 @@ def test_existing_oauth2_password_bearer_unchanged():
     assert resp.status_code == 200
     assert resp.json()["token"] == "old-style-token"
 
-    # Check OpenAPI schema doesn't have refreshUrl
+    # Check OpenAPI schema - refreshUrl defaults to None and is excluded from output
     resp = client.get("/openapi.json")
     schema = resp.json()
     scheme = schema["components"]["securitySchemes"]["OAuth2PasswordBearer"]
+    # When refreshUrl is None (default), Pydantic excludes it from the OpenAPI output
     assert "refreshUrl" not in scheme["flows"]["password"]
 
 
