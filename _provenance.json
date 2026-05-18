@@ -1,0 +1,5 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Hermes Agent API session on macOS. Use tools to act, not just describe. Respond in Vietnamese. Be direct, honest, and verify before answering. Relevant loaded guidance: github-pr-workflow, github-auth, github-repo-management; for this task, create a GitHub PR for the UnsafeLabs/Bounty-Hunters repository. Repository is at /tmp/Bounty-Hunters with remote origin https://github.com/UnsafeLabs/Bounty-Hunters.git. Current task context: fix TLS record parser version byte order bug in assembly/tls_record_parser.asm, preserve issue acceptance criteria, and include a _provenance.json file with tool_name, boot_context, and timestamp.",
+  "timestamp": "2026-05-18T06:41:02Z"
+}
