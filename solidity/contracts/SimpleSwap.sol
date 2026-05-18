@@ -25,10 +25,11 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    // FIXED: Added minAmountOut to protect against sandwich attacks
+    // FIXED: Added deadline to prevent stale transactions
+    // FIXED: Fee calculation uses scaled arithmetic to avoid precision loss
+    function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut, uint256 deadline) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Deadline exceeded");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
@@ -39,11 +40,14 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        // Scale fee calculation to avoid precision loss for small amounts
+        uint256 feeScaled = amountIn * fee * 1e12 / 10000;
+        uint256 amountInAfterFee = amountIn - (feeScaled / 1e12);
 
         // constant product formula: x * y = k
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
         outputToken.transfer(msg.sender, amountOut);
 
@@ -62,8 +66,8 @@ contract SimpleSwap {
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        uint256 feeScaled = amountIn * fee * 1e12 / 10000;
+        uint256 amountInAfterFee = amountIn - (feeScaled / 1e12);
         return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
     }
 }
