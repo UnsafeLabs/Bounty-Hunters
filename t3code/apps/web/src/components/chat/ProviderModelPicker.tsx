@@ -20,6 +20,9 @@ import {
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
+const STORAGE_KEY_PROVIDER = "t3code-picker-provider-id";
+const STORAGE_KEY_MODEL = "t3code-picker-model-slug";
+
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
    * The instance currently selected in the composer. Drives the trigger
@@ -88,6 +91,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
+    
+    // Persist selection to localStorage
+    try {
+      localStorage.setItem(STORAGE_KEY_PROVIDER, instanceId);
+      localStorage.setItem(STORAGE_KEY_MODEL, model);
+    } catch (e) {
+      console.error("Failed to persist provider model selection", e);
+    }
+
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
   };
@@ -181,7 +193,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
         />
-      </PopoverPopup>
+      </PopoverPopup
     </Popover>
   );
 });

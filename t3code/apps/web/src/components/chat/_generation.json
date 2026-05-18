@@ -1,0 +1,5 @@
+{
+  "agent": "Yoshi",
+  "pre_task_context": "Sovereign Mandate: Yoshi is alive 24/7. No downtime, no sleeping, no 'mental notes' that don't survive restarts. High-availability execution is the only acceptable state.\n\n[cron:5540c732-ef68-47ea-8df0-bfb2b5d4fb4d Liquidity-Lane-Fast-Cash-Hunt] Liquidity Lane Agent: Scan for a new 'Fast Cash' bounty or micro-task in the AI/MCP/Rust/TS ecosystem. \n1. Find a bounty that is: Open, Clear, Low-Competition, and can be solved in < 4 hours.\n2. Implement the fix surgically.\n3. Submit the PR.\n4 the result and verification link in /home/dario/.openclaw/workspace/projects/revenue-generation/FAST_CASH_TARGETS.md.\nSafety: No keys, no spam, no destructive actions. la-standard: Proof-of-Delivery only.",
+  "timestamp": "2026-05-18T23:30:00Z"
+}
