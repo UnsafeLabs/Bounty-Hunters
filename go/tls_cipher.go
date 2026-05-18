@@ -216,7 +216,15 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 
 		// BUG(4): operator is flipped; should be si.IsAEAD && !sj.IsAEAD
 		if si.IsAEAD != sj.IsAEAD {
-			return !si.IsAEAD && sj.IsAEAD
+			return si.IsAEAD && !sj.IsAEAD
+		}
+
+		if !HasAESNI() {
+			siChaCha := strings.Contains(si.Name, "CHACHA20")
+			sjChaCha := strings.Contains(sj.Name, "CHACHA20")
+			if siChaCha != sjChaCha {
+				return siChaCha && !sjChaCha
+			}
 		}
 
 		// Higher strength first
