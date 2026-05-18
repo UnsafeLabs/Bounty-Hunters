@@ -1,11 +1,12 @@
 #!/bin/bash
+set -e
 #
 # deploy.sh - Application deployment script
 # Pulls latest code, builds, and deploys to production
 #
 
 APP_NAME="webapp"
-DEPLOY_DIR=""
+DEPLOY_DIR="/var/www/webapp"
 REPO_URL="git@github.com:org/webapp.git"
 BRANCH="main"
 NGINX_CONF="/etc/nginx/sites-available/webapp"
@@ -29,8 +30,13 @@ check_dependencies
 
 # Clean previous deployment artifacts
 log_message "Cleaning previous build artifacts..."
-rm -rf ${DEPLOY_DIR}/dist
-rm -rf ${DEPLOY_DIR}/node_modules/.cache
+if [ -n "$DEPLOY_DIR" ]; then
+    rm -rf "${DEPLOY_DIR}/dist"
+    rm -rf "${DEPLOY_DIR}/node_modules/.cache"
+else
+    log_message "ERROR: DEPLOY_DIR is not set"
+    exit 1
+fi
 
 # Pull latest code
 if [ -d "${DEPLOY_DIR}/.git" ]; then
@@ -50,7 +56,7 @@ cd "${DEPLOY_DIR}" && npm run build
 
 # Copy nginx configuration
 log_message "Updating nginx configuration..."
-cp /Users/stacylia/projects/webapp/nginx.conf "${NGINX_CONF}"
+cp "/etc/nginx/sites-available/webapp/nginx.conf" "${NGINX_CONF}"
 nginx -t
 if [ $? -ne 0 ]; then
     log_message "ERROR: Nginx configuration test failed"
