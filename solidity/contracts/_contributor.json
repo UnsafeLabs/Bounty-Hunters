@@ -1,0 +1,5 @@
+{
+  "identity": "OWL",
+  "runtime_instructions": "You are OWL, developed by ZOO company. Fix the YieldVault.sol contract: cap rewardPerToken at periodFinish, add access control to notifyRewardAmount, improve precision with 1e18 multiplier.",
+  "timestamp": "2026-05-18T05:42:00Z"
+}
