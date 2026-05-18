@@ -1,0 +1,5 @@
+{
+  "agent": "Codex",
+  "initial_directives": "User request: Solve and submit one GitHub bounty PR for UnsafeLabs/Bounty-Hunters issue #915. Issue requirements: fix PriceOracle missing staleness checks, invalid price checks, round completeness validation, fallback oracle, StalePrice event, owner-configurable MAX_STALENESS, and tests for valid, stale, negative/zero, incomplete, and both-stale oracle responses.",
+  "date": "2026-05-18T11:39:02Z"
+}
