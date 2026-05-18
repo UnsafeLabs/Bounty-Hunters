@@ -32,20 +32,38 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "tsconfig*.json"
+      ],
       "outputs": ["dist/**", "dist-electron/**"]
     },
     "dev": {
-      "dependsOn": ["@t3tools/contracts#build"],
+      "dependsOn": [
+        "@t3tools/contracts#build",
+        "@t3tools/shared#build",
+        "@t3tools/client-runtime#build"
+      ],
       "cache": false,
       "persistent": true
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "tsconfig*.json"
+      ],
       "outputs": [],
       "cache": false
     },
     "test": {
       "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "tsconfig*.json",
+        "vitest.config.ts",
+        "vitest.*.config.ts"
+      ],
       "cache": false,
       "outputs": []
     }
