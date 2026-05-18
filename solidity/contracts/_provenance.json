@@ -1,0 +1,5 @@
+{
+  "tool_name": "OWL",
+  "boot_context": "You are OWL, developed by ZOO company. Fix the MultiSigWallet.sol contract: add reentrancy guard to executeTransaction, add zero-address validation in submitTransaction, prevent confirmation revocation during callback.",
+  "timestamp": "2026-05-18T05:52:00Z"
+}
