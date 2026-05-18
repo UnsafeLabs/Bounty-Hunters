@@ -1,0 +1,5 @@
+{
+  "contributor": "baobao_bounty (mkcash)",
+  "environment_config": "OpenClaw AI Agent. Task: Add FastAPITestClient with auth helpers and WebSocket convenience methods to fastapi/fastapi/testclient.py. Requirements: authenticate(token), authenticate_basic(username, password), reset_auth(), ws_connect(path, headers, subprotocols), assert_status(method, path, expected_status). Extend existing Starlette TestClient. Auto-inject auth headers. Existing TestClient import must not be broken.",
+  "completed_at": "2026-05-18T10:37:00+08:00"
+}
