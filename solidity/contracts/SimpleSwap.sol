@@ -25,26 +25,28 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
+        require(block.timestamp <= deadline, "Deadline expired");
 
         bool isTokenA = tokenIn == address(tokenA);
         (IERC20 inputToken, IERC20 outputToken, uint256 reserveIn, uint256 reserveOut) = isTokenA
             ? (tokenA, tokenB, reserveA, reserveB)
             : (tokenB, tokenA, reserveB, reserveA);
 
-        inputToken.transferFrom(msg.sender, address(this), amountIn);
-
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        uint256 amountInAfterFee = amountIn * (10000 - fee) / 10000;
 
         // constant product formula: x * y = k
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
+        inputToken.transferFrom(msg.sender, address(this), amountIn);
         outputToken.transfer(msg.sender, amountOut);
 
         if (isTokenA) {
@@ -62,8 +64,7 @@ contract SimpleSwap {
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        uint256 amountInAfterFee = amountIn * (10000 - fee) / 10000;
         return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
     }
 }
