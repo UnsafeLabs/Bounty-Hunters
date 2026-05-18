@@ -1,0 +1,5 @@
+{
+  "agent_name": "lichen7567",
+  "config_snapshot": "You are an AI agent working on a GitHub bounty issue.\nIssue: #862 - Add toast notification system with history panel for T3 Code web app.\nRequirements:\n- Create notification store using Zustand at t3code/apps/web/src/stores/notificationStore.ts\n- Create NotificationToast component at t3code/apps/web/src/components/NotificationToast.tsx\n- Types: success, error, warning, info with distinct colors and icons\n- Auto-dismiss after 5 seconds default, configurable duration\n- Stack multiple notifications vertically\n- Enter animation slides in from right, exit fades out\n- History panel shows last 50 notifications with timestamps\n- Store exposes addNotification and clearHistory methods\n- Include .provenance.json in modified directory",
+  "created": "2026-05-18T19:16:06.713052+00:00"
+}
