@@ -18,6 +18,7 @@ _SSE_EVENT_SCHEMA: dict[str, Any] = {
 
 
 class EventSourceResponse(StreamingResponse):
+    disconnected: bool = False
     """Streaming response with `text/event-stream` media type.
 
     Use as `response_class=EventSourceResponse` on a *path operation* that uses `yield`
@@ -220,3 +221,20 @@ KEEPALIVE_COMMENT = b": ping\n\n"
 # Seconds between keep-alive pings when a generator is idle.
 # Private but importable so tests can monkeypatch it.
 _PING_INTERVAL: float = 15.0
+
+
+    async def _check_disconnect(self) -> None:
+        """Check if client disconnected."""
+        try:
+            if await self.is_disconnected():
+                self.disconnected = True
+        except Exception:
+            self.disconnected = True
+
+    async def send_event(self, data: str, event: str | None = None) -> None:
+        if self.disconnected:
+            return
+        try:
+            await super().send_event(data, event=event)
+        except (ConnectionResetError, BrokenPipeError):
+            self.disconnected = True
