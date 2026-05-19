@@ -26,7 +26,7 @@ contract SimpleSwap {
     }
 
     // Fixed: Added minAmountOut for slippage protection and deadline to prevent stale txns.
-    // Fixed: Fee applied to output amount using fixed-point math for precision.
+    // Fixed: Fee applied as (10000 - fee) to output for consistent precision.
     function swap(
         address tokenIn,
         uint256 amountIn,
@@ -44,7 +44,7 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        // Calculate output amount using constant product formula (x * y = k)
+        // Apply fee as (10000 - fee) multiplier for consistent precision
         uint256 amountInAfterFee = (amountIn * (10000 - fee)) / 10000;
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
 
@@ -64,7 +64,6 @@ contract SimpleSwap {
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
 
-    // Updated to use same formula as swap for consistency
     function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
