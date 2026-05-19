@@ -89,12 +89,16 @@ function toAuthClientSession(input: Omit<AuthClientSession, "current">): AuthCli
   };
 }
 
+const ACTIVITY_DEBOUNCE_MS = Duration.toMillis(Duration.minutes(5));
+
 export const makeSessionCredentialService = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const secretStore = yield* ServerSecretStore;
   const authSessions = yield* AuthSessionRepository;
   const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
   const connectedSessionsRef = yield* Ref.make(new Map<string, number>());
+  // Tracks last time we wrote last_active_at to DB per session (in-memory debounce)
+  const lastActiveAtWrittenRef = yield* Ref.make(new Map<string, number>());
   const changesPubSub = yield* PubSub.unbounded<SessionCredentialChange>();
   const cookieName = resolveSessionCookieName({
     mode: serverConfig.mode,
@@ -505,6 +509,58 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       return revokedSessionIds.length;
     }).pipe(Effect.mapError(toSessionCredentialError("Failed to revoke other sessions.")));
 
+  /**
+   * listSessions — returns all active sessions sorted by last_active_at descending.
+   * The DB query already orders by last_active_at DESC so we rely on that ordering.
+   */
+  const listSessions: SessionCredentialServiceShape["listSessions"] = () => listActive();
+
+  /** revokeSession — alias for revoke. */
+  const revokeSession: SessionCredentialServiceShape["revokeSession"] = (sessionId) =>
+    revoke(sessionId);
+
+  /** revokeAllOtherSessions — alias for revokeAllExcept. */
+  const revokeAllOtherSessions: SessionCredentialServiceShape["revokeAllOtherSessions"] = (
+    sessionId,
+  ) => revokeAllExcept(sessionId);
+
+  /**
+   * trackActivity — updates last_active_at for the given session.
+   * Debounced: only writes to DB if ≥5 minutes have elapsed since the last write.
+   * Errors are swallowed to avoid breaking authenticated request handlers.
+   */
+  const trackActivity: SessionCredentialServiceShape["trackActivity"] = (sessionId) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((nowMs) =>
+        Ref.modify(lastActiveAtWrittenRef, (current) => {
+          // Use -Infinity as the initial sentinel so the very first call always writes.
+          const lastWrittenMs = current.get(sessionId) ?? Number.NEGATIVE_INFINITY;
+          const shouldWrite = nowMs - lastWrittenMs >= ACTIVITY_DEBOUNCE_MS;
+          if (shouldWrite) {
+            const next = new Map(current);
+            next.set(sessionId, nowMs);
+            return [true, next] as const;
+          }
+          return [false, current] as const;
+        }),
+      ),
+      Effect.flatMap((shouldWrite) => {
+        if (!shouldWrite) {
+          return Effect.void;
+        }
+        return DateTime.now.pipe(
+          Effect.flatMap((lastActiveAt) =>
+            authSessions.setLastActiveAt({ sessionId, lastActiveAt }),
+          ),
+        );
+      }),
+      Effect.catchCause((cause) =>
+        Effect.logError("Failed to track session activity.").pipe(
+          Effect.annotateLogs({ sessionId, cause }),
+        ),
+      ),
+    );
+
   return {
     cookieName,
     issue,
@@ -512,13 +568,17 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     issueWebSocketToken,
     verifyWebSocketToken,
     listActive,
+    listSessions,
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);
     },
     revoke,
+    revokeSession,
     revokeAllExcept,
+    revokeAllOtherSessions,
     markConnected,
     markDisconnected,
+    trackActivity,
   } satisfies SessionCredentialServiceShape;
 });
 

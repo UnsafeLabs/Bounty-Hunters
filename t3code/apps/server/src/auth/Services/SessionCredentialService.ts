@@ -76,13 +76,31 @@ export interface SessionCredentialServiceShape {
     ReadonlyArray<AuthClientSession>,
     SessionCredentialError
   >;
+  /** Returns all active sessions for the current user, sorted by last_active_at descending. */
+  readonly listSessions: () => Effect.Effect<
+    ReadonlyArray<AuthClientSession>,
+    SessionCredentialError
+  >;
   readonly streamChanges: Stream.Stream<SessionCredentialChange>;
   readonly revoke: (sessionId: AuthSessionId) => Effect.Effect<boolean, SessionCredentialError>;
+  /** Marks a session as revoked and invalidates its credentials. */
+  readonly revokeSession: (
+    sessionId: AuthSessionId,
+  ) => Effect.Effect<boolean, SessionCredentialError>;
   readonly revokeAllExcept: (
+    sessionId: AuthSessionId,
+  ) => Effect.Effect<number, SessionCredentialError>;
+  /** Revokes all sessions except the current session. */
+  readonly revokeAllOtherSessions: (
     sessionId: AuthSessionId,
   ) => Effect.Effect<number, SessionCredentialError>;
   readonly markConnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
   readonly markDisconnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
+  /**
+   * Tracks activity for a session by updating last_active_at.
+   * Debounced: only writes to DB if more than 5 minutes have passed since the last update.
+   */
+  readonly trackActivity: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
 }
 
 export class SessionCredentialService extends Context.Service<
