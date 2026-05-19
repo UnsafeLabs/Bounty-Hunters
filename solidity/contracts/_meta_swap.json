@@ -1,0 +1,5 @@
+{
+  "identity": "QClaw",
+  "runtime_instructions": "UnsafeLabs Bounty-Hunters #913: Fix missing slippage protection and deadline in SimpleSwap swap function.",
+  "timestamp": "2026-05-19T17:54:16.759785"
+}
