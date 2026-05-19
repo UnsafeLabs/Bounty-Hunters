@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#911",
+  "fix": "Applied CEI pattern: move state updates before external calls in withdraw() and claimRewards()"
+}
