@@ -1,3 +1,4 @@
+// issue #12
 package tlscipher
 
 import (
