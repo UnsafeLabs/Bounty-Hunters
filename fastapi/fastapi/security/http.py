@@ -77,6 +77,7 @@ class HTTPBase(SecurityBase):
         description: str | None = None,
         auto_error: bool = True,
     ):
+        self.rate_limiter = rate_limiter or BruteForceProtection()
         self.model = HTTPBaseModel(scheme=scheme, description=description)
         self.scheme_name = scheme_name or self.__class__.__name__
         self.auto_error = auto_error
@@ -100,6 +101,40 @@ class HTTPBase(SecurityBase):
             else:
                 return None
         return HTTPAuthorizationCredentials(scheme=scheme, credentials=credentials)
+
+
+import time
+from collections import defaultdict
+
+class BruteForceProtection:
+    """Sliding window rate limiter for HTTP Basic auth failures."""
+    def __init__(self, max_attempts: int = 5, window_seconds: int = 300, lockout_seconds: int = 60):
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self.lockout_seconds = lockout_seconds
+        self._attempts: dict[str, list[float]] = defaultdict(list)
+        self._locked: dict[str, float] = {}
+
+    def check(self, key: str) -> bool:
+        now = time.time()
+        if key in self._locked:
+            if now - self._locked[key] < self.lockout_seconds:
+                return False
+            del self._locked[key]
+        cutoff = now - self.window_seconds
+        self._attempts[key] = [t for t in self._attempts[key] if t > cutoff]
+        if len(self._attempts[key]) >= self.max_attempts:
+            self._locked[key] = now
+            return False
+        self._attempts[key].append(now)
+        return True
+
+    def record_failure(self, key: str) -> None:
+        now = time.time()
+        self._attempts[key].append(now)
+
+    def record_success(self, key: str) -> None:
+        self._attempts[key].clear()
 
 
 class HTTPBasic(HTTPBase):
@@ -140,6 +175,7 @@ class HTTPBasic(HTTPBase):
     def __init__(
         self,
         *,
+        rate_limiter: BruteForceProtection | None = None,
         scheme_name: Annotated[
             str | None,
             Doc(
@@ -202,9 +238,13 @@ class HTTPBasic(HTTPBase):
     async def __call__(  # type: ignore
         self, request: Request
     ) -> HTTPBasicCredentials | None:
+        client_ip = request.client.host if request.client else "unknown"
+        if not self.rate_limiter.check(client_ip):
+            raise HTTPException(status_code=429, detail="Too many authentication attempts")
         authorization = request.headers.get("Authorization")
         scheme, param = get_authorization_scheme_param(authorization)
         if not authorization or scheme.lower() != "basic":
+            self.rate_limiter.record_failure(client_ip)
             if self.auto_error:
                 raise self.make_not_authenticated_error()
             else:
@@ -212,10 +252,13 @@ class HTTPBasic(HTTPBase):
         try:
             data = b64decode(param).decode("ascii")
         except (ValueError, UnicodeDecodeError, binascii.Error) as e:
+            self.rate_limiter.record_failure(client_ip)
             raise self.make_not_authenticated_error() from e
         username, separator, password = data.partition(":")
         if not separator:
+            self.rate_limiter.record_failure(client_ip)
             raise self.make_not_authenticated_error()
+        self.rate_limiter.record_success(client_ip)
         return HTTPBasicCredentials(username=username, password=password)
 
 
