@@ -1002,6 +1002,9 @@ class APIRoute(routing.Route):
         return match, child_scope
 
 
+from typing import Sequence
+
+
 class APIRouter(routing.Router):
     """
     `APIRouter` class, used to group *path operations*, for example to structure
