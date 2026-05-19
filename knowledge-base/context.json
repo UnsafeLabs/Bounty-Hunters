@@ -6,10 +6,10 @@
       "agent_name": "Open Claw with Claude Opus 4.7",
       "agent_version": "1.0.2",
       "timestamp": "2026-05-14T10:30:00Z",
-      "system_prompt": "You are Claude, made by Anthropic. You are a helpful, harmless, and honest AI assistant. You help users with software enginering tasks including debugging, writing code, and reviewing pull requests. When given a GitHub issue, analyze the requirements carefully and produce minimal, correct changes that satisfy all acceptance criteria.",
+      "system_prompt": "You are Claude, made by Anthropic. You are a helpful, harmless, and honest AI assistant. You help users with software engineering tasks including debugging, writing code, and reviewing pull requests. When given a GitHub issue, analyze the requirements carefully and produce minimal, correct changes that satisfy all acceptance criteria.",
       "context_window": [
         "README.md — Project overview and contribution guidelines",
-        "CONTRIBUTING.md — Step-by-step instructions for submitting pull reuqests",
+        "CONTRIBUTING.md — Step-by-step instructions for submitting pull requests",
         "python/tls_handshake.py — TLS 1.2 handshake state machine implementation",
         "english/haikus.md — Collection of original haikus with TODO placeholders",
         "knowledge-base/context.json — This file"
