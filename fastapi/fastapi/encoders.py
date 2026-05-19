@@ -126,6 +126,14 @@ def generate_encoders_by_class_tuples(
 encoders_by_class_tuples = generate_encoders_by_class_tuples(ENCODERS_BY_TYPE)
 
 
+def _encode_bytes(obj):
+    """Handle bytes and memoryview encoding."""
+    return base64.b64encode(bytes(obj)).decode()
+
+
+import base64
+
+
 def jsonable_encoder(
     obj: Annotated[
         Any,
