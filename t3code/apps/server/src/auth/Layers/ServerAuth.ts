@@ -78,6 +78,7 @@ export const makeServerAuth = Effect.gen(function* () {
           }),
         ),
       ),
+      Effect.tap((session) => sessions.trackActivity(session.sessionId)),
       Effect.map((session) => ({
         sessionId: session.sessionId,
         subject: session.subject,
