@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#920",
+  "fix": "Add block.chainid and address(this) to transfer hash, add ecrecover zero-address check"
+}
