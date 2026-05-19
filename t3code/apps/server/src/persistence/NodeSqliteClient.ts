@@ -10,11 +10,10 @@ import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import { identity } from "effect/Function";
 import * as Layer from "effect/Layer";
+import * as Pool from "effect/Pool";
 import * as Scope from "effect/Scope";
-import * as Semaphore from "effect/Semaphore";
 import * as Context from "effect/Context";
 import * as Stream from "effect/Stream";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
@@ -22,6 +21,8 @@ import * as Client from "effect/unstable/sql/SqlClient";
 import type { Connection } from "effect/unstable/sql/SqlConnection";
 import { SqlError, classifySqliteError } from "effect/unstable/sql/SqlError";
 import * as Statement from "effect/unstable/sql/Statement";
+
+const POOL_ACQUIRE_TIMEOUT = Duration.seconds(10);
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
 
@@ -40,6 +41,8 @@ export interface SqliteClientConfig {
   readonly allowExtension?: boolean | undefined;
   readonly prepareCacheSize?: number | undefined;
   readonly prepareCacheTTL?: Duration.Input | undefined;
+  readonly poolMin?: number | undefined;
+  readonly poolMax?: number | undefined;
   readonly spanAttributes?: Record<string, unknown> | undefined;
   readonly transformResultNames?: ((str: string) => string) | undefined;
   readonly transformQueryNames?: ((str: string) => string) | undefined;
@@ -194,18 +197,38 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
     });
   });
 
-  const semaphore = yield* Semaphore.make(1);
-  const connection = yield* makeConnection;
-
-  const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
-  const transactionAcquirer = Effect.uninterruptibleMask((restore) => {
-    const fiber = Fiber.getCurrent()!;
-    const scope = Context.getUnsafe(fiber.context, Scope.Scope);
-    return Effect.as(
-      Effect.tap(restore(semaphore.take(1)), () => Scope.addFinalizer(scope, semaphore.release(1))),
-      connection,
-    );
+  const poolMin = options.poolMin ?? 1;
+  const poolMax = options.poolMax ?? 5;
+  const pool = yield* Pool.make({
+    acquire: Effect.map(makeConnection, (conn) => ({
+      conn,
+      reset: Effect.sync(() => {}),
+    })),
+    min: poolMin,
+    max: poolMax,
   });
+
+  const acquireWithTimeout = <A>(effect: Effect.Effect<A, SqlError, Scope.Scope>) =>
+    Effect.timeoutFail({
+      duration: POOL_ACQUIRE_TIMEOUT,
+      onTimeout: () =>
+        new SqlError({
+          reason: "connection-pool-timeout",
+          message: "Timed out waiting for database connection from pool",
+          operation: "pool-acquire",
+        }),
+    })(effect);
+
+  const acquirer = Effect.flatMap(
+    acquireWithTimeout(Pool.get(pool)),
+    (entry) => entry.conn,
+  );
+  const transactionAcquirer = Effect.uninterruptibleMask((restore) =>
+    Effect.flatMap(
+      acquireWithTimeout(restore(Pool.get(pool))),
+      (entry) => entry.conn,
+    ),
+  );
 
   return yield* Client.make({
     acquirer,
@@ -275,3 +298,26 @@ export const layerMemory = (config: SqliteMemoryClientConfig = {}): Layer.Layer<
       Context.make(SqliteClient, client).pipe(Context.add(Client.SqlClient, client)),
     ),
   ).pipe(Layer.provide(Reactivity.layer));
+
+export interface HealthCheckResult {
+  readonly status: "pass" | "fail";
+  readonly detail: string;
+}
+
+export const healthCheck = Effect.fn("healthCheck")(function* (
+  sql: Client.SqlClient,
+): Effect.Effect<HealthCheckResult> {
+  const rows = yield* sql<{ readonly integrity_check: string }>`PRAGMA integrity_check;`.pipe(
+    Effect.timeout(Duration.seconds(5)),
+    Effect.catchAll((cause) =>
+      Effect.succeed([
+        { integrity_check: `Health check failed: ${cause}` },
+      ] as unknown as ReadonlyArray<{ readonly integrity_check: string }>),
+    ),
+  );
+  const result = rows[0]?.integrity_check ?? "no result";
+  return {
+    status: result === "ok" ? "pass" : "fail",
+    detail: result,
+  };
+});
