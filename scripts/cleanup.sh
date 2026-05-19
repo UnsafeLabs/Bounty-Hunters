@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 # cleanup.sh - Log file cleanup utility
 # Removes old log files and compresses recent ones
@@ -34,10 +35,11 @@ done
 
 echo ""
 
-# Check total disk usage of log directories
-if [ $MAX_AGE_DAYS -gt $TOTAL_CLEANED ]; then
-    echo "WARNING: Retention period exceeds number of files cleaned"
-    echo "Consider reducing MAX_AGE_DAYS (currently ${MAX_AGE_DAYS})"
+# Check if any files were cleaned
+if [ "${TOTAL_CLEANED}" -gt 0 ] 2>/dev/null; then
+    echo "Total files removed: ${TOTAL_CLEANED}"
+else
+    echo "No files were removed (cleanup directory may be empty)"
 fi
 
 echo ""
