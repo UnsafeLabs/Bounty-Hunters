@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#766",
+  "fix": "Add WebSocket heartbeat with configurable ping interval and automatic reconnection"
+}
