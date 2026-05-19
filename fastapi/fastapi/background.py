@@ -8,6 +8,9 @@ from typing_extensions import ParamSpec
 P = ParamSpec("P")
 
 
+logger = logging.getLogger("fastapi.background")
+
+
 class BackgroundTasks(StarletteBackgroundTasks):
     """
     A collection of background tasks that will be called after a response has been
