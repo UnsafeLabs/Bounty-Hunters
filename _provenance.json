@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#913",
+  "fix": "Added minAmountOut parameter with require check for slippage protection, deadline parameter with expiry check, and Swap event"
+}
