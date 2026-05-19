@@ -8,7 +8,7 @@ A curated set of original haikus on nature, technology, and solitude.
 
 Dew drips from the leaf
 A spider weaves silver thread
-[TODO: write closing line — must be 5 syllables, reference sunrise]
+The sun wakes the dew
 
 ---
 
@@ -32,7 +32,7 @@ Seagulls call goodnight
 
 Dust gathers softly
 A chair waits by the window
-[TODO: write closing line — must be 5 syllables, convey absence]
+But no one sits there
 
 ---
 
@@ -40,12 +40,12 @@ A chair waits by the window
 
 Semicolon missed
 The build fails at line forty
-[TODO: write closing line — must be 5 syllables, humorous tone]
+The screen glows in shame
 
 ---
 
 ### Autumn Walk
 
 Leaves crunch underfoot
-[TODO: write middle line — must be 7 syllables, describe the wind]
+A cold wind whispers secrets
 Cold hands find warm pockets
