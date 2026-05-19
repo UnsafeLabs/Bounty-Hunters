@@ -39,11 +39,55 @@ const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" vi
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
+// Default body size limits (in bytes)
+const DEFAULT_BODY_LIMIT = 10 * 1024 * 1024; // 10MB
+const DEFAULT_UPLOAD_LIMIT = 50 * 1024 * 1024; // 50MB
+
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: [...browserApiCorsAllowedMethods],
   allowedHeaders: [...browserApiCorsAllowedHeaders],
   maxAge: 600,
 });
+
+/**
+ * Middleware to enforce request body size limits.
+ * Default limit is 10MB, upload routes allow 50MB.
+ */
+export const bodySizeLimitLayer = HttpRouter.middleware(
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    
+    // Determine limit based on route
+    let limit = DEFAULT_BODY_LIMIT;
+    if (Option.isSome(url) && (url.value.pathname.includes("/upload") || url.value.pathname.startsWith(ATTACHMENTS_ROUTE_PREFIX))) {
+      limit = DEFAULT_UPLOAD_LIMIT;
+    }
+
+    const contentLength = request.headers["content-length"];
+    if (contentLength !== undefined) {
+      const size = parseInt(contentLength, 10);
+      if (!isNaN(size) && size > limit) {
+        return HttpServerResponse.json(
+          {
+            error: "Payload Too Large",
+            message: `Request body exceeds limit of ${limit} bytes (received ${size} bytes).`,
+            limit,
+            received: size,
+          },
+          {
+            status: 413,
+            headers: {
+              "X-Max-Body-Size": limit.toString(),
+            },
+          }
+        );
+      }
+    }
+    
+    return yield* Effect.resume;
+  })
+);
 
 export function isLoopbackHostname(hostname: string): boolean {
   const normalizedHostname = hostname
