@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#761",
+  "fix": "Add file size and content type validation to UploadFile"
+}
