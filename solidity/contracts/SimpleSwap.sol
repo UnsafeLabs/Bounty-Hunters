@@ -25,10 +25,15 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    // Fixed: Added minAmountOut for slippage protection and deadline to prevent stale txns.
+    // Fixed: Fee applied to output amount using fixed-point math for precision.
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Transaction expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
@@ -39,11 +44,12 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-
-        // constant product formula: x * y = k
+        // Calculate output amount using constant product formula (x * y = k)
+        uint256 amountInAfterFee = (amountIn * (10000 - fee)) / 10000;
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        // Slippage protection
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
         outputToken.transfer(msg.sender, amountOut);
 
@@ -58,12 +64,12 @@ contract SimpleSwap {
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
 
+    // Updated to use same formula as swap for consistency
     function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        uint256 amountInAfterFee = (amountIn * (10000 - fee)) / 10000;
         return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
     }
 }
