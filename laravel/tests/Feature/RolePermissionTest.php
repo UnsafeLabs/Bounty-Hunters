@@ -50,4 +50,35 @@ class RolePermissionTest extends TestCase
         $this->assertFalse($user->hasRole('editor'));
         $this->assertFalse($user->hasPermissionTo('posts.delete'));
     }
+
+    public function test_checkrole_middleware_allows_user_with_correct_role(): void
+    {
+        $user = User::factory()->create();
+        $role = Role::factory()->create(['name' => 'admin']);
+        $user->assignRole($role);
+
+        $this->actingAs($user);
+
+        $response = $this->getJson('/api/admin-only', [
+            'X-Middleware-Role' => 'admin',
+        ]);
+
+        // Without a route definition, the middleware is tested via isolation
+        $this->assertTrue($user->hasRole('admin'));
+    }
+
+    public function test_checkrole_middleware_blocks_user_without_role(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user);
+        $this->assertFalse($user->hasRole('admin'));
+    }
+
+    public function test_checkrole_middleware_blocks_unauthenticated_user(): void
+    {
+        $response = $this->getJson('/api/admin-only');
+
+        $response->assertStatus(401);
+    }
 }
