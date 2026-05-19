@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#804",
+  "fix": "Add auth helpers, WebSocket test support, and request headers to TestClient"
+}
