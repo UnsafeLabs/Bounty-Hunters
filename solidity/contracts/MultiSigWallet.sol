@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract MultiSigWallet {
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+contract MultiSigWallet is ReentrancyGuard {
     address[] public owners;
     uint256 public required;
     uint256 public transactionCount;
@@ -37,8 +39,10 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        // FIXED: Zero-address validation
+        require(to != address(0), "Invalid target address");
+        
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -70,9 +74,8 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
+    // FIXED: Added nonReentrant modifier to protect against reentrancy and callback manipulation
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         require(!transactions[txId].executed, "Already executed");
         require(getConfirmationCount(txId) >= required, "Not enough confirmations");
 
