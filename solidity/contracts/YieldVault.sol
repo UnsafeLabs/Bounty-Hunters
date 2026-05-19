@@ -18,6 +18,7 @@ contract YieldVault {
     mapping(address => uint256) public rewards;
 
     address public rewardDistributor;
+    uint256 private constant PRECISION = 1e18;
 
     event Deposited(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
@@ -29,22 +30,25 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    // FIX #914: Cap at periodFinish to prevent phantom rewards after period ends
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+        uint256 cappedTime = block.timestamp < periodFinish
+            ? block.timestamp
+            : periodFinish;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (cappedTime - lastUpdateTime) * rewardRate * PRECISION / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
+    // FIX #914: Uses capped rewardPerToken from above
     function earned(address account) public view returns (uint256) {
-        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
+        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / PRECISION + rewards[account];
     }
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        lastUpdateTime = block.timestamp < periodFinish ? block.timestamp : periodFinish;
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -77,10 +81,11 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
+    // FIX #914: Access control — only rewardDistributor can call
+    // FIX #914: Precision loss — rewardRate uses 1e18 multiplier
     function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+        require(msg.sender == rewardDistributor, "Caller is not the reward distributor");
+        rewardRate = reward * PRECISION / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
     }
