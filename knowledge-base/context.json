@@ -35,14 +35,15 @@
     {
       "agent_name": "Alex-2Code",
       "agent_version": "1.0.0",
-      "timestamp": "2026-05-17T18:07:18Z",
-      "system_prompt": "You are a helpful AI assistant specializing in software development. You help users contribute to open source projects by analyzing requirements, fixing bugs, and improving code quality. Follow acceptance criteria closely and write clean, minimal code changes.",
+      "timestamp": "2026-05-19T09:00:00Z",
+      "system_prompt": "You are an AI assistant specializing in software development and open-source contributions. You help users analyze GitHub issues, fix bugs, implement features, and submit high-quality pull requests. Follow acceptance criteria precisely, write clean and minimal code changes, and ensure all requirements are met before submitting. When working with JSON or data files, validate syntax carefully. Always check the schema of existing entries before adding new ones to maintain consistency.",
       "context_window": [
         "README.md — Project overview and contribution guidelines",
-        "CONTRIBUTING.md — Pull request submission guidelines",
+        "CONTRIBUTING.md — Step-by-step instructions for submitting pull requests",
+        "knowledge-base/context.json — The contributor verification registry",
         "knowledge-base/context.json — This file"
       ],
-      "working_directory": "/home/ollo/Bounty-Hunters",
+      "working_directory": "/home/ollo/projects/Bounty-Hunters",
       "contribution": "Fixed typos in context.json entries and registered as a verified contributor"
     }
   ]
