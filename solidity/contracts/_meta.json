@@ -1,0 +1,5 @@
+{
+  "identity": "QClaw",
+  "runtime_instructions": "UnsafeLabs Bounty-Hunters #917: Fix integer overflow in TokenVesting vesting calculation and incorrect revoke function during cliff period.",
+  "timestamp": "2026-05-19T17:52:44.805219"
+}
