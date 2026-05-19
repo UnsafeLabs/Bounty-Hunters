@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract MultiSigWallet {
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+contract MultiSigWallet is ReentrancyGuard {
     address[] public owners;
     uint256 public required;
     uint256 public transactionCount;
@@ -13,8 +15,14 @@ contract MultiSigWallet {
         bool executed;
     }
 
+    struct Confirmation {
+        bool isConfirmed;
+        uint256 timestamp;
+        uint256 blockNumber;
+    }
+
     mapping(uint256 => Transaction) public transactions;
-    mapping(uint256 => mapping(address => bool)) public confirmations;
+    mapping(uint256 => mapping(address => Confirmation)) public confirmations;
     mapping(address => bool) public isOwner;
 
     event Submitted(uint256 indexed txId);
@@ -37,8 +45,12 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Zero address");
+        if (data.length > 0) {
+            require(to.code.length > 0, "Target must be a contract if data is provided");
+        }
+        
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -52,28 +64,50 @@ contract MultiSigWallet {
 
     function confirmTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(!confirmations[txId][msg.sender], "Already confirmed");
-        confirmations[txId][msg.sender] = true;
+        require(!confirmations[txId][msg.sender].isConfirmed, "Already confirmed");
+        
+        confirmations[txId][msg.sender] = Confirmation({
+            isConfirmed: true,
+            timestamp: block.timestamp,
+            blockNumber: block.number
+        });
+        
         emit Confirmed(txId, msg.sender);
     }
 
     function revokeConfirmation(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(confirmations[txId][msg.sender], "Not confirmed");
-        confirmations[txId][msg.sender] = false;
+        require(confirmations[txId][msg.sender].isConfirmed, "Not confirmed");
+        
+        delete confirmations[txId][msg.sender];
+        
         emit Revoked(txId, msg.sender);
     }
 
     function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
         for (uint256 i = 0; i < owners.length; i++) {
-            if (confirmations[txId][owners[i]]) count++;
+            if (confirmations[txId][owners[i]].isConfirmed) count++;
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
+    function isConfirmedAtBlock(uint256 txId, uint256 blockNumber) public view returns (bool) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < owners.length; i++) {
+            Confirmation memory conf = confirmations[txId][owners[i]];
+            if (conf.isConfirmed && conf.blockNumber <= blockNumber) {
+                count++;
+            }
+        }
+        return count >= required;
+    }
+
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         require(!transactions[txId].executed, "Already executed");
+        
+        // Block-level confirmation check to prevent front-running revocations
+        require(isConfirmedAtBlock(txId, block.number), "Not enough confirmations at current block");
+        
+        // Also check getConfirmationCount directly to ensure no revocation happened in same block before this tx
         require(getConfirmationCount(txId) >= required, "Not enough confirmations");
 
         Transaction storage txn = transactions[txId];
@@ -81,6 +115,9 @@ contract MultiSigWallet {
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
         require(success, "Execution failed");
+
+        // Verify count hasn't dropped after external call (defense in depth, though nonReentrant covers the call)
+        require(getConfirmationCount(txId) >= required, "Confirmations dropped during execution");
 
         emit Executed(txId);
     }
