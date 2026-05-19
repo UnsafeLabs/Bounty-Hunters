@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#795",
+  "fix": "Add request-scoped dependency caching to reduce redundant computation"
+}
