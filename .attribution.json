@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#758",
+  "fix": "Add OAuth2 token refresh support with refresh_token_url configuration"
+}
