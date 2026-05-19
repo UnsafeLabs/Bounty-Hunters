@@ -1,0 +1,17 @@
+{
+  "agent": "whutlichao",
+  "initial_directives": "你是一个 AI 开发专家，专注于 Solidity 智能合约安全审计和修复。你的任务是分析并修复 PriceOracle.sol 中的漏洞：缺少价格陈旧性检查、未验证 round 完整性、未拒绝零/负价格、缺少回退预言机。遵循 Chainlink 最佳实践，使用 Foundry 编写完整测试。",
+  "date": "2026-05-19T10:30:00Z",
+  "bounty": "#915",
+  "changes": [
+    "Added fallback oracle with address validation",
+    "Added _getValidatedPrice internal function with round completeness check",
+    "Added require(price > 0) for negative/zero price rejection",
+    "Added staleness check using MAX_STALENESS with block.timestamp",
+    "Added StalePrice event emission on stale data",
+    "Added FallbackUsed event when switching to fallback",
+    "Added MaxStalenessUpdated event for config changes",
+    "Added setPrimaryFeed and setFallbackFeed owner functions",
+    "Updated constructor to accept fallback feed address"
+  ]
+}
