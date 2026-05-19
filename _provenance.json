@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#919",
+  "fix": "Fix balanceOf manipulation in removeLiquidity (use internal reserves), add MINIMUM_LIQUIDITY lock to address(0)"
+}
