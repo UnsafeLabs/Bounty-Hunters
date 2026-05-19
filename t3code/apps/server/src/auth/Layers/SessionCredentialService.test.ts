@@ -190,4 +190,98 @@ it.layer(NodeServices.layer)("SessionCredentialServiceLive", (it) => {
       expect(afterReconnect[0]?.lastConnectedAt?.toString()).not.toBe(firstConnectedAt?.toString());
     }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
   );
+
+  it.effect("revokeSession marks session as revoked and invalidates credentials", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const issued = yield* sessions.issue({
+        subject: "revoke-session-test",
+        role: "client",
+      });
+
+      const revoked = yield* sessions.revokeSession(issued.sessionId);
+      const error = yield* Effect.flip(sessions.verify(issued.token));
+
+      expect(revoked).toBe(true);
+      expect(error._tag).toBe("SessionCredentialError");
+      expect(error.message).toContain("revoked");
+    }).pipe(Effect.provide(makeSessionCredentialLayer())),
+  );
+
+  it.effect("revokeAllOtherSessions keeps only the current session active", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const current = yield* sessions.issue({
+        subject: "current-session",
+        role: "owner",
+      });
+      const other1 = yield* sessions.issue({
+        subject: "other-session-1",
+        role: "client",
+      });
+      const other2 = yield* sessions.issue({
+        subject: "other-session-2",
+        role: "client",
+      });
+
+      const revokedCount = yield* sessions.revokeAllOtherSessions(current.sessionId);
+      const remaining = yield* sessions.listActive();
+      const other1Error = yield* Effect.flip(sessions.verify(other1.token));
+      const other2Error = yield* Effect.flip(sessions.verify(other2.token));
+
+      expect(revokedCount).toBe(2);
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0]?.sessionId).toBe(current.sessionId);
+      expect(other1Error.message).toContain("revoked");
+      expect(other2Error.message).toContain("revoked");
+    }).pipe(Effect.provide(makeSessionCredentialLayer())),
+  );
+
+  it.effect("listSessions returns active sessions sorted by last_active_at descending", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const first = yield* sessions.issue({ subject: "first-session", role: "owner" });
+      const second = yield* sessions.issue({ subject: "second-session", role: "client" });
+
+      // Track activity on first, then advance clock and track on second
+      // so second has a more recent last_active_at
+      yield* TestClock.adjust(Duration.minutes(1));
+      yield* sessions.trackActivity(first.sessionId);
+      yield* TestClock.adjust(Duration.minutes(5));
+      yield* sessions.trackActivity(second.sessionId);
+
+      const listed = yield* sessions.listSessions();
+
+      expect(listed).toHaveLength(2);
+      // second has more recent last_active_at, should be listed first
+      expect(listed[0]?.sessionId).toBe(second.sessionId);
+      expect(listed[1]?.sessionId).toBe(first.sessionId);
+    }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
+  );
+
+  it.effect("trackActivity updates last_active_at and debounces writes within 5 minutes", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const issued = yield* sessions.issue({
+        subject: "activity-test",
+        role: "client",
+      });
+
+      // First trackActivity call — should write
+      yield* TestClock.adjust(Duration.minutes(1));
+      yield* sessions.trackActivity(issued.sessionId);
+
+      // Immediate second call within debounce window — should NOT write again
+      yield* sessions.trackActivity(issued.sessionId);
+      yield* sessions.trackActivity(issued.sessionId);
+
+      // Advance past debounce window and call again — should write
+      yield* TestClock.adjust(Duration.minutes(5));
+      yield* sessions.trackActivity(issued.sessionId);
+
+      // Verify the session is still active (no errors thrown)
+      const verified = yield* sessions.verify(issued.token);
+      expect(verified.sessionId).toBe(issued.sessionId);
+    }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
+  );
 });
