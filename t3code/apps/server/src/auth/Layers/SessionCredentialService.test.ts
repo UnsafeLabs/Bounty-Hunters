@@ -140,8 +140,14 @@ it.layer(NodeServices.layer)("SessionCredentialServiceLive", (it) => {
         "Julius iPhone",
       );
       expect(
+        beforeRevoke.find((entry) => entry.sessionId === client.sessionId)?.client.deviceName,
+      ).toBe("Safari on iOS");
+      expect(
         beforeRevoke.find((entry) => entry.sessionId === owner.sessionId)?.client.deviceType,
       ).toBe("desktop");
+      expect(
+        beforeRevoke.find((entry) => entry.sessionId === owner.sessionId)?.client.deviceName,
+      ).toBe("Electron on macOS");
       expect(revokedCount).toBe(1);
       expect(afterRevoke).toHaveLength(1);
       expect(afterRevoke[0]?.sessionId).toBe(owner.sessionId);
@@ -256,7 +262,32 @@ it.layer(NodeServices.layer)("SessionCredentialServiceLive", (it) => {
       // second has more recent last_active_at, should be listed first
       expect(listed[0]?.sessionId).toBe(second.sessionId);
       expect(listed[1]?.sessionId).toBe(first.sessionId);
+      // lastActiveAt must be exposed in the returned sessions
+      expect(listed[0]?.lastActiveAt).not.toBeNull();
+      expect(listed[1]?.lastActiveAt).not.toBeNull();
     }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
+  );
+
+  it.effect("new session has lastActiveAt null and deviceName derived from browser+os", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const issued = yield* sessions.issue({
+        subject: "device-name-test",
+        role: "client",
+        client: {
+          deviceType: "desktop",
+          os: "Linux",
+          browser: "Firefox",
+        },
+      });
+
+      const listed = yield* sessions.listActive();
+      const session = listed.find((s) => s.sessionId === issued.sessionId);
+
+      expect(session).toBeDefined();
+      expect(session?.lastActiveAt).toBeNull();
+      expect(session?.client.deviceName).toBe("Firefox on Linux");
+    }).pipe(Effect.provide(makeSessionCredentialLayer())),
   );
 
   it.effect("trackActivity updates last_active_at and debounces writes within 5 minutes", () =>
