@@ -229,6 +229,24 @@ describe("CrossChainBridge", () => {
     await assert.rejects(bridge.processTransfer(attackerSourceSender, recipientAddress, 100n, 0n, signature));
   });
 
+  it("rejects zero source sender and recipient addresses before signature processing", async () => {
+    const { provider, owner, recipient, validator, bridge } = await setup();
+    const sourceSender = await owner.getAddress();
+    const recipientAddress = await recipient.getAddress();
+    const signature = await signTransfer({
+      provider,
+      bridge,
+      validator,
+      sourceSender,
+      recipient: recipientAddress,
+      amount: 100n,
+      nonce: 0n,
+    });
+
+    await assert.rejects(bridge.processTransfer(ethers.ZeroAddress, recipientAddress, 100n, 0n, signature));
+    await assert.rejects(bridge.processTransfer(sourceSender, ethers.ZeroAddress, 100n, 0n, signature));
+  });
+
   it("rejects replay against a replacement bridge contract on the same chain", async () => {
     const { provider, owner, recipient, validator, token, bridge, bridgeArtifact } = await setup();
     const sourceSender = await owner.getAddress();

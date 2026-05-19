@@ -42,6 +42,8 @@ contract CrossChainBridge {
         uint256 transferNonce,
         bytes calldata signature
     ) external {
+        require(sourceSender != address(0), "Invalid source sender");
+        require(recipient != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be > 0");
         require(transferNonce == inboundNonces[sourceSender], "Invalid nonce");
 
