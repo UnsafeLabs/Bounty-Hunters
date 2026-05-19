@@ -13,6 +13,7 @@ export const AuthSessionClientMetadataRecord = Schema.Struct({
   deviceType: AuthClientMetadataDeviceType,
   os: Schema.NullOr(Schema.String),
   browser: Schema.NullOr(Schema.String),
+  deviceName: Schema.NullOr(Schema.String),
 });
 export type AuthSessionClientMetadataRecord = typeof AuthSessionClientMetadataRecord.Type;
 
