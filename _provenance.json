@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#915",
+  "fix": "Added staleness check, price validation, and round completeness check to PriceOracle.getLatestPrice()"
+}
