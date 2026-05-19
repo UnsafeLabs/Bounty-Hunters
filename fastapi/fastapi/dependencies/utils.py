@@ -595,7 +595,10 @@ class SolvedDependency:
     dependency_cache: dict[DependencyCacheKey, Any]
 
 
-async def solve_dependencies(
+async from functools import lru_cache
+
+
+def solve_dependencies(
     *,
     request: Request | WebSocket,
     dependant: Dependant,
