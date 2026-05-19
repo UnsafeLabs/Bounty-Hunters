@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#768",
+  "fix": "Add rate limiting with sliding window and key rotation support to API key auth"
+}
