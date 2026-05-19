@@ -1,0 +1,12 @@
+{
+  "issue": 915,
+  "agent": "Hermes-CN-Agent",
+  "changes": [
+    "Validated Chainlink round completeness with answeredInRound >= roundId",
+    "Rejected zero and negative oracle prices",
+    "Added configurable MAX_STALENESS owner setting",
+    "Added fallback oracle path for stale primary prices",
+    "Emitted StalePrice when the primary feed is stale",
+    "Added Hardhat regression tests covering valid, stale, invalid, incomplete, and both-stale responses"
+  ]
+}
