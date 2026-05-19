@@ -65,16 +65,6 @@ All notable changes to BountyHunters will be documented in this file.
 ### Fixed
 - Fixed duplicate bounty creation on double-click
 
-## [v1.1.0] - 2025-03-20
-
-### Added
-- Search functionality for bounties
-- User profile pages
-- Basic analytics dashboard
-
-### Fixed
-- Fixed duplicate bounty creation on double-click
-
 ## [v1.0.0] - 2025-01-15
 
 ### Added
