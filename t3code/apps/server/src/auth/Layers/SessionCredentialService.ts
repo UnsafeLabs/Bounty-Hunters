@@ -64,6 +64,23 @@ function createDefaultClientMetadata(): AuthClientMetadata {
   };
 }
 
+/**
+ * Derives a human-readable device name from browser and OS fields.
+ * Examples: "Chrome on macOS", "Safari on iOS", "Electron"
+ */
+function deriveDeviceName(browser: string | null, os: string | null): string | null {
+  if (browser && os) {
+    return `${browser} on ${os}`;
+  }
+  if (browser) {
+    return browser;
+  }
+  if (os) {
+    return os;
+  }
+  return null;
+}
+
 function toClientMetadata(record: {
   readonly label: string | null;
   readonly ipAddress: string | null;
@@ -71,6 +88,7 @@ function toClientMetadata(record: {
   readonly deviceType: AuthClientMetadata["deviceType"];
   readonly os: string | null;
   readonly browser: string | null;
+  readonly deviceName: string | null;
 }): AuthClientMetadata {
   return {
     ...(record.label ? { label: record.label } : {}),
@@ -79,6 +97,7 @@ function toClientMetadata(record: {
     deviceType: record.deviceType,
     ...(record.os ? { os: record.os } : {}),
     ...(record.browser ? { browser: record.browser } : {}),
+    ...(record.deviceName ? { deviceName: record.deviceName } : {}),
   };
 }
 
@@ -141,6 +160,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
           issuedAt: row.value.issuedAt,
           expiresAt: row.value.expiresAt,
           lastConnectedAt: row.value.lastConnectedAt,
+          lastActiveAt: row.value.lastActiveAt,
           connected: connectedSessions.has(row.value.sessionId),
         }),
       );
@@ -231,18 +251,25 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       );
       const signature = signPayload(encodedPayload, signingSecret);
       const client = input?.client ?? createDefaultClientMetadata();
+      const deviceName =
+        client.deviceName ?? deriveDeviceName(client.browser ?? null, client.os ?? null);
+      const clientWithDeviceName: AuthClientMetadata = {
+        ...client,
+        ...(deviceName ? { deviceName } : {}),
+      };
       yield* authSessions.create({
         sessionId,
         subject: claims.sub,
         role: claims.role,
         method: claims.method,
         client: {
-          label: client.label ?? null,
-          ipAddress: client.ipAddress ?? null,
-          userAgent: client.userAgent ?? null,
-          deviceType: client.deviceType,
-          os: client.os ?? null,
-          browser: client.browser ?? null,
+          label: clientWithDeviceName.label ?? null,
+          ipAddress: clientWithDeviceName.ipAddress ?? null,
+          userAgent: clientWithDeviceName.userAgent ?? null,
+          deviceType: clientWithDeviceName.deviceType,
+          os: clientWithDeviceName.os ?? null,
+          browser: clientWithDeviceName.browser ?? null,
+          deviceName: clientWithDeviceName.deviceName ?? null,
         },
         issuedAt,
         expiresAt,
@@ -253,10 +280,11 @@ export const makeSessionCredentialService = Effect.gen(function* () {
           subject: claims.sub,
           role: claims.role,
           method: claims.method,
-          client,
+          client: clientWithDeviceName,
           issuedAt,
           expiresAt,
           lastConnectedAt: null,
+          lastActiveAt: null,
           connected: false,
         }),
       );
@@ -459,6 +487,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
           issuedAt: row.issuedAt,
           expiresAt: row.expiresAt,
           lastConnectedAt: row.lastConnectedAt,
+          lastActiveAt: row.lastActiveAt,
           connected: connectedSessions.has(row.sessionId),
         }),
       );
