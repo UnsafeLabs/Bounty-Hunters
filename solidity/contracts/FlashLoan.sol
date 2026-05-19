@@ -2,19 +2,22 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface IFlashLoanReceiver {
     function onFlashLoan(address token, uint256 amount, uint256 fee, bytes calldata data) external;
 }
 
-contract FlashLoan {
+contract FlashLoan is ReentrancyGuard {
     IERC20 public loanToken;
     uint256 public feeBPS; // fee in basis points
     uint256 public totalFees;
+    uint256 public expectedBalance; // internal accounting
     address public owner;
     bool public paused;
 
     event FlashLoanExecuted(address indexed borrower, uint256 amount, uint256 fee);
+    event Paused(bool isPaused);
 
     constructor(address _loanToken, uint256 _feeBPS) {
         loanToken = IERC20(_loanToken);
@@ -22,43 +25,61 @@ contract FlashLoan {
         owner = msg.sender;
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
-    function flashLoan(uint256 amount, bytes calldata data) external {
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+
+    function flashLoan(uint256 amount, bytes calldata data) external nonReentrant {
         require(!paused, "Paused");
         require(amount > 0, "Amount must be > 0");
 
-        uint256 balanceBefore = loanToken.balanceOf(address(this));
-        require(balanceBefore >= amount, "Insufficient pool balance");
+        // Uses internal accounting
+        uint256 poolBalance = expectedBalance;
+        require(amount <= poolBalance / 2, "Loan exceeds 50% of pool balance");
+        require(poolBalance >= amount, "Insufficient pool balance");
 
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
-        uint256 fee = amount * feeBPS / 10000;
+        uint256 calculatedFee = (amount * feeBPS) / 10000;
+        uint256 fee = calculatedFee > 0 ? calculatedFee : 1;
+
+        // expected balance updates to include fee, and temporarily drops by amount out
+        expectedBalance = poolBalance + fee;
 
         loanToken.transfer(msg.sender, amount);
 
         IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
-        uint256 balanceAfter = loanToken.balanceOf(address(this));
-        require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
+        // check against internal accounting
+        uint256 actualBalance = loanToken.balanceOf(address(this));
+        require(actualBalance >= expectedBalance, "Loan not repaid");
+
+        // Sync internal accounting (so rebasing tokens don't steal pool equity)
+        // actually if balance is higher, we just sync to actual balance to capture rebasing?
+        // Let's just track expected balance strictly to prevent theft. If they overpay, pool keeps it.
+        expectedBalance = actualBalance;
 
         totalFees += fee;
         emit FlashLoanExecuted(msg.sender, amount, fee);
     }
 
     function depositToPool(uint256 amount) external {
+        require(amount > 0, "Cannot deposit 0");
         loanToken.transferFrom(msg.sender, address(this), amount);
+        expectedBalance += amount;
     }
 
-    function withdrawFees() external {
-        require(msg.sender == owner, "Not owner");
+    function withdrawFees() external onlyOwner {
         uint256 fees = totalFees;
         totalFees = 0;
+        expectedBalance -= fees;
         loanToken.transfer(owner, fees);
     }
 
-    // BUG: No emergency pause function
+    function togglePause() external onlyOwner {
+        paused = !paused;
+        emit Paused(paused);
+    }
+
     function getPoolBalance() external view returns (uint256) {
         return loanToken.balanceOf(address(this));
     }
