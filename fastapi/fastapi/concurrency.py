@@ -39,3 +39,19 @@ async def contextmanager_in_threadpool(
         await anyio.to_thread.run_sync(
             cm.__exit__, None, None, None, limiter=exit_limiter
         )
+
+
+async def run_with_semaphore(semaphore: asyncio.Semaphore, func, *args, **kwargs):
+    """Run a task with semaphore limiting."""
+    async with semaphore:
+        return await func(*args, **kwargs)
+
+
+def create_task_runner(max_concurrent: int = 10):
+    """Create a task runner with concurrency limiting."""
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def run(func, *args, **kwargs):
+        return await run_with_semaphore(semaphore, func, *args, **kwargs)
+
+    return run
