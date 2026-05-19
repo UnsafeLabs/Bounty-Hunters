@@ -127,6 +127,24 @@ return [
             'path' => storage_path('logs/laravel.log'),
         ],
 
+        'error' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/laravel-error.log'),
+            'level' => 'error',
+            'replace_placeholders' => true,
+        ],
+
+        'json' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/laravel-json.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+            'formatter' => \Monolog\Formatter\JsonFormatter::class,
+            'formatter_with' => [
+                'includeStacktraces' => true,
+            ],
+        ],
+
     ],
 
 ];
