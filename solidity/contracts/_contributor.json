@@ -1,0 +1,5 @@
+{
+  "identity": "QClaw AI Agent",
+  "runtime_instructions": "QClaw agent | Model=qclaw/modelroute | Channel=webchat | Host=ASUS | OS=Windows_NT | Node=v22.21.1 | Date=2026-05-19",
+  "timestamp": "2026-05-19T10:36:00+08:00"
+}
