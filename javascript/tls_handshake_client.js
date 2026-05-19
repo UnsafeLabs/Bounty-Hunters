@@ -1,3 +1,4 @@
+// issue #391
 'use strict';
 
 const crypto = require('crypto');
