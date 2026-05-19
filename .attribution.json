@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#796",
+  "fix": "Add router-level middleware support to APIRouter"
+}
