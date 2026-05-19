@@ -144,6 +144,25 @@ class APIKeyQuery(APIKeyBase):
         return self.check_api_key(api_key)
 
 
+import time
+from collections import defaultdict
+
+class RateLimiter:
+    def __init__(self, max_requests: int = 100, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.requests: dict[str, list[float]] = defaultdict(list)
+
+    def check(self, key: str) -> bool:
+        now = time.time()
+        window_start = now - self.window_seconds
+        self.requests[key] = [t for t in self.requests[key] if t > window_start]
+        if len(self.requests[key]) >= self.max_requests:
+            return False
+        self.requests[key].append(now)
+        return True
+
+
 class APIKeyHeader(APIKeyBase):
     """
     API key authentication using a header.
