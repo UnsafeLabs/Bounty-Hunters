@@ -715,6 +715,48 @@ const make = Effect.gen(function* () {
       );
   });
 
+  // Captures a checkpoint when a turn interrupt is requested, preserving
+  // the workspace state so the user can resume from this point on restart.
+  const captureCheckpointOnInterrupt = Effect.fn("captureCheckpointOnInterrupt")(function* (
+    event: Extract<OrchestrationEvent, { type: "thread.turn-interrupt-requested" }>,
+  ) {
+    const thread = yield* resolveThreadDetail(event.payload.threadId);
+    if (!thread) {
+      return;
+    }
+
+    const projects = yield* resolveThreadProjects(thread.projectId);
+    const checkpointCwd = yield* resolveCheckpointCwd({
+      threadId: thread.id,
+      thread,
+      projects,
+      preferSessionRuntime: true,
+    });
+    if (!checkpointCwd) {
+      return;
+    }
+
+    const currentTurnCount = thread.checkpoints.reduce(
+      (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
+      0,
+    );
+    const nextTurnCount = currentTurnCount + 1;
+    const checkpointRef = checkpointRefForThreadTurn(thread.id, nextTurnCount);
+
+    yield* checkpointStore.captureCheckpoint({
+      cwd: checkpointCwd,
+      checkpointRef,
+    });
+
+    yield* receiptBus.publish({
+      type: "checkpoint.baseline.captured",
+      threadId: thread.id,
+      checkpointTurnCount: nextTurnCount,
+      checkpointRef,
+      createdAt: event.payload.createdAt,
+    });
+  });
+
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (event: OrchestrationEvent) {
     if (event.type === "thread.turn-start-requested" || event.type === "thread.message-sent") {
       yield* ensurePreTurnBaselineFromDomainTurnStart(event);
@@ -731,6 +773,25 @@ const make = Effect.gen(function* () {
               detail: error.message,
               createdAt,
             }),
+          ),
+        ),
+      );
+      return;
+    }
+
+    // When a turn interrupt is requested, capture a checkpoint before the
+    // provider processes the interrupt. This preserves the workspace state
+    // so the user can resume from the last saved point on restart.
+    if (event.type === "thread.turn-interrupt-requested") {
+      yield* captureCheckpointOnInterrupt(event).pipe(
+        Effect.catch((error) =>
+          Effect.flatMap(nowIso, (createdAt) =>
+            appendCaptureFailureActivity({
+              threadId: event.payload.threadId,
+              turnId: event.payload.turnId ?? null,
+              detail: error.message,
+              createdAt,
+            }).pipe(Effect.catch(() => Effect.void)),
           ),
         ),
       );
@@ -790,11 +851,44 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, CheckpointStoreError | OrchestrationDispatchError, never> =>
     input.source === "domain" ? processDomainEvent(input.event) : processRuntimeEvent(input.event);
 
+  const checkpointOnInterrupt = (input: ReactorInput) =>
+    Effect.gen(function* () {
+      const threadId =
+        "threadId" in input.event
+          ? input.event.threadId
+          : "threadId" in (input.event as any).payload
+            ? (input.event as any).payload.threadId
+            : null;
+      if (!threadId) return;
+
+      const thread = yield* resolveThreadDetail(threadId).pipe(Effect.catch(() => null));
+      if (!thread) return;
+
+      const projects = yield* resolveThreadProjects(thread.projectId).pipe(Effect.catch(() => [] as any));
+      const checkpointCwd = yield* resolveCheckpointCwd({
+        threadId,
+        thread,
+        projects,
+        preferSessionRuntime: true,
+      }).pipe(Effect.catch(() => undefined));
+      if (!checkpointCwd) return;
+
+      const currentTurnCount = thread.checkpoints.reduce(
+        (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
+        0,
+      );
+      const checkpointRef = checkpointRefForThreadTurn(thread.id, currentTurnCount + 1);
+      yield* checkpointStore.captureCheckpoint({
+        cwd: checkpointCwd,
+        checkpointRef,
+      }).pipe(Effect.catch(() => Effect.void));
+    });
+
   const processInputSafely = (input: ReactorInput) =>
     processInput(input).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
-          return Effect.failCause(cause);
+          return checkpointOnInterrupt(input).pipe(Effect.andThen(Effect.failCause(cause)));
         }
         return Effect.logWarning("checkpoint reactor failed to process input", {
           source: input.source,
@@ -813,6 +907,7 @@ const make = Effect.gen(function* () {
           event.type !== "thread.turn-start-requested" &&
           event.type !== "thread.message-sent" &&
           event.type !== "thread.checkpoint-revert-requested" &&
+          event.type !== "thread.turn-interrupt-requested" &&
           event.type !== "thread.turn-diff-completed"
         ) {
           return Effect.void;
