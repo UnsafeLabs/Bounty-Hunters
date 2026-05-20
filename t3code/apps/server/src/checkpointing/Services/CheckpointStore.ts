@@ -40,6 +40,12 @@ export interface DeleteCheckpointRefsInput {
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
 }
 
+export interface PruneCheckpointsInput {
+  readonly cwd: string;
+  readonly retentionCount: number;
+  readonly maxAgeDays: number;
+}
+
 /**
  * CheckpointStoreShape - Service API for checkpoint capture/restore and diff access.
  */
