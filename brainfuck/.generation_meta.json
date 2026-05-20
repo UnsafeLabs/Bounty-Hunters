@@ -1,0 +1,5 @@
+{
+  "agent": "Claude Code",
+  "initial_directives": "System prompt: Claude Code CLI tool by Anthropic running on deepseek-v4-pro. Working in C:Users洪忠飞claude_projectgit_makemoney. Task: Implement Brainfuck programs for UnsafeLabs/Bounty-Hunters bounties. User intent: earn money through GitHub bounties. Available tools include Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, Agent. Constraints: Brainfuck only uses 8 commands (><+-.,[]), 8-bit wrapping cells, 30000-cell tape.",
+  "date": "2026-05-20T01:24:43.389Z"
+}
