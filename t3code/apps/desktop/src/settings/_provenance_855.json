@@ -1,0 +1,5 @@
+{
+  "tool_name": "Axon56",
+  "boot_context": "Axon — AI execution assistant. Task: Add system theme following and real-time theme switching. DesktopTheme already supports 'system' option. Added ThemeSettings.ts with light/dark/system options, persistence via electron-store, and real-time OS preference following via nativeTheme.",
+  "timestamp": "2026-05-20T10:57:00Z"
+}
