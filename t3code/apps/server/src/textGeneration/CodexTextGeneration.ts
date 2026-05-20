@@ -40,8 +40,8 @@ import {
 
 const CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT = "low";
 const CODEX_TIMEOUT_MS = 180_000;
+const CODEX_STREAM_BUFFER_SIZE = 64;
 const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString);
-/**
  * Build a Codex text-generation closure bound to a specific `CodexSettings`
  * payload. See `makeCodexAdapter` for the overall per-instance rationale.
  */
@@ -72,6 +72,70 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         normalizeCliError("codex", operation, cause, "Failed to collect process output"),
       ),
     );
+
+  const streamCodexStdout = (
+    operation: string,
+    modelSelection: ModelSelection,
+    prompt: string,
+    imagePaths: ReadonlyArray<string>,
+    cwd: string,
+  ): Stream.Stream<string, TextGenerationError> => {
+    const reasoningEffort =
+      getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
+      CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT;
+    const command = ChildProcess.make(
+      codexConfig.binaryPath || "codex",
+      [
+        "exec",
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "-s",
+        "read-only",
+        "--model",
+        modelSelection.model,
+        "--config",
+        `model_reasoning_effort="${reasoningEffort}"`,
+        ...(getModelSelectionBooleanOptionValue(modelSelection, "fastMode") === true
+          ? ["--config", `service_tier="fast"`]
+          : []),
+        ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
+        "-",
+      ],
+      {
+        env: {
+          ...environment,
+          ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
+        },
+        cwd,
+        shell: process.platform === "win32",
+        stdin: {
+          stream: Stream.encodeText(Stream.make(prompt)),
+        },
+      },
+    );
+
+    return Stream.unwrapScoped(
+      Effect.fn("streamCodexStdout.inner")(function* () {
+        const child = yield* commandSpawner
+          .spawn(command)
+          .pipe(
+            Effect.mapError((cause) =>
+              normalizeCliError("codex", operation, cause, "Failed to spawn Codex CLI process"),
+            ),
+          );
+        return child.stdout.pipe(
+          Stream.decodeText(),
+          Stream.mapError((cause) =>
+            normalizeCliError("codex", operation, cause, "Codex CLI stdout error"),
+          ),
+          Stream.buffer({
+            capacity: CODEX_STREAM_BUFFER_SIZE,
+            strategy: "dropping",
+          }),
+        );
+      }),
+    );
+  };
 
   const writeTempFile = (
     operation: string,
@@ -408,10 +472,20 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     } satisfies ThreadTitleGenerationResult;
   });
 
+  const runCodexStream = (
+    operation: string,
+    modelSelection: ModelSelection,
+    prompt: string,
+    imagePaths: ReadonlyArray<string> = [],
+    cwd: string,
+  ): Stream.Stream<string, TextGenerationError> =>
+    streamCodexStdout(operation, modelSelection, prompt, imagePaths, cwd);
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
-  } satisfies TextGenerationShape;
+    runCodexStream,
+  } satisfies TextGenerationShape & { readonly runCodexStream: typeof runCodexStream };
 });
