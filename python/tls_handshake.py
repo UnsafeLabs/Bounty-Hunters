@@ -80,13 +80,13 @@ VALID_TRANSITIONS: Dict[HandshakeState, List[HandshakeState]] = {
     HandshakeState.IDLE: [HandshakeState.CLIENT_HELLO],
     HandshakeState.CLIENT_HELLO: [
         HandshakeState.SERVER_HELLO,
-        HandshakeState.FINISHED,       # BUG 1: allows skipping key exchange
+        HandshakeState.SERVER_FINISHED,       # BUG 1: allows skipping key exchange
     ],
     HandshakeState.SERVER_HELLO: [HandshakeState.CERTIFICATE],
     HandshakeState.CERTIFICATE: [HandshakeState.KEY_EXCHANGE],
     HandshakeState.KEY_EXCHANGE: [HandshakeState.CHANGE_CIPHER_SPEC],
-    HandshakeState.CHANGE_CIPHER_SPEC: [HandshakeState.FINISHED],
-    HandshakeState.FINISHED: [HandshakeState.ESTABLISHED],
+    HandshakeState.CHANGE_CIPHER_SPEC: [HandshakeState.SERVER_FINISHED],
+    HandshakeState.SERVER_FINISHED: [HandshakeState.ESTABLISHED],
     HandshakeState.ESTABLISHED: [],
     HandshakeState.ERROR: [],
 }
@@ -370,7 +370,7 @@ class TLSHandshake:
             return True, "Key exchange processed"
 
         elif message.msg_type == HandshakeType.FINISHED:
-            if not self.transition_to(HandshakeState.FINISHED):
+            if not self.transition_to(HandshakeState.SERVER_FINISHED):
                 return False, "Invalid state for Finished"
             label = (
                 "server finished" if self.is_server else "client finished"
