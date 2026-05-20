@@ -47,5 +47,5 @@ The bug laughs again
 ### Autumn Walk
 
 Leaves crunch underfoot
-Wind combs through the amber trees
+Wind threads through amber branches
 Cold hands find warm pockets
