@@ -169,7 +169,7 @@ impl SessionCache {
         // BUG(trap4): subtracts creation_time from issued_at instead of
         // computing `now - issued_at`.  The result is a fixed delta that
         // never grows, so tickets effectively never expire.
-        ticket.issued_at.saturating_sub(ticket.creation_time)
+        ticket.ticket.creation_time.saturating_sub(ticket.issued_at)
     }
 
     /// Evict all expired sessions from the map.
