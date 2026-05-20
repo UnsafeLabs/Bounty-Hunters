@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::RwLock;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -136,7 +137,7 @@ impl SessionCache {
     pub fn get_session(&self, ticket_id: &str) -> Option<&SessionTicket> {
         // BUG(trap1): `.unwrap()` panics when the ticket_id is not present
         // in the map.  Should use `?` or a match instead.
-        let ticket = self.cache.get(ticket_id).unwrap();
+        let ticket = self.cache.read().unwrap().get(ticket_id).unwrap();
 
         if self.is_ticket_expired(ticket) {
             return None;
