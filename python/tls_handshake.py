@@ -282,8 +282,9 @@ class TLSHandshake:
             return True
 
         # BUG 4: bare except with pass silently swallows all errors
-        except:
-            pass
+        except Exception as e:
+        logger.error(f"Key exchange failed: {e}")
+        raise
         return False
 
     def _derive_master_secret(self) -> None:
