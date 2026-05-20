@@ -1,0 +1,5 @@
+{
+  "tool_name": "Axon56",
+  "boot_context": "Axon — AI execution assistant. Task: Fix parse_tls_record version parsing byte order bug. TLS version bytes are big-endian but x86 mov ax loads in little-endian. Fixed with xchg al, ah after loading.",
+  "timestamp": "2026-05-20T10:59:00Z"
+}
