@@ -234,6 +234,14 @@ class TLSHandshake:
                 self.negotiated_ems = True
             elif ext_type == EXT_SIGNATURE_ALGORITHMS:
                 pass  # stored in ext.data for later use
+            elif ext_type == EXT_SNI:
+                if len(ext_data) >= 5:
+                    name_type = ext_data[2]
+                    if name_type == 0:
+                        name_len = struct.unpack("!H", ext_data[3:5])[0]
+                        if len(ext_data) >= 5 + name_len:
+                            ext.server_name = ext_data[5:5 + name_len].decode("ascii", errors="ignore")
+                            self.server_name = ext.server_name
             elif ext_type == EXT_SUPPORTED_VERSIONS:
                 pass  # stored in ext.data for later use
 
