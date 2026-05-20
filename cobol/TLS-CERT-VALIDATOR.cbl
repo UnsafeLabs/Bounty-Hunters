@@ -123,14 +123,18 @@
            88  WS-CERT-INVALID         VALUE 'I'.
        01  WS-VALIDATION-MSG           PIC X(128).
        01  WS-AUDIT-TIMESTAMP          PIC X(26).
-       01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
-       PROCEDURE DIVISION.
+        01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
+        01  WS-PARSED-CN                PIC X(64).
+        01  WS-RDN-COUNT                PIC 9(2).
+        01  WS-CHAR-INDEX               PIC 9(3).
+        PROCEDURE DIVISION.
        0000-MAIN-CONTROL.
            PERFORM 1000-INITIALIZE
            PERFORM 2000-VALIDATE-CERT-CHAIN
            PERFORM 3000-CHECK-EXPIRY-DATE
            PERFORM 4000-VERIFY-SIGNATURE
-           PERFORM 5000-MATCH-HOSTNAME
+            PERFORM 3500-PARSE-SUBJECT-DN
+            PERFORM 5000-MATCH-HOSTNAME
            PERFORM 6000-CHECK-REVOCATION-STATUS
            PERFORM 7000-DETERMINE-FINAL-RESULT
            PERFORM 9000-CLEANUP
@@ -254,7 +258,20 @@
            .
        4000-EXIT.
            EXIT.
-       5000-MATCH-HOSTNAME.
+        3500-PARSE-SUBJECT-DN.
+            MOVE SPACES TO WS-PARSED-CN
+            MOVE 0 TO WS-RDN-COUNT
+            MOVE 1 TO WS-CHAR-INDEX
+            INSPECT WS-SUBJECT-COMMON-NAME
+                REPLACING ALL '\,,' BY '_;_'
+            UNSTRING WS-SUBJECT-COMMON-NAME DELIMITED BY ','
+                INTO WS-PARSED-CN
+                TALLYING IN WS-RDN-COUNT
+            END-UNSTRING
+            INSPECT WS-PARSED-CN
+                REPLACING ALL '_;_' BY ','
+            .
+        5000-MATCH-HOSTNAME.
            INSPECT WS-SUBJECT-COMMON-NAME
                TALLYING WS-HOSTNAME-TALLY FOR ALL '*'
            IF WS-HOSTNAME-TALLY > 0
