@@ -1,43 +1,25 @@
-# Limerick Collection
+# Limericks
 
-A set of original limericks. Some need polish.
+## The Programmer
 
----
+A programmer stayed up all night,
+He coded with all of his might.
+He chased down each bug,
+Gave his keyboard a hug,
+And finally he got it right.
 
-### The Programmer
+## The Database Admin
 
-There once was a dev who loved Rust,
-Whose code never once gathered dust,
-He wrote every night,
-Till the tests were all right,
-[TODO: write closing line — must rhyme with "Rust" and "dust"]
+A DBA named Ms. Lee,
+Kept indexes under her key.
+When queries ran slow,
+She'd make indexes grow,
+And everyone cheered, "Whee!"
 
----
+## The Network Engineer
 
-### The Cat
-
-A cat sat on top of the fence,
-And stared with an air of suspense,
-It leapt to the ground,
-Without making a sound,
-And vanished with feline defense.
-
----
-
-### The Coffee
-
-A barista who worked the night shift,
-Made lattes incredibly swift,
-[TODO: write line 3 — short line, ~5 syllables, setup for punchline]
-[TODO: write line 4 — short line, ~5 syllables, rhymes with line 3]
-But her espresso game was a gift.
-
----
-
-### The Astronaut
-
-There once was a girl from the stars,
-Who dreamed about living on Mars,
-She built her own ship,
-And went on a trip,
-[TODO: write closing line — must rhyme with "stars" and "Mars"]
+A network engineer from Kent,
+Had cables that never were bent.
+He crimped them with care,
+Made connections so rare,
+A ninety-nine point nine percent.
