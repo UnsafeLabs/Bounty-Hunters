@@ -63,6 +63,14 @@ static void log_cert_event(int level, const char *fmt, ...)
     fprintf(stderr, "\n");
 }
 
+/**
+ * compute_fingerprint - Compute SHA-256 fingerprint of a certificate.
+ * @cert: The X509 certificate to fingerprint.
+ * @out: Output buffer for the fingerprint (must be at least FINGERPRINT_LEN).
+ * @out_len: Size of the output buffer.
+ *
+ * Returns 0 on success, -1 on failure.
+ */
 static int compute_fingerprint(X509 *cert, unsigned char *out, size_t out_len)
 {
     unsigned int len = 0;
@@ -78,6 +86,14 @@ static int match_fingerprint(const unsigned char *fp1, const unsigned char *fp2)
     return memcmp(fp1, fp2, FINGERPRINT_LEN) == 0;
 }
 
+/**
+ * check_expiry - Validate certificate validity period.
+ * @cert: The X509 certificate to check.
+ *
+ * Verifies notBefore and notAfter dates against the current time.
+ * Returns CERT_STATUS_OK if valid, CERT_STATUS_EXPIRED or
+ * CERT_STATUS_INVALID otherwise.
+ */
 static int check_expiry(X509 *cert)
 {
     const ASN1_TIME *not_before = X509_get0_notBefore(cert);
@@ -105,6 +121,13 @@ static int check_expiry(X509 *cert)
     return CERT_STATUS_OK;
 }
 
+/**
+ * verify_signature - Verify certificate signature using issuer's public key.
+ * @cert: The certificate to verify.
+ * @issuer: The issuer certificate whose public key is used.
+ *
+ * Returns CERT_STATUS_OK on valid signature, CERT_STATUS_INVALID otherwise.
+ */
 static int verify_signature(X509 *cert, X509 *issuer)
 {
     EVP_PKEY *issuer_key = X509_get0_pubkey(issuer);
@@ -132,6 +155,14 @@ static cert_entry_t *find_issuer(cert_store_t *store, X509 *cert)
     return NULL;
 }
 
+/**
+ * validate_chain - Validate a full certificate chain.
+ * @ctx: Chain context with certificates, trusted store, and options.
+ *
+ * Iterates through the chain checking expiry, signatures, trusted root,
+ * and optional fingerprint pinning on the leaf certificate.
+ * Returns CERT_STATUS_OK on success, or the appropriate error code.
+ */
 static int validate_chain(chain_context_t *ctx)
 {
     int             i, rc;
@@ -179,6 +210,10 @@ static int validate_chain(chain_context_t *ctx)
     return CERT_STATUS_OK;
 }
 
+/**
+ * cleanup_cert_store - Free all resources in a certificate store.
+ * @store: The store to clean. All entries are freed and pointers zeroed.
+ */
 static void cleanup_cert_store(cert_store_t *store)
 {
     cert_entry_t *entry, *next;
@@ -199,6 +234,15 @@ static void cleanup_cert_store(cert_store_t *store)
     store->count = 0;
 }
 
+/**
+ * add_trusted_cert - Add a trusted certificate to the store.
+ * @store: Pointer to an initialized cert store.
+ * @cert: OpenSSL X509 certificate to add (will be duplicated).
+ *
+ * Computes the SHA-256 fingerprint and extracts subject/issuer names.
+ * The certificate is inserted at the head of the store's linked list.
+ * Returns 0 on success, -1 on memory or fingerprint failure.
+ */
 int add_trusted_cert(cert_store_t *store, X509 *cert)
 {
     if (!store || !cert)
@@ -236,6 +280,14 @@ int add_trusted_cert(cert_store_t *store, X509 *cert)
     return 0;
 }
 
+/**
+ * init_cert_store - Allocate and initialize a certificate store.
+ * @max_depth: Maximum chain depth (clamped to MAX_CHAIN_DEPTH).
+ * @log_level: Logging verbosity (LOG_LEVEL_* constants).
+ *
+ * Returns a newly allocated cert_store_t, or NULL on allocation failure.
+ * The caller must call cleanup_cert_store() to free resources.
+ */
 cert_store_t *init_cert_store(int max_depth, int log_level)
 {
     cert_store_t *store = calloc(1, sizeof(cert_store_t));

@@ -16,6 +16,7 @@ const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
 // Error types
 // ---------------------------------------------------------------------------
 
+/// Errors that can occur during session ticket operations.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionError {
     TicketExpired { ticket_id: String },
@@ -45,6 +46,7 @@ impl std::error::Error for SessionError {}
 // Core data structures
 // ---------------------------------------------------------------------------
 
+/// A TLS session ticket with cipher suite, master secret, and encrypted state.
 #[derive(Debug, Clone)]
 pub struct SessionTicket {
     pub ticket_id: String,
@@ -56,6 +58,7 @@ pub struct SessionTicket {
     pub creation_time: u64,
 }
 
+/// Key material used for session ticket encryption/decryption.
 #[derive(Debug, Clone)]
 pub struct EncryptionKey {
     pub key_id: u32,
@@ -63,6 +66,10 @@ pub struct EncryptionKey {
     pub created_at: u64,
 }
 
+/// Thread-safe cache of TLS session tickets with automatic eviction.
+///
+/// Manages session ticket storage, retrieval, and expiration.
+/// Uses a fixed-size HashMap guarded by Arc for shared access.
 #[derive(Debug, Clone)]
 pub struct SessionCache {
     /// Thread-safe reference to the inner cache map.
@@ -73,6 +80,7 @@ pub struct SessionCache {
     max_size: usize,
 }
 
+/// TLS cipher suite identifiers matching TLS 1.3 registry values.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CipherSuite {
     TlsAes128GcmSha256 = 0x1301,
@@ -85,6 +93,8 @@ pub enum CipherSuite {
 // ---------------------------------------------------------------------------
 
 impl EncryptionKey {
+    /// Create a new encryption key with the given ID and material.
+    /// Sets created_at to the current system time.
     pub fn new(key_id: u32, material: Vec<u8>) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -105,6 +115,8 @@ impl EncryptionKey {
 
 impl SessionCache {
     /// Create a new, empty session cache with a default encryption key.
+    ///
+    /// The cache starts with key_id=1 and the provided key material.
     pub fn new(key_material: Vec<u8>) -> Self {
         let key = EncryptionKey::new(1, key_material);
         SessionCache {
@@ -115,6 +127,9 @@ impl SessionCache {
     }
 
     /// Store a session ticket in the cache.
+    ///
+    /// Evicts expired sessions if the cache is full before inserting.
+    /// Returns CacheFull if eviction does not free enough space.
     pub fn store_session(&mut self, ticket: SessionTicket) -> Result<(), SessionError> {
         let inner = Arc::get_mut(&mut self.cache).ok_or(SessionError::CacheFull)?;
 
@@ -146,12 +161,16 @@ impl SessionCache {
     }
 
     /// Remove a specific ticket from the cache.
+    ///
+    /// Returns the removed ticket, or None if not found.
     pub fn remove_session(&mut self, ticket_id: &str) -> Option<SessionTicket> {
         let inner = Arc::get_mut(&mut self.cache)?;
         inner.remove(ticket_id)
     }
 
     /// Return the number of cached sessions.
+    ///
+    /// This is an O(1) operation.
     pub fn session_count(&self) -> usize {
         self.cache.len()
     }

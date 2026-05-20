@@ -96,6 +96,7 @@ class TLSExtension:
     """Represents a parsed TLS extension."""
 
     def __init__(self, ext_type: int, data: bytes):
+        """Initialize extension with type code and raw data."""
         self.ext_type = ext_type
         self.data = data
         self.server_name: Optional[str] = None
@@ -108,6 +109,7 @@ class HandshakeMessage:
     """Parsed TLS handshake message."""
 
     def __init__(self, msg_type: HandshakeType, payload: bytes):
+        """Initialize message with type and raw payload data."""
         self.msg_type = msg_type
         self.payload = payload
         self.extensions: List[TLSExtension] = []
@@ -123,6 +125,11 @@ class TLSHandshake:
     """
 
     def __init__(self, is_server: bool = False):
+        """Initialize handshake state machine.
+
+        Args:
+            is_server: If True, use server-side Finished label.
+        """
         self.state: HandshakeState = HandshakeState.IDLE
         self.is_server = is_server
         self.client_random: Optional[bytes] = None
@@ -138,7 +145,10 @@ class TLSHandshake:
         self.transcript: bytearray = bytearray()
 
     def transition_to(self, new_state: HandshakeState) -> bool:
-        """Attempt a state transition. Returns True if valid."""
+        """Attempt a state transition. Returns True if valid.
+
+        On invalid transition the state becomes ERROR.
+        """
         allowed = VALID_TRANSITIONS.get(self.state, [])
         if new_state in allowed:
             self.state = new_state
@@ -182,7 +192,10 @@ class TLSHandshake:
         return message
 
     def parse_client_hello(self, message: HandshakeMessage) -> bool:
-        """Parse ClientHello message fields."""
+        """Parse ClientHello message fields.
+
+        Extracts client random, session ID, cipher suites, and extensions.
+        """
         payload = message.payload
         if len(payload) < 38:
             return False
@@ -262,7 +275,10 @@ class TLSHandshake:
         return computed_verify == received_verify
 
     def process_key_exchange(self, message: HandshakeMessage) -> bool:
-        """Process a ClientKeyExchange or ServerKeyExchange message."""
+        """Process a ClientKeyExchange or ServerKeyExchange message.
+
+        Decrypts the pre-master secret and derives master secret.
+        """
         try:
             payload = message.payload
             if len(payload) < 2:
@@ -287,7 +303,10 @@ class TLSHandshake:
         return False
 
     def _derive_master_secret(self) -> None:
-        """Derive the master secret from pre-master secret and randoms."""
+        """Derive the master secret from pre-master secret and randoms.
+
+        Uses standard or extended master secret label based on negotiation.
+        """
         if self._pre_master_secret is None:
             raise ValueError("No pre-master secret available")
         if self.client_random is None or self.server_random is None:
@@ -325,6 +344,7 @@ class TLSHandshake:
     def _decrypt_pre_master_secret(self, encrypted: bytes) -> Optional[bytes]:
         """
         Placeholder for RSA decryption of the pre-master secret.
+
         In production, this would use the server's private key.
         """
         # Stub: return a deterministic value for testing

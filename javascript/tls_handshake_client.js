@@ -81,6 +81,12 @@ class TLSHandshakeClient {
   // ClientHello
   // --------------------------------------------------------------------------
 
+  /**
+   * Generate a ClientHello handshake message.
+   * Builds the message with SNI, supported versions, groups, signature
+   * algorithms, and key share extensions. Appends to the transcript.
+   * @returns {Buffer} The serialized ClientHello handshake message.
+   */
   generateClientHello() {
     const sessionId = crypto.randomBytes(32);
     const cipherSuiteBytes = Buffer.alloc(this.offeredCipherSuites.length * 2);
@@ -122,6 +128,14 @@ class TLSHandshakeClient {
   // ServerHello parsing
   // --------------------------------------------------------------------------
 
+  /**
+   * Parse a ServerHello handshake message.
+   * Validates the handshake type, legacy version, cipher suite selection,
+   * and compression method. Throws TLSError on any validation failure.
+   * @param {Buffer} buffer - The raw ServerHello message.
+   * @returns {{serverRandom: Buffer, cipherSuite: number, hash: string}}
+   * @throws {TLSError}
+   */
   parseServerHello(buffer) {
     if (!Buffer.isBuffer(buffer) || buffer.length < 6) {
       throw new TLSError('ServerHello message too short', 50);
@@ -186,6 +200,14 @@ class TLSHandshakeClient {
   // Key derivation (HKDF-based)
   // --------------------------------------------------------------------------
 
+  /**
+   * Derive handshake traffic keys from ECDH shared secret.
+   * Uses HKDF-Extract and HKDF-ExpandLabel per TLS 1.3 key schedule.
+   * @param {Buffer} sharedSecret - The ECDH shared secret.
+   * @returns {{clientKey: Buffer, clientIv: Buffer, serverKey: Buffer,
+   *   serverIv: Buffer, handshakeSecret: Buffer}}
+   * @throws {TLSError} If cipher suite not yet negotiated.
+   */
   deriveHandshakeKeys(sharedSecret) {
     if (!this.negotiatedHash) {
       throw new TLSError('Cipher suite not yet negotiated');
@@ -231,6 +253,14 @@ class TLSHandshakeClient {
   // Certificate verification
   // --------------------------------------------------------------------------
 
+  /**
+   * Verify server certificate chain.
+   * Checks expiry, hostname match on leaf, and chain linkage.
+   * @param {Array<{subject: string, issuer: string, notBefore?: string,
+   *   notAfter?: string, subjectAltNames?: string[]}>} certChain
+   * @returns {boolean} True if chain is valid.
+   * @throws {TLSError} On any validation failure.
+   */
   verifyServerCertificate(certChain) {
     if (!Array.isArray(certChain) || certChain.length === 0) {
       throw new TLSError('Empty certificate chain', 42);
@@ -282,6 +312,14 @@ class TLSHandshakeClient {
   // Finished hash computation
   // --------------------------------------------------------------------------
 
+  /**
+   * Compute the Finished message verify_data.
+   * Uses HKDF-ExpandLabel with "finished" label and HMAC over transcript hash.
+   * @param {Buffer} baseKey - The base key (handshake traffic secret).
+   * @param {Buffer|Buffer[]} transcript - Transcript data to hash.
+   * @returns {Buffer} The verify_data.
+   * @throws {TLSError} If hash algorithm not negotiated.
+   */
   computeFinishedHash(baseKey, transcript) {
     if (!this.negotiatedHash) {
       throw new TLSError('Hash algorithm not negotiated');
@@ -312,6 +350,12 @@ class TLSHandshakeClient {
   // ECDH key exchange
   // --------------------------------------------------------------------------
 
+  /**
+   * Perform ECDH key exchange with server's public key.
+   * @param {Buffer} serverPublicKey - The server's ECDH public key.
+   * @returns {Buffer} The shared secret.
+   * @throws {TLSError} If key is invalid or exchange fails.
+   */
   performKeyExchange(serverPublicKey) {
     if (!Buffer.isBuffer(serverPublicKey) || serverPublicKey.length === 0) {
       throw new TLSError('Invalid server public key', 47);
