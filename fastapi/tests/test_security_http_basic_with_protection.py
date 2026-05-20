@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import threading
 import unittest
 from dataclasses import dataclass
 
@@ -136,6 +137,20 @@ class HTTPBasicWithProtectionTest(unittest.TestCase):
         self.assertTrue(HTTPBasicWithProtection.verify_password("s3cret", password_hash))
         self.assertFalse(HTTPBasicWithProtection.verify_password("wrong", password_hash))
         self.assertFalse(HTTPBasicWithProtection.verify_password("s3cret", "invalid"))
+
+    def test_failed_attempt_tracking_is_thread_safe(self):
+        security = HTTPBasicWithProtection(max_attempts=100)
+
+        def fail() -> None:
+            security._record_failure("10.0.0.1")
+
+        threads = [threading.Thread(target=fail) for _ in range(50)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(security._failed_attempts["10.0.0.1"][0], 50)
 
     def test_optional_http_basic_behavior_is_preserved(self):
         security = HTTPBasicWithProtection(auto_error=False)

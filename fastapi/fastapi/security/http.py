@@ -5,6 +5,7 @@ import math
 import secrets
 import time
 from base64 import b64decode, b64encode
+from threading import Lock
 from typing import Annotated, Callable
 
 from annotated_doc import Doc
@@ -232,8 +233,14 @@ class HTTPBasicWithProtection(HTTPBasic):
     HTTP Basic authentication with opt-in brute-force protection.
 
     This extends `HTTPBasic` without changing its default behavior. Applications
-    that need lockouts can provide a `password_checker` callback; failed
-    parsing or failed password checks are counted per client IP.
+    can tune `max_attempts` and `window_seconds`, then provide a
+    `password_checker` callback to validate credentials. Failed parsing or
+    failed password checks are counted per client IP.
+
+    The in-memory counter is protected by a process-local lock so concurrent
+    requests do not race while updating failures. Deployments with multiple
+    worker processes should use shared external rate limiting for global
+    lockouts across workers.
     """
 
     def __init__(
@@ -310,6 +317,7 @@ class HTTPBasicWithProtection(HTTPBasic):
         self.password_checker = password_checker
         self._time_source = time_source
         self._failed_attempts: dict[str, tuple[int, float]] = {}
+        self._failed_attempts_lock = Lock()
 
     async def __call__(self, request: Request) -> HTTPBasicCredentials | None:
         client_ip = self._client_ip(request)
@@ -392,7 +400,8 @@ class HTTPBasicWithProtection(HTTPBasic):
         return getattr(client, "host", None) or "unknown"
 
     def _raise_if_locked(self, client_ip: str) -> None:
-        attempts, first_failure = self._failed_attempts.get(client_ip, (0, 0.0))
+        with self._failed_attempts_lock:
+            attempts, first_failure = self._failed_attempts.get(client_ip, (0, 0.0))
         if attempts < self.max_attempts:
             return
 
@@ -411,14 +420,16 @@ class HTTPBasicWithProtection(HTTPBasic):
 
     def _record_failure(self, client_ip: str) -> None:
         now = self._time_source()
-        attempts, first_failure = self._failed_attempts.get(client_ip, (0, now))
-        if now - first_failure >= self.window_seconds:
-            attempts = 0
-            first_failure = now
-        self._failed_attempts[client_ip] = (attempts + 1, first_failure)
+        with self._failed_attempts_lock:
+            attempts, first_failure = self._failed_attempts.get(client_ip, (0, now))
+            if now - first_failure >= self.window_seconds:
+                attempts = 0
+                first_failure = now
+            self._failed_attempts[client_ip] = (attempts + 1, first_failure)
 
     def _reset_attempts(self, client_ip: str) -> None:
-        self._failed_attempts.pop(client_ip, None)
+        with self._failed_attempts_lock:
+            self._failed_attempts.pop(client_ip, None)
 
 
 class HTTPBearer(HTTPBase):
