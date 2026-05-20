@@ -127,6 +127,21 @@ const make = Effect.gen(function* () {
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
     };
+    const gitStatusClick = () => {
+      runMenuEffect("git-status", dispatchMenuAction("git-status"));
+    };
+    const gitPullClick = () => {
+      runMenuEffect("git-pull", dispatchMenuAction("git-pull"));
+    };
+    const gitPushClick = () => {
+      runMenuEffect("git-push", dispatchMenuAction("git-push"));
+    };
+    const gitViewHistoryClick = () => {
+      runMenuEffect("git-view-history", dispatchMenuAction("git-view-history"));
+    };
+    const inspectElementClick = () => {
+      runMenuEffect("inspect-element", dispatchMenuAction("inspect-element"));
+    };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
     if (environment.platform === "darwin") {
@@ -187,6 +202,48 @@ const make = Effect.gen(function* () {
           { role: "zoomOut" },
           { type: "separator" },
           { role: "togglefullscreen" },
+        ],
+      },
+      {
+        label: "Developer",
+        submenu: [
+          { role: "toggleDevTools", label: "Toggle Developer Tools" },
+          { type: "separator" },
+          { role: "reload" },
+          { role: "forceReload" },
+          { type: "separator" },
+          {
+            label: "Inspect Element",
+            accelerator: "CmdOrCtrl+Shift+C",
+            click: inspectElementClick,
+          },
+        ],
+      },
+      {
+        label: "Git",
+        submenu: [
+          {
+            label: "Status...",
+            accelerator: "CmdOrCtrl+Shift+S",
+            click: gitStatusClick,
+          },
+          { type: "separator" },
+          {
+            label: "Pull",
+            accelerator: "CmdOrCtrl+Shift+P",
+            click: gitPullClick,
+          },
+          {
+            label: "Push",
+            accelerator: "CmdOrCtrl+Shift+U",
+            click: gitPushClick,
+          },
+          { type: "separator" },
+          {
+            label: "View History",
+            accelerator: "CmdOrCtrl+Shift+H",
+            click: gitViewHistoryClick,
+          },
         ],
       },
       { role: "windowMenu" },
