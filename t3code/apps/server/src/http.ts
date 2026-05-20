@@ -16,6 +16,7 @@ import {
 } from "effect/unstable/http";
 import { OtlpTracer } from "effect/unstable/observability";
 
+import { withBodyLimit, respondToBodyLimitError, DEFAULT_MAX_BODY_BYTES } from "./bodyLimit.ts";
 import {
   ATTACHMENTS_ROUTE_PREFIX,
   normalizeAttachmentRelativePath,
@@ -89,50 +90,55 @@ class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecor
 export const otlpTracesProxyRouteLayer = HttpRouter.add(
   "POST",
   OTLP_TRACES_PROXY_PATH,
-  Effect.gen(function* () {
-    yield* requireAuthenticatedRequest;
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const config = yield* ServerConfig;
-    const otlpTracesUrl = config.otlpTracesUrl;
-    const browserTraceCollector = yield* BrowserTraceCollector;
-    const httpClient = yield* HttpClient.HttpClient;
-    const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
+  withBodyLimit(
+    Effect.gen(function* () {
+      yield* requireAuthenticatedRequest;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const config = yield* ServerConfig;
+      const otlpTracesUrl = config.otlpTracesUrl;
+      const browserTraceCollector = yield* BrowserTraceCollector;
+      const httpClient = yield* HttpClient.HttpClient;
+      const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
 
-    yield* Effect.try({
-      try: () => decodeOtlpTraceRecords(bodyJson),
-      catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson }),
-    }).pipe(
-      Effect.flatMap((records) => browserTraceCollector.record(records)),
-      Effect.catch((cause) =>
-        Effect.logWarning("Failed to decode browser OTLP traces", {
-          cause,
-          bodyJson,
-        }),
-      ),
-    );
-
-    if (otlpTracesUrl === undefined) {
-      return HttpServerResponse.empty({ status: 204 });
-    }
-
-    return yield* httpClient
-      .post(otlpTracesUrl, {
-        body: HttpBody.jsonUnsafe(bodyJson),
-      })
-      .pipe(
-        Effect.flatMap(HttpClientResponse.filterStatusOk),
-        Effect.as(HttpServerResponse.empty({ status: 204 })),
-        Effect.tapError((cause) =>
-          Effect.logWarning("Failed to export browser OTLP traces", {
+      yield* Effect.try({
+        try: () => decodeOtlpTraceRecords(bodyJson),
+        catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson }),
+      }).pipe(
+        Effect.flatMap((records) => browserTraceCollector.record(records)),
+        Effect.catch((cause) =>
+          Effect.logWarning("Failed to decode browser OTLP traces", {
             cause,
-            otlpTracesUrl,
+            bodyJson,
           }),
         ),
-        Effect.catch(() =>
-          Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
-        ),
       );
-  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+
+      if (otlpTracesUrl === undefined) {
+        return HttpServerResponse.empty({ status: 204 });
+      }
+
+      return yield* httpClient
+        .post(otlpTracesUrl, {
+          body: HttpBody.jsonUnsafe(bodyJson),
+        })
+        .pipe(
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.as(HttpServerResponse.empty({ status: 204 })),
+          Effect.tapError((cause) =>
+            Effect.logWarning("Failed to export browser OTLP traces", {
+              cause,
+              otlpTracesUrl,
+            }),
+          ),
+          Effect.catch(() =>
+            Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
+          ),
+        );
+    }).pipe(
+      Effect.catchTag("AuthError", respondToAuthError),
+      Effect.catchTag("BodyLimitError", respondToBodyLimitError),
+    ),
+  ),
 );
 
 export const attachmentsRouteLayer = HttpRouter.add(
