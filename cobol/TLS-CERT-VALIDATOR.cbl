@@ -297,6 +297,10 @@
            END-IF
            .
        6000-CHECK-REVOCATION-STATUS.
+           IF CRL-REVOKED-SW = "Y"
+               MOVE "REVOKED" TO WS-CERT-STATUS
+               GO TO 6000-EXIT
+           END-IF
            IF WS-CRL-NOT-LOADED
                SET WS-CERT-NOT-REVOKED TO TRUE
                GO TO 6000-EXIT
