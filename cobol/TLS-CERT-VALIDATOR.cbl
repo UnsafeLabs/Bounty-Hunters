@@ -165,7 +165,7 @@
                GO TO 2000-EXIT
            END-IF
            PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
-               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH + 1
+                UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH
                MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
                    TO CS-CERT-SERIAL
                READ CERT-STORE-FILE
