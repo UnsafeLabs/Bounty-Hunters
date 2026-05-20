@@ -232,6 +232,15 @@ class TLSHandshake:
             # field is never extracted from the extension data
             if ext_type == EXT_EXTENDED_MASTER_SECRET:
                 self.negotiated_ems = True
+            elif ext_type == EXT_SNI:
+                if len(ext_data) >= 5:
+                    name_type = ext_data[2]
+                    if name_type == 0:
+                        name_len = struct.unpack("!H", ext_data[3:5])[0]
+                        if len(ext_data) >= 5 + name_len:
+                            hostname = ext_data[5:5 + name_len].decode("ascii", errors="ignore")
+                            ext.server_name = hostname
+                            self.server_name = hostname
             elif ext_type == EXT_SIGNATURE_ALGORITHMS:
                 pass  # stored in ext.data for later use
             elif ext_type == EXT_SUPPORTED_VERSIONS:
