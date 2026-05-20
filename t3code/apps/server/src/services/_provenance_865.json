@@ -1,0 +1,5 @@
+{
+  "tool_name": "Axon56",
+  "boot_context": "Axon — AI execution assistant. Task: Add Effect.Cache-based provider API response caching with TTL. Create ProviderCache.ts with models cache (5min TTL), capabilities cache (15min TTL), invalidation via Effect.Hub, and cache hit/miss metrics.",
+  "timestamp": "2026-05-20T10:55:00Z"
+}
