@@ -246,7 +246,27 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div
+        className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip"
+        data-timeline-root="true"
+        role="listitem"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            const parent = (e.currentTarget as HTMLElement).parentElement;
+            if (!parent) return;
+            const items = Array.from(parent.querySelectorAll('[role="listitem"]'));
+            const idx = items.indexOf(e.currentTarget as HTMLElement);
+            if (e.key === "ArrowDown" && idx < items.length - 1) {
+              (items[idx + 1] as HTMLElement).focus();
+              e.preventDefault();
+            } else if (e.key === "ArrowUp" && idx > 0) {
+              (items[idx - 1] as HTMLElement).focus();
+              e.preventDefault();
+            }
+          }
+        }}
+      >
         <TimelineRowContent row={item} />
       </div>
     ),
