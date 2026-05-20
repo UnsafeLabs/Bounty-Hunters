@@ -803,6 +803,26 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     expandThreadListForProject,
     collapseThreadListForProject,
   } = props;
+
+  const threadListSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+  );
+  const threadCollisionDetection = useCallback<CollisionDetection>((args) => {
+    const pointerCollisions = pointerWithin(args);
+    if (pointerCollisions.length > 0) {
+      return pointerCollisions;
+    }
+    return closestCorners(args);
+  }, []);
+
+  const handleThreadDragEnd = useCallback(
+    (_event: DragEndEvent) => {
+    },
+    [],
+  );
+
   const showMoreButtonRender = useMemo(() => <button type="button" />, []);
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
 
@@ -821,38 +841,53 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           </div>
         </SidebarMenuSubItem>
       ) : null}
-      {shouldShowThreadPanel &&
-        renderedThreads.map((thread) => {
-          const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-          return (
-            <SidebarThreadRow
-              key={threadKey}
-              thread={thread}
-              projectCwd={projectCwd}
-              orderedProjectThreadKeys={orderedProjectThreadKeys}
-              isActive={activeRouteThreadKey === threadKey}
-              jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
-              appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
-              renamingThreadKey={renamingThreadKey}
-              renamingTitle={renamingTitle}
-              setRenamingTitle={setRenamingTitle}
-              renamingInputRef={renamingInputRef}
-              renamingCommittedRef={renamingCommittedRef}
-              confirmingArchiveThreadKey={confirmingArchiveThreadKey}
-              setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
-              confirmArchiveButtonRefs={confirmArchiveButtonRefs}
-              handleThreadClick={handleThreadClick}
-              navigateToThread={navigateToThread}
-              handleMultiSelectContextMenu={handleMultiSelectContextMenu}
-              handleThreadContextMenu={handleThreadContextMenu}
-              clearSelection={clearSelection}
-              commitRename={commitRename}
-              cancelRename={cancelRename}
-              attemptArchiveThread={attemptArchiveThread}
-              openPrLink={openPrLink}
-            />
-          );
-        })}
+      {shouldShowThreadPanel && (
+        <DndContext
+          sensors={threadListSensors}
+          collisionDetection={threadCollisionDetection}
+          onDragEnd={handleThreadDragEnd}
+        >
+          <SortableContext
+            items={renderedThreads.map((thread) =>
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+            )}
+            strategy={verticalListSortingStrategy}
+          >
+            {renderedThreads.map((thread) => {
+              const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+              return (
+                <SortableThreadRow key={threadKey} threadId={threadKey}>
+                  <SidebarThreadRow
+                    thread={thread}
+                    projectCwd={projectCwd}
+                    orderedProjectThreadKeys={orderedProjectThreadKeys}
+                    isActive={activeRouteThreadKey === threadKey}
+                    jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
+                    appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
+                    renamingThreadKey={renamingThreadKey}
+                    renamingTitle={renamingTitle}
+                    setRenamingTitle={setRenamingTitle}
+                    renamingInputRef={renamingInputRef}
+                    renamingCommittedRef={renamingCommittedRef}
+                    confirmingArchiveThreadKey={confirmingArchiveThreadKey}
+                    setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
+                    confirmArchiveButtonRefs={confirmArchiveButtonRefs}
+                    handleThreadClick={handleThreadClick}
+                    navigateToThread={navigateToThread}
+                    handleMultiSelectContextMenu={handleMultiSelectContextMenu}
+                    handleThreadContextMenu={handleThreadContextMenu}
+                    clearSelection={clearSelection}
+                    commitRename={commitRename}
+                    cancelRename={cancelRename}
+                    attemptArchiveThread={attemptArchiveThread}
+                    openPrLink={openPrLink}
+                  />
+                </SortableThreadRow>
+              );
+            })}
+          </SortableContext>
+        </DndContext>
+      )}
 
       {projectExpanded && hasOverflowingThreads && !isThreadListExpanded && (
         <SidebarMenuSubItem className="w-full">
@@ -2441,6 +2476,33 @@ function SortableProjectItem({
     >
       {children({ attributes, listeners, setActivatorNodeRef })}
     </li>
+  );
+}
+
+function SortableThreadRow({
+  threadId,
+  disabled = false,
+  children,
+}: {
+  threadId: string;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, transform, transition, isDragging } = useSortable({
+    id: threadId,
+    disabled,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Translate.toString(transform),
+        transition,
+      }}
+      className={`${isDragging ? "z-20 opacity-60" : ""}`}
+    >
+      {children}
+    </div>
   );
 }
 
