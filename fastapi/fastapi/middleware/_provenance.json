@@ -1,0 +1,5 @@
+{
+  "tool_name": "Axon56",
+  "boot_context": "Axon — AI execution assistant. Task: Implement dynamic CORS origin validation with callback support in FastAPI middleware. Create DynamicCORSMiddleware class with sync/async callback, cors_max_age parameter, keeping existing CORSMiddleware export unchanged.",
+  "timestamp": "2026-05-20T10:24:00Z"
+}
