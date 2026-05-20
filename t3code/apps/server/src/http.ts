@@ -1,3 +1,4 @@
+import * as zlib from "node:zlib";
 import Mime from "@effect/platform-node/Mime";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
@@ -5,7 +6,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import { cast } from "effect/Function";
+import { cast, pipe } from "effect/Function";
 import {
   HttpBody,
   HttpClient,
@@ -38,6 +39,144 @@ const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+
+/** Content types that are already compressed and should not be re-compressed. */
+const UNCOMPRESSIBLE_CONTENT_TYPES = new Set([
+  "image/",
+  "audio/",
+  "video/",
+  "application/zip",
+  "application/x-zip",
+  "application/gzip",
+  "application/x-gzip",
+  "application/x-rar",
+  "application/pdf",
+  "application/ogg",
+]);
+
+/** Minimum response size in bytes before compression is applied. */
+const MIN_COMPRESSION_SIZE = 1024;
+
+/**
+ * Checks if a content type should not be compressed.
+ */
+const isUncompressibleContentType = (contentType: string): boolean =>
+  UNCOMPRESSIBLE_CONTENT_TYPES.has(contentType) ||
+  UNCOMPRESSIBLE_CONTENT_TYPES.has(contentType.split(";")[0].trim()) ||
+  UNCOMPRESSIBLE_CONTENT_TYPES.some((type) => contentType.startsWith(type));
+
+/**
+ * Parses the Accept-Encoding header and returns the preferred encoding.
+ * Prefers brotli over gzip when both are accepted.
+ */
+const preferredEncoding = (acceptEncoding: string | undefined): "br" | "gzip" | undefined => {
+  if (!acceptEncoding) return undefined;
+  const encodings = acceptEncoding.split(",").map((e) => e.trim().toLowerCase());
+  if (encodings.includes("br")) return "br";
+  if (encodings.includes("gzip")) return "gzip";
+  return undefined;
+};
+
+/**
+ * Synchronously compresses data using the specified encoding.
+ * For gzip: uses zlib.createGzip with sync mode.
+ * For brotli: uses zlib.createBrotliCompress with sync mode.
+ */
+const compressSync = (
+  data: Uint8Array,
+  encoding: "br" | "gzip",
+  level: number,
+): Uint8Array => {
+  if (encoding === "br") {
+    return zlib.brotliCompressSync(data, { params: { [zlib.constants.BROTLI_PARAM_MODE]: zlib.constants.BROTLI_MODE_GENERIC, [zlib.constants.BROTLI_PARAM_QUALITY]: level } });
+  }
+  return zlib.gzipSync(data, { level });
+};
+
+
+/**
+ * Synchronously decompresses data using the specified encoding.
+ */
+const decompressSync = (data: Buffer, encoding: "br" | "gzip"): Buffer => {
+  if (encoding === "br") {
+    return zlib.brotliDecompressSync(data);
+  }
+  return zlib.gunzipSync(data);
+};
+
+/**
+ * Decompresses a request body if Content-Encoding is set.
+ * Returns the decompressed body as a Buffer.
+ */
+const decompressRequestBody = (
+  body: Uint8Array,
+  contentEncoding: string | undefined,
+): Buffer => {
+  if (!contentEncoding) return Buffer.from(body);
+  const encoding = preferredEncoding(contentEncoding);
+  if (!encoding) return Buffer.from(body);
+  try {
+    return decompressSync(Buffer.from(body), encoding);
+  } catch {
+    return Buffer.from(body);
+  }
+};
+
+/**
+ * Compresses a response body if:
+ * - The client supports compression (Accept-Encoding header)
+ * - The response is larger than MIN_COMPRESSION_SIZE
+ * - The content type is not already compressed
+ *
+ * Returns the compressed body and the Content-Encoding header value, or undefined.
+ */
+const compressResponseBody = (
+  body: Uint8Array,
+  contentType: string,
+  acceptEncoding: string | undefined,
+  compressionLevel: number,
+): { body: Uint8Array; contentEncoding: "br" | "gzip" } | undefined => {
+  if (body.length < MIN_COMPRESSION_SIZE) return undefined;
+  if (isUncompressibleContentType(contentType)) return undefined;
+  const encoding = preferredEncoding(acceptEncoding);
+  if (!encoding) return undefined;
+  try {
+    const compressed = compressSync(body, encoding, compressionLevel);
+    if (compressed.length >= body.length) return undefined;
+    return { body: compressed, contentEncoding: encoding };
+  } catch {
+    return undefined;
+  }
+};
+
+
+/**
+ * Builds a compressed HTTP response from raw bytes.
+ * Used for JSON API responses that support compression.
+ */
+const compressedResponse = (
+  body: Uint8Array,
+  contentType: string,
+  acceptEncoding: string | undefined,
+  compressionLevel: number,
+  baseStatus: number,
+  baseHeaders: Record<string, string>,
+): HttpServerResponse.HttpServerResponse => {
+  const compressed = compressResponseBody(body, contentType, acceptEncoding, compressionLevel);
+  if (compressed) {
+    const headers = { ...baseHeaders, "Content-Encoding": compressed.contentEncoding };
+    return HttpServerResponse.uint8Array(compressed.body, {
+      status: baseStatus,
+      contentType,
+      headers,
+    });
+  }
+  return HttpServerResponse.uint8Array(body, {
+    status: baseStatus,
+    contentType,
+    headers: baseHeaders,
+  });
+};
 
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: [...browserApiCorsAllowedMethods],
@@ -74,10 +213,11 @@ export const serverEnvironmentRouteLayer = HttpRouter.add(
     const descriptor = yield* Effect.service(ServerEnvironment).pipe(
       Effect.flatMap((serverEnvironment) => serverEnvironment.getDescriptor),
     );
-    return HttpServerResponse.jsonUnsafe(descriptor, {
-      status: 200,
-      headers: browserApiCorsHeaders,
-    });
+    const config = yield* ServerConfig;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const acceptEncoding = request.headers["accept-encoding"];
+    const body = new TextEncoder().encode(JSON.stringify(descriptor));
+    return compressedResponse(body, "application/json", acceptEncoding, config.compressionLevel, 200, browserApiCorsHeaders);
   }),
 );
 
