@@ -3,7 +3,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -19,6 +19,8 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+
+const PERSISTENCE_KEY = "t3code:provider-model-picker:active";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -89,8 +91,32 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
+    try {
+      localStorage.setItem(
+        PERSISTENCE_KEY,
+        JSON.stringify({ instanceId, model }),
+      );
+    } catch { /* storage full or unavailable */ }
     setIsMenuOpen(false);
   };
+
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    try {
+      const raw = localStorage.getItem(PERSISTENCE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { instanceId: string; model: string } | null;
+      if (!parsed) return;
+      if (parsed.instanceId !== props.activeInstanceId || parsed.model !== props.model) {
+        props.onInstanceModelChange(
+          parsed.instanceId as ProviderInstanceId,
+          parsed.model,
+        );
+      }
+    } catch { /* ignore parse errors */ }
+    restoredRef.current = true;
+  }, []);
 
   return (
     <Popover
