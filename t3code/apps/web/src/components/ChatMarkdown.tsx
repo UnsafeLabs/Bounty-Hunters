@@ -1,5 +1,5 @@
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon } from "lucide-react";
 import type { ServerProviderSkill } from "@t3tools/contracts";
 import React, {
   Children,
@@ -66,6 +66,7 @@ interface ChatMarkdownProps {
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
+const COLLAPSIBLE_LINE_THRESHOLD = 15;
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
@@ -148,7 +149,10 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
 
 function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
   const [copied, setCopied] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lineCount = code.split("\n").length;
+  const canCollapse = lineCount > COLLAPSIBLE_LINE_THRESHOLD;
   const handleCopy = useCallback(() => {
     if (typeof navigator === "undefined" || navigator.clipboard == null) {
       return;
@@ -189,7 +193,21 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
       >
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </button>
-      {children}
+      {canCollapse ? (
+        <div
+          className={isCollapsed ? "max-h-56 overflow-hidden" : ""}
+        >
+          {children}
+          <button
+            type="button"
+            className="flex w-full items-center gap-1.5 border-t border-border/50 px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+            onClick={() => setIsCollapsed(!isCollapsed)}
+          >
+            {isCollapsed ? <ChevronRightIcon className="size-3" /> : <ChevronDownIcon className="size-3" />}
+            {isCollapsed ? `Show ${lineCount - COLLAPSIBLE_LINE_THRESHOLD} more lines` : "Collapse"}
+          </button>
+        </div>
+      ) : children}
     </div>
   );
 }
