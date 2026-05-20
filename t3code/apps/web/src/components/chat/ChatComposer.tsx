@@ -1201,14 +1201,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   // ------------------------------------------------------------------
   // Reset compositor state on thread/draft change
+  // Restore draft from store when switching back to a thread
   // ------------------------------------------------------------------
   useEffect(() => {
     setComposerHighlightedItemId(null);
-    setComposerCursor(collapseExpandedComposerCursor(promptRef.current, promptRef.current.length));
-    setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length));
+    const restoredPrompt = promptRef.current;
+    setComposerCursor(collapseExpandedComposerCursor(restoredPrompt, restoredPrompt.length));
+    setComposerTrigger(detectComposerTrigger(restoredPrompt, restoredPrompt.length));
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
-  }, [draftId, activeThreadId, promptRef]);
+  }, [composerDraftTarget, draftId, activeThreadId, prompt, promptRef]);
 
   // ------------------------------------------------------------------
   // Footer compact layout observation
