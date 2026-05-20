@@ -39,6 +39,7 @@ import {
   terminalDeleteShortcutData,
   terminalNavigationShortcutData,
 } from "../keybindings";
+import { isMacPlatform } from "../lib/utils";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
   DEFAULT_THREAD_TERMINAL_ID,
@@ -444,11 +445,34 @@ export function TerminalViewport({
         return false;
       }
 
-      if (!isTerminalClearShortcut(event)) return true;
-      event.preventDefault();
-      event.stopPropagation();
-      void sendTerminalInput("\u000c", "Failed to clear terminal");
-      return false;
+      if (isTerminalClearShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        void sendTerminalInput("\u000c", "Failed to clear terminal");
+        return false;
+      }
+
+      const isMac = isMacPlatform(navigator.platform);
+      const modKey = isMac ? event.metaKey : event.ctrlKey;
+      if (event.type === "keydown" && modKey && !event.shiftKey && !event.altKey) {
+        if (event.key.toLowerCase() === "c" && terminalRef.current?.hasSelection()) {
+          const selected = terminalRef.current.getSelection();
+          if (selected) {
+            void navigator.clipboard.writeText(selected);
+          }
+          return false;
+        }
+        if (event.key.toLowerCase() === "v") {
+          event.preventDefault();
+          event.stopPropagation();
+          void navigator.clipboard.readText().then((text) => {
+            void sendTerminalInput(text, "Failed to paste");
+          });
+          return false;
+        }
+      }
+
+      return true;
     });
 
     const terminalLinksDisposable = terminal.registerLinkProvider({
