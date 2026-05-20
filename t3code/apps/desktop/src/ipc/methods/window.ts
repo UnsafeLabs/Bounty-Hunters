@@ -100,6 +100,8 @@ export const setTheme = makeIpcMethod({
   handler: Effect.fn("desktop.ipc.window.setTheme")(function* (theme) {
     const electronTheme = yield* ElectronTheme.ElectronTheme;
     yield* electronTheme.setSource(theme);
+    const settings = yield* DesktopAppSettings.DesktopAppSettings;
+    yield* settings.setTheme(theme);
   }),
 });
 

@@ -21,6 +21,7 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
+import * as ElectronTheme from "../electron/ElectronTheme.ts";
 
 const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
 const MAX_TCP_PORT = 65_535;
@@ -213,6 +214,9 @@ const startup = Effect.gen(function* () {
   );
   yield* logStartupInfo("app ready");
   yield* appIdentity.configure;
+  const currentSettings = yield* desktopSettings.get;
+  const electronTheme = yield* ElectronTheme.ElectronTheme;
+  yield* electronTheme.setSource(currentSettings.theme);
   yield* applicationMenu.configure;
   yield* electronProtocol.registerDesktopFileProtocol;
   yield* updates.configure;
