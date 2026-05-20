@@ -8,6 +8,7 @@ import { OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/unstable/obse
 import { ServerConfig } from "../../config.ts";
 import { ServerLoggerLive } from "../../serverLogger.ts";
 import { BrowserTraceCollector } from "../Services/BrowserTraceCollector.ts";
+import { SlidingWindowMetrics, makeSlidingWindowMetrics } from "../Services/SlidingWindowMetrics.ts";
 
 const otlpSerializationLayer = OtlpSerialization.layerJson;
 
@@ -81,6 +82,8 @@ export const ObservabilityLive = Layer.unwrap(
             },
           }).pipe(Layer.provideMerge(otlpSerializationLayer));
 
-    return Layer.mergeAll(ServerLoggerLive, traceReferencesLayer, tracerLayer, metricsLayer);
+    const slidingMetricsLayer = Layer.effect(SlidingWindowMetrics, makeSlidingWindowMetrics);
+
+    return Layer.mergeAll(ServerLoggerLive, traceReferencesLayer, tracerLayer, metricsLayer, slidingMetricsLayer);
   }),
 );

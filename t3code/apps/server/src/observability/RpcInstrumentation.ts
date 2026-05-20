@@ -8,7 +8,8 @@ import * as References from "effect/References";
 import * as Stream from "effect/Stream";
 
 import { outcomeFromExit } from "./Attributes.ts";
-import { metricAttributes, rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
+import { metricAttributes, requestLatency, rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
+import { SlidingWindowMetrics } from "./Services/SlidingWindowMetrics.ts";
 
 const RPC_SPAN_PREFIX = "ws.rpc";
 const DEFAULT_RPC_SPAN_ATTRIBUTES = {
@@ -101,7 +102,27 @@ export const observeRpcEffect = <A, E, R>(
     }),
   );
 
-  return withRpcEffectTracing(method, instrumented, traceAttributes);
+  const withSlidingMetrics = Effect.gen(function* () {
+    const slidingMetrics = yield* SlidingWindowMetrics.pipe(Effect.option);
+    if (slidingMetrics._tag === "None") {
+      return instrumented;
+    }
+    const startedAt = Date.now();
+    const result = yield* instrumented.pipe(Effect.exit);
+    const isError = Exit.isFailure(result);
+    yield* slidingMetrics.value.recordEvent({
+      timestamp: startedAt,
+      isError,
+    });
+    if (Exit.isSuccess(result)) {
+      const elapsedMs = Date.now() - startedAt;
+      yield* Metric.update(requestLatency, elapsedMs / 1000);
+      return result.value;
+    }
+    return yield* Effect.failCause(result.cause);
+  });
+
+  return withRpcEffectTracing(method, withSlidingMetrics, traceAttributes);
 };
 
 export const observeRpcStream = <A, E, R>(
