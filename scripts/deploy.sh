@@ -1,4 +1,6 @@
 #!/bin/bash
+set -e
+/bin/bash
 #
 # deploy.sh - Application deployment script
 # Pulls latest code, builds, and deploys to production
