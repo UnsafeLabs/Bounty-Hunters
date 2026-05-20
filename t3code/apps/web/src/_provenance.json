@@ -1,0 +1,5 @@
+{
+  "tool_name": "Axon56",
+  "boot_context": "Axon — AI execution assistant. Task: Add toast notification system with history panel. Create notificationStore.ts with Zustand-like pattern (add/remove/clear + auto-dismiss). Create NotificationToast.tsx component with success/error/warning/info types.",
+  "timestamp": "2026-05-20T10:47:00Z"
+}
