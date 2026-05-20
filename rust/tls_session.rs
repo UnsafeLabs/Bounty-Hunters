@@ -65,6 +65,11 @@ pub struct EncryptionKey {
 
 #[derive(Debug, Clone)]
 pub struct SessionCache {
+    cache: RwLock<HashMap<String, SessionTicket>>,
+    current_key_id: u64,
+    encryption_key: [u8; 32],
+    old_keys: Vec<([u8; 32], u64)>,
+}
     /// Thread-safe reference to the inner cache map.
     // BUG(trap2): Arc alone does not provide interior mutability or
     // synchronisation.  Concurrent callers can race on the HashMap.
