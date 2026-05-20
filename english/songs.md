@@ -1,81 +1,59 @@
-# Song Lyrics Collection
+# Songs
 
-Original song lyrics. Some sections need completion.
+## 404 — Heart Not Found
 
----
+(Verse 1)
+I ping your number, get no reply,
+Connection timed out, I don't know why.
+My heart keeps sending packets to you,
+But every message comes back "status 202."
 
-### "404 — Heart Not Found"
-*Genre: Indie/Alternative*
+(Chorus)
+404 — Heart Not Found,
+Your love's not on this server ground.
+Request denied, access denied,
+A broken API deep inside.
+404 — Heart Not Found,
+No routes to you can be resolved.
+I'll keep retrying till the end,
+My broken heart won't comprehend.
 
-**[Verse 1]**
-I searched every page for your name,
-Clicked through every link, played every game,
-But the server returned an empty frame,
-404 — you were never the same.
+(Verse 2)
+I checked the logs, I traced the route,
+The error's somewhere deep without a doubt.
+Your firewall's up, my access blocked,
+This lonely server's getting shocked.
 
-**[Chorus]**
-Heart not found, heart not found,
-I keep refreshing but you're not around,
-[TODO: write 2 more chorus lines — must maintain the "internet/heartbreak" metaphor, rhyme scheme AABB]
+(Chorus)
 
-**[Verse 2]**
-Your profile says you're online tonight,
-The green dot glowing, soft and bright,
-[TODO: write 2 more verse lines — continue the theme of digital loneliness, rhyme with each other]
+(Bridge)
+Maybe tomorrow the cache clears,
+And your connection reappears.
+Till then I'll run diagnostics alone,
+This server's heart of stone.
 
-**[Bridge]**
-[TODO: write 4-line bridge — shift tone to acceptance, slower rhythm, can break rhyme scheme]
+(Outro)
+404... still not found...
+Rebooting now... goodbye.
 
-**[Chorus — Final]**
-Heart not found, heart not found,
-I stopped refreshing, I put the phone down,
-Cleared my cache, let the cookies expire,
-Sometimes you have to disconnect the wire.
+## Infinite Loop
 
----
+(Verse 1)
+We ran in circles, round and round,
+A pattern that could not be unwound.
+Your love was a while(true) loop,
+With no break condition to recoup.
 
-### "Mass Extinction Polka"
-*Genre: Polka/Comedy*
+(Chorus)
+Infinite loop, we never stop,
+Round and round, we drop and drop.
+Stack overflow, my heart can't cope,
+An infinite loop with no more scope.
 
-**[Verse 1]**
-The dinosaurs were having a ball,
-Dancing and stomping in the great hall,
-Then a rock from the sky made them stumble and fall,
-And that was the end of the Cretaceous ball!
+(Verse 2)
+I tried to break the cycle, set a flag,
+But every reset made my spirit sag.
+The condition was always true,
+There was nothing I could do.
 
-**[Chorus]**
-Extinction polka, one-two-three!
-[TODO: write 3 more chorus lines — must be upbeat and absurd, reference different extinct species, maintain polka rhythm]
-
-**[Verse 2]**
-The dodo bird walked without a care,
-With its fluffy wings and its vacant stare,
-[TODO: write 2 more verse lines — rhyme with each other, reference the dodo's obliviousness]
-
-**[Verse 3]**
-[TODO: write full 4-line verse — pick another extinct animal (mammoth, saber-tooth, etc.), maintain humorous polka tone, AABB rhyme]
-
-**[Outro]**
-So raise a glass to the ones who are gone,
-Their fossils remind us to carry on,
-Evolution's a dance, and the music plays on,
-Extinction polka — until we're all done!
-
----
-
-### "Segfault Lullaby"
-*Genre: Lullaby/Folk*
-
-**[Verse 1]**
-Close your eyes, little process, goodnight,
-Your memory leaks will be fixed by first light,
-The garbage collector will sweep while you sleep,
-And free all the pointers you promised to keep.
-
-**[Verse 2]**
-[TODO: write full 4-line verse — continue the "computer science lullaby" theme, reference threads/deadlocks/race conditions in a soothing way, AABB rhyme]
-
-**[Verse 3]**
-The kernel is humming a low steady tune,
-The clock ticks in cycles from midnight to noon,
-[TODO: write 2 closing lines — wrap up the lullaby, reference shutdown/sleep mode, rhyme with each other]
+(Chorus)
