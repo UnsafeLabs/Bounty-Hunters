@@ -1174,6 +1174,18 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
             cause,
           }),
       ),
+    )
+    .pipe(
+      Effect.tap(() => {
+        const pwdFile = childEnvironment.T3_SSH_AUTH_SECRET_FILE;
+        if (pwdFile) {
+          return Effect.gen(function* () {
+            const fileSystem = yield* FileSystem.FileSystem;
+            yield* fileSystem.remove(pwdFile, { force: true });
+          }).pipe(Effect.ignore);
+        }
+        return Effect.void;
+      }),
     );
   yield* Effect.logDebug("ssh.tunnel.spawn.succeeded", {
     ...sshTargetLogFields(input.resolvedTarget),

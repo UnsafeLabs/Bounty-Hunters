@@ -160,6 +160,14 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
           cause,
         }),
     ),
+  ).pipe(
+    Effect.tap(() => {
+      const pwdFile = environment.T3_SSH_AUTH_SECRET_FILE;
+      if (pwdFile) {
+        return fileSystem.remove(pwdFile, { force: true }).pipe(Effect.ignore);
+      }
+      return Effect.void;
+    }),
   );
   const args = [
     ...baseSshArgs(target, {
@@ -202,6 +210,15 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
             cause,
           }),
       ),
+    )
+    .pipe(
+      Effect.tap(() => {
+        const pwdFile = environment.T3_SSH_AUTH_SECRET_FILE;
+        if (pwdFile) {
+          return fileSystem.remove(pwdFile, { force: true }).pipe(Effect.ignore);
+        }
+        return Effect.void;
+      }),
     );
 
   const [stdout, stderr, exitCode] = yield* Effect.all(

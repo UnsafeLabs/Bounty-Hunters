@@ -186,13 +186,25 @@ export const buildSshChildEnvironment = Effect.fn("ssh/auth.buildSshChildEnviron
 
   const platform = input.platform ?? process.platform;
   const directory = input.askpassDirectory ?? (yield* getDefaultSshAskpassDirectory());
+  const pathUtil = yield* Path.Path;
+  const pathUtil = yield* Path.Path;
   const sshAskpass = yield* ensureSshAskpassHelpers({ directory, platform });
+
+  const secretFilePath =
+    input.authSecret !== undefined && input.authSecret !== null
+      ? pathUtil.join(directory, "ssh-password")
+      : undefined;
+
+  if (secretFilePath) {
+    const fs = yield* FileSystem.FileSystem;
+    yield* fs.writeFileString(secretFilePath, input.authSecret!, { mode: 0o600 });
+  }
 
   return {
     ...baseEnv,
     SSH_ASKPASS: sshAskpass,
     SSH_ASKPASS_REQUIRE: "force",
-    ...(input.authSecret === undefined ? {} : { T3_SSH_AUTH_SECRET: input.authSecret ?? "" }),
+    ...(secretFilePath ? { T3_SSH_AUTH_SECRET_FILE: secretFilePath } : {}),
     ...(platform === "win32" || baseEnv.DISPLAY ? {} : { DISPLAY: "t3code" }),
   };
 });
