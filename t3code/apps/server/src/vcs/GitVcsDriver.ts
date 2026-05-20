@@ -783,6 +783,73 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       return result.stdout;
     }),
 
+
+    pruneCheckpoints: Effect.fn("GitVcsDriver.checkpoints.pruneCheckpoints")(
+      function* (input) {
+        const listResult = yield* execute({
+          operation: "GitVcsDriver.checkpoints.listCheckpointRefs",
+          cwd: input.cwd,
+          args: [
+            "for-each-ref",
+            "--format",
+            "%(refname) %(creatordate:unix)",
+            "refs/t3/checkpoints/",
+          ],
+          allowNonZeroExit: true,
+        });
+        if (listResult.exitCode !== 0 || listResult.stdout.trim().length === 0) {
+          return;
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        const refsByThread = new Map();
+        const RE = /^refs\/t3\/checkpoints\/([^/]+)\/turn\/(\d+)$/;
+
+        for (const line of listResult.stdout.trim().split("\n")) {
+          const spaceIdx = line.lastIndexOf(" ");
+          if (spaceIdx <= 0) continue;
+          const ref = line.slice(0, spaceIdx);
+          const created = Number(line.slice(spaceIdx + 1));
+          if (!Number.isFinite(created)) continue;
+
+          const match = ref.match(RE);
+          if (!match) continue;
+
+          const threadKey = match[1];
+          const turn = Number(match[2]);
+          if (!Number.isFinite(turn)) continue;
+          const arr = refsByThread.get(threadKey) || [];
+          arr.push({ ref, turn, created });
+          refsByThread.set(threadKey, arr);
+        }
+
+        const toDelete = [];
+        for (const [, refs] of refsByThread) {
+          refs.sort((a, b) => b.turn - a.turn);
+          for (let i = 0; i < refs.length; i++) {
+            const r = refs[i];
+            const ageDays = (now - r.created) / 86400;
+            if (i >= input.retentionCount || ageDays > input.maxAgeDays) {
+              toDelete.push(r.ref);
+            }
+          }
+        }
+
+        if (toDelete.length === 0) return;
+
+        yield* Effect.forEach(
+          toDelete,
+          (checkpointRef) =>
+            execute({
+              operation: "GitVcsDriver.checkpoints.pruneCheckpoints.delete",
+              cwd: input.cwd,
+              args: ["update-ref", "-d", checkpointRef],
+              allowNonZeroExit: true,
+            }),
+          { discard: true },
+        );
+      },
+    ),
     deleteCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.deleteCheckpointRefs")(
       function* (input) {
         yield* Effect.forEach(

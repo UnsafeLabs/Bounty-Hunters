@@ -66,6 +66,15 @@ const makeCheckpointStore = Effect.gen(function* () {
     },
   );
 
+  const pruneCheckpoints: CheckpointStoreShape["pruneCheckpoints"] = Effect.fn(
+    "pruneCheckpoints",
+  )(function* (input) {
+    const checkpoints = yield* resolveCheckpoints(
+      "CheckpointStore.pruneCheckpoints",
+      input.cwd,
+    );
+    return yield* checkpoints.pruneCheckpoints(input);
+  });
   const deleteCheckpointRefs: CheckpointStoreShape["deleteCheckpointRefs"] = Effect.fn(
     "deleteCheckpointRefs",
   )(function* (input) {

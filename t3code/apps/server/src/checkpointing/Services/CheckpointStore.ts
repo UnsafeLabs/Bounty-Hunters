@@ -40,6 +40,12 @@ export interface DeleteCheckpointRefsInput {
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
 }
 
+export interface PruneCheckpointsInput {
+  readonly cwd: string;
+  readonly retentionCount: number;
+  readonly maxAgeDays: number;
+}
+
 /**
  * CheckpointStoreShape - Service API for checkpoint capture/restore and diff access.
  */
@@ -90,6 +96,17 @@ export interface CheckpointStoreShape {
    */
   readonly deleteCheckpointRefs: (
     input: DeleteCheckpointRefsInput,
+  ) => Effect.Effect<void, CheckpointStoreError>;
+
+  /**
+   * Prune old checkpoint snapshots, keeping only the most recent ones.
+   *
+   * Retains the last `retentionCount` snapshots per thread and removes
+   * refs older than `maxAgeDays`. Best-effort: missing or already-deleted
+   * refs are tolerated.
+   */
+  readonly pruneCheckpoints: (
+    input: PruneCheckpointsInput,
   ) => Effect.Effect<void, CheckpointStoreError>;
 }
 
