@@ -43,7 +43,8 @@ type SuiteRegistry struct {
 	knownSuites []*CipherSuite
 	minStrength CipherStrength
 	preferredID uint16
-	suiteCache  map[uint16]*CipherSuite // BUG(5): unprotected shared cache
+	suiteCache   map[uint16]*CipherSuite
+	mu           sync.Mutex // BUG(5): unprotected shared cache
 	mu          sync.Mutex              // guards knownSuites only
 }
 
@@ -139,7 +140,9 @@ func (r *SuiteRegistry) loadDefaults() {
 // scan of knownSuites. Results are cached for faster repeated lookups.
 // BUG(5): suiteCache is read/written without holding r.mu.
 func (r *SuiteRegistry) lookupSuite(id uint16) *CipherSuite {
-	if cached, ok := r.suiteCache[id]; ok {
+	if cached, ok := r.mu.Lock()
+	defer r.mu.Unlock()
+	r.suiteCache[id]; ok {
 		return cached
 	}
 
