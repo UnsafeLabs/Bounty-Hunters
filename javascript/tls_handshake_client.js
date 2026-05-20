@@ -1,6 +1,8 @@
 'use strict';
 
 const crypto = require('crypto');
+const { RecordLayer } = require('./tls_record_layer.js');
+const { KeySchedule } = require('./tls_key_schedule.js');
 
 // ============================================================================
 // Constants
@@ -74,7 +76,17 @@ class TLSHandshakeClient {
     this.ecdh = crypto.createECDH('prime256v1');
     this.ecdh.generateKeys();
     this.clientRandom = crypto.randomBytes(32);
+    this.recordLayer = null;
     this.transcript = [];
+  }
+
+  createRecordLayer() {
+    if (this.recordLayer) {
+      return this.recordLayer;
+    }
+    const ks = new KeySchedule(this.negotiatedCipherSuite);
+    this.recordLayer = new RecordLayer(ks);
+    return this.recordLayer;
   }
 
   // --------------------------------------------------------------------------
@@ -450,4 +462,4 @@ class TLSHandshakeClient {
   }
 }
 
-module.exports = { TLSHandshakeClient, TLSError, CIPHER_SUITES, TLS_VERSION, HANDSHAKE_TYPE };
+module.exports = { TLSHandshakeClient, TLSError, CIPHER_SUITES, TLS_VERSION, HANDSHAKE_TYPE, RecordLayer, KeySchedule };
