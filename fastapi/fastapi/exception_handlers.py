@@ -8,6 +8,25 @@ from starlette.responses import JSONResponse, Response
 from starlette.status import WS_1008_POLICY_VIOLATION
 
 
+SENSITIVE_BODY_FIELDS = {"password", "secret", "token", "api_key"}
+REDACTED_VALUE = "***REDACTED***"
+
+
+def _redact_sensitive_body_fields(value):
+    if isinstance(value, dict):
+        return {
+            key: (
+                REDACTED_VALUE
+                if isinstance(key, str) and key.lower() in SENSITIVE_BODY_FIELDS
+                else _redact_sensitive_body_fields(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_sensitive_body_fields(item) for item in value]
+    return value
+
+
 async def http_exception_handler(request: Request, exc: HTTPException) -> Response:
     headers = getattr(exc, "headers", None)
     if not is_body_allowed_for_status_code(exc.status_code):
@@ -20,9 +39,18 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> Respon
 async def request_validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    content = {
+        "detail": jsonable_encoder(exc.errors()),
+        "path": request.url.path,
+        "method": request.method,
+    }
+    if getattr(request.app, "debug", False):
+        content["body"] = jsonable_encoder(
+            _redact_sensitive_body_fields(getattr(exc, "body", None))
+        )
     return JSONResponse(
         status_code=422,
-        content={"detail": jsonable_encoder(exc.errors())},
+        content=content,
     )
 
 
