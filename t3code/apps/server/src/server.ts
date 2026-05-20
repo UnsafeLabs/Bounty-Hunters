@@ -17,6 +17,7 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
 import { metricsRouteLayer } from "./httpMetrics.ts";
+import { wrapCreateServer } from "./httpCompression.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime.ts";
@@ -120,7 +121,8 @@ const HttpServerLive = Layer.unwrap(
         Effect.promise(() => import("@effect/platform-node/NodeHttpServer")),
         Effect.promise(() => import("node:http")),
       ]);
-      return NodeHttpServer.layer(NodeHttp.createServer, {
+      const wrappedCreateServer = wrapCreateServer(NodeHttp.createServer);
+      return NodeHttpServer.layer(wrappedCreateServer, {
         host: config.host,
         port: config.port,
       });
