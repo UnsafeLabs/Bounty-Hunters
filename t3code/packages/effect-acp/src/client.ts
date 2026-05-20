@@ -1,5 +1,7 @@
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Ref from "effect/Ref";
 import * as Stdio from "effect/Stdio";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -22,10 +24,13 @@ import {
 } from "./_internal/shared.ts";
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
 
+const AUTH_REQUIRED_ERROR_CODE = -32000 as const;
+
 export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  readonly refreshToken?: () => Effect.Effect<string, AcpError.AcpError>;
 }
 
 type AcpClientRaw = {
@@ -456,6 +461,45 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     generateRequestId: () => nextRpcRequestId++ as never,
   }).pipe(Effect.provideService(RpcClient.Protocol, transport.clientProtocol));
 
+  const refreshState = yield* Ref.make<{
+    readonly inProgress: boolean;
+    readonly signal: Deferred.Deferred<void, AcpError.AcpError>;
+  }>({
+    inProgress: false,
+    signal: yield* Deferred.make<void, AcpError.AcpError>(),
+  });
+
+  const withTokenRefresh = <A>(
+    effect: Effect.Effect<A, AcpError.AcpError>,
+  ): Effect.Effect<A, AcpError.AcpError> => {
+    if (!options.refreshToken) {
+      return effect;
+    }
+    const doRefresh = Effect.gen(function* () {
+      const current = yield* Ref.get(refreshState);
+      if (current.inProgress) {
+        return yield* Deferred.await(current.signal);
+      }
+      const nextSignal = yield* Deferred.make<void, AcpError.AcpError>();
+      yield* Ref.set(refreshState, { inProgress: true, signal: current.signal });
+      yield* options.refreshToken!().pipe(
+        Effect.flatMap(() => Deferred.succeed(current.signal, void 0)),
+        Effect.catch((error) =>
+          Deferred.fail(current.signal, error).pipe(Effect.andThen(Effect.fail(error))),
+        ),
+        Effect.ensuring(Ref.set(refreshState, { inProgress: false, signal: nextSignal })),
+      );
+    });
+    return effect.pipe(
+      Effect.catchTag("AcpRequestError", (error) => {
+        if (error.code === AUTH_REQUIRED_ERROR_CODE) {
+          return doRefresh.pipe(Effect.flatMap(() => effect));
+        }
+        return Effect.fail(error);
+      }),
+    );
+  };
+
   return AcpClient.of({
     raw: {
       notifications: transport.incoming,
@@ -463,19 +507,19 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
       notify: transport.notify,
     },
     agent: {
-      initialize: (payload) => callRpc(rpc[AGENT_METHODS.initialize](payload)),
-      authenticate: (payload) => callRpc(rpc[AGENT_METHODS.authenticate](payload)),
-      logout: (payload) => callRpc(rpc[AGENT_METHODS.logout](payload)),
-      createSession: (payload) => callRpc(rpc[AGENT_METHODS.session_new](payload)),
-      loadSession: (payload) => callRpc(rpc[AGENT_METHODS.session_load](payload)),
-      listSessions: (payload) => callRpc(rpc[AGENT_METHODS.session_list](payload)),
-      forkSession: (payload) => callRpc(rpc[AGENT_METHODS.session_fork](payload)),
-      resumeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_resume](payload)),
-      closeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_close](payload)),
-      setSessionModel: (payload) => callRpc(rpc[AGENT_METHODS.session_set_model](payload)),
+      initialize: (payload) => withTokenRefresh(callRpc(rpc[AGENT_METHODS.initialize](payload))),
+      authenticate: (payload) => withTokenRefresh(callRpc(rpc[AGENT_METHODS.authenticate](payload))),
+      logout: (payload) => withTokenRefresh(callRpc(rpc[AGENT_METHODS.logout](payload))),
+      createSession: (payload) => withTokenRefresh(callRpc(rpc[AGENT_METHODS.session_new](payload))),
+      loadSession: (payload) => withTokenRefresh(callRpc(rpc[AGENT_METHODS.session_load](payload))),
+      listSessions: (payload) => withTokenRefresh(callRpc(rpc[AGENT_METHODS.session_list](payload))),
+      forkSession: (payload) => withTokenRefresh(callRpc(rpc[AGENT_METHODS.session_fork](payload))),
+      resumeSession: (payload) => withTokenRefresh(callRpc(rpc[AGENT_METHODS.session_resume](payload))),
+      closeSession: (payload) => withTokenRefresh(callRpc(rpc[AGENT_METHODS.session_close](payload))),
+      setSessionModel: (payload) => withTokenRefresh(callRpc(rpc[AGENT_METHODS.session_set_model](payload))),
       setSessionConfigOption: (payload) =>
-        callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)),
-      prompt: (payload) => callRpc(rpc[AGENT_METHODS.session_prompt](payload)),
+        withTokenRefresh(callRpc(rpc[AGENT_METHODS.session_set_config_option](payload))),
+      prompt: (payload) => withTokenRefresh(callRpc(rpc[AGENT_METHODS.session_prompt](payload))),
       cancel: (payload) => transport.notify(AGENT_METHODS.session_cancel, payload),
     },
     handleRequestPermission: (handler) =>
