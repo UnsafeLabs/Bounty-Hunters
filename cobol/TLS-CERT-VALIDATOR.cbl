@@ -238,9 +238,12 @@
                SET WS-SIG-INVALID TO TRUE
                GO TO 4000-EXIT
            END-IF
-           MOVE 'N' TO WS-ALGO-FOUND
-           PERFORM VARYING WS-ALGO-INDEX FROM 1 BY 1
-               UNTIL WS-ALGO-INDEX > 4
+            INSPECT WS-CERT-FINGERPRINT
+                CONVERTING 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                TO 'abcdefghijklmnopqrstuvwxyz'
+            MOVE 'N' TO WS-ALGO-FOUND
+            PERFORM VARYING WS-ALGO-INDEX FROM 1 BY 1
+                UNTIL WS-ALGO-INDEX > 4
                IF WS-CERT-SIG-ALGO =
                    WS-ALGO-ENTRY(WS-ALGO-INDEX)
                    MOVE 'Y' TO WS-ALGO-FOUND
