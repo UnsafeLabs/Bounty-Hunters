@@ -1,0 +1,5 @@
+{
+  "tool_name": "Axon56",
+  "boot_context": "Axon — AI execution assistant. Task: Add gzip and brotli response compression to HTTP layer. Create compression.ts middleware with brotli preference, 1KB threshold, content-type skip list, and proper Content-Encoding headers.",
+  "timestamp": "2026-05-20T10:50:00Z"
+}
