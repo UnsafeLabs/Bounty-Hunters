@@ -1940,8 +1940,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   return (
     <form
+      id="chat-composer-form"
       ref={composerFormRef}
       onSubmit={submitComposer}
+      aria-label="Message composer"
       className="mx-auto w-full min-w-0 max-w-208"
       data-chat-composer-form="true"
     >

@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -98,6 +99,7 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const noopReturnToComposer = () => {};
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -126,6 +128,7 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onReturnToComposer?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +158,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
+  onReturnToComposer = noopReturnToComposer,
 }: MessagesTimelineProps) {
   const rawRows = useMemo(
     () =>
@@ -247,10 +251,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
       <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
-        <TimelineRowContent row={item} />
+        <TimelineRowContent row={item} onReturnToComposer={onReturnToComposer} />
       </div>
     ),
-    [],
+    [onReturnToComposer],
   );
 
   if (rows.length === 0 && !isWorking) {
@@ -266,21 +270,29 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <LegendList<MessagesTimelineRow>
-          ref={listRef}
-          data={rows}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          estimatedItemSize={90}
-          initialScrollAtEnd
-          maintainScrollAtEnd
-          maintainScrollAtEndThreshold={0.1}
-          maintainVisibleContentPosition
-          onScroll={handleScroll}
-          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-          ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={TIMELINE_LIST_FOOTER}
-        />
+        <div
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-label="Chat messages"
+          className="h-full"
+        >
+          <LegendList<MessagesTimelineRow>
+            ref={listRef}
+            data={rows}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            estimatedItemSize={90}
+            initialScrollAtEnd
+            maintainScrollAtEnd
+            maintainScrollAtEndThreshold={0.1}
+            maintainVisibleContentPosition
+            onScroll={handleScroll}
+            className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListFooterComponent={TIMELINE_LIST_FOOTER}
+          />
+        </div>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );
@@ -299,13 +311,68 @@ type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
-const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
+const TimelineRowContent = memo(function TimelineRowContent({
+  row,
+  onReturnToComposer,
+}: {
+  row: TimelineRow;
+  onReturnToComposer: () => void;
+}) {
+  const handleRowKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onReturnToComposer();
+        return;
+      }
+
+      const currentRow = event.currentTarget;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const rows = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-timeline-row-focusable="true"]'),
+        );
+        const currentIndex = rows.indexOf(currentRow);
+        const nextIndex =
+          event.key === "ArrowDown"
+            ? Math.min(rows.length - 1, currentIndex + 1)
+            : Math.max(0, currentIndex - 1);
+        rows[nextIndex]?.focus();
+        return;
+      }
+
+      if (event.key === "Enter") {
+        const firstAction = currentRow.querySelector<HTMLButtonElement>(
+          'button:not([disabled]), [role="button"]:not([aria-disabled="true"])',
+        );
+        if (firstAction) {
+          event.preventDefault();
+          firstAction.click();
+        }
+      }
+    },
+    [onReturnToComposer],
+  );
+
   return (
     <div
+      role={row.kind === "message" ? "listitem" : undefined}
+      tabIndex={row.kind === "message" ? 0 : -1}
       className={cn(
-        "pb-4",
+        "pb-4 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
+      aria-label={
+        row.kind === "message"
+          ? `${row.message.role === "user" ? "User" : "Assistant"} message`
+          : undefined
+      }
+      onKeyDown={row.kind === "message" ? handleRowKeyDown : undefined}
+      data-timeline-row-focusable={row.kind === "message" ? "true" : undefined}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
@@ -400,6 +467,7 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
       disabled={activity.isRevertingCheckpoint || activity.isWorking}
       onClick={() => ctx.onRevertUserMessage(messageId)}
       title="Revert to this message"
+      aria-label="Revert to this message"
     >
       <Undo2Icon className="size-3" />
     </Button>

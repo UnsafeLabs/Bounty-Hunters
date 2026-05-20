@@ -3498,8 +3498,30 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      <nav className="sr-only focus-within:not-sr-only focus-within:absolute focus-within:left-3 focus-within:top-3 focus-within:z-50 focus-within:flex focus-within:gap-2 focus-within:rounded-md focus-within:border focus-within:border-border focus-within:bg-background focus-within:p-2 focus-within:shadow">
+        <a
+          className="rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          href="#chat-sidebar"
+        >
+          Skip to sidebar
+        </a>
+        <a
+          className="rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          href="#chat-messages"
+        >
+          Skip to messages
+        </a>
+        <a
+          className="rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          href="#chat-composer"
+        >
+          Skip to composer
+        </a>
+      </nav>
       {/* Top bar */}
       <header
+        id="chat-sidebar"
+        tabIndex={-1}
         className={cn(
           "border-b border-border",
           isElectron
@@ -3551,7 +3573,12 @@ export default function ChatView(props: ChatViewProps) {
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div
+            id="chat-messages"
+            tabIndex={-1}
+            className="relative flex min-h-0 flex-1 flex-col"
+            aria-label="Chat messages"
+          >
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}
@@ -3577,6 +3604,7 @@ export default function ChatView(props: ChatViewProps) {
               workspaceRoot={activeWorkspaceRoot}
               skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
               onIsAtEndChange={onIsAtEndChange}
+              onReturnToComposer={focusComposer}
             />
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
@@ -3585,6 +3613,7 @@ export default function ChatView(props: ChatViewProps) {
                 <button
                   type="button"
                   onClick={() => scrollToEnd(true)}
+                  aria-label="Scroll to latest message"
                   className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
                 >
                   <ChevronDownIcon className="size-3.5" />
@@ -3596,6 +3625,8 @@ export default function ChatView(props: ChatViewProps) {
 
           {/* Input bar */}
           <div
+            id="chat-composer"
+            tabIndex={-1}
             className={cn(
               "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
               isGitRepo
