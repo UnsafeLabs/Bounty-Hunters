@@ -43,9 +43,11 @@
        FD  AUDIT-LOG-FILE.
        01  AUDIT-LOG-RECORD            PIC X(512).
        WORKING-STORAGE SECTION.
-       01  WS-FILE-STATUS              PIC XX.
-           88  WS-FILE-OK              VALUE '00'.
-           88  WS-FILE-NOT-FOUND       VALUE '23'.
+        01  WS-FILE-STATUS              PIC XX.
+            88  WS-FILE-OK              VALUE '00'.
+            88  WS-FILE-NOT-FOUND       VALUE '23'.
+            88  WS-FILE-LOGIC-ERROR     VALUE '92'.
+            88  WS-FILE-RECORD-LOCKED   VALUE '93'.
        01  WS-CRL-FILE-STATUS          PIC XX.
            88  WS-CRL-OK               VALUE '00'.
            88  WS-CRL-EOF              VALUE '10'.
@@ -123,8 +125,13 @@
            88  WS-CERT-INVALID         VALUE 'I'.
        01  WS-VALIDATION-MSG           PIC X(128).
        01  WS-AUDIT-TIMESTAMP          PIC X(26).
-       01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
-       PROCEDURE DIVISION.
+        01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
+        01  WS-PARSED-CN                PIC X(64).
+        01  WS-RDN-COUNT                PIC 9(2).
+        01  WS-CHAR-INDEX               PIC 9(3).
+        01  WS-RETRY-COUNT              PIC 9(2)  VALUE 0.
+        01  WS-MAX-RETRIES              PIC 9(2)  VALUE 3.
+        PROCEDURE DIVISION.
        0000-MAIN-CONTROL.
            PERFORM 1000-INITIALIZE
            PERFORM 2000-VALIDATE-CERT-CHAIN
@@ -142,14 +149,14 @@
            SET WS-HOSTNAME-NO-MATCH TO TRUE
            SET WS-CHAIN-IS-VALID TO TRUE
            MOVE FUNCTION CURRENT-DATE TO WS-CURRENT-DATE-TIME
-           OPEN INPUT CERT-STORE-FILE
-           IF NOT WS-FILE-OK
-               DISPLAY 'TLSVAL-E001: CERT STORE FAILED '
-                   WS-FILE-STATUS
-               MOVE 12 TO WS-RETURN-CODE
-               PERFORM 9000-CLEANUP
-               STOP RUN
-           END-IF
+            OPEN I-O CERT-STORE-FILE
+            IF NOT WS-FILE-OK
+                DISPLAY 'TLSVAL-E001: CERT STORE FAILED '
+                    WS-FILE-STATUS
+                MOVE 12 TO WS-RETURN-CODE
+                PERFORM 9000-CLEANUP
+                STOP RUN
+            END-IF
            OPEN INPUT CRL-FILE
            IF WS-CRL-OK
                SET WS-CRL-IS-LOADED TO TRUE
@@ -164,17 +171,39 @@
                SET WS-CHAIN-IS-INVALID TO TRUE
                GO TO 2000-EXIT
            END-IF
-           PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
-               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH + 1
-               MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
-                   TO CS-CERT-SERIAL
-               READ CERT-STORE-FILE
-                   INVALID KEY
-                       DISPLAY 'TLSVAL-E011: UNKNOWN CERT '
-                           WS-CHN-SERIAL(WS-CHAIN-INDEX)
-                       SET WS-CHAIN-IS-INVALID TO TRUE
-                       GO TO 2000-EXIT
-               END-READ
+            PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
+                UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH + 1
+                MOVE 0 TO WS-RETRY-COUNT
+                PERFORM UNTIL WS-RETRY-COUNT >= WS-MAX-RETRIES
+                    MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
+                        TO CS-CERT-SERIAL
+                    READ CERT-STORE-FILE
+                    IF WS-FILE-LOGIC-ERROR
+                        OR WS-FILE-RECORD-LOCKED
+                        ADD 1 TO WS-RETRY-COUNT
+                    ELSE
+                        MOVE WS-MAX-RETRIES TO WS-RETRY-COUNT
+                    END-IF
+                END-PERFORM
+                IF WS-FILE-LOGIC-ERROR
+                    OR WS-FILE-RECORD-LOCKED
+                    DISPLAY 'TLSVAL-E012: CERT STORE UNAVAILABLE '
+                        WS-CHN-SERIAL(WS-CHAIN-INDEX)
+                    SET WS-CHAIN-IS-INVALID TO TRUE
+                    GO TO 2000-EXIT
+                END-IF
+                IF NOT WS-FILE-OK
+                    IF NOT WS-FILE-NOT-FOUND
+                        DISPLAY 'TLSVAL-E013: CERT STORE ERROR '
+                            WS-FILE-STATUS
+                        SET WS-CHAIN-IS-INVALID TO TRUE
+                        GO TO 2000-EXIT
+                    END-IF
+                    DISPLAY 'TLSVAL-E011: UNKNOWN CERT '
+                        WS-CHN-SERIAL(WS-CHAIN-INDEX)
+                    SET WS-CHAIN-IS-INVALID TO TRUE
+                    GO TO 2000-EXIT
+                END-IF
                IF WS-CHAIN-INDEX = WS-CHAIN-LENGTH
                    IF NOT CS-IS-TRUST-ANCHOR
                        SET WS-CHAIN-IS-INVALID TO TRUE
