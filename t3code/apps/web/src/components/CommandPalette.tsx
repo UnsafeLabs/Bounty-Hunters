@@ -1666,6 +1666,7 @@ function OpenCommandPaletteDialog() {
             isActionsOnly={isActionsOnly}
             keybindings={keybindings}
             onExecuteItem={executeItem}
+            query={deferredQuery}
             {...(addProjectCloneFlow?.step === "repository"
               ? {
                   emptyStateMessage:

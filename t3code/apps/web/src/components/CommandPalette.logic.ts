@@ -5,6 +5,60 @@ import { sortThreads } from "../lib/threadSort";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 
+export interface FuzzyMatchResult {
+  score: number;
+  indices: readonly number[];
+}
+
+export function fuzzyMatch(text: string, query: string): FuzzyMatchResult | null {
+  const normalizedText = text.toLowerCase();
+  const normalizedQuery = query.toLowerCase();
+  let score = 0;
+  let textIndex = 0;
+  let queryIndex = 0;
+  const indices: number[] = [];
+
+  let prevMatched = false;
+
+  while (queryIndex < normalizedQuery.length && textIndex < normalizedText.length) {
+    if (normalizedText[textIndex] === normalizedQuery[queryIndex]) {
+      indices.push(textIndex);
+      score += prevMatched ? 10 : 20;
+      if (textIndex === 0) score += 15;
+      if (text[textIndex] === text[textIndex].toUpperCase() && text[textIndex] !== text[textIndex].toLowerCase()) {
+        score += 5;
+      }
+      prevMatched = true;
+      queryIndex++;
+    } else {
+      if (prevMatched) score -= 3;
+      prevMatched = false;
+    }
+    textIndex++;
+  }
+
+  if (queryIndex < normalizedQuery.length) return null;
+
+  score -= (normalizedText.length - normalizedQuery.length) * 2;
+  score = Math.max(0, score);
+
+  return { score, indices };
+}
+
+export function fuzzyMatchFields(
+  fields: ReadonlyArray<string>,
+  query: string,
+): FuzzyMatchResult | null {
+  let best: FuzzyMatchResult | null = null;
+  for (const field of fields) {
+    const result = fuzzyMatch(field, query);
+    if (result && (!best || result.score > best.score)) {
+      best = result;
+    }
+  }
+  return best;
+}
+
 export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-muted-foreground/80";
 export const ADDON_ICON_CLASS = "size-4";
@@ -254,19 +308,21 @@ export function filterCommandPaletteGroups(input: {
   return searchableGroups.flatMap((group) => {
     const items = group.items
       .map((item, index) => {
-        const haystack = normalizeSearchText(item.searchTerms.join(" "));
-        if (!haystack.includes(normalizedQuery)) {
-          return null;
-        }
+        const fields = item.searchTerms.filter((t) => t.length > 0);
+        if (fields.length === 0) return null;
+
+        const fuzzyResult = fuzzyMatchFields(fields as string[], normalizedQuery);
+        if (!fuzzyResult) return null;
 
         return {
           item,
           index,
-          rank: rankCommandPaletteItemMatch(item, normalizedQuery),
+          rank: fuzzyResult.score,
+          fuzzyResult,
         };
       })
       .filter(
-        (entry): entry is { item: (typeof group.items)[number]; index: number; rank: number } =>
+        (entry): entry is { item: (typeof group.items)[number]; index: number; fuzzyResult: FuzzyMatchResult; rank: number } =>
           entry !== null,
       )
       .toSorted((left, right) => right.rank - left.rank || left.index - right.index)

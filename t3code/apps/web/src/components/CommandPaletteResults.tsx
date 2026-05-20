@@ -1,10 +1,13 @@
 import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { ChevronRightIcon } from "lucide-react";
+import { type ReactNode } from "react";
 import { shortcutLabelForCommand } from "../keybindings";
 import {
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
   type CommandPaletteSubmenuItem,
+  fuzzyMatch,
+  type FuzzyMatchResult,
 } from "./CommandPalette.logic";
 import {
   CommandCollection,
@@ -23,6 +26,36 @@ interface CommandPaletteResultsProps {
   isActionsOnly: boolean;
   keybindings: ResolvedKeybindingsConfig;
   onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
+  query?: string;
+}
+
+function highlightText(text: string, indices: readonly number[]): ReactNode {
+  if (indices.length === 0) return text;
+  const chars: ReactNode[] = [];
+  const indicesSet = new Set(indices);
+  for (let i = 0; i < text.length; i++) {
+    if (indicesSet.has(i)) {
+      chars.push(
+        <mark key={i} className="rounded-sm bg-primary/20 text-foreground">
+          {text[i]}
+        </mark>,
+      );
+    } else {
+      chars.push(text[i]);
+    }
+  }
+  return <>{chars}</>;
+}
+
+function scoreBar(score: number): ReactNode {
+  if (score <= 0) return null;
+  const pct = Math.min(100, Math.round((score / 100) * 100));
+  const bars = Math.max(1, Math.min(5, Math.ceil(pct / 20)));
+  return (
+    <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/60" title={`Score: ${score}`}>
+      {"\u2502".repeat(bars)}
+    </span>
+  );
 }
 
 export function CommandPaletteResults(props: CommandPaletteResultsProps) {
@@ -53,6 +86,7 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
                   keybindings={props.keybindings}
                   isActive={props.highlightedItemValue === item.value}
                   onExecuteItem={props.onExecuteItem}
+                  query={props.query}
                 />
               )
             }
@@ -95,10 +129,24 @@ function CommandPaletteResultRow(props: {
   isActive: boolean;
   keybindings: ResolvedKeybindingsConfig;
   onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
+  query?: string;
 }) {
   const shortcutLabel = props.item.shortcutCommand
     ? shortcutLabelForCommand(props.keybindings, props.item.shortcutCommand)
     : null;
+
+  const query = props.query?.trim().toLowerCase();
+  const fuzzyResult: FuzzyMatchResult | null =
+    query && query.length > 0
+      ? fuzzyMatch(
+          props.item.searchTerms.filter((t) => t.length > 0).join(" "),
+          query,
+        )
+      : null;
+
+  const titleText = typeof props.item.title === "string" ? props.item.title : null;
+  const highlightedTitle =
+    titleText && fuzzyResult ? highlightText(titleText, fuzzyResult.indices) : props.item.title;
 
   return (
     <CommandItem
@@ -119,7 +167,7 @@ function CommandPaletteResultRow(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <span className="truncate">{highlightedTitle}</span>
           </span>
           <span className="truncate text-muted-foreground/70 text-xs">
             {props.item.description}
@@ -128,10 +176,11 @@ function CommandPaletteResultRow(props: {
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <span className="truncate">{highlightedTitle}</span>
         </span>
       )}
       {props.item.titleTrailingContent}
+      {fuzzyResult ? scoreBar(fuzzyResult.score) : null}
       {props.item.timestamp ? (
         <span className="min-w-12 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground/70">
           {props.item.timestamp}
