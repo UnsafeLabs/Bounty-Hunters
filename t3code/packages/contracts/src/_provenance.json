@@ -1,0 +1,5 @@
+{
+  "tool_name": "Axon56",
+  "boot_context": "Axon — AI execution assistant. Task: Add runtime validation for provider configuration. Add ProviderApiKeySchema (min 10 chars), ProviderHttpsUrlSchema (valid HTTPS URLs), ProviderConfigError tagged error, and validateProviderConfig function that returns all errors at once using Effect.Either pattern.",
+  "timestamp": "2026-05-20T09:48:00Z"
+}

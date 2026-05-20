@@ -147,3 +147,119 @@ export type ProviderInstanceConfigMap = typeof ProviderInstanceConfigMap.Type;
  */
 export const defaultInstanceIdForDriver = (driver: ProviderDriverKind): ProviderInstanceId =>
   ProviderInstanceId.make(driver);
+
+
+/**
+ * Schema that validates an API key string.
+ * API keys must be non-empty, trimmed strings at least 10 characters long.
+ * Provides clear error messages for empty, too-short, and whitespace-only values.
+ */
+export const ProviderApiKeySchema = Schema.String.pipe(
+  Schema.filter((value) => {
+    if (value.trim().length === 0) {
+      return "API key must not be empty";
+    }
+    if (value.trim().length < 10) {
+      return `API key must be at least 10 characters (got ${value.trim().length})`;
+    }
+    return undefined;
+  }),
+);
+
+export type ProviderApiKeySchema = typeof ProviderApiKeySchema.Type;
+
+/**
+ * Schema that validates an HTTPS endpoint URL.
+ * Must be a valid URL with https:// protocol scheme.
+ * HTTP URLs are rejected with a clear error message suggesting HTTPS.
+ */
+export const ProviderHttpsUrlSchema = Schema.String.pipe(
+  Schema.filter((value) => {
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      return `"${value}" is not a valid URL`;
+    }
+    if (url.protocol !== "https:") {
+      return `URL must use HTTPS protocol (got "${url.protocol}//") — use https:// for security`;
+    }
+    if (!url.hostname || url.hostname.length === 0) {
+      return "URL must have a valid hostname";
+    }
+    return undefined;
+  }),
+);
+
+export type ProviderHttpsUrlSchema = typeof ProviderHttpsUrlSchema.Type;
+
+/**
+ * Tagged error type for provider configuration validation failures.
+ * Carries a list of all validation errors found, enabling consumers to
+ * display or log all issues at once rather than failing on the first one.
+ */
+export class ProviderConfigError {
+  readonly _tag = "ProviderConfigError";
+  constructor(
+    readonly errors: ReadonlyArray<{
+      readonly field: string;
+      readonly message: string;
+    }>,
+  ) {}
+}
+
+/**
+ * Validate a provider configuration object against a set of field schemas.
+ * Returns all validation errors at once in a `ProviderConfigError`, or
+ * succeeds with the validated and decoded configuration.
+ *
+ * @example
+ * ```ts
+ * const result = validateProviderConfig(rawConfig, {
+ *   apiKey: ProviderApiKeySchema,
+ *   endpoint: ProviderHttpsUrlSchema,
+ * });
+ * ```
+ */
+export const validateProviderConfig = <Fields extends Record<string, Schema.Schema<any, any>>>(
+  config: unknown,
+  fieldSchemas: Fields,
+): Effect.Effect<
+  { readonly [K in keyof Fields]: Fields[K] extends Schema.Schema<infer A, any> ? A : never },
+  ProviderConfigError
+> => {
+  if (typeof config !== "object" || config === null) {
+    return Effect.fail(
+      new ProviderConfigError([{ field: "(root)", message: "Config must be a non-null object" }]),
+    );
+  }
+
+  const errors: Array<{ field: string; message: string }> = [];
+  const result: Record<string, unknown> = {};
+
+  for (const [fieldName, schema] of Object.entries(fieldSchemas)) {
+    const value = (config as Record<string, unknown>)[fieldName];
+    const decoded = Schema.decodeUnknownEither(schema as Schema.Schema<any, any>)(value, {
+      errors: "all",
+    });
+
+    if (decoded._tag === "Left") {
+      // Extract error messages from the decoded error
+      const errorMessages = Array.isArray(decoded.left)
+        ? decoded.left.map((e: { message?: string }) => e.message ?? String(e))
+        : [String(decoded.left)];
+
+      for (const msg of errorMessages) {
+        errors.push({ field: fieldName, message: msg });
+      }
+    } else {
+      result[fieldName] = decoded.right;
+    }
+  }
+
+  if (errors.length > 0) {
+    return Effect.fail(new ProviderConfigError(errors));
+  }
+
+  return Effect.succeed(result) as any;
+};
