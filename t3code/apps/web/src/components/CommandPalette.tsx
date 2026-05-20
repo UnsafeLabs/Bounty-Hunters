@@ -75,15 +75,18 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { getLatestThreadForProject } from "../lib/threadSort";
 import { cn, isMacPlatform, isWindowsPlatform, newCommandId, newProjectId } from "../lib/utils";
 import {
+  selectEnvironmentState,
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsAcrossEnvironments,
   useStore,
+  type AppState,
 } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import {
   ADDON_ICON_CLASS,
   buildBrowseGroups,
+  buildMessageSearchItems,
   buildProjectActionItems,
   buildRootGroups,
   buildThreadActionItems,
@@ -712,6 +715,68 @@ function OpenCommandPaletteDialog() {
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
 
+  const globalMessages = useStore(
+    useCallback(
+      (state: AppState) => {
+        const results: Array<{
+          threadId: string;
+          messageId: string;
+          text: string;
+          role: "user" | "assistant" | "system";
+        }> = [];
+        for (const envState of Object.values(state.environmentStateById)) {
+          for (const threadId of envState.threadIds) {
+            const messageIds = envState.messageIdsByThreadId[threadId];
+            const messages = envState.messageByThreadId[threadId];
+            if (!messageIds || !messages) continue;
+            for (const messageId of messageIds) {
+              const msg = messages[messageId];
+              if (!msg) continue;
+              results.push({
+                threadId,
+                messageId,
+                text: msg.text,
+                role: msg.role,
+              });
+            }
+          }
+        }
+        return results;
+      },
+      [],
+    ),
+  );
+
+  const threadTitleById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const thread of threads) {
+      map.set(thread.id, thread.title);
+    }
+    return map;
+  }, [threads]);
+
+  const messageSearchItems = useMemo(
+    () =>
+      buildMessageSearchItems({
+        threadTitleById,
+        messages: globalMessages,
+        query: deferredQuery,
+        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+        runMessage: async (threadId) => {
+          const thread = threads.find((t) => t.id === threadId);
+          if (!thread) return;
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams({
+              environmentId: thread.environmentId,
+              threadId: thread.id,
+            }),
+          });
+        },
+      }),
+    [deferredQuery, globalMessages, navigate, threadTitleById, threads],
+  );
+
   function pushPaletteView(view: CommandPaletteView): void {
     setViewStack((previousViews) => [
       ...previousViews,
@@ -1070,6 +1135,7 @@ function OpenCommandPaletteDialog() {
     isInSubmenu: currentView !== null,
     projectSearchItems: projectSearchItems,
     threadSearchItems: allThreadItems,
+    messageSearchItems: messageSearchItems,
   });
 
   const handleAddProject = useCallback(

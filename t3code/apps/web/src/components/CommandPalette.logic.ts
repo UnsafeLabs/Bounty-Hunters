@@ -1,9 +1,9 @@
-import { type KeybindingCommand, type FilesystemBrowseEntry } from "@t3tools/contracts";
+import { type KeybindingCommand, type FilesystemBrowseEntry, type MessageId } from "@t3tools/contracts";
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import { type ReactNode } from "react";
 import { sortThreads } from "../lib/threadSort";
 import { formatRelativeTimeLabel } from "../timestampFormat";
-import { type Project, type SidebarThreadSummary, type Thread } from "../types";
+import { type ChatMessage, type Project, type SidebarThreadSummary, type Thread } from "../types";
 
 export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-muted-foreground/80";
@@ -208,12 +208,69 @@ function rankCommandPaletteItemMatch(
   return 0;
 }
 
+export function buildMessageSearchItems(input: {
+  threadTitleById: ReadonlyMap<MessageId["threadId"], string>;
+  messages: ReadonlyArray<{
+    readonly id: MessageId;
+    readonly threadId: MessageId["threadId"];
+    readonly text: string;
+    readonly role: ChatMessage["role"];
+  }>;
+  query: string;
+  icon: ReactNode;
+  runMessage: (threadId: MessageId["threadId"]) => Promise<void>;
+}): CommandPaletteActionItem[] {
+  const normalizedQuery = normalizeSearchText(input.query);
+  if (normalizedQuery.length === 0 || input.messages.length === 0) {
+    return [];
+  }
+
+  return input.messages
+    .filter((msg) => {
+      const text = normalizeSearchText(msg.text);
+      return text.includes(normalizedQuery);
+    })
+    .slice(0, 20)
+    .map((msg) => {
+      const threadTitle = input.threadTitleById.get(msg.threadId) ?? "Unknown thread";
+      const preview =
+        msg.text.length > 120 ? msg.text.slice(0, 120) + "..." : msg.text;
+      return {
+        kind: "action" as const,
+        value: `message:${msg.threadId}:${msg.id}`,
+        searchTerms: [msg.text, threadTitle],
+        title: threadTitle,
+        description: `${msg.role === "user" ? "You" : "Assistant"}: ${preview.replace(/\n/g, " ")}`,
+        icon: input.icon,
+        run: async () => {
+          await input.runMessage(msg.threadId);
+        },
+      };
+    });
+}
+
+export function buildFileSearchItems(input: {
+  query: string;
+  icon: ReactNode;
+  addProject: (path: string) => Promise<void>;
+}): CommandPaletteActionItem[] {
+  const normalizedQuery = normalizeSearchText(input.query);
+  if (normalizedQuery.length === 0) {
+    return [];
+  }
+
+  return [];
+}
+
 export function filterCommandPaletteGroups(input: {
   activeGroups: ReadonlyArray<CommandPaletteGroup>;
   query: string;
   isInSubmenu: boolean;
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  messageSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
+  fileSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
+  gitHistoryItems?: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const isActionsFilter = input.query.startsWith(">");
   const searchQuery = isActionsFilter ? input.query.slice(1) : input.query;
@@ -247,6 +304,27 @@ export function filterCommandPaletteGroups(input: {
         value: "threads-search",
         label: "Threads",
         items: input.threadSearchItems,
+      });
+    }
+    if (input.messageSearchItems && input.messageSearchItems.length > 0) {
+      searchableGroups.push({
+        value: "messages-search",
+        label: "Chat Messages",
+        items: input.messageSearchItems,
+      });
+    }
+    if (input.fileSearchItems && input.fileSearchItems.length > 0) {
+      searchableGroups.push({
+        value: "files-search",
+        label: "Files",
+        items: input.fileSearchItems,
+      });
+    }
+    if (input.gitHistoryItems && input.gitHistoryItems.length > 0) {
+      searchableGroups.push({
+        value: "git-history-search",
+        label: "Git History",
+        items: input.gitHistoryItems,
       });
     }
   }
