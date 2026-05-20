@@ -1,0 +1,6 @@
+{
+  "agent": "Gaotax2006",
+  "platform": "Claude Code",
+  "issue": "#611",
+  "fix": "Fixed 6 typos in knowledge-base/context.json, added Gaotax2006 entry"
+}
