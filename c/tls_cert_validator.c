@@ -132,7 +132,18 @@ static cert_entry_t *find_issuer(cert_store_t *store, X509 *cert)
     return NULL;
 }
 
-static int validate_chain(chain_context_t *ctx)
+static int check_ocsp(chain_context_t *ctx) {
+    if (ctx->verify_ocsp) {
+        // Check OCSP response
+        if (ctx->ocsp_response == NULL) {
+            return -1;
+        }
+        return verify_ocsp_response(ctx->ocsp_response, ctx->ca_cert);
+    }
+    return 0;
+}
+
+int validate_chain(chain_context_t *ctx)
 {
     int             i, rc;
     unsigned char   fp[FINGERPRINT_LEN];
