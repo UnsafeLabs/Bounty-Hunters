@@ -20,6 +20,14 @@ import {
 } from "./protocol";
 import { isTransportConnectionErrorMessage } from "./transportError";
 
+interface QueuedRequest {
+  readonly execute: (client: WsRpcProtocolClient) => Effect.Effect<unknown, Error, never>;
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (error: Error) => void;
+}
+
+const MAX_QUEUED_REQUESTS = 100;
+
 interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;
   readonly onResubscribe?: () => void;
@@ -64,6 +72,8 @@ export class WsTransport {
   private session: TransportSession;
   private lastHeartbeatPongAt = 0;
   private readonly streamRequestStartListeners = new Set<(info: StreamRequestStartInfo) => void>();
+  private readonly pendingQueue: QueuedRequest[] = [];
+  private flushing = false;
 
   constructor(
     url: WsRpcProtocolSocketUrlProvider,
@@ -82,9 +92,45 @@ export class WsTransport {
       throw new Error("Transport disposed");
     }
 
+    if (!this.isHeartbeatFresh(30_000) && this.pendingQueue.length < MAX_QUEUED_REQUESTS) {
+      return new Promise((resolve, reject) => {
+        this.pendingQueue.push({
+          execute: execute as (client: WsRpcProtocolClient) => Effect.Effect<unknown, Error, never>,
+          resolve: resolve as (value: unknown) => void,
+          reject,
+        });
+      }) as Promise<TSuccess>;
+    }
+
     const session = this.session;
     const client = await session.clientPromise;
     return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
+  }
+
+  private async flushQueue(): Promise<void> {
+    if (this.flushing || this.pendingQueue.length === 0) return;
+    this.flushing = true;
+    const queue = this.pendingQueue.splice(0);
+    const session = this.session;
+    try {
+      const client = await session.clientPromise;
+      for (const item of queue) {
+        try {
+          const result = await session.runtime.runPromise(
+            Effect.suspend(() => item.execute(client)),
+          );
+          item.resolve(result);
+        } catch (error) {
+          item.reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      }
+    } catch (error) {
+      for (const item of queue) {
+        item.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    } finally {
+      this.flushing = false;
+    }
   }
 
   async requestStream<TValue>(
@@ -211,6 +257,7 @@ export class WsTransport {
       const previousSession = this.session;
       this.session = this.createSession();
       await this.closeSession(previousSession);
+      await this.flushQueue();
     });
 
     this.reconnectChain = reconnectOperation.catch(() => undefined);
