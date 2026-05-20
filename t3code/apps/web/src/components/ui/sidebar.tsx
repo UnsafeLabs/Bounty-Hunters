@@ -39,6 +39,7 @@ type SidebarContextProps = {
 };
 
 type SidebarResizableOptions = {
+  defaultWidth?: number;
   maxWidth?: number;
   minWidth?: number;
   onResize?: (width: number) => void;
@@ -54,6 +55,7 @@ type SidebarResizableOptions = {
 };
 
 type SidebarResolvedResizableOptions = {
+  defaultWidth: number;
   maxWidth: number;
   minWidth: number;
   onResize?: (width: number) => void;
@@ -191,9 +193,12 @@ function Sidebar({
     }
 
     const options = typeof resizable === "boolean" ? {} : resizable;
+    const minWidth = options.minWidth ?? SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH;
+    const maxWidth = options.maxWidth ?? Number.POSITIVE_INFINITY;
     return {
-      maxWidth: options.maxWidth ?? Number.POSITIVE_INFINITY,
-      minWidth: options.minWidth ?? SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH,
+      defaultWidth: Math.max(minWidth, Math.min(options.defaultWidth ?? minWidth, maxWidth)),
+      maxWidth,
+      minWidth,
       storageKey: options.storageKey ?? null,
       ...(options.onResize ? { onResize: options.onResize } : {}),
       ...(options.shouldAcceptWidth ? { shouldAcceptWidth: options.shouldAcceptWidth } : {}),
@@ -339,6 +344,7 @@ function SidebarRail({
   className,
   onClick,
   onPointerCancel,
+  onDoubleClick,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -543,6 +549,26 @@ function SidebarRail({
     [onClick, open, resolvedResizable, toggleSidebar],
   );
 
+  const handleDoubleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      onDoubleClick?.(event);
+      if (event.defaultPrevented || !resolvedResizable || !open) return;
+
+      const wrapper = event.currentTarget.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
+      if (!wrapper) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      const resetWidth = clampSidebarWidth(resolvedResizable.defaultWidth, resolvedResizable);
+      wrapper.style.setProperty("--sidebar-width", `${resetWidth}px`);
+      if (resolvedResizable.storageKey && typeof window !== "undefined") {
+        setLocalStorageItem(resolvedResizable.storageKey, resetWidth, Schema.Finite);
+      }
+      resolvedResizable.onResize?.(resetWidth);
+    },
+    [onDoubleClick, open, resolvedResizable],
+  );
+
   React.useEffect(() => {
     if (!resolvedResizable?.storageKey || typeof window === "undefined") return;
     const rail = railRef.current;
@@ -554,6 +580,9 @@ function SidebarRail({
     if (storedWidth === null) return;
     const clampedWidth = clampSidebarWidth(storedWidth, resolvedResizable);
     wrapper.style.setProperty("--sidebar-width", `${clampedWidth}px`);
+    if (clampedWidth !== storedWidth) {
+      setLocalStorageItem(resolvedResizable.storageKey, clampedWidth, Schema.Finite);
+    }
     resolvedResizable.onResize?.(clampedWidth);
   }, [resolvedResizable]);
 
@@ -587,13 +616,14 @@ function SidebarRail({
       data-sidebar="rail"
       data-slot="sidebar-rail"
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       onPointerCancel={handlePointerCancel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       ref={railRef}
       tabIndex={-1}
-      title={railTitle}
+      title={canResize ? `${railTitle}; double-click to reset` : railTitle}
       type="button"
       {...props}
     />

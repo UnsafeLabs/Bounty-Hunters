@@ -2,10 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  Sidebar,
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuSubButton,
   SidebarProvider,
+  SidebarRail,
 } from "./sidebar";
 
 function renderSidebarButton(className?: string) {
@@ -49,5 +51,20 @@ describe("sidebar interactive cursors", () => {
 
     expect(html).toContain('data-slot="sidebar-menu-sub-button"');
     expect(html).toContain("cursor-pointer");
+  });
+
+  it("renders the resizable rail with resize affordance and reset hint", () => {
+    const html = renderToStaticMarkup(
+      <SidebarProvider>
+        <Sidebar resizable={{ defaultWidth: 280, maxWidth: 500, minWidth: 200 }}>
+          <SidebarRail />
+        </Sidebar>
+      </SidebarProvider>,
+    );
+
+    expect(html).toContain('aria-label="Resize Sidebar"');
+    expect(html).toContain("double-click to reset");
+    expect(html).toContain("cursor-w-resize");
+    expect(html).toContain("hover:after:bg-sidebar-border");
   });
 });
