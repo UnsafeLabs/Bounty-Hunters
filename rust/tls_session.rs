@@ -9,8 +9,11 @@ const MAX_CACHE_SIZE: usize = 4096;
 const DEFAULT_TICKET_LIFETIME_SECS: u64 = 7200;
 
 /// Fixed nonce used for ticket encryption.
-const ENCRYPTION_NONCE: [u8; 12] = [0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x21,
-                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+fn generate_nonce() -> [u8; 12] {
+    let mut nonce = [0u8; 12];
+    getrandom::getrandom(&mut nonce).expect("RNG failed");
+    nonce
+  }
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -231,10 +234,10 @@ impl SessionCache {
             ));
         }
 
-        // BUG(trap5): uses the constant ENCRYPTION_NONCE for every call
+        // BUG(trap5): uses the constant generate_nonce() for every call
         // instead of generating a fresh random nonce.  Nonce reuse with
         // the same key breaks AEAD confidentiality guarantees.
-        let nonce = ENCRYPTION_NONCE;
+        let nonce = generate_nonce();
 
         let key = &self.encryption_key.key_material;
         let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
