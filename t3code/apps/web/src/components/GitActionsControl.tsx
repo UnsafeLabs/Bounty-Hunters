@@ -1787,8 +1787,8 @@ export default function GitActionsControl({
                     {gitStatusForActions?.refName ?? "(detached HEAD)"}
                   </span>
                   {isDefaultRef && (
-                    <span className="text-right text-warning text-xs">
-                      Warning: default refName
+                    <span className="flex items-center gap-1 text-right text-warning text-xs">
+                      <LockIcon className="size-3" /> Protected branch
                     </span>
                   )}
                 </span>
@@ -1953,6 +1953,15 @@ export default function GitActionsControl({
             </DialogTitle>
             <DialogDescription>{pendingDefaultBranchActionCopy?.description}</DialogDescription>
           </DialogHeader>
+          {pendingDefaultBranchAction && (
+            <div className="flex items-start gap-2 rounded-md border border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning mx-4">
+              <LockIcon className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                <strong>{pendingDefaultBranchAction.branchName}</strong> is a protected branch.
+                Force-push is not allowed. Consider creating a feature branch instead.
+              </span>
+            </div>
+          )}
           <DialogFooter className="sm:flex-wrap sm:items-center">
             <Button
               className="w-full sm:mr-auto sm:w-auto"

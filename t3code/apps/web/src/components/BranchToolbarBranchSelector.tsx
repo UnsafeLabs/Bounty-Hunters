@@ -2,7 +2,7 @@ import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, LockIcon } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -545,6 +545,7 @@ export function BranchToolbarBranchSelector({
 
     const hasSecondaryWorktree =
       refName.worktreePath && activeProjectCwd && refName.worktreePath !== activeProjectCwd;
+    const protectedBranch = refName.isDefault;
     const badge = refName.current
       ? "current"
       : hasSecondaryWorktree
@@ -552,7 +553,7 @@ export function BranchToolbarBranchSelector({
         : refName.isRemote
           ? "remote"
           : refName.isDefault
-            ? "default"
+            ? "protected"
             : null;
     return (
       <ComboboxItem
@@ -563,7 +564,10 @@ export function BranchToolbarBranchSelector({
         onClick={() => selectBranch(refName)}
       >
         <div className="flex w-full items-center justify-between gap-2">
-          <span className="truncate">{itemValue}</span>
+          <span className="flex items-center gap-1.5 truncate">
+            {protectedBranch && <LockIcon className="size-3 shrink-0 text-warning" />}
+            <span className="truncate">{itemValue}</span>
+          </span>
           {badge && <span className="shrink-0 text-[10px] text-muted-foreground/45">{badge}</span>}
         </div>
       </ComboboxItem>
@@ -589,11 +593,13 @@ export function BranchToolbarBranchSelector({
       open={isBranchMenuOpen}
       value={resolvedActiveBranch}
     >
+      const isProtectedBranch = resolvedActiveBranch ? refs.some((r) => r.name === resolvedActiveBranch && r.isDefault) : false;
       <ComboboxTrigger
         render={<Button variant="ghost" size="xs" />}
         className={cn("min-w-0 text-muted-foreground/70 hover:text-foreground/80", className)}
         disabled={(isBranchesSearchPending && refs.length === 0) || isBranchActionPending}
       >
+        {isProtectedBranch && <LockIcon className="size-3 shrink-0 text-warning" />}
         <span className="min-w-0 max-w-[240px] truncate">{triggerLabel}</span>
         <ChevronDownIcon className="shrink-0" />
       </ComboboxTrigger>
