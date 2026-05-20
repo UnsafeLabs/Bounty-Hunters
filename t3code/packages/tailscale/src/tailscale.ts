@@ -43,6 +43,31 @@ export interface TailscaleStatus {
   readonly tailnetIpv4Addresses: readonly string[];
 }
 
+export interface TailscalePeerInfo {
+  readonly dnsName: string | null;
+  readonly tailscaleIPs: readonly string[];
+  readonly online: boolean;
+  readonly active: boolean;
+  readonly lastHandshake: Date | null;
+  readonly relay: string | null;
+  readonly rxBytes: number;
+  readonly txBytes: number;
+  readonly hostname: string | null;
+  readonly os: string | null;
+  readonly exitNode: boolean;
+  readonly exitNodeOption: boolean;
+  readonly inNetworkMap: boolean;
+  readonly currentAddr: string | null;
+}
+
+export interface TailscalePeerDiagnostics {
+  readonly totalPeers: number;
+  readonly onlinePeers: number;
+  readonly activePeers: number;
+  readonly averageLatencyMs: number | null;
+  readonly peers: readonly TailscalePeerInfo[];
+}
+
 const collectStdout = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<string, E> =>
   stream.pipe(
     Stream.decodeText(),
@@ -322,3 +347,172 @@ export const resolveTailscaleHttpsBaseUrl = (
         : null,
     ),
   );
+
+const TailscalePeerJson = Schema.Struct({
+  DNSName: Schema.optional(Schema.Unknown),
+  TailscaleIPs: Schema.optional(Schema.Unknown),
+  Online: Schema.optional(Schema.Boolean),
+  Active: Schema.optional(Schema.Boolean),
+  LastHandshake: Schema.optional(Schema.String),
+  Relay: Schema.optional(Schema.String),
+  LastRxBytes: Schema.optional(Schema.Number),
+  LastTxBytes: Schema.optional(Schema.Number),
+  HostName: Schema.optional(Schema.String),
+  OS: Schema.optional(Schema.String),
+  ExitNode: Schema.optional(Schema.Boolean),
+  ExitNodeOption: Schema.optional(Schema.Boolean),
+  InNetworkMap: Schema.optional(Schema.Boolean),
+  CurAddr: Schema.optional(Schema.String),
+  KeepAlive: Schema.optional(Schema.Boolean),
+});
+
+const TailscaleStatusWithPeersJson = Schema.Struct({
+  Self: Schema.optional(TailscaleStatusSelf),
+  Peer: Schema.optional(Schema.Array(Schema.Unknown)),
+});
+
+const decodeTailscaleStatusWithPeersJson = Schema.decodeEffect(
+  Schema.fromJsonString(TailscaleStatusWithPeersJson),
+);
+
+const parsePeerSync = Schema.parseSync(TailscalePeerJson);
+
+function normalizePeerInfo(raw: unknown): TailscalePeerInfo | null {
+  let peer: Schema.Schema.Type<typeof TailscalePeerJson>;
+  try {
+    peer = parsePeerSync(raw);
+  } catch {
+    return null;
+  }
+  const rawIps = peer.TailscaleIPs;
+  const tailscaleIPs = Array.isArray(rawIps)
+    ? rawIps.filter((ip): ip is string => typeof ip === "string").filter(isTailscaleIpv4Address)
+    : [];
+  const lastHandshake = typeof peer.LastHandshake === "string"
+    ? new Date(peer.LastHandshake)
+    : null;
+  return {
+    dnsName: typeof peer.DNSName === "string" ? peer.DNSName.trim().replace(/\.$/u, "") : null,
+    tailscaleIPs,
+    online: peer.Online === true,
+    active: peer.Active === true,
+    lastHandshake,
+    relay: typeof peer.Relay === "string" ? peer.Relay : null,
+    rxBytes: typeof peer.LastRxBytes === "number" ? peer.LastRxBytes : 0,
+    txBytes: typeof peer.LastTxBytes === "number" ? peer.LastTxBytes : 0,
+    hostname: typeof peer.HostName === "string" ? peer.HostName : null,
+    os: typeof peer.OS === "string" ? peer.OS : null,
+    exitNode: peer.ExitNode === true,
+    exitNodeOption: peer.ExitNodeOption === true,
+    inNetworkMap: peer.InNetworkMap === true,
+    currentAddr: typeof peer.CurAddr === "string" ? peer.CurAddr : null,
+  };
+}
+
+function estimateLatencyMs(lastHandshake: Date | null): number | null {
+  if (lastHandshake === null) return null;
+  const now = Date.now();
+  const elapsed = now - lastHandshake.getTime();
+  if (elapsed < 50) return 1;
+  if (elapsed < 200) return 5;
+  if (elapsed < 1000) return 15;
+  if (elapsed < 5000) return 50;
+  if (elapsed < 30000) return 150;
+  return null;
+}
+
+export const parseTailscalePeers = (
+  rawStatusJson: string,
+): Effect.Effect<readonly TailscalePeerInfo[], TailscaleStatusParseError> =>
+  decodeTailscaleStatusWithPeersJson(rawStatusJson).pipe(
+    Effect.mapError((cause) => new TailscaleStatusParseError({ cause })),
+    Effect.map((parsed) => {
+      const rawPeers = parsed.Peer;
+      if (!Array.isArray(rawPeers)) return [];
+      return rawPeers
+        .map(normalizePeerInfo)
+        .filter((p): p is TailscalePeerInfo => p !== null);
+    }),
+  );
+
+export const computePeerDiagnostics = (
+  peers: readonly TailscalePeerInfo[],
+): TailscalePeerDiagnostics => {
+  const onlinePeers = peers.filter((p) => p.online);
+  const activePeers = peers.filter((p) => p.active);
+  const latencies = peers
+    .map((p) => estimateLatencyMs(p.lastHandshake))
+    .filter((l): l is number => l !== null);
+  const averageLatencyMs = latencies.length > 0
+    ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+    : null;
+  return {
+    totalPeers: peers.length,
+    onlinePeers: onlinePeers.length,
+    activePeers: activePeers.length,
+    averageLatencyMs,
+    peers: [...peers],
+  };
+};
+
+export const readTailscalePeerDiagnostics: Effect.Effect<
+  TailscalePeerDiagnostics,
+  TailscaleCommandError | TailscaleStatusParseError,
+  ChildProcessSpawner.ChildProcessSpawner
+> = Effect.gen(function* () {
+  const args = ["status", "--json"];
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const child = yield* spawner
+    .spawn(
+      ChildProcess.make("tailscale", args, {
+        shell: process.platform === "win32",
+      }),
+    )
+    .pipe(
+      Effect.mapError((cause) =>
+        tailscaleCommandError(
+          args,
+          cause instanceof Error ? cause.message : "Failed to spawn tailscale status.",
+          null,
+        ),
+      ),
+    );
+  const [stdout, stderr, exitCode] = yield* Effect.all(
+    [
+      collectStdout(child.stdout),
+      collectStderr(child.stderr),
+      child.exitCode.pipe(Effect.map(Number)),
+    ],
+    { concurrency: "unbounded" },
+  ).pipe(
+    Effect.mapError((cause) =>
+      tailscaleCommandError(
+        args,
+        cause instanceof Error ? cause.message : "Failed to run tailscale status.",
+        null,
+      ),
+    ),
+  );
+  if (exitCode !== 0) {
+    return yield* tailscaleCommandError(
+      args,
+      `Tailscale status exited with code ${exitCode}.`,
+      exitCode,
+      stderr,
+    );
+  }
+  const peers = yield* parseTailscalePeers(stdout);
+  return computePeerDiagnostics(peers);
+}).pipe(
+  Effect.scoped,
+  Effect.timeoutOption(TAILSCALE_STATUS_TIMEOUT_MS),
+  Effect.flatMap((result) =>
+    Option.match(result, {
+      onNone: () =>
+        Effect.fail(
+          tailscaleCommandError(["status", "--json"], "Tailscale status timed out.", null),
+        ),
+      onSome: Effect.succeed,
+    }),
+  ),
+);

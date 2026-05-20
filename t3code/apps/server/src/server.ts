@@ -16,6 +16,7 @@ import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
+import { metricsRouteLayer } from "./httpMetrics.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime.ts";
@@ -305,6 +306,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
   attachmentsRouteLayer,
+  metricsRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,
