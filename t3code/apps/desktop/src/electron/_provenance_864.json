@@ -1,0 +1,5 @@
+{
+  "tool_name": "Axon56",
+  "boot_context": "Axon — AI execution assistant. Task: Add deep linking support via t3code:// custom protocol. Create DeepLink.ts handling open/project, chat/thread, settings URLs. Register protocol handler with IPC routing to renderer.",
+  "timestamp": "2026-05-20T10:52:00Z"
+}
