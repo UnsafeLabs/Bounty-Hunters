@@ -75,7 +75,7 @@ static int compute_fingerprint(X509 *cert, unsigned char *out, size_t out_len)
 
 static int match_fingerprint(const unsigned char *fp1, const unsigned char *fp2)
 {
-    return memcmp(fp1, fp2, FINGERPRINT_LEN) == 0;
+    return tls_memcmp_const(fp1, fp2, FINGERPRINT_LEN) == 0;
 }
 
 static int check_expiry(X509 *cert)
