@@ -11,24 +11,28 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
-import { AuthError, ServerAuth } from "./Services/ServerAuth.ts";
+import { ServerAuth } from "./Services/ServerAuth.ts";
 import { SessionCredentialService } from "./Services/SessionCredentialService.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
 import { browserApiCorsHeaders } from "../httpCors.ts";
+import { ServerError, errorToResponse } from "../errors.ts";
 
-export const respondToAuthError = (error: AuthError) =>
+export const respondToServerError = (error: ServerError) =>
   Effect.gen(function* () {
-    if ((error.status ?? 500) >= 500) {
-      yield* Effect.logError("auth route failed", {
+    const status = errorToResponse(error);
+    if (status >= 500) {
+      yield* Effect.logError("server error occurred", {
         message: error.message,
         cause: error.cause,
+        tag: error._tag,
       });
     }
     return HttpServerResponse.jsonUnsafe(
       {
         error: error.message,
+        tag: error._tag,
       },
-      { status: error.status ?? 500, headers: browserApiCorsHeaders },
+      { status, headers: browserApiCorsHeaders },
     );
   });
 
@@ -73,10 +77,10 @@ export const authBootstrapRouteLayer = HttpRouter.add(
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthBootstrapInput).pipe(
       Effect.mapError(
         (cause) =>
-          new AuthError({
+          ServerError.ValidationError({
             message: "Invalid bootstrap payload.",
-            status: 400,
             cause,
+            timestamp: Date.now(),
           }),
       ),
     );
@@ -96,7 +100,7 @@ export const authBootstrapRouteLayer = HttpRouter.add(
         sameSite: "lax",
       }),
     );
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(Effect.catchTag("ValidationError", respondToServerError), Effect.catchTag("AuthError", respondToServerError)),
 );
 
 export const authBearerBootstrapRouteLayer = HttpRouter.add(
@@ -108,10 +112,10 @@ export const authBearerBootstrapRouteLayer = HttpRouter.add(
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthBootstrapInput).pipe(
       Effect.mapError(
         (cause) =>
-          new AuthError({
+          ServerError.ValidationError({
             message: "Invalid bootstrap payload.",
-            status: 400,
             cause,
+            timestamp: Date.now(),
           }),
       ),
     );
@@ -123,7 +127,7 @@ export const authBearerBootstrapRouteLayer = HttpRouter.add(
       status: 200,
       headers: browserApiCorsHeaders,
     });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(Effect.catchTag("ValidationError", respondToServerError), Effect.catchTag("AuthError", respondToServerError)),
 );
 
 export const authWebSocketTokenRouteLayer = HttpRouter.add(
@@ -138,7 +142,7 @@ export const authWebSocketTokenRouteLayer = HttpRouter.add(
       status: 200,
       headers: browserApiCorsHeaders,
     });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(Effect.catchTag("AuthError", respondToServerError)),
 );
 
 export const authPairingCredentialRouteLayer = HttpRouter.add(
@@ -149,18 +153,18 @@ export const authPairingCredentialRouteLayer = HttpRouter.add(
     const request = yield* HttpServerRequest.HttpServerRequest;
     const session = yield* serverAuth.authenticateHttpRequest(request);
     if (session.role !== "owner") {
-      return yield* new AuthError({
+      return yield* ServerError.AuthError({
         message: "Only owner sessions can create pairing credentials.",
-        status: 403,
+        timestamp: Date.now(),
       });
     }
     const headers = yield* HttpServerRequest.schemaHeaders(PairingCredentialRequestHeaders).pipe(
       Effect.mapError(
         (cause) =>
-          new AuthError({
+          ServerError.ValidationError({
             message: "Invalid pairing credential request headers.",
-            status: 400,
             cause,
+            timestamp: Date.now(),
           }),
       ),
     );
@@ -168,17 +172,17 @@ export const authPairingCredentialRouteLayer = HttpRouter.add(
       ? yield* HttpServerRequest.schemaBodyJson(AuthCreatePairingCredentialInput).pipe(
           Effect.mapError(
             (cause) =>
-              new AuthError({
+              ServerError.ValidationError({
                 message: "Invalid pairing credential payload.",
-                status: 400,
                 cause,
+                timestamp: Date.now(),
               }),
           ),
         )
       : {};
     const result = yield* serverAuth.issuePairingCredential(payload);
     return HttpServerResponse.jsonUnsafe(result, { status: 200 });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(Effect.catchTag("AuthError", respondToServerError), Effect.catchTag("ValidationError", respondToServerError)),
 );
 
 const authenticateOwnerSession = Effect.gen(function* () {
@@ -186,9 +190,9 @@ const authenticateOwnerSession = Effect.gen(function* () {
   const serverAuth = yield* ServerAuth;
   const session = yield* serverAuth.authenticateHttpRequest(request);
   if (session.role !== "owner") {
-    return yield* new AuthError({
+    return yield* ServerError.AuthError({
       message: "Only owner sessions can manage network access.",
-      status: 403,
+      timestamp: Date.now(),
     });
   }
   return { serverAuth, session } as const;
@@ -201,7 +205,7 @@ export const authPairingLinksRouteLayer = HttpRouter.add(
     const { serverAuth } = yield* authenticateOwnerSession;
     const pairingLinks = yield* serverAuth.listPairingLinks();
     return HttpServerResponse.jsonUnsafe(pairingLinks, { status: 200 });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(Effect.catchTag("AuthError", respondToServerError)),
 );
 
 export const authPairingLinksRevokeRouteLayer = HttpRouter.add(
@@ -212,16 +216,16 @@ export const authPairingLinksRevokeRouteLayer = HttpRouter.add(
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthRevokePairingLinkInput).pipe(
       Effect.mapError(
         (cause) =>
-          new AuthError({
+          ServerError.ValidationError({
             message: "Invalid revoke pairing link payload.",
-            status: 400,
             cause,
+            timestamp: Date.now(),
           }),
       ),
     );
     const revoked = yield* serverAuth.revokePairingLink(payload.id);
     return HttpServerResponse.jsonUnsafe({ revoked }, { status: 200 });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(Effect.catchTag("AuthError", respondToServerError), Effect.catchTag("ValidationError", respondToServerError)),
 );
 
 export const authClientsRouteLayer = HttpRouter.add(
@@ -231,7 +235,7 @@ export const authClientsRouteLayer = HttpRouter.add(
     const { serverAuth, session } = yield* authenticateOwnerSession;
     const clients = yield* serverAuth.listClientSessions(session.sessionId);
     return HttpServerResponse.jsonUnsafe(clients, { status: 200 });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(Effect.catchTag("AuthError", respondToServerError)),
 );
 
 export const authClientsRevokeRouteLayer = HttpRouter.add(
@@ -242,16 +246,16 @@ export const authClientsRevokeRouteLayer = HttpRouter.add(
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthRevokeClientSessionInput).pipe(
       Effect.mapError(
         (cause) =>
-          new AuthError({
+          ServerError.ValidationError({
             message: "Invalid revoke client payload.",
-            status: 400,
             cause,
+            timestamp: Date.now(),
           }),
       ),
     );
     const revoked = yield* serverAuth.revokeClientSession(session.sessionId, payload.sessionId);
     return HttpServerResponse.jsonUnsafe({ revoked }, { status: 200 });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(Effect.catchTag("AuthError", respondToServerError), Effect.catchTag("ValidationError", respondToServerError)),
 );
 
 export const authClientsRevokeOthersRouteLayer = HttpRouter.add(
@@ -261,5 +265,5 @@ export const authClientsRevokeOthersRouteLayer = HttpRouter.add(
     const { serverAuth, session } = yield* authenticateOwnerSession;
     const revokedCount = yield* serverAuth.revokeOtherClientSessions(session.sessionId);
     return HttpServerResponse.jsonUnsafe({ revokedCount }, { status: 200 });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(Effect.catchTag("AuthError", respondToServerError)),
 );
