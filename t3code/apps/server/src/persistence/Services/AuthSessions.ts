@@ -68,6 +68,12 @@ export const SetAuthSessionLastConnectedAtInput = Schema.Struct({
 });
 export type SetAuthSessionLastConnectedAtInput = typeof SetAuthSessionLastConnectedAtInput.Type;
 
+export const UpdateAuthSessionLabelInput = Schema.Struct({
+  sessionId: AuthSessionId,
+  label: Schema.NullOr(Schema.String),
+});
+export type UpdateAuthSessionLabelInput = typeof UpdateAuthSessionLabelInput.Type;
+
 export interface AuthSessionRepositoryShape {
   readonly create: (
     input: CreateAuthSessionInput,
@@ -87,6 +93,9 @@ export interface AuthSessionRepositoryShape {
   readonly setLastConnectedAt: (
     input: SetAuthSessionLastConnectedAtInput,
   ) => Effect.Effect<void, AuthSessionRepositoryError>;
+  readonly updateLabel: (
+    input: UpdateAuthSessionLabelInput,
+  ) => Effect.Effect<boolean, AuthSessionRepositoryError>;
 }
 
 export class AuthSessionRepository extends Context.Service<

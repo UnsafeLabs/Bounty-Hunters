@@ -21,6 +21,7 @@ import {
   RevokeAuthSessionInput,
   RevokeOtherAuthSessionsInput,
   SetAuthSessionLastConnectedAtInput,
+  UpdateAuthSessionLabelInput,
 } from "../Services/AuthSessions.ts";
 
 const AuthSessionDbRow = Schema.Struct({
@@ -266,6 +267,30 @@ const makeAuthSessionRepository = Effect.gen(function* () {
       ),
     );
 
+  const updateLabelRow = SqlSchema.findOne({
+    Request: UpdateAuthSessionLabelInput,
+    Result: Schema.Struct({ sessionId: AuthSessionId }),
+    execute: ({ sessionId, label }) =>
+      sql`
+        UPDATE auth_sessions
+        SET client_label = ${label}
+        WHERE session_id = ${sessionId}
+          AND revoked_at IS NULL
+        RETURNING session_id AS "sessionId"
+      `,
+  });
+
+  const updateLabel: AuthSessionRepositoryShape["updateLabel"] = (input) =>
+    updateLabelRow(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "AuthSessionRepository.updateLabel:query",
+          "AuthSessionRepository.updateLabel:encodeRequest",
+        ),
+      ),
+      Effect.map((row) => row !== undefined),
+    );
+
   return {
     create,
     getById,
@@ -273,6 +298,7 @@ const makeAuthSessionRepository = Effect.gen(function* () {
     revoke,
     revokeAllExcept,
     setLastConnectedAt,
+    updateLabel,
   } satisfies AuthSessionRepositoryShape;
 });
 

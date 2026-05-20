@@ -505,6 +505,16 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       return revokedSessionIds.length;
     }).pipe(Effect.mapError(toSessionCredentialError("Failed to revoke other sessions.")));
 
+  const setSessionLabel: SessionCredentialServiceShape["setSessionLabel"] = (
+    sessionId,
+    label,
+  ) =>
+    authSessions.updateLabel({ sessionId, label }).pipe(
+      Effect.mapError(
+        toSessionCredentialError("Failed to update session label"),
+      ),
+    );
+
   return {
     cookieName,
     issue,
@@ -519,6 +529,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     revokeAllExcept,
     markConnected,
     markDisconnected,
+    setSessionLabel,
   } satisfies SessionCredentialServiceShape;
 });
 

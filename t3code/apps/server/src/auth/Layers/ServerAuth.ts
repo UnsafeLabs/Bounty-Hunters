@@ -373,6 +373,21 @@ export const makeServerAuth = Effect.gen(function* () {
       return yield* authenticateRequest(request);
     });
 
+  const setSessionLabel: ServerAuthShape["setSessionLabel"] = (
+    _currentSessionId,
+    targetSessionId,
+    label,
+  ) =>
+    sessions.setSessionLabel(targetSessionId, label).pipe(
+      Effect.mapError(
+        (cause) =>
+          new AuthError({
+            message: "Failed to update session label.",
+            cause,
+          }),
+      ),
+    );
+
   return {
     getDescriptor: () => Effect.succeed(descriptor),
     getSessionState,
@@ -384,6 +399,7 @@ export const makeServerAuth = Effect.gen(function* () {
     listClientSessions,
     revokeClientSession,
     revokeOtherClientSessions,
+    setSessionLabel,
     authenticateHttpRequest: authenticateRequest,
     authenticateWebSocketUpgrade,
     issueWebSocketToken,

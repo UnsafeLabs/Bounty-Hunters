@@ -69,6 +69,11 @@ export interface ServerAuthShape {
   readonly revokeOtherClientSessions: (
     currentSessionId: AuthSessionId,
   ) => Effect.Effect<number, AuthError>;
+  readonly setSessionLabel: (
+    currentSessionId: AuthSessionId,
+    targetSessionId: AuthSessionId,
+    label: string | null,
+  ) => Effect.Effect<boolean, AuthError>;
   readonly authenticateHttpRequest: (
     request: HttpServerRequest.HttpServerRequest,
   ) => Effect.Effect<AuthenticatedSession, AuthError>;

@@ -1,4 +1,5 @@
 import {
+  AuthSessionId,
   type AuthBearerBootstrapResult,
   AuthBootstrapInput,
   AuthCreatePairingCredentialInput,
@@ -261,5 +262,34 @@ export const authClientsRevokeOthersRouteLayer = HttpRouter.add(
     const { serverAuth, session } = yield* authenticateOwnerSession;
     const revokedCount = yield* serverAuth.revokeOtherClientSessions(session.sessionId);
     return HttpServerResponse.jsonUnsafe({ revokedCount }, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+);
+
+const AuthSetSessionLabelInput = Schema.Struct({
+  sessionId: AuthSessionId,
+  label: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+export const authClientsSessionLabelRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/auth/clients/session-label",
+  Effect.gen(function* () {
+    const { serverAuth, session } = yield* authenticateOwnerSession;
+    const payload = yield* HttpServerRequest.schemaBodyJson(AuthSetSessionLabelInput).pipe(
+      Effect.mapError(
+        (cause) =>
+          new AuthError({
+            message: "Invalid session label payload.",
+            status: 400,
+            cause,
+          }),
+      ),
+    );
+    const updated = yield* serverAuth.setSessionLabel(
+      session.sessionId,
+      payload.sessionId,
+      payload.label ?? null,
+    );
+    return HttpServerResponse.jsonUnsafe({ updated }, { status: 200 });
   }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
 );
