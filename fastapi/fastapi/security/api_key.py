@@ -5,6 +5,7 @@ from fastapi.openapi.models import APIKey, APIKeyIn
 from fastapi.security.base import SecurityBase
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
+from starlette.responses import Response
 from starlette.status import HTTP_401_UNAUTHORIZED
 
 
@@ -318,3 +319,60 @@ class APIKeyCookie(APIKeyBase):
     async def __call__(self, request: Request) -> str | None:
         api_key = request.cookies.get(self.model.name)
         return self.check_api_key(api_key)
+
+
+class APIKeyWithRateLimit(APIKeyHeader):
+    def __init__(
+        self,
+        *,
+        name: str,
+        rate_limit: str,
+        deprecated_keys: list[str] | None = None,
+        scheme_name: str | None = None,
+        description: str | None = None,
+        auto_error: bool = True,
+    ):
+        super().__init__(
+            name=name,
+            scheme_name=scheme_name,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.deprecated_keys = set(deprecated_keys or [])
+        limit_str, window_str = rate_limit.split("/")
+        self.max_requests = int(limit_str)
+        if window_str == "minute":
+            self.window = 60
+        elif window_str == "hour":
+            self.window = 3600
+        else:
+            self.window = int(window_str)
+        self._requests = {}
+
+    async def __call__(self, request: Request, response: Response) -> str | None:
+        api_key = request.headers.get(self.model.name)
+        key = self.check_api_key(api_key)
+        if not key:
+            return None
+
+        import time
+        now = time.time()
+        if key not in self._requests:
+            self._requests[key] = []
+        
+        self._requests[key] = [t for t in self._requests[key] if now - t < self.window]
+
+        if len(self._requests[key]) >= self.max_requests:
+            retry_after = int(max(1, self.window - (now - self._requests[key][0])))
+            raise HTTPException(
+                status_code=429,
+                detail="Too Many Requests",
+                headers={"Retry-After": str(retry_after)}
+            )
+
+        self._requests[key].append(now)
+
+        if key in self.deprecated_keys:
+            response.headers["Warning"] = '299 - "Deprecated API Key"'
+
+        return key
