@@ -7,9 +7,9 @@
   },
   {
     "username": "Gaotax2006",
-    "total_prs": 86,
+    "total_prs": 114,
     "first_pr": "2026-05-19T09:32:34.235Z",
-    "last_pr": "2026-05-20T06:24:02.317Z"
+    "last_pr": "2026-05-20T08:46:15.835Z"
   },
   {
     "username": "mkcash",
@@ -276,6 +276,12 @@
     "last_pr": "2026-05-19T10:52:54.885Z"
   },
   {
+    "username": "elektropionir2",
+    "total_prs": 9,
+    "first_pr": "2026-05-20T06:47:17.454Z",
+    "last_pr": "2026-05-20T08:06:46.887Z"
+  },
+  {
     "username": "ChienNguyen23",
     "total_prs": 8,
     "first_pr": "2026-05-13T09:47:25Z",
@@ -364,6 +370,12 @@
     "total_prs": 7,
     "first_pr": "2026-05-16T15:38:56.830Z",
     "last_pr": "2026-05-17T01:16:12.898Z"
+  },
+  {
+    "username": "acdunbrack",
+    "total_prs": 7,
+    "first_pr": "2026-05-20T06:42:52.143Z",
+    "last_pr": "2026-05-20T07:48:21.527Z"
   },
   {
     "username": "TsukinowaRin",
@@ -744,6 +756,12 @@
     "last_pr": "2026-05-20T06:10:51.726Z"
   },
   {
+    "username": "Zmkhg",
+    "total_prs": 2,
+    "first_pr": "2026-05-20T07:42:09.326Z",
+    "last_pr": "2026-05-20T07:58:24.187Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -1066,5 +1084,11 @@
     "total_prs": 1,
     "first_pr": "2026-05-20T05:54:35.230Z",
     "last_pr": "2026-05-20T05:54:35.230Z"
+  },
+  {
+    "username": "Treasure520520",
+    "total_prs": 1,
+    "first_pr": "2026-05-20T07:46:21.129Z",
+    "last_pr": "2026-05-20T07:46:21.129Z"
   }
 ]
