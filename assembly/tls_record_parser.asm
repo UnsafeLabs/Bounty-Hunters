@@ -224,6 +224,23 @@ parse_tls_record:
     jmp .parse_done
 
 .handle_application:
+    cmp byte [rsi], 0x1d  ; TLS 1.3 application data
+    je .is_tls13
+    cmp byte [rsi], 0x17  ; TLS 1.2 application data
+    je .is_tls12
+    jmp .unknown_type
+.is_tls13:
+    mov rax, 4
+    jmp .done
+.is_tls12:
+    mov rax, 3
+    jmp .done
+.unknown_type:
+    mov rax, -1
+.done:
+    ret
+
+; Fallback
     push rdi
     lea rdi, [rel lbl_application]
     call print_string
