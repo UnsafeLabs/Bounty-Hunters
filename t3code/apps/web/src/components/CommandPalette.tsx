@@ -718,26 +718,16 @@ function OpenCommandPaletteDialog() {
   const globalMessages = useStore(
     useCallback(
       (state: AppState) => {
-        const results: Array<{
-          threadId: string;
-          messageId: string;
-          text: string;
-          role: "user" | "assistant" | "system";
-        }> = [];
+        const results: Array<{ threadId: string; messageId: string; text: string; role: "user" | "assistant" | "system" }> = [];
         for (const envState of Object.values(state.environmentStateById)) {
           for (const threadId of envState.threadIds) {
             const messageIds = envState.messageIdsByThreadId[threadId];
             const messages = envState.messageByThreadId[threadId];
             if (!messageIds || !messages) continue;
-            for (const messageId of messageIds) {
-              const msg = messages[messageId];
+            for (const msgId of messageIds) {
+              const msg = messages[msgId];
               if (!msg) continue;
-              results.push({
-                threadId,
-                messageId,
-                text: msg.text,
-                role: msg.role,
-              });
+              results.push({ threadId, messageId: msgId, text: msg.text, role: msg.role });
             }
           }
         }
@@ -756,24 +746,20 @@ function OpenCommandPaletteDialog() {
   }, [threads]);
 
   const messageSearchItems = useMemo(
-    () =>
-      buildMessageSearchItems({
-        threadTitleById,
-        messages: globalMessages,
-        query: deferredQuery,
-        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-        runMessage: async (threadId) => {
-          const thread = threads.find((t) => t.id === threadId);
-          if (!thread) return;
-          await navigate({
-            to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams({
-              environmentId: thread.environmentId,
-              threadId: thread.id,
-            }),
-          });
-        },
-      }),
+    () => buildMessageSearchItems({
+      threadTitleById,
+      messages: globalMessages,
+      query: deferredQuery,
+      icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+      runMessage: async (threadId) => {
+        const thread = threads.find((t) => t.id === threadId);
+        if (!thread) return;
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: { environmentId: thread.environmentId, threadId: thread.id },
+        });
+      },
+    }),
     [deferredQuery, globalMessages, navigate, threadTitleById, threads],
   );
 

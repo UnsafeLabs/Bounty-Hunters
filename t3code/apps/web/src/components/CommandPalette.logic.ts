@@ -1,4 +1,4 @@
-import { type KeybindingCommand, type FilesystemBrowseEntry, type MessageId } from "@t3tools/contracts";
+import { type KeybindingCommand, type FilesystemBrowseEntry } from "@t3tools/contracts";
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import { type ReactNode } from "react";
 import { sortThreads } from "../lib/threadSort";
@@ -209,16 +209,16 @@ function rankCommandPaletteItemMatch(
 }
 
 export function buildMessageSearchItems(input: {
-  threadTitleById: ReadonlyMap<MessageId["threadId"], string>;
-  messages: ReadonlyArray<{
-    readonly id: MessageId;
-    readonly threadId: MessageId["threadId"];
+  readonly threadTitleById: ReadonlyMap<string, string>;
+  readonly messages: ReadonlyArray<{
+    readonly id: string;
+    readonly threadId: string;
     readonly text: string;
     readonly role: ChatMessage["role"];
   }>;
-  query: string;
-  icon: ReactNode;
-  runMessage: (threadId: MessageId["threadId"]) => Promise<void>;
+  readonly query: string;
+  readonly icon: ReactNode;
+  readonly runMessage: (threadId: string) => Promise<void>;
 }): CommandPaletteActionItem[] {
   const normalizedQuery = normalizeSearchText(input.query);
   if (normalizedQuery.length === 0 || input.messages.length === 0) {
