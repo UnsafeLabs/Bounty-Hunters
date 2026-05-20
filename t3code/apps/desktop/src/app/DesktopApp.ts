@@ -7,6 +7,7 @@ import * as Ref from "effect/Ref";
 
 import * as NetService from "@t3tools/shared/Net";
 import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as ElectronDeepLink from "../electron/ElectronDeepLink.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import { installDesktopIpcHandlers } from "../ipc/DesktopIpcHandlers.ts";
@@ -187,6 +188,7 @@ const startup = Effect.gen(function* () {
   const appIdentity = yield* DesktopAppIdentity.DesktopAppIdentity;
   const applicationMenu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
   const electronApp = yield* ElectronApp.ElectronApp;
+  const electronDeepLink = yield* ElectronDeepLink.ElectronDeepLink;
   const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
   const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
   const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
@@ -215,6 +217,7 @@ const startup = Effect.gen(function* () {
   yield* appIdentity.configure;
   yield* applicationMenu.configure;
   yield* electronProtocol.registerDesktopFileProtocol;
+  yield* electronDeepLink.registerProtocol;
   yield* updates.configure;
   yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
 }).pipe(Effect.withSpan("desktop.startup"));
