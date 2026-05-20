@@ -61,6 +61,25 @@ export interface GitRunStackedActionOptions {
   readonly progressReporter?: GitActionProgressReporter;
 }
 
+export interface RebaseConflictFile {
+  readonly path: string;
+  readonly hasOurs: boolean;
+  readonly hasTheirs: boolean;
+}
+
+export type RebaseConflictResolution = "ours" | "theirs" | "manual";
+
+export interface GitRebaseConflictResult {
+  readonly inRebase: boolean;
+  readonly files: readonly RebaseConflictFile[];
+}
+
+export interface GitResolveConflictInput {
+  readonly cwd: string;
+  readonly filePath: string;
+  readonly resolution: RebaseConflictResolution;
+}
+
 export interface GitManagerShape {
   readonly status: (
     input: VcsStatusInput,
@@ -84,6 +103,14 @@ export interface GitManagerShape {
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
   ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
+  readonly detectRebaseConflicts: (
+    cwd: string,
+  ) => Effect.Effect<GitRebaseConflictResult, GitManagerServiceError>;
+  readonly resolveConflict: (
+    input: GitResolveConflictInput,
+  ) => Effect.Effect<void, GitManagerServiceError>;
+  readonly abortRebase: (cwd: string) => Effect.Effect<void, GitManagerServiceError>;
+  readonly continueRebase: (cwd: string) => Effect.Effect<void, GitManagerServiceError>;
 }
 
 export class GitManager extends Context.Service<GitManager, GitManagerShape>()(
@@ -1768,6 +1795,119 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     },
   );
 
+  const detectRebaseConflicts: GitManagerShape["detectRebaseConflicts"] =
+    Effect.fn("detectRebaseConflicts")(function* (cwd: string) {
+      const rebaseDot = yield* fileSystem
+        .exists(path.join(cwd, ".git", "rebase-merge"))
+        .pipe(Effect.orElse(() => Effect.succeed(false)));
+      const rebaseApply = yield* fileSystem
+        .exists(path.join(cwd, ".git", "rebase-apply"))
+        .pipe(Effect.orElse(() => Effect.succeed(false)));
+      const inRebase = rebaseDot || rebaseApply;
+
+      if (!inRebase) {
+        return { inRebase: false, files: [] };
+      }
+
+      const unmergedResult = yield* gitCore
+        .execute({
+          operation: "detectRebaseConflicts.unmerged",
+          cwd,
+          args: ["diff", "--name-only", "--diff-filter=U", "-z"],
+          allowNonZeroExit: true,
+        })
+        .pipe(Effect.catch(() => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" })));
+
+      const unmergedPaths = unmergedResult.stdout
+        .split("\0")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+      const lsFilesResult = yield* gitCore
+        .execute({
+          operation: "detectRebaseConflicts.lsFiles",
+          cwd,
+          args: ["ls-files", "-u", "-z"],
+          allowNonZeroExit: true,
+        })
+        .pipe(Effect.catch(() => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" })));
+
+      const stageEntries = lsFilesResult.stdout.split("\0").filter((s) => s.trim().length > 0);
+
+      const fileMap = new Map<string, { hasOurs: boolean; hasTheirs: boolean }>();
+      for (const entry of stageEntries) {
+        const match = /^\d+\s+\w+\s+(\d+)\t(.+)$/m.exec(entry);
+        if (match) {
+          const stage = parseInt(match[1], 10);
+          const filePath = match[2].trim();
+          if (!fileMap.has(filePath)) {
+            fileMap.set(filePath, { hasOurs: false, hasTheirs: false });
+          }
+          const info = fileMap.get(filePath)!;
+          if (stage === 2) info.hasOurs = true;
+          if (stage === 3) info.hasTheirs = true;
+        }
+      }
+
+      for (const filePath of unmergedPaths) {
+        if (!fileMap.has(filePath)) {
+          fileMap.set(filePath, { hasOurs: true, hasTheirs: true });
+        }
+      }
+
+      const files: RebaseConflictFile[] = [];
+      for (const [path, info] of fileMap) {
+        files.push({ path, hasOurs: info.hasOurs, hasTheirs: info.hasTheirs });
+      }
+      files.sort((a, b) => a.path.localeCompare(b.path));
+
+      return { inRebase: true, files };
+    });
+
+  const resolveConflict: GitManagerShape["resolveConflict"] = Effect.fn("resolveConflict")(
+    function* (input: GitResolveConflictInput) {
+      const escapedPath = input.filePath;
+      if (input.resolution === "ours") {
+        yield* gitCore.execute({
+          operation: "resolveConflict.ours",
+          cwd: input.cwd,
+          args: ["checkout", "--ours", "--", escapedPath],
+        });
+      } else if (input.resolution === "theirs") {
+        yield* gitCore.execute({
+          operation: "resolveConflict.theirs",
+          cwd: input.cwd,
+          args: ["checkout", "--theirs", "--", escapedPath],
+        });
+      }
+      yield* gitCore.execute({
+        operation: "resolveConflict.add",
+        cwd: input.cwd,
+        args: ["add", "--", escapedPath],
+      });
+    },
+  );
+
+  const abortRebase: GitManagerShape["abortRebase"] = Effect.fn("abortRebase")(function* (
+    cwd: string,
+  ) {
+    yield* gitCore.execute({
+      operation: "abortRebase",
+      cwd,
+      args: ["rebase", "--abort"],
+    });
+  });
+
+  const continueRebase: GitManagerShape["continueRebase"] = Effect.fn("continueRebase")(function* (
+    cwd: string,
+  ) {
+    yield* gitCore.execute({
+      operation: "continueRebase",
+      cwd,
+      args: ["rebase", "--continue"],
+    });
+  });
+
   return {
     localStatus,
     remoteStatus,
@@ -1778,6 +1918,10 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     resolvePullRequest,
     preparePullRequestThread,
     runStackedAction,
+    detectRebaseConflicts,
+    resolveConflict,
+    abortRebase,
+    continueRebase,
   } satisfies GitManagerShape;
 });
 
