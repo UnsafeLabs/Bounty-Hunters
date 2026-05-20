@@ -5,6 +5,11 @@
 #
 
 APP_NAME="webapp"
+if [ -z "${DEPLOY_DIR}" ]; then
+    echo "Error: DEPLOY_DIR is not set"
+    exit 1
+fi
+
 DEPLOY_DIR=""
 REPO_URL="git@github.com:org/webapp.git"
 BRANCH="main"
