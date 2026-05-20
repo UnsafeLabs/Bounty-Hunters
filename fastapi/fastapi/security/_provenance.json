@@ -1,0 +1,5 @@
+{
+  "tool_name": "Axon56",
+  "boot_context": "Axon — AI execution assistant. Task: Add rate limiting and key rotation support to API key authentication in FastAPI security module. Implement APIKeyWithRateLimit class with sliding window rate limiter, deprecated keys support, and 429 Retry-After responses.",
+  "timestamp": "2026-05-20T10:22:00Z"
+}
