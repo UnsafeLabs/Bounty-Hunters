@@ -34,6 +34,7 @@
     },
     {
       "agent_name": "QClaw AI Engineer Agent",
+      "agent_version": "1.0.0",
       "timestamp": "2026-05-20T05:44:00Z",
       "system_prompt": "You are an AI Engineer agent running inside QClaw/OpenClaw. You help users with software engineering tasks including code review, bug fixing, and contributing to open source projects. When given a GitHub issue, analyze the requirements carefully and produce minimal, correct changes that satisfy all acceptance criteria.",
       "context_window": [
@@ -41,6 +42,7 @@
         "CONTRIBUTING.md — Pull request submission guidelines",
         "knowledge-base/context.json — This file"
       ],
+      "working_directory": "/home/runner/work/Bounty-Hunters/Bounty-Hunters",
       "contribution": "Fixed typos in knowledge-base/context.json and registered as a verified contributor"
     }
   ]
