@@ -233,10 +233,16 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
     yield* requireAuthenticatedRequest;
     const request = yield* HttpServerRequest.HttpServerRequest;
     const config = yield* ServerConfig;
+    const acceptEncoding = request.headers["accept-encoding"];
+    const contentEncoding = request.headers["content-encoding"];
     const otlpTracesUrl = config.otlpTracesUrl;
     const browserTraceCollector = yield* BrowserTraceCollector;
     const httpClient = yield* HttpClient.HttpClient;
-    const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
+
+    // Decompress request body if encoded
+    const rawBody = cast<Uint8Array, Uint8Array>(yield* request.arrayBuffer);
+    const decompressedBody = decompressRequestBody(rawBody, contentEncoding);
+    const bodyJson = cast<unknown, OtlpTracer.TraceData>(JSON.parse(decompressedBody.toString()));
 
     yield* Effect.try({
       try: () => decodeOtlpTraceRecords(bodyJson),
