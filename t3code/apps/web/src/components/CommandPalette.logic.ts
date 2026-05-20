@@ -175,18 +175,66 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   });
 }
 
-function rankSearchFieldMatch(field: string, normalizedQuery: string): number {
+/** Result of a fuzzy match against a search field */
+export interface FuzzyMatchResult {
+  matched: boolean;
+  score: number;
+  matchIndices: readonly number[];
+}
+
+/**
+ * Fuzzy match a query against a field.
+ * Checks if all characters of the query appear in order in the field (allowing gaps).
+ * Returns a score: consecutive matches > word boundary matches > shorter commands.
+ */
+function fuzzyMatchField(field: string, normalizedQuery: string): FuzzyMatchResult {
   const normalizedField = normalizeSearchText(field);
-  if (normalizedField.length === 0 || !normalizedField.includes(normalizedQuery)) {
-    return Number.NEGATIVE_INFINITY;
+  if (normalizedField.length === 0 || normalizedQuery.length === 0) {
+    return { matched: false, score: 0, matchIndices: [] };
   }
-  if (normalizedField === normalizedQuery) {
-    return 3;
+
+  // Character-by-character matching allowing gaps
+  let queryIdx = 0;
+  const indices: number[] = [];
+  for (let fieldIdx = 0; fieldIdx < normalizedField.length && queryIdx < normalizedQuery.length; fieldIdx++) {
+    if (normalizedField[fieldIdx] === normalizedQuery[queryIdx]) {
+      indices.push(fieldIdx);
+      queryIdx++;
+    }
   }
-  if (normalizedField.startsWith(normalizedQuery)) {
-    return 2;
+
+  if (queryIdx < normalizedQuery.length) {
+    return { matched: false, score: 0, matchIndices: [] };
   }
-  return 1;
+
+  // Calculate score
+  let score = 0;
+  let consecutiveCount = 0;
+  
+  for (let i = 0; i < indices.length; i++) {
+    // Bonus for consecutive matches
+    if (i > 0 && indices[i] === indices[i - 1] + 1) {
+      consecutiveCount++;
+      score += 10 * consecutiveCount; // Higher bonus for longer runs
+    } else {
+      consecutiveCount = 0;
+      // Bonus for word boundary (after space or at start)
+      if (indices[i] === 0 || normalizedField[indices[i] - 1] === ' ') {
+        score += 5;
+      }
+    }
+    score += 1; // Base per match
+  }
+
+  // Bonus for shorter commands (prefer more precise matches)
+  score += Math.max(0, 50 - normalizedField.length);
+
+  // Bonus for matching at the start
+  if (indices[0] === 0) {
+    score += 20;
+  }
+
+  return { matched: true, score, matchIndices: indices };
 }
 
 function rankCommandPaletteItemMatch(
@@ -199,9 +247,9 @@ function rankCommandPaletteItemMatch(
   }
 
   for (const [index, field] of terms.entries()) {
-    const fieldRank = rankSearchFieldMatch(field, normalizedQuery);
-    if (fieldRank !== Number.NEGATIVE_INFINITY) {
-      return 1_000 - index * 100 + fieldRank;
+    const result = fuzzyMatchField(field, normalizedQuery);
+    if (result.matched) {
+      return 1_000 - index * 100 + result.score;
     }
   }
 
@@ -254,8 +302,7 @@ export function filterCommandPaletteGroups(input: {
   return searchableGroups.flatMap((group) => {
     const items = group.items
       .map((item, index) => {
-        const haystack = normalizeSearchText(item.searchTerms.join(" "));
-        if (!haystack.includes(normalizedQuery)) {
+        if (normalizedQuery.length > 0 && rankCommandPaletteItemMatch(item, normalizedQuery) === 0) {
           return null;
         }
 

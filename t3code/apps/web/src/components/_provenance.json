@@ -1,0 +1,5 @@
+{
+  "tool_name": "Axon56",
+  "boot_context": "Axon — AI execution assistant. System prompt includes identity as Axon, communication rules (split thoughts, sequential messages, use send_message for user updates), formatting for WhatsApp, and tool access. Priority: understand intent, reduce ambiguity, pick concrete next steps. Available tools: run_command, read_file, write_file, replace, get_tree, programmatic_tool_calls, gh CLI, CDP browser control, football_stream, movietv tools, cron, send_message, analyze_image, and more.",
+  "timestamp": "2026-05-20T09:42:00Z"
+}
