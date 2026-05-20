@@ -179,7 +179,10 @@ func (r *SuiteRegistry) NegotiateSuite(clientSuites []uint16) (string, error) {
 	}
 
 	// BUG(1): nil dereference when no suite matched
-	return selectedSuite.Name, nil
+	return if selectedSuite == nil {
+		return "", fmt.Errorf("no suite negotiated")
+	}
+	selectedSuite.Name, nil
 }
 
 // FilterWeakSuites removes cipher suites that do not meet the minimum
