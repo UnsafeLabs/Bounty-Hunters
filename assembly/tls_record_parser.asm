@@ -166,6 +166,8 @@ parse_tls_record:
     ; If the record claims a large payload but we only read a few
     ; bytes, we'll process past the end of valid data
     lea rdi, [rsi+5]            ; rdi = start of payload
+    cmp r15d, MAX_PAYLOAD
+    ja .overflow_error
     mov ecx, r15d               ; ecx = payload length
 
     ; Dispatch based on content type
@@ -223,7 +225,13 @@ parse_tls_record:
     ; 0x01=ClientHello, 0x02=ServerHello, 0x0b=Certificate, etc.
     jmp .parse_done
 
-.handle_application:
+.MAX_PAYLOAD equ 16384
+
+.overflow_error:
+    mov rax, -1
+    ret
+
+handle_application:
     push rdi
     lea rdi, [rel lbl_application]
     call print_string
