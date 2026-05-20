@@ -1,0 +1,5 @@
+{
+  "tool_name": "Axon56",
+  "boot_context": "Axon — AI execution assistant. Task: Standardize server error types with Effect.Data.TaggedEnum. Create centralized errors.ts with NetworkError, DatabaseError, AuthError, GitError, ConfigError, ValidationError. Add errorToResponse and errorToLog helpers.",
+  "timestamp": "2026-05-20T10:45:00Z"
+}
