@@ -83,7 +83,7 @@ static int check_expiry(X509 *cert)
     const ASN1_TIME *not_before = X509_get0_notBefore(cert);
     const ASN1_TIME *not_after  = X509_get0_notAfter(cert);
     int day_diff, sec_diff;
-    int remaining_seconds;
+    int64_t remaining_seconds;
     if (!not_before || !not_after) {
         log_cert_event(LOG_LEVEL_ERROR, "certificate missing validity dates");
         return CERT_STATUS_INVALID;
