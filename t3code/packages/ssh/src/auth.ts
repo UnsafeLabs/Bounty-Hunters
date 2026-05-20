@@ -69,6 +69,23 @@ function joinSshAskpassPath(
   return platform === "win32" ? `${trimmed}\\${fileName}` : `${trimmed}/${fileName}`;
 }
 
+/**
+ * Validate that an askpass helper path does not contain shell metacharacters
+ * that could enable shell injection when the path is used in SSH_ASKPASS.
+ * Returns the validated path or throws a PlatformError on invalid input.
+ */
+export const SHELL_METACHARACTER_PATTERN =
+  /[\\s!$"'()*;<>[\\]|&~#{}`\\n\\r\\t]/u;
+
+export function validateAskpassHelperPath(path: string): path is string {
+  if (SHELL_METACHARACTER_PATTERN.test(path)) {
+    throw new Error(
+      `Askpass helper path contains shell metacharacters: "${path}"`,
+    );
+  }
+  return true;
+}
+
 export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
 # from the renderer's in-app prompt. We never expose a native dialog here - if

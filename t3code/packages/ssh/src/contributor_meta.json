@@ -1,0 +1,5 @@
+{
+  "name": "Axon56",
+  "session_init": "Axon — AI execution assistant. Task: Fix SSH askpass script leaking password via insecure temp file permissions. Security fixes: mktemp with mode 0600, trap cleanup on EXIT/INT/TERM, path validation for shell metacharacters, Windows SecureString handling.",
+  "ts": "2026-05-20T10:15:00Z"
+}
