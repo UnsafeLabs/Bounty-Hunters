@@ -86,7 +86,7 @@ Returns full details for a single bounty.
 ### Submit Claim
 
 ```
-POST /bounties/:id/claims
+PUT /bounties/:id/claims
 ```
 
 Submit a claim against a bounty. See [Claim Lifecycle](#claim-lifecycle) for status transitions.
