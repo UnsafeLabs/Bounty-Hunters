@@ -1,15 +1,10 @@
-/**
- * ServerConfig - Runtime configuration services.
- *
- * Defines process-level server configuration and networking helpers used by
- * startup and runtime layers.
- *
- * @module ServerConfig
- */
+import * as Config from "effect/Config";
+import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as LogLevel from "effect/LogLevel";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
@@ -22,9 +17,6 @@ export type RuntimeMode = typeof RuntimeMode.Type;
 export const StartupPresentation = Schema.Literals(["browser", "headless"]);
 export type StartupPresentation = typeof StartupPresentation.Type;
 
-/**
- * ServerDerivedPaths - Derived paths from the base directory.
- */
 export interface ServerDerivedPaths {
   readonly stateDir: string;
   readonly dbPath: string;
@@ -45,9 +37,6 @@ export interface ServerDerivedPaths {
   readonly secretsDir: string;
 }
 
-/**
- * ServerConfigShape - Process/runtime configuration required by the server.
- */
 export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logLevel: LogLevel.LogLevel;
   readonly traceMinLevel: LogLevel.LogLevel;
@@ -129,9 +118,6 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
   );
 });
 
-/**
- * ServerConfig - Service tag for server runtime configuration.
- */
 export class ServerConfig extends Context.Service<ServerConfig, ServerConfigShape>()(
   "t3/config/ServerConfig",
 ) {
@@ -199,4 +185,45 @@ export const resolveStaticDir = Effect.fn(function* () {
     return monorepoClient;
   }
   return undefined;
+});
+
+interface EnvVarEntry {
+  readonly name: string;
+  readonly value: Config.Config<Option.Option<unknown>>;
+}
+
+const checkVar = (entry: EnvVarEntry) =>
+  Effect.matchEffect(entry.value, {
+    onSuccess: () => Effect.succeed(null as string | null),
+    onFailure: (error) => Effect.succeed(`${entry.name}: ${error.message}`),
+  });
+
+export const validateRequiredEnvVars = Effect.fn(function* () {
+  const entries: Array<EnvVarEntry> = [
+    { name: "T3CODE_PORT", value: Config.port("T3CODE_PORT").pipe(Config.option) },
+    { name: "T3CODE_MODE", value: Config.schema(RuntimeMode, "T3CODE_MODE").pipe(Config.option) },
+    { name: "T3CODE_LOG_LEVEL", value: Config.logLevel("T3CODE_LOG_LEVEL").pipe(Config.option) },
+    { name: "T3CODE_HOME", value: Config.string("T3CODE_HOME").pipe(Config.option) },
+    { name: "T3CODE_NO_BROWSER", value: Config.boolean("T3CODE_NO_BROWSER").pipe(Config.option) },
+    { name: "T3CODE_TAILSCALE_SERVE", value: Config.boolean("T3CODE_TAILSCALE_SERVE").pipe(Config.option) },
+    { name: "T3CODE_TAILSCALE_SERVE_PORT", value: Config.port("T3CODE_TAILSCALE_SERVE_PORT").pipe(Config.option) },
+    { name: "T3CODE_AUTH_TOKEN", value: Config.string("T3CODE_AUTH_TOKEN").pipe(Config.option) },
+    { name: "T3CODE_TRACE_MIN_LEVEL", value: Config.logLevel("T3CODE_TRACE_MIN_LEVEL").pipe(Config.option) },
+    { name: "T3CODE_HOST", value: Config.string("T3CODE_HOST").pipe(Config.option) },
+    { name: "T3CODE_DESKTOP_WS_URL", value: Config.string("T3CODE_DESKTOP_WS_URL").pipe(Config.option) },
+    { name: "T3CODE_OTLP_TRACES_URL", value: Config.url("T3CODE_OTLP_TRACES_URL").pipe(Config.option) },
+    { name: "T3CODE_OTLP_METRICS_URL", value: Config.url("T3CODE_OTLP_METRICS_URL").pipe(Config.option) },
+  ];
+
+  const results = yield* Effect.all(entries.map(checkVar), { concurrency: "unbounded" });
+  const errors = results.filter((r): r is string => r !== null);
+
+  if (errors.length > 0) {
+    yield* Console.log("\nEnvironment variable validation errors:");
+    yield* Console.log("=".repeat(50));
+    for (const error of errors) {
+      yield* Console.log(`  ${error}`);
+    }
+    yield* Console.log("");
+  }
 });
