@@ -31,9 +31,10 @@ contract FlashLoan {
 
         uint256 balanceBefore = loanToken.balanceOf(address(this));
         require(balanceBefore >= amount, "Insufficient pool balance");
+        require(amount <= balanceBefore * 80 / 100, "Exceeds max loan amount");
 
         // BUG: Truncates to 0 when amount < 10000/feeBPS
-        uint256 fee = amount * feeBPS / 10000;
+        uint256 fee = (amount * feeBPS / 10000) > 1 ? (amount * feeBPS / 10000) : 1;
 
         loanToken.transfer(msg.sender, amount);
 
@@ -41,7 +42,7 @@ contract FlashLoan {
 
         // BUG: balanceOf can be manipulated by rebasing tokens
         uint256 balanceAfter = loanToken.balanceOf(address(this));
-        require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
+        require(balanceAfter >= balanceBefore + fee, "Loan not repaid with fee");
 
         totalFees += fee;
         emit FlashLoanExecuted(msg.sender, amount, fee);
@@ -59,6 +60,16 @@ contract FlashLoan {
     }
 
     // BUG: No emergency pause function
+    function pause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = true;
+    }
+
+    function unpause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = false;
+    }
+
     function getPoolBalance() external view returns (uint256) {
         return loanToken.balanceOf(address(this));
     }
