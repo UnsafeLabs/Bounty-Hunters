@@ -11,6 +11,7 @@ contract MultiSigWallet {
         uint256 value;
         bytes data;
         bool executed;
+        uint256 confirmedCount;
     }
 
     mapping(uint256 => Transaction) public transactions;
@@ -37,14 +38,15 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Invalid address");
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
             value: value,
             data: data,
-            executed: false
+            executed: false,
+            confirmedCount: 0
         });
         emit Submitted(txId);
         return txId;
@@ -54,6 +56,7 @@ contract MultiSigWallet {
         require(!transactions[txId].executed, "Already executed");
         require(!confirmations[txId][msg.sender], "Already confirmed");
         confirmations[txId][msg.sender] = true;
+        transactions[txId].confirmedCount++;
         emit Confirmed(txId, msg.sender);
     }
 
@@ -61,6 +64,7 @@ contract MultiSigWallet {
         require(!transactions[txId].executed, "Already executed");
         require(confirmations[txId][msg.sender], "Not confirmed");
         confirmations[txId][msg.sender] = false;
+        transactions[txId].confirmedCount--;
         emit Revoked(txId, msg.sender);
     }
 
@@ -70,13 +74,11 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
     function executeTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
-
         Transaction storage txn = transactions[txId];
+        require(txn.confirmedCount >= required, "Not enough confirmations");
+
         txn.executed = true;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
