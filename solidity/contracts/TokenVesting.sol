@@ -42,7 +42,7 @@ contract TokenVesting {
 
         uint256 elapsed = block.timestamp - start;
         // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+        return totalAllocation / duration * elapsed;
     }
 
     function claimable() public view returns (uint256) {
@@ -67,7 +67,7 @@ contract TokenVesting {
         uint256 vested = vestedAmount();
         // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
         // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        uint256 unvested = totalAllocation - claimed;
 
         if (vested > claimed) {
             token.transfer(beneficiary, vested - claimed);
