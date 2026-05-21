@@ -5,7 +5,7 @@ import {
 } from "@t3tools/contracts";
 import { resolveSelectableModel } from "@t3tools/shared/model";
 import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
-import { SearchIcon } from "lucide-react";
+import { SearchIcon, RotateCcwIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { isModelPickerNewModel } from "./modelPickerModelHighlights";
@@ -82,6 +82,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   terminalOpen: boolean;
   onRequestClose?: () => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  /** Called when the user requests a reset of persisted selection to defaults. */
+  onRequestResetToDefault?: () => void;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -641,6 +643,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             <ComboboxEmpty className="not-empty:py-6 empty:h-0 text-xs font-normal leading-snug">
               No models found
             </ComboboxEmpty>
+            {props.onRequestResetToDefault ? (
+              <button
+                type="button"
+                onClick={props.onRequestResetToDefault}
+                className="flex w-full items-center gap-2 border-t px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50"
+              >
+                <RotateCcwIcon className="size-3 shrink-0" />
+                Reset to default
+              </button>
+            ) : null}
           </div>
         </Combobox>
       </div>

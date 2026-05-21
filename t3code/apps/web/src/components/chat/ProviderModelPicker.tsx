@@ -20,6 +20,41 @@ import {
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
+const STORAGE_KEY_PROVIDER = "t3code:lastProviderInstanceId";
+const STORAGE_KEY_MODEL = "t3code:lastModelSlug";
+
+function readPersistedSelection(): {
+  providerId: ProviderInstanceId | null;
+  modelSlug: string | null;
+} {
+  try {
+    return {
+      providerId: (localStorage.getItem(STORAGE_KEY_PROVIDER) as ProviderInstanceId | null) ?? null,
+      modelSlug: localStorage.getItem(STORAGE_KEY_MODEL) ?? null,
+    };
+  } catch {
+    return { providerId: null, modelSlug: null };
+  }
+}
+
+function writePersistedSelection(providerId: ProviderInstanceId, modelSlug: string): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_PROVIDER, providerId);
+    localStorage.setItem(STORAGE_KEY_MODEL, modelSlug);
+  } catch {
+    // Storage unavailable — ignore.
+  }
+}
+
+function clearPersistedSelection(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY_PROVIDER);
+    localStorage.removeItem(STORAGE_KEY_MODEL);
+  } catch {
+    // Storage unavailable — ignore.
+  }
+}
+
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
    * The instance currently selected in the composer. Drives the trigger
@@ -46,27 +81,48 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
 
-  // Resolve the active instance entry by exact routing key. The composer
-  // resolves fallbacks before rendering this component; if the selected
-  // instance disappears, do not infer a replacement from its driver kind.
+  // Restore persisted selection on mount. If the persisted provider is no
+  // longer available, fall back to the first available instance.
+  const restoredSelection = useMemo<{
+    activeInstanceId: ProviderInstanceId;
+    model: string;
+  } | null>(() => {
+    const { providerId, modelSlug } = readPersistedSelection();
+    if (!providerId || !modelSlug) return null;
+    const entry = props.instanceEntries.find((e) => e.instanceId === providerId);
+    if (!entry || entry.status !== "ready") {
+      // Persisted provider gone or unavailable — fall back to first ready.
+      const firstReady = props.instanceEntries.find((e) => e.status === "ready");
+      if (!firstReady) return null;
+      const options = props.modelOptionsByInstance.get(firstReady.instanceId) ?? [];
+      return {
+        activeInstanceId: firstReady.instanceId,
+        model: options[0]?.slug ?? "",
+      };
+    }
+    return { activeInstanceId: providerId, model: modelSlug };
+  }, [props.instanceEntries, props.modelOptionsByInstance]);
+
+  // Resolve the active instance entry by exact routing key.
   const activeEntry = useMemo(() => {
     return (
-      props.instanceEntries.find((entry) => entry.instanceId === props.activeInstanceId) ?? null
+      props.instanceEntries.find((entry) => entry.instanceId === (restoredSelection?.activeInstanceId ?? props.activeInstanceId)) ?? null
     );
-  }, [props.activeInstanceId, props.instanceEntries]);
+  }, [restoredSelection?.activeInstanceId, props.activeInstanceId, props.instanceEntries]);
 
-  const activeInstanceId = props.activeInstanceId;
+  // Resolved active instance — use restored value when available.
+  const activeInstanceId = restoredSelection?.activeInstanceId ?? props.activeInstanceId;
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
   // If the current slug belongs to a different instance (for example after
   // a provider switch or disable), prefer the active instance's first
   // option so the trigger icon and label stay in sync instead of showing
   // a stale foreign slug.
   const selectedModel =
-    selectedInstanceOptions.find((option) => option.slug === props.model) ??
+    selectedInstanceOptions.find((option) => option.slug === (restoredSelection?.model ?? props.model)) ??
     selectedInstanceOptions[0];
-  const triggerTitle = selectedModel ? getTriggerDisplayModelName(selectedModel) : props.model;
+  const triggerTitle = selectedModel ? getTriggerDisplayModelName(selectedModel) : (restoredSelection?.model ?? props.model);
   const triggerSubtitle = selectedModel?.subProvider;
-  const triggerLabel = selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model;
+  const triggerLabel = selectedModel ? getTriggerDisplayModelLabel(selectedModel) : (restoredSelection?.model ?? props.model);
   const duplicateDriverCount = props.instanceEntries.filter(
     (entry) => activeEntry !== null && entry.driverKind === activeEntry.driverKind,
   ).length;
@@ -89,7 +145,14 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
+    writePersistedSelection(instanceId, model);
     setIsMenuOpen(false);
+  };
+
+  const handleResetToDefault = () => {
+    clearPersistedSelection();
+    setIsMenuOpen(false);
+    window.location.reload();
   };
 
   return (
@@ -171,7 +234,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       >
         <ModelPickerContent
           activeInstanceId={activeInstanceId}
-          model={props.model}
+          model={selectedModel?.slug ?? (restoredSelection?.model ?? props.model)}
           lockedProvider={props.lockedProvider}
           lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
           instanceEntries={props.instanceEntries}
@@ -180,6 +243,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           terminalOpen={props.terminalOpen ?? false}
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
+          onRequestResetToDefault={handleResetToDefault}
         />
       </PopoverPopup>
     </Popover>
