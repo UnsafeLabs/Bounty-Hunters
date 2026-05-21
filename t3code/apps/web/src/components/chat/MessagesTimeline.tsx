@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -98,6 +99,8 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const TIMELINE_FOCUSABLE_ROW_SELECTOR = '[data-timeline-row-focusable="true"]';
+const COMPOSER_EDITOR_SELECTOR = '[data-chat-composer-editor="true"]';
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -277,6 +280,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           maintainScrollAtEndThreshold={0.1}
           maintainVisibleContentPosition
           onScroll={handleScroll}
+          role="list"
+          aria-label="Conversation timeline"
           className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
@@ -300,14 +305,50 @@ type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["grouped
 type TimelineRow = MessagesTimelineRow;
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
+  const isMessageRow = row.kind === "message";
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!isMessageRow) {
+        return;
+      }
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        focusAdjacentTimelineRow(event.currentTarget, event.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        focusComposerEditor(event.currentTarget);
+        return;
+      }
+
+      if (event.key === "Enter") {
+        const firstAction = event.currentTarget.querySelector<HTMLElement>(
+          'button:not(:disabled), a[href], [role="button"]:not([aria-disabled="true"])',
+        );
+        firstAction?.click();
+      }
+    },
+    [isMessageRow],
+  );
+
   return (
     <div
       className={cn(
         "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
+      role={isMessageRow ? "listitem" : undefined}
+      tabIndex={isMessageRow ? 0 : undefined}
+      aria-label={
+        isMessageRow ? `${row.message.role === "user" ? "User" : "Assistant"} message` : undefined
+      }
+      onKeyDown={isMessageRow ? handleKeyDown : undefined}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
+      data-timeline-row-focusable={isMessageRow ? "true" : undefined}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
@@ -321,6 +362,22 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
     </div>
   );
 });
+
+function focusAdjacentTimelineRow(currentRow: HTMLElement, direction: 1 | -1): void {
+  const root = currentRow.closest('[data-chat-messages-region="true"]');
+  const rows = Array.from(
+    (root ?? currentRow.ownerDocument).querySelectorAll<HTMLElement>(
+      TIMELINE_FOCUSABLE_ROW_SELECTOR,
+    ),
+  );
+  const currentIndex = rows.indexOf(currentRow);
+  const nextRow = rows[currentIndex + direction];
+  nextRow?.focus();
+}
+
+function focusComposerEditor(currentRow: HTMLElement): void {
+  currentRow.ownerDocument.querySelector<HTMLElement>(COMPOSER_EDITOR_SELECTOR)?.focus();
+}
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);

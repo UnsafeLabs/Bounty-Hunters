@@ -1,5 +1,5 @@
 import { EnvironmentId, MessageId } from "@t3tools/contracts";
-import { createRef, type ReactNode, type Ref } from "react";
+import { createRef, type HTMLAttributes, type ReactNode, type Ref } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { LegendListRef } from "@legendapp/list/react";
@@ -7,20 +7,38 @@ import type { LegendListRef } from "@legendapp/list/react";
 vi.mock("@legendapp/list/react", async () => {
   const legendListTestId = "legend-list";
 
-  const LegendList = (props: {
+  const LegendList = ({
+    data,
+    keyExtractor,
+    renderItem,
+    estimatedItemSize: _estimatedItemSize,
+    initialScrollAtEnd: _initialScrollAtEnd,
+    maintainScrollAtEnd: _maintainScrollAtEnd,
+    maintainScrollAtEndThreshold: _maintainScrollAtEndThreshold,
+    maintainVisibleContentPosition: _maintainVisibleContentPosition,
+    ListHeaderComponent,
+    ListFooterComponent,
+    ref: _ref,
+    ...rest
+  }: {
     data: Array<{ id: string }>;
     keyExtractor: (item: { id: string }) => string;
     renderItem: (args: { item: { id: string } }) => ReactNode;
+    estimatedItemSize?: number;
+    initialScrollAtEnd?: boolean;
+    maintainScrollAtEnd?: boolean;
+    maintainScrollAtEndThreshold?: number;
+    maintainVisibleContentPosition?: boolean;
     ListHeaderComponent?: ReactNode;
     ListFooterComponent?: ReactNode;
     ref?: Ref<LegendListRef>;
-  }) => (
-    <div data-testid={legendListTestId}>
-      {props.ListHeaderComponent}
-      {props.data.map((item) => (
-        <div key={props.keyExtractor(item)}>{props.renderItem({ item })}</div>
+  } & HTMLAttributes<HTMLDivElement>) => (
+    <div data-testid={legendListTestId} {...rest}>
+      {ListHeaderComponent}
+      {data.map((item) => (
+        <div key={keyExtractor(item)}>{renderItem({ item })}</div>
       ))}
-      {props.ListFooterComponent}
+      {ListFooterComponent}
     </div>
   );
 
@@ -185,6 +203,23 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('aria-label="Copy link"');
     expect(markup).toContain('data-user-message-collapsed="true"');
     expect(markup).toContain('data-user-message-footer="true"');
+  });
+
+  it("marks message rows as keyboard-focusable list items", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildUserTimelineEntry("Keyboard reachable prompt.")]}
+      />,
+    );
+
+    expect(markup).toContain('role="list"');
+    expect(markup).toContain('aria-label="Conversation timeline"');
+    expect(markup).toContain('role="listitem"');
+    expect(markup).toContain('tabindex="0"');
+    expect(markup).toContain('aria-label="User message"');
+    expect(markup).toContain('data-timeline-row-focusable="true"');
   });
 
   it("renders context compaction entries in the normal work log", async () => {
