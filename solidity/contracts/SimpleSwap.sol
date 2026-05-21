@@ -28,7 +28,8 @@ contract SimpleSwap {
     // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
     // BUG: No deadline parameter — stale transactions can be executed
     // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut, uint256 deadline) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
