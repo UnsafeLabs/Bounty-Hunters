@@ -47,6 +47,7 @@ const make = (): TailscaleDiagnosticsShape => {
 						latencyMs: ping.latencyMs,
 						connectionType: ping.connectionType,
 						relayServer: ping.relayServer,
+						relayLocation: ping.relayLocation,
 						timestamp: ping.timestamp,
 					})),
 				} satisfies ServerDiagnoseTailscalePeerResult;

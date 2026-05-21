@@ -50,6 +50,7 @@ export const PingResult = Schema.Struct({
         latencyMs: Schema.Number,
         connectionType: Schema.Literal("direct") | Schema.Literal("relayed") | Schema.Literal("unknown"),
         relayServer: Schema.optional(Schema.String),
+        relayLocation: Schema.optional(Schema.String),
         timestamp: Schema.String,
 });
 export type PingResult = typeof PingResult.Type;
@@ -309,12 +310,15 @@ export const pingPeer = (peer: string): Effect.Effect<PingResult> =>
                 const latencyMs = parseLatencyFromPing(combinedOutput) ?? 0;
                 const connectionType = parseConnectionTypeFromPing(combinedOutput);
                 const relayServer = parseRelayServerFromPing(combinedOutput) ?? undefined;
+                const relayLocation = parseRelayLocationFromPing(combinedOutput) ?? undefined;
+
 
                 const result: PingResult = {
                         peer,
                         latencyMs,
                         connectionType,
                         relayServer,
+                        relayLocation,
                         timestamp: new Date().toISOString(),
                 };
 
@@ -352,7 +356,7 @@ export const diagnosePeer = (
                         connectionType: pingResult.connectionType,
                         latencyMs: pingResult.latencyMs,
                         relayServer: pingResult.relayServer,
-                        relayLocation: undefined,
+                        relayLocation: pingResult.relayLocation,
                         lastSeen: pingResult.timestamp,
                         success: pingResult.latencyMs > 0,
                         error: pingResult.latencyMs === 0 ? "Ping failed or timed out" : undefined,

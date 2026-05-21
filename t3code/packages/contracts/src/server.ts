@@ -358,6 +358,7 @@ export const ServerDiagnoseTailscalePeerResult = Schema.Struct({
       latencyMs: Schema.Number,
       connectionType: Schema.Literal("direct") | Schema.Literal("relayed") | Schema.Literal("unknown"),
       relayServer: Schema.optional(Schema.String),
+      relayLocation: Schema.optional(Schema.String),
       timestamp: Schema.String,
     }),
   ),
