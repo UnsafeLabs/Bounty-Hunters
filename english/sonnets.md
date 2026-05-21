@@ -13,13 +13,16 @@ A whispered prayer dissolving in the cloud.
 
 The moon ascends her throne of silver light,
 And casts her gaze upon the sleeping earth,
-[TODO: write lines 7-8 — must rhyme with "light" and "earth", ~10 syllables each, iambic pentameter]
+She watches kingdoms fade from day to night,
+And mourns the silence after every birth.
 
 The rivers carry secrets to the sea,
 And mountains hold the memories of rain,
-[TODO: write lines 11-12 — must rhyme with "sea" and "rain", ~10 syllables each]
+But I am bound by neither root nor tree,
+A wanderer who cannot feel the pain.
 
-[TODO: write closing couplet (lines 13-14) — must rhyme with each other, provide resolution to the theme of cosmic solitude]
+Yet in this solitude I find no fear —
+For every star that falls, a new draws near.
 
 ---
 
@@ -42,3 +45,4 @@ As code decays beneath the coder's hand.
 
 So let us plant in dirt and not in wire,
 And grow a world that never will expire.
+
