@@ -25,6 +25,7 @@ import {
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
+import { MetricsAggregator } from "./observability/Services/MetricsAggregator.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { respondToAuthError } from "./auth/http.ts";
@@ -468,3 +469,24 @@ export const staticAndDevRouteLayer = HttpRouter.add(
     });
   }),
 );
+
+/**
+ * Aggregated metrics endpoint — returns sliding window statistics.
+ * One window = 1 minute, circular buffer retains last 60 windows (1 hour).
+ */
+export const metricsAggregatedRouteLayer = HttpRouter.add(
+  "GET",
+  "/metrics/aggregated",
+  Effect.gen(function* () {
+    const aggregator = yield* MetricsAggregator;
+    const windows = yield* aggregator.getAggregatedWindows();
+    const body = new TextEncoder().encode(JSON.stringify(windows));
+    return HttpServerResponse.uint8Array(body, {
+      status: 200,
+      contentType: "application/json",
+      headers: { "Cache-Control": "no-store" },
+    });
+  }),
+).pipe(Effect.catchTag("ServiceError", () =>
+  HttpServerResponse.text("Metrics service unavailable", { status: 503 })
+));
