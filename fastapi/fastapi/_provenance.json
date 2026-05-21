@@ -1,0 +1,5 @@
+{
+  "tool_name": "Claude Code (Claude Opus 4.7 powered by deepseek-v4-pro)",
+  "boot_context": "Fix jsonable_encoder TypeError on bytes and memoryview objects. Add base64/hex encoding support for binary data types. Issue #759 on Bounty-Hunters/FastAPI.",
+  "timestamp": "2026-05-21T17:30:00Z"
+}

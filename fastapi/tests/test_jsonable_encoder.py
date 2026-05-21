@@ -313,6 +313,66 @@ def test_encode_pydantic_undefined():
     assert jsonable_encoder(data) == {"value": None}
 
 
+def test_encode_bytes_base64():
+    data = b"hello world"
+    assert jsonable_encoder(data) == "aGVsbG8gd29ybGQ="
+
+
+def test_encode_bytes_hex():
+    data = b"hello world"
+    assert jsonable_encoder(data, bytes_encoding="hex") == "68656c6c6f20776f726c64"
+
+
+def test_encode_bytes_in_dict():
+    data = {"key": b"test"}
+    assert jsonable_encoder(data) == {"key": "dGVzdA=="}
+    assert jsonable_encoder(data, bytes_encoding="hex") == {"key": "74657374"}
+
+
+def test_encode_bytes_in_list():
+    data = [b"a", b"b"]
+    assert jsonable_encoder(data) == ["YQ==", "Yg=="]
+
+
+def test_encode_bytes_nested():
+    data = {"outer": {"inner": b"nested"}}
+    assert jsonable_encoder(data) == {"outer": {"inner": "bmVzdGVk"}}
+    assert jsonable_encoder(data, bytes_encoding="hex") == {"outer": {"inner": "6e6573746564"}}
+
+
+def test_encode_memoryview_base64():
+    data = memoryview(b"hello")
+    assert jsonable_encoder(data) == "aGVsbG8="
+
+
+def test_encode_memoryview_hex():
+    data = memoryview(b"hello")
+    assert jsonable_encoder(data, bytes_encoding="hex") == "68656c6c6f"
+
+
+def test_encode_non_utf8_bytes():
+    data = b"\xff\xfe\x00\x01"
+    assert jsonable_encoder(data) == "//4AAQ=="
+    assert jsonable_encoder(data, bytes_encoding="hex") == "fffe0001"
+
+
+def test_encode_bytes_invalid_encoding():
+    data = b"test"
+    with pytest.raises(ValueError, match="Unsupported bytes_encoding"):
+        jsonable_encoder(data, bytes_encoding="invalid")
+
+
+def test_encode_bytes_in_dataclass():
+    @dataclass
+    class BinaryItem:
+        name: str
+        content: bytes
+
+    item = BinaryItem(name="test", content=b"data")
+    result = jsonable_encoder(item)
+    assert result == {"name": "test", "content": "ZGF0YQ=="}
+
+
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
 @pytest.mark.parametrize(
     "module_path",
