@@ -22,6 +22,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     },
     filesystem: {
       browse: rpcClient.filesystem.browse,
+      move: rpcClient.filesystem.move,
     },
     sourceControl: {
       lookupRepository: rpcClient.sourceControl.lookupRepository,

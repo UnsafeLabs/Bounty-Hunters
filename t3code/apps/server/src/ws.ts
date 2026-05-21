@@ -9,25 +9,8 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
-  DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
-  type AuthAccessStreamEvent,
-  AuthSessionId,
-  CommandId,
-  EventId,
-  type OrchestrationCommand,
-  type GitActionProgressEvent,
-  type GitManagerServiceError,
-  OrchestrationDispatchCommandError,
-  type OrchestrationEvent,
-  type OrchestrationShellStreamEvent,
-  OrchestrationGetFullThreadDiffError,
-  OrchestrationGetSnapshotError,
-  OrchestrationGetTurnDiffError,
-  ORCHESTRATION_WS_METHODS,
-  ProjectSearchEntriesError,
-  ProjectWriteFileError,
-  OrchestrationReplayEventsError,
   FilesystemBrowseError,
+  FilesystemMoveError,
   ThreadId,
   type TerminalEvent,
   WS_METHODS,
@@ -997,16 +980,23 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "workspace" },
           ),
-        [WS_METHODS.subscribeVcsStatus]: (input) =>
-          observeRpcStream(
-            WS_METHODS.subscribeVcsStatus,
-            vcsStatusBroadcaster.streamStatus(input, {
-              automaticRemoteRefreshInterval: automaticGitFetchInterval,
-            }),
-            {
-              "rpc.aggregate": "vcs",
-            },
+
+        [WS_METHODS.filesystemMove]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.filesystemMove,
+            workspaceFileSystem.rename(input.sourcePath, input.targetDir).pipe(
+              Effect.map((newPath) => ({ newPath })),
+              Effect.mapError(
+                (cause) =>
+                  new FilesystemMoveError({
+                    message: cause.detail ?? cause.message,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
           ),
+
         [WS_METHODS.vcsRefreshStatus]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsRefreshStatus,

@@ -40,6 +40,11 @@ export interface WorkspaceFileSystemShape {
     ProjectWriteFileResult,
     WorkspaceFileSystemError | WorkspacePathOutsideRootError
   >;
+
+  readonly rename: (
+    sourcePath: string,
+    targetDir: string,
+  ) => Effect.Effect<string, WorkspaceFileSystemError>;
 }
 
 /**

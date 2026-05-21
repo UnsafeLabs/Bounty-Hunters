@@ -17,6 +17,25 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
   const workspacePaths = yield* WorkspacePaths;
   const workspaceEntries = yield* WorkspaceEntries;
 
+  const rename: WorkspaceFileSystemShape["rename"] = Effect.fn(
+    "WorkspaceFileSystem.rename",
+  )(function* (sourcePath: string, targetDir: string) {
+    const sourceName = path.basename(sourcePath);
+    const targetPath = path.join(targetDir, sourceName);
+    yield* fileSystem.rename(sourcePath, targetPath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new WorkspaceFileSystemError({
+            cwd: "",
+            operation: "workspaceFileSystem.rename",
+            detail: cause.message,
+            cause,
+          }),
+      ),
+    );
+    return targetPath;
+  });
+
   const writeFile: WorkspaceFileSystemShape["writeFile"] = Effect.fn(
     "WorkspaceFileSystem.writeFile",
   )(function* (input) {
@@ -52,7 +71,7 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
     yield* workspaceEntries.invalidate(input.cwd);
     return { relativePath: target.relativePath };
   });
-  return { writeFile } satisfies WorkspaceFileSystemShape;
+  return { writeFile, rename } satisfies WorkspaceFileSystemShape;
 });
 
 export const WorkspaceFileSystemLive = Layer.effect(WorkspaceFileSystem, makeWorkspaceFileSystem);
