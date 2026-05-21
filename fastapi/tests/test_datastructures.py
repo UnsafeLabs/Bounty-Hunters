@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 from fastapi import FastAPI, UploadFile
-from fastapi.datastructures import Default
+from fastapi.datastructures import Default, ValidationResult
+from fastapi.exceptions import HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -63,3 +64,83 @@ async def test_upload_file():
     await file.seek(0)
     assert await file.read() == b"data and more data!"
     await file.close()
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_no_constraints():
+    stream = io.BytesIO(b"hello")
+    file = UploadFile(filename="test.txt", file=stream, size=5)
+    result = await file.validate()
+    assert result.is_valid
+    assert result.file_size == 5
+    assert result.content_type is None
+    await file.close()
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_size_ok():
+    stream = io.BytesIO(b"hello")
+    file = UploadFile(filename="test.txt", file=stream, size=5, max_size=10)
+    result = await file.validate()
+    assert result.is_valid
+    assert result.file_size == 5
+    await file.close()
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_size_exceeded():
+    stream = io.BytesIO(b"hello world")
+    file = UploadFile(filename="test.txt", file=stream, size=11, max_size=5)
+    with pytest.raises(HTTPException) as exc:
+        await file.validate()
+    assert exc.value.status_code == 413
+    await file.close()
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_content_type_ok():
+    stream = io.BytesIO(b"data")
+    file = UploadFile(
+        filename="test.txt",
+        file=stream,
+        size=4,
+        headers={"content-type": "text/plain"},
+        allowed_content_types=["text/plain"],
+    )
+    result = await file.validate()
+    assert result.is_valid
+    assert result.content_type == "text/plain"
+    await file.close()
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_content_type_rejected():
+    stream = io.BytesIO(b"data")
+    file = UploadFile(
+        filename="test.txt",
+        file=stream,
+        size=4,
+        headers={"content-type": "image/png"},
+        allowed_content_types=["text/plain"],
+    )
+    with pytest.raises(HTTPException) as exc:
+        await file.validate()
+    assert exc.value.status_code == 415
+    await file.close()
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_max_size_none():
+    stream = io.BytesIO(b"a" * 10000)
+    file = UploadFile(filename="large.txt", file=stream, size=10000, max_size=None)
+    result = await file.validate()
+    assert result.is_valid
+    assert result.file_size == 10000
+    await file.close()
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_allowed_types_none():
+    stream = io.BytesIO(b"data")
+    file = UploadFile(filename="test.bin", file=stream, size=4)
+
