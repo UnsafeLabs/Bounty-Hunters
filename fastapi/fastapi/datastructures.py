@@ -1,4 +1,5 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import (
     Annotated,
     Any,
@@ -16,6 +17,17 @@ from starlette.datastructures import Headers as Headers  # noqa: F401
 from starlette.datastructures import QueryParams as QueryParams  # noqa: F401
 from starlette.datastructures import State as State  # noqa: F401
 from starlette.datastructures import UploadFile as StarletteUploadFile
+
+from fastapi.exceptions import HTTPException
+
+
+@dataclass
+class ValidationResult:
+    is_valid: Annotated[bool, Doc("Whether all validation checks passed.")]
+    file_size: Annotated[int | None, Doc("The size of the file in bytes.")] = None
+    content_type: Annotated[
+        str | None, Doc("The content type of the uploaded file.")
+    ] = None
 
 
 class UploadFile(StarletteUploadFile):
@@ -62,6 +74,13 @@ class UploadFile(StarletteUploadFile):
     content_type: Annotated[
         str | None, Doc("The content type of the request, from the headers.")
     ]
+    max_size: Annotated[
+        int | None, Doc("Maximum allowed file size in bytes. None disables size check.")
+    ] = None
+    allowed_content_types: Annotated[
+        Sequence[str] | None,
+        Doc("List of allowed MIME types. None disables content type check."),
+    ] = None
 
     async def write(
         self,
@@ -148,6 +167,32 @@ class UploadFile(StarletteUploadFile):
         from ._compat.v2 import with_info_plain_validator_function
 
         return with_info_plain_validator_function(cls._validate)
+
+    async def validate(self) -> ValidationResult:
+        file_size = self.size
+        file_content_type = self.content_type
+
+        if self.max_size is not None:
+            await self.seek(0, 2)
+            actual_size = self.file.tell()
+            await self.seek(0)
+            file_size = actual_size
+            if actual_size > self.max_size:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File too large. Maximum allowed size is {self.max_size} bytes, got {actual_size} bytes.",
+                )
+
+        if self.allowed_content_types is not None and file_content_type is not None:
+            if file_content_type not in self.allowed_content_types:
+                raise HTTPException(
+                    status_code=415,
+                    detail=f"Unsupported media type '{file_content_type}'. Allowed types: {', '.join(self.allowed_content_types)}.",
+                )
+
+        return ValidationResult(
+            is_valid=True, file_size=file_size, content_type=file_content_type
+        )
 
 
 class DefaultPlaceholder:
