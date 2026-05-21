@@ -85,6 +85,8 @@ import {
   ServerSignalProcessResult,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
+  ServerDiagnoseTailscalePeerInput,
+  ServerDiagnoseTailscalePeerResult,
 } from "./server.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
@@ -149,6 +151,7 @@ export const WS_METHODS = {
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
+  serverDiagnoseTailscalePeer: "server.diagnoseTailscalePeer",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -238,6 +241,14 @@ export const WsServerGetProcessResourceHistoryRpc = Rpc.make(
 export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
+});
+
+export const WsServerDiagnoseTailscalePeerRpc = Rpc.make(WS_METHODS.serverDiagnoseTailscalePeer, {
+  payload: ServerDiagnoseTailscalePeerInput,
+  success: ServerDiagnoseTailscalePeerResult,
+  error: Schema.Struct({
+    message: Schema.String,
+  }),
 });
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
@@ -485,6 +496,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetProcessDiagnosticsRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
+  WsServerDiagnoseTailscalePeerRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,

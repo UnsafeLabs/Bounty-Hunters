@@ -7,11 +7,14 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   buildTailscaleHttpsBaseUrl,
+  diagnosePeer,
   disableTailscaleServe,
   ensureTailscaleServe,
+  getPingHistory,
   isTailscaleIpv4Address,
   parseTailscaleMagicDnsName,
   parseTailscaleStatus,
+  pingPeer,
   readTailscaleStatus,
 } from "./tailscale.ts";
 
@@ -139,6 +142,69 @@ describe("tailscale", () => {
       assert.deepEqual(commands, [
         { command: "tailscale", args: ["serve", "--https=8443", "off"] },
       ]);
+    });
+  });
+
+  it.effect("pings a peer and records in history", () => {
+    const layer = mockSpawnerLayer((command, args) => {
+      assert.equal(command, "tailscale");
+      assert.deepEqual(args, ["ping", "foo.bar.ts.net", "--count=1"]);
+      return {
+        stdout: "pong from foo.bar.ts.net: latency=12.34ms\n",
+        code: 0,
+      };
+    });
+
+    return Effect.gen(function* () {
+      const result = yield* pingPeer("foo.bar.ts.net").pipe(Effect.provide(layer));
+      assert.equal(result.peer, "foo.bar.ts.net");
+      assert.equal(result.latencyMs, 12.34);
+      assert.equal(result.connectionType, "direct");
+      assert.equal(result.success, true);
+
+      // Check ping history was recorded
+      const history = yield* getPingHistory("foo.bar.ts.net").pipe(Effect.provide(layer));
+      assert.equal(history.length, 1);
+      assert.equal(history[0].peer, "foo.bar.ts.net");
+    });
+  });
+
+  it.effect("detects relayed connection via DERP", () => {
+    const layer = mockSpawnerLayer((command, args) => {
+      assert.equal(command, "tailscale");
+      assert.deepEqual(args, ["ping", "relayed-peer.ts.net", "--count=1"]);
+      return {
+        stdout: "pong from relayed-peer.ts.net via DERP nyc: latency=45.67ms\n",
+        code: 0,
+      };
+    });
+
+    return Effect.gen(function* () {
+      const result = yield* pingPeer("relayed-peer.ts.net").pipe(Effect.provide(layer));
+      assert.equal(result.peer, "relayed-peer.ts.net");
+      assert.equal(result.latencyMs, 45.67);
+      assert.equal(result.connectionType, "relayed");
+      assert.equal(result.relayServer, "nyc");
+    });
+  });
+
+  it.effect("diagnosePeer returns structured diagnostics", () => {
+    const layer = mockSpawnerLayer((command, args) => {
+      assert.equal(command, "tailscale");
+      assert.deepEqual(args, ["ping", "desktop.tail.ts.net", "--count=1"]);
+      return {
+        stdout: "pong from desktop.tail.ts.net: latency=8.5ms\n",
+        code: 0,
+      };
+    });
+
+    return Effect.gen(function* () {
+      const diagnostics = yield* diagnosePeer("desktop.tail.ts.net").pipe(Effect.provide(layer));
+      assert.equal(diagnostics.peer, "desktop.tail.ts.net");
+      assert.equal(diagnostics.connectionType, "direct");
+      assert.equal(diagnostics.latencyMs, 8.5);
+      assert.equal(diagnostics.success, true);
+      assert.equal(diagnostics.lastSeen !== undefined, true);
     });
   });
 });

@@ -334,6 +334,36 @@ export const ServerProcessResourceHistoryInput = Schema.Struct({
 });
 export type ServerProcessResourceHistoryInput = typeof ServerProcessResourceHistoryInput.Type;
 
+export const ServerDiagnoseTailscalePeerInput = Schema.Struct({
+  peer: Schema.String,
+});
+export type ServerDiagnoseTailscalePeerInput = typeof ServerDiagnoseTailscalePeerInput.Type;
+
+export const ServerDiagnoseTailscalePeerResult = Schema.Struct({
+  peer: Schema.String,
+  connectionType: Schema.Union(
+    Schema.Literal("direct"),
+    Schema.Literal("relayed"),
+    Schema.Literal("unknown"),
+  ),
+  latencyMs: Schema.Number,
+  relayServer: Schema.optional(Schema.String),
+  relayLocation: Schema.optional(Schema.String),
+  lastSeen: Schema.optional(Schema.String),
+  success: Schema.Boolean,
+  error: Schema.optional(Schema.String),
+  pingHistory: Schema.Array(
+    Schema.Struct({
+      peer: Schema.String,
+      latencyMs: Schema.Number,
+      connectionType: Schema.Literal("direct") | Schema.Literal("relayed") | Schema.Literal("unknown"),
+      relayServer: Schema.optional(Schema.String),
+      timestamp: Schema.String,
+    }),
+  ),
+});
+export type ServerDiagnoseTailscalePeerResult = typeof ServerDiagnoseTailscalePeerResult.Type;
+
 export const ServerProcessResourceHistoryBucket = Schema.Struct({
   startedAt: Schema.DateTimeUtc,
   endedAt: Schema.DateTimeUtc,
