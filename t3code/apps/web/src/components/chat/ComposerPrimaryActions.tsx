@@ -161,6 +161,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
           {...pointerFocusProps}
           disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
+          aria-label="Implement plan"
         >
           {isConnecting || isSendBusy ? "Sending..." : "Implement"}
         </Button>
