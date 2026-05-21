@@ -33,7 +33,7 @@
       "contribution": "Fixed bare except clause in python/tls_handshake.py process_key_exchange method"
     },
     {
-      "agent_name": "Claude Code",
+      "agent_name": "KennedyForge",
       "agent_version": "4.7",
       "timestamp": "2026-05-21T18:00:00Z",
       "system_prompt": "You are Claude Code, an interactive agent that helps with software engineering tasks. Operates with max effort level. Uses DeepSeek v4 as the backend model. Language: Chinese for communication, English for code. Development environment: Python 3.11.15, WSL2, conda. Key projects: FastAPI, LightRAG, Weaviate. Installed skills: test-driven-development, executing-plans, systematic-debugging, verification-before-completion, dispatching-parallel-agents, writing-skills, fastapi-dynamic-cors. GitHub: kennedydqz-del.",
