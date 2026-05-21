@@ -22,6 +22,7 @@ import {
   resolveAttachmentRelativePath,
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
+import { compressResponse } from "./middleware/compression.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
@@ -302,9 +303,27 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       if (!indexData) {
         return HttpServerResponse.text("Not Found", { status: 404 });
       }
-      return HttpServerResponse.uint8Array(indexData, {
+      const acceptEncoding = request.headers["accept-encoding"] ?? "";
+      const compressResult = yield* compressResponse(
+        { "accept-encoding": acceptEncoding },
+        Buffer.from(indexData),
+      );
+      const contentEncoding = compressResult.headers["content-encoding"];
+      const contentType = "text/html; charset=utf-8";
+      if (contentEncoding) {
+        return HttpServerResponse.uint8Array(compressResult.body, {
+          status: 200,
+          contentType,
+          headers: {
+            "content-encoding": contentEncoding,
+            "vary": compressResult.headers["vary"],
+            "content-length": compressResult.headers["content-length"],
+          },
+        });
+      }
+      return HttpServerResponse.uint8Array(compressResult.body, {
         status: 200,
-        contentType: "text/html; charset=utf-8",
+        contentType,
       });
     }
 
@@ -316,7 +335,24 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Internal Server Error", { status: 500 });
     }
 
-    return HttpServerResponse.uint8Array(data, {
+    const acceptEncoding = request.headers["accept-encoding"] ?? "";
+    const compressResult = yield* compressResponse(
+      { "accept-encoding": acceptEncoding },
+      Buffer.from(data),
+    );
+    const contentEncoding = compressResult.headers["content-encoding"];
+    if (contentEncoding) {
+      return HttpServerResponse.uint8Array(compressResult.body, {
+        status: 200,
+        contentType,
+        headers: {
+          "content-encoding": contentEncoding,
+          "vary": compressResult.headers["vary"],
+          "content-length": compressResult.headers["content-length"],
+        },
+      });
+    }
+    return HttpServerResponse.uint8Array(compressResult.body, {
       status: 200,
       contentType,
     });
