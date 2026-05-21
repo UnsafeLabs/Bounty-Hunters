@@ -26,6 +26,7 @@ contract TokenVesting {
         uint256 _cliffDuration,
         uint256 _vestingDuration
     ) {
+        require(_totalAllocation > 0, "Zero allocation");
         token = IERC20(_token);
         beneficiary = _beneficiary;
         owner = msg.sender;
@@ -58,21 +59,15 @@ contract TokenVesting {
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
-        uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
-
-        if (vested > claimed) {
-            token.transfer(beneficiary, vested - claimed);
+        uint256 remaining = totalAllocation - claimed;
+        if (remaining > 0) {
+            token.transfer(owner, remaining);
         }
-        token.transfer(owner, unvested);
-        emit VestingRevoked(beneficiary, unvested);
+        emit VestingRevoked(beneficiary, remaining);
     }
 }
