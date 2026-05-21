@@ -73,6 +73,12 @@ export interface RuntimeEnvironmentInfo {
   readonly isWSL: boolean;
 }
 
+/** Minimal filesystem interface used by Docker / WSL detection. */
+export interface FsProvider {
+  existsSync(path: string): boolean;
+  readFileSync(path: string, encoding: BufferEncoding): string;
+}
+
 // Map well-known CI environment variables to provider names.
 const CI_PROVIDERS: ReadonlyArray<[string, string]> = [
   ["GITHUB_ACTIONS", "GitHub Actions"],
@@ -89,21 +95,14 @@ const CI_PROVIDERS: ReadonlyArray<[string, string]> = [
  * "docker".  Returns `false` when the file system checks are unavailable
  * (e.g. browser, Deno without --allow-read).
  */
-function detectDocker(): boolean {
-  if (typeof process === "undefined" || !process.env) return false;
+function detectDocker(fs: FsProvider | null): boolean {
+  if (!fs) return false;
 
   try {
-    const fs = requireNodeFs();
-    if (!fs) return false;
-
     if (fs.existsSync("/.dockerenv")) return true;
 
-    try {
-      const cgroup = fs.readFileSync("/proc/1/cgroup", "utf8");
-      return cgroup.includes("docker");
-    } catch {
-      return false;
-    }
+    const cgroup = fs.readFileSync("/proc/1/cgroup", "utf8");
+    return cgroup.includes("docker");
   } catch {
     return false;
   }
@@ -130,13 +129,10 @@ function detectCI(): [isCI: boolean, provider: string | null] {
  * Checks `/proc/version` for the presence of "Microsoft" or "microsoft"
  * (WSL1 indicates via "Microsoft", WSL2 via "microsoft").
  */
-function detectWSL(): boolean {
-  if (typeof process === "undefined" || !process.env) return false;
+function detectWSL(fs: FsProvider | null): boolean {
+  if (!fs) return false;
 
   try {
-    const fs = requireNodeFs();
-    if (!fs) return false;
-
     const version = fs.readFileSync("/proc/version", "utf8");
     return /microsoft/i.test(version);
   } catch {
@@ -145,13 +141,14 @@ function detectWSL(): boolean {
 }
 
 /**
- * Attempt to `require("fs")` at runtime.  Returns `null` when the module
+ * Resolve the `fs` module at runtime.  Returns `null` when the module
  * is unavailable (e.g. browser bundlers, Deno without Node compat).
  */
-function requireNodeFs(): typeof import("fs") | null {
+function resolveNodeFs(): FsProvider | null {
+  if (typeof process === "undefined" || !process.env) return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    return require("fs");
+    return require("fs") as unknown as FsProvider;
   } catch {
     return null;
   }
@@ -163,8 +160,11 @@ function requireNodeFs(): typeof import("fs") | null {
  *
  * Safe to call in browser, Node.js, Bun, and Deno — detection degrades
  * gracefully when file system or environment access is unavailable.
+ *
+ * @param fs - Optional filesystem provider for testing. When omitted the
+ *   function attempts to resolve `fs` at runtime via `require("fs")`.
  */
-export function detectRuntimeEnvironment(): RuntimeEnvironmentInfo {
+export function detectRuntimeEnvironment(fs?: FsProvider | null): RuntimeEnvironmentInfo {
   const runtime = typeof process !== "undefined"
     ? process.release?.name === "node"
       ? "node"
@@ -189,9 +189,10 @@ export function detectRuntimeEnvironment(): RuntimeEnvironmentInfo {
     ? process.arch
     : "unknown";
 
-  const isContainer = detectDocker();
+  const nodeFs = fs ?? resolveNodeFs();
+  const isContainer = detectDocker(nodeFs);
   const [isCI, ciProvider] = detectCI();
-  const isWSL = detectWSL();
+  const isWSL = detectWSL(nodeFs);
 
   return {
     runtime,
