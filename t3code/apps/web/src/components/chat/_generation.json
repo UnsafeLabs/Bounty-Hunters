@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent with gpt-5.5",
+  "pre_task_context": "User asked to find and fix a bounty issue. Selected Issue #834: Add localStorage persistence to ProviderModelPicker in T3 Code project. The component is a controlled React component at t3code/apps/web/src/components/chat/ProviderModelPicker.tsx that uses Popover/ModelPickerContent for provider/model selection.",
+  "timestamp": "2026-05-21T10:30:00Z"
+}

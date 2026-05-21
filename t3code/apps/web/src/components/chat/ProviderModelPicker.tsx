@@ -3,9 +3,9 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, RotateCcwIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -19,6 +19,13 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+
+const PERSISTENCE_KEY = "t3code:provider-model-preference";
+
+interface PersistedPreference {
+  instanceId: ProviderInstanceId;
+  model: string;
+}
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -45,6 +52,106 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+
+  // Track whether we've already attempted to restore from localStorage on mount.
+  // We use a ref so it persists across re-renders but resets on unmount/remount.
+  const hasRestoredRef = useRef(false);
+
+  // Restore persisted provider/model selection on mount.
+  useEffect(() => {
+    if (hasRestoredRef.current) return;
+    hasRestoredRef.current = true;
+
+    try {
+      const raw = localStorage.getItem(PERSISTENCE_KEY);
+      if (!raw) return;
+      const pref: PersistedPreference = JSON.parse(raw);
+      if (!pref.instanceId || !pref.model) return;
+
+      // Only restore if the persisted instance still exists in the available entries.
+      const exists = props.instanceEntries.some(
+        (entry) => entry.instanceId === pref.instanceId,
+      );
+      if (!exists) {
+        // Stale preference — clear it and fall back to default.
+        localStorage.removeItem(PERSISTENCE_KEY);
+        return;
+      }
+
+      // Only restore if it differs from the current selection to avoid
+      // an unnecessary re-render loop.
+      if (
+        pref.instanceId !== props.activeInstanceId ||
+        pref.model !== props.model
+      ) {
+        props.onInstanceModelChange(pref.instanceId, pref.model);
+      }
+    } catch {
+      // Corrupted data — clear it.
+      localStorage.removeItem(PERSISTENCE_KEY);
+    }
+    // We only want this to fire on mount — don't re-run when props change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist selection to localStorage whenever it changes.
+  const prevSelectionRef = useRef<{ instanceId: string; model: string } | null>(null);
+  useEffect(() => {
+    const current = { instanceId: props.activeInstanceId, model: props.model };
+    if (
+      prevSelectionRef.current?.instanceId === current.instanceId &&
+      prevSelectionRef.current?.model === current.model
+    ) {
+      return;
+    }
+    prevSelectionRef.current = current;
+    try {
+      localStorage.setItem(PERSISTENCE_KEY, JSON.stringify(current));
+    } catch {
+      // localStorage may be full or unavailable — silently ignore.
+    }
+  }, [props.activeInstanceId, props.model]);
+
+  // Sync persisted preference across browser tabs via the storage event.
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key !== PERSISTENCE_KEY || !e.newValue) return;
+      try {
+        const pref: PersistedPreference = JSON.parse(e.newValue);
+        if (!pref.instanceId || !pref.model) return;
+
+        const exists = props.instanceEntries.some(
+          (entry) => entry.instanceId === pref.instanceId,
+        );
+        if (!exists) return;
+
+        if (
+          pref.instanceId !== props.activeInstanceId ||
+          pref.model !== props.model
+        ) {
+          props.onInstanceModelChange(pref.instanceId, pref.model);
+        }
+      } catch {
+        // Ignore parse errors from other tabs.
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [props.activeInstanceId, props.model, props.instanceEntries, props.onInstanceModelChange]);
+
+  // Clear persisted preference and reset to the first available provider/model.
+  const handleResetToDefault = useCallback(() => {
+    localStorage.removeItem(PERSISTENCE_KEY);
+    const firstEntry = props.instanceEntries[0];
+    if (firstEntry) {
+      const firstModel =
+        props.modelOptionsByInstance.get(firstEntry.instanceId)?.[0];
+      if (firstModel) {
+        props.onInstanceModelChange(firstEntry.instanceId, firstModel.slug);
+      }
+    }
+    setIsMenuOpen(false);
+  }, [props.instanceEntries, props.modelOptionsByInstance, props.onInstanceModelChange]);
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -181,6 +288,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
         />
+        <div className="border-t border-border px-3 py-1.5">
+          <button
+            type="button"
+            onClick={handleResetToDefault}
+            className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground transition-colors"
+          >
+            <RotateCcwIcon className="size-3" />
+            Reset to default
+          </button>
+        </div>
       </PopoverPopup>
     </Popover>
   );
