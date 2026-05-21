@@ -1276,3 +1276,19 @@ export class OrchestrationReplayEventsError extends Schema.TaggedErrorClass<Orch
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
+
+// Scheduled command for deferred execution
+export const ScheduledCommandStatus = Schema.Literals(["pending", "running", "completed", "failed", "cancelled"]);
+export type ScheduledCommandStatus = typeof ScheduledCommandStatus.Type;
+
+export const ScheduledCommand = Schema.Struct({
+  commandId: CommandId,
+  scheduledAt: IsoDateTime,
+  repeatInterval: Schema.optional(Schema.String), // ISO duration e.g. "PT5M" for every 5 minutes
+  maxRetries: Schema.optional(Schema.PositiveInt),
+  status: ScheduledCommandStatus,
+  retryCount: Schema.NonNegativeInt,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ScheduledCommand = typeof ScheduledCommand.Type;
