@@ -22,6 +22,10 @@
     "./errors": {
       "types": "./src/errors.ts",
       "import": "./src/errors.ts"
+    },
+    "./streaming": {
+      "types": "./src/streaming.ts",
+      "import": "./src/streaming.ts"
     }
   },
   "scripts": {

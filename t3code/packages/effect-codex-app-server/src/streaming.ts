@@ -1,10 +1,10 @@
-import * as Chunk from "effect/Chunk";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as CodexError from "./errors.ts";
@@ -88,12 +88,11 @@ export const withStreaming = <A>(
   ): Effect.Effect<
     CodexStreamingResponse<A>,
     CodexError.CodexAppServerError,
-    R
+    R | Scope.Scope
   > =>
     Effect.gen(function* () {
       const abortController = new AbortController();
 
-      // Set up abort signal handling
       if (options.abortSignal) {
         if (options.abortSignal.aborted) {
           abortController.abort();
@@ -111,32 +110,26 @@ export const withStreaming = <A>(
       const warningTimeoutMs = Duration.toMillis(warningTimeout);
       const failTimeoutMs = Duration.toMillis(failTimeout);
 
-      // Set up timeout monitoring fiber - runs in background checking chunk times
+      // Timeout monitor fiber
       const timeoutFiber = Effect.gen(function* () {
         while (true) {
-          // Check if we should stop first
           if (abortController.signal.aborted) {
-            break;
+            return;
           }
-
           yield* Effect.sleep(Duration.seconds(1));
-
           if (abortController.signal.aborted) {
-            break;
+            return;
           }
-
           const currentTime = yield* Clock.currentTimeMillis;
           const lastChunkTime = yield* Ref.get(lastChunkRef);
           const sinceLastChunk = currentTime - lastChunkTime;
-
           if (sinceLastChunk >= failTimeoutMs) {
             yield* Effect.logWarning(
-              `Streaming timed out: no chunk received for ${sinceLastChunk}ms`,
+              `Streaming timed out: no chunk for ${sinceLastChunk}ms`,
             );
             abortController.abort();
             return;
           }
-
           if (sinceLastChunk >= warningTimeoutMs) {
             yield* Effect.logDebug(
               `Chunk delayed: ${sinceLastChunk}ms (warning at ${warningTimeoutMs}ms)`,
@@ -145,26 +138,30 @@ export const withStreaming = <A>(
         }
       }).pipe(Effect.forkScoped);
 
-      // Create output stream with backpressure (queue capacity controls backpressure)
-      const outputStream = Stream.fromQueue(chunkQueue, { capacity: 10 }).pipe(
-        Stream.tap(() => Clock.currentTimeMillis.pipe(Effect.flatMap((t) => Ref.set(lastChunkRef, t)))),
-      );
-
-      // Run the input stream, feeding items into the queue
-      const streamFiber = Stream.runForEach(stream, (chunk) => Queue.offer(chunkQueue, chunk)).pipe(
-        Effect.catchCause((cause) =>
-          Queue.offer(chunkQueue, cause as unknown as A).pipe(Effect.asVoid),
+      // Stream runner - feeds chunks into queue and updates lastChunkRef
+      const streamFiber = stream.pipe(
+        Stream.runForEach((chunk) =>
+          Effect.gen(function* () {
+            yield* Queue.offer(chunkQueue, chunk);
+            yield* Ref.set(lastChunkRef, yield* Clock.currentTimeMillis);
+          }),
         ),
+        Effect.catchCause(() => Effect.unit),
         Effect.forkScoped,
       );
 
-      const fiber = yield* Effect.forkScoped(
-        Effect.zip(timeoutFiber, streamFiber, { concurrent: true }),
-      );
+      // Wait for both fibers, then interrupt them together
+      const fiber = Effect.gen(function* () {
+        const tf = yield* timeoutFiber;
+        const sf = yield* streamFiber;
+        yield* Fiber.interruptAll([tf, sf]);
+      }).pipe(Effect.forkScoped);
+
+      const outputStream = Stream.fromQueue(chunkQueue);
 
       return {
         stream: outputStream,
-        fiber,
+        fiber: yield* fiber,
         abortController,
       };
     });
@@ -174,22 +171,17 @@ export const withStreaming = <A>(
  * Options for streaming a Codex request.
  */
 export interface CodexRequestStreamOptions extends CodexStreamingOptions {
-  /**
-   * Notification method to stream chunks from.
-   */
   readonly notificationMethod?: string;
-
-  /**
-   * Transform function to extract stream items from notifications.
-   */
-  readonly selector?: (notification: CodexProtocol.CodexAppServerIncomingNotification) => A | undefined;
+  readonly selector?: (
+    notification: CodexProtocol.CodexAppServerIncomingNotification,
+  ) => string | undefined;
 }
 
 /**
  * Creates a streaming request that yields chunks as notifications arrive.
  * Combines backpressure, per-chunk timeouts, and abort signal support.
  */
-export const requestStream = <A>(
+export const requestStream = (
   _method: string,
   _payload: unknown,
   options: CodexRequestStreamOptions = {},
@@ -197,50 +189,46 @@ export const requestStream = <A>(
   return <R>(
     client: CodexProtocol.CodexAppServerPatchedProtocol,
   ): Effect.Effect<
-    CodexStreamingResponse<A>,
+    CodexStreamingResponse<string>,
     CodexError.CodexAppServerError,
-    R
-  > => {
-    const warningTimeout = options.chunkWarningTimeout ?? DEFAULT_CHUNK_WARNING_TIMEOUT;
-    const failTimeout = options.chunkFailTimeout ?? DEFAULT_CHUNK_FAIL_TIMEOUT;
-    const abortSignal = options.abortSignal ?? new AbortController().signal;
-
-    return Effect.gen(function* () {
+    R | Scope.Scope
+  > =>
+    Effect.gen(function* () {
       const abortController = new AbortController();
 
-      // Wire up external abort signal
-      if (abortSignal.aborted) {
-        abortController.abort();
-      } else {
-        abortSignal.addEventListener("abort", () => {
+      if (options.abortSignal) {
+        if (options.abortSignal.aborted) {
           abortController.abort();
-        });
+        } else {
+          options.abortSignal.addEventListener("abort", () => {
+            abortController.abort();
+          });
+        }
       }
 
-      const chunkQueue = yield* Queue.unbounded<A>();
+      const chunkQueue = yield* Queue.unbounded<string>();
       const startTime = yield* Clock.currentTimeMillis;
       const lastChunkRef = yield* Ref.make(startTime);
 
-      const warningTimeoutMs = Duration.toMillis(warningTimeout);
-      const failTimeoutMs = Duration.toMillis(failTimeout);
+      const warningTimeoutMs = Duration.toMillis(
+        options.chunkWarningTimeout ?? DEFAULT_CHUNK_WARNING_TIMEOUT,
+      );
+      const failTimeoutMs = Duration.toMillis(
+        options.chunkFailTimeout ?? DEFAULT_CHUNK_FAIL_TIMEOUT,
+      );
 
-      // Set up timeout monitoring fiber
       const timeoutFiber = Effect.gen(function* () {
         while (true) {
           if (abortController.signal.aborted) {
-            break;
+            return;
           }
-
           yield* Effect.sleep(Duration.seconds(1));
-
           if (abortController.signal.aborted) {
-            break;
+            return;
           }
-
           const currentTime = yield* Clock.currentTimeMillis;
           const lastChunkTime = yield* Ref.get(lastChunkRef);
           const sinceLastChunk = currentTime - lastChunkTime;
-
           if (sinceLastChunk >= failTimeoutMs) {
             yield* Effect.logWarning(
               `Streaming timed out: no chunk received for ${sinceLastChunk}ms`,
@@ -248,7 +236,6 @@ export const requestStream = <A>(
             abortController.abort();
             return;
           }
-
           if (sinceLastChunk >= warningTimeoutMs) {
             yield* Effect.logDebug(
               `Chunk delayed: ${sinceLastChunk}ms (warning at ${warningTimeoutMs}ms)`,
@@ -257,43 +244,38 @@ export const requestStream = <A>(
         }
       }).pipe(Effect.forkScoped);
 
-      // Listen for notifications matching the selector
       const selector = options.selector;
       const notificationMethod = options.notificationMethod;
 
       const notificationFiber = Stream.runForEach(
-        client.incomingNotifications.pipe(
-          Stream.filter((notification) =>
-            notificationMethod ? notification.method === notificationMethod : true
-          ),
-          Stream.map((notification) =>
-            selector ? selector(notification) : (notification as unknown as A)
-          ),
-          Stream.filterMap((item) =>
-            item !== undefined ? Chunk.make(item) : Chunk.empty<A>(),
-        ),
-        (item) => Queue.offer(chunkQueue, item)
+        client.incomingNotifications,
+        (notification: CodexProtocol.CodexAppServerIncomingNotification) => {
+          if (notificationMethod && notification.method !== notificationMethod) {
+            return Effect.asVoid(Effect.unit);
+          }
+          const item = selector ? selector(notification) : undefined;
+          if (item === undefined) {
+            return Effect.asVoid(Effect.unit);
+          }
+          return Effect.asVoid(Queue.offer(chunkQueue, item));
+        },
       ).pipe(
-        Effect.catchCause((cause) =>
-          Queue.offer(chunkQueue, cause as unknown as A).pipe(Effect.asVoid),
-        ),
+        Effect.catchCause(() => Effect.asVoid(Effect.unit)),
         Effect.forkScoped,
       );
 
-      // Create output stream with backpressure
-      const outputStream = Stream.fromQueue(chunkQueue, { capacity: 10 });
+      const fiber = Effect.gen(function* () {
+        const tf = yield* timeoutFiber;
+        const nf = yield* notificationFiber;
+        yield* Fiber.interruptAll([tf, nf]);
+      }).pipe(Effect.forkScoped);
 
-      const fiber = yield* Effect.forkScoped(
-        Effect.zip(notificationFiber, timeoutFiber, { concurrent: true }),
-      );
+      const outputStream = Stream.fromQueue(chunkQueue);
 
       return {
         stream: outputStream,
-        fiber,
+        fiber: yield* fiber,
         abortController,
       };
     });
-  };
 };
-
-export type { CodexStreamingOptions, CodexStreamingResponse };
