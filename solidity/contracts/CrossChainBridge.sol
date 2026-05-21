@@ -9,6 +9,10 @@ contract CrossChainBridge {
     uint256 public nonce;
 
     mapping(bytes32 => bool) public processedTransfers;
+    mapping(address => uint256) public senderNonce;
+
+    bytes32 public constant TRANSFER_TYPEHASH = keccak256("Transfer(address recipient,uint256 amount,uint256 nonce,uint256 chainId)");
+    bytes32 public DOMAIN_SEPARATOR;
 
     event TransferInitiated(address indexed sender, uint256 amount, uint256 targetChain, uint256 nonce);
     event TransferProcessed(bytes32 indexed transferHash, address indexed recipient, uint256 amount);
@@ -16,11 +20,19 @@ contract CrossChainBridge {
     constructor(address _bridgeToken, address _validator) {
         bridgeToken = IERC20(_bridgeToken);
         validator = _validator;
+        DOMAIN_SEPARATOR = keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256(bytes("CrossChainBridge")),
+            keccak256(bytes("1")),
+            block.chainid,
+            address(this)
+        ));
     }
 
     function initiateTransfer(uint256 amount, uint256 targetChain) external {
         require(amount > 0, "Amount must be > 0");
         bridgeToken.transferFrom(msg.sender, address(this), amount);
+        senderNonce[msg.sender]++;
         emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
     }
 
@@ -71,7 +83,7 @@ contract CrossChainBridge {
             v, r, s
         );
 
-        // BUG: Missing require(recovered != address(0))
+        require(recovered != address(0), "Invalid signature: zero address");
         return recovered == validator;
     }
 
