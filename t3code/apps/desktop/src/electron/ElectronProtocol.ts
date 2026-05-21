@@ -270,3 +270,7 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(ElectronProtocol, make);
+
+export type DeepLinkAction={readonly type:"openProject";readonly path:string}|{readonly type:"openChat";readonly threadId:string}|{readonly type:"openSettings";readonly section?:string};
+export function parseDeepLinkUrl(url:string):DeepLinkAction|null{try{const p=new URL(url);if(p.protocol!=="t3code:")return null;if(p.hostname==="open"&&p.pathname==="/project"){const path=p.searchParams.get("path");if(path)return{type:"openProject",path};}if(p.hostname==="chat"&&p.pathname==="/thread"){const id=p.searchParams.get("id");if(id)return{type:"openChat",threadId:id};}if(p.hostname==="settings"){const s=p.searchParams.get("section");return{type:"openSettings",...(s?{...(s?{section:s}:{}):{})}as DeepLinkAction;}return null;}catch{return null;}}
+export function handleDeepLink(url:string){const a=parseDeepLinkUrl(url);if(!a)return;return Effect.sync(()=>{}).pipe(Effect.withSpan("desktop.electron.deepLink"));}
