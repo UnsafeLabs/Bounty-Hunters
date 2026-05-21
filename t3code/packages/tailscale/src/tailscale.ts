@@ -322,3 +322,176 @@ export const resolveTailscaleHttpsBaseUrl = (
         : null,
     ),
   );
+
+// ---------------------------------------------------------------------------
+// Peer diagnostics
+// ---------------------------------------------------------------------------
+
+export const TAILSCALE_PING_TIMEOUT_MS = 5_000;
+
+export class TailscalePingError extends Data.TaggedError("TailscalePingError")<{
+  readonly peer: string;
+  readonly message: string;
+  readonly stderr: string;
+}> {}
+
+export class TailscalePingParseError extends Data.TaggedError("TailscalePingParseError")<{
+  readonly raw: string;
+  readonly cause: unknown;
+}> {}
+
+/**
+ * Schema for peer diagnostics returned by tailscale ping.
+ */
+export const PeerDiagnosticsSchema = Schema.Struct({
+  /** Whether the peer is reachable at all. */
+  reachable: Schema.Boolean,
+  /** Connection type: "direct" or "relay" (DERP). */
+  connectionType: Schema.Union([Schema.Literal("direct"), Schema.Literal("relay")]),
+  /** Round-trip latency in milliseconds, null if unreachable. */
+  latencyMs: Schema.NullOr(Schema.Number),
+  /** Direct peer IP address (null for relayed connections). */
+  peerIp: Schema.NullOr(Schema.String),
+  /** DERP relay server name (null for direct connections). */
+  relayServer: Schema.NullOr(Schema.String),
+  /** DERP relay server region (null for direct connections). */
+  relayRegion: Schema.NullOr(Schema.String),
+});
+
+export type PeerDiagnostics = typeof PeerDiagnosticsSchema.Type;
+
+/**
+ * Parse a single line of `tailscale ping` output.
+ *
+ * Direct ping line:  `pong from <peer> via <IP> in <time>ms`
+ * Relayed ping line: `pong from <peer> via DERP(<region>) in <time>ms`
+ * Timeout/unreachable: empty or error output.
+ */
+export const parsePingLine = (
+  line: string,
+): Effect.Effect<Omit<PeerDiagnostics, "reachable">, TailscalePingParseError> => {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.includes("timeout") || trimmed.includes("no reply")) {
+    return Effect.succeed({
+      connectionType: "relay" as const,
+      latencyMs: null,
+      peerIp: null,
+      relayServer: null,
+      relayRegion: null,
+    });
+  }
+
+  // Match: pong from <peer> via <destination> in <time>ms
+  const pongMatch = /^pong\s+from\s+\S+\s+via\s+(.+?)\s+in\s+([\d.]+)\s*ms$/u.exec(trimmed);
+  if (!pongMatch) {
+    return Effect.fail(
+      new TailscalePingParseError({ raw: trimmed, cause: new Error("Unrecognized ping output format") }),
+    );
+  }
+
+  const destination = pongMatch[1]!;
+  const latencyMs = Number.parseFloat(pongMatch[2]!);
+
+  // Check for DERP relay
+  const derpMatch = /^DERP\((.+?)\)$/u.exec(destination);
+  if (derpMatch) {
+    const region = derpMatch[1]!;
+    return Effect.succeed({
+      connectionType: "relay" as const,
+      latencyMs,
+      peerIp: null,
+      relayServer: region,
+      relayRegion: region,
+    });
+  }
+
+  // Direct connection — destination is the peer IP
+  return Effect.succeed({
+    connectionType: "direct" as const,
+    latencyMs,
+    peerIp: destination,
+    relayServer: null,
+    relayRegion: null,
+  });
+};
+
+/**
+ * Run `tailscale ping <peer>` and return parsed diagnostics.
+ *
+ * Accepts a peer identifier (hostname, hostname.domain, or Tailscale IP).
+ */
+export const diagnosePeer = (
+  peer: string,
+): Effect.Effect<
+  PeerDiagnostics,
+  TailscaleCommandError | TailscalePingError | TailscalePingParseError,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
+  Effect.gen(function* () {
+    const args = ["ping", "--c", "1", peer];
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const child = yield* spawner
+      .spawn(
+        ChildProcess.make("tailscale", args, {
+          shell: process.platform === "win32",
+        }),
+      )
+      .pipe(
+        Effect.mapError((cause) =>
+          new TailscaleCommandError({
+            command: ["tailscale", ...args],
+            message: cause instanceof Error ? cause.message : "Failed to spawn tailscale ping.",
+            exitCode: null,
+            stderr: "",
+          }),
+        ),
+      );
+
+    const stdout = yield* child.stdout.pipe(
+      Stream.decodeText(),
+      Stream.runFold(
+        () => "",
+        (acc, chunk) => acc + chunk,
+      ),
+    );
+    const stderr = yield* child.stderr.pipe(
+      Stream.decodeText(),
+      Stream.runFold(
+        () => "",
+        (acc, chunk) => acc + chunk,
+      ),
+    );
+    const exitCode = yield* child.exitCode.pipe(Effect.map(Number));
+
+    if (exitCode !== 0) {
+      return yield* new TailscalePingError({
+        peer,
+        message: `tailscale ping exited with code ${exitCode}.`,
+        stderr,
+      });
+    }
+
+    const firstLine = stdout.split("\n")[0] ?? "";
+    const parsed = yield* parsePingLine(firstLine);
+
+    return {
+      reachable: parsed.latencyMs !== null,
+      ...parsed,
+    };
+  }).pipe(
+    Effect.scoped,
+    Effect.timeoutOption(TAILSCALE_PING_TIMEOUT_MS),
+    Effect.flatMap((result) =>
+      Option.match(result, {
+        onNone: () =>
+          Effect.fail(
+            new TailscalePingError({
+              peer,
+              message: "tailscale ping timed out.",
+              stderr: "",
+            }),
+          ),
+        onSome: Effect.succeed,
+      }),
+    ),
+  );
