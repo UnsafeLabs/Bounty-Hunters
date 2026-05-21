@@ -1,6 +1,7 @@
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
+  BellIcon,
   ChevronRightIcon,
   CloudIcon,
   FolderPlusIcon,
@@ -18,6 +19,8 @@ import {
   ThreadStatusLabel,
 } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
+import { NotificationHistoryPanel } from "./NotificationHistory";
+import { NotificationToastContainer } from "./NotificationToast";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -2489,6 +2492,7 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
+  const [showHistory, setShowHistory] = useState(false);
   const handleSettingsClick = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
@@ -2505,6 +2509,17 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
           <SidebarMenuButton
             size="sm"
             className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+            onClick={() => setShowHistory(true)}
+            title="Notification History"
+          >
+            <BellIcon className="size-3.5" />
+            <span className="text-xs">History</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            size="sm"
+            className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
             onClick={handleSettingsClick}
           >
             <SettingsIcon className="size-3.5" />
@@ -2512,6 +2527,11 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
+      {showHistory && (
+        <div className="mt-2 border-t border-border pt-2">
+          <NotificationHistoryPanel onClose={() => setShowHistory(false)} />
+        </div>
+      )}
     </SidebarFooter>
   );
 });
