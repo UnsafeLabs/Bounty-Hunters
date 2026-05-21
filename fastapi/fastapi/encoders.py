@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import datetime
 from collections import defaultdict, deque
@@ -82,7 +83,8 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
+    bytes: lambda o: base64.b64encode(o).decode("ascii"),
+    memoryview: lambda o: base64.b64encode(bytes(o)).decode("ascii"),
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
