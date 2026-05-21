@@ -1,4 +1,7 @@
+import csv
 import importlib
+from collections.abc import AsyncIterable, Iterable, Mapping, Sequence
+from io import StringIO
 from typing import Any, Protocol, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
@@ -11,6 +14,85 @@ from starlette.responses import RedirectResponse as RedirectResponse  # noqa
 from starlette.responses import Response as Response  # noqa
 from starlette.responses import StreamingResponse as StreamingResponse  # noqa
 from typing_extensions import deprecated
+
+CSVRow = Mapping[str, Any] | Sequence[Any]
+
+
+def _quote_content_disposition_filename(filename: str) -> str:
+    return filename.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _normalise_csv_row(row: CSVRow, headers: Sequence[str] | None) -> Sequence[Any]:
+    if isinstance(row, Mapping):
+        if headers is not None:
+            return [row.get(header, "") for header in headers]
+        return list(row.values())
+    if isinstance(row, str | bytes):
+        return [row]
+    return row
+
+
+def _render_csv_row(
+    row: CSVRow,
+    *,
+    headers: Sequence[str] | None,
+    delimiter: str,
+) -> str:
+    output = StringIO()
+    writer = csv.writer(output, delimiter=delimiter)
+    writer.writerow(_normalise_csv_row(row, headers))
+    return output.getvalue()
+
+
+async def _iterate_csv_rows(
+    content: AsyncIterable[CSVRow] | Iterable[CSVRow],
+    *,
+    headers: Sequence[str] | None,
+    delimiter: str,
+) -> AsyncIterable[str]:
+    if headers is not None:
+        yield _render_csv_row(headers, headers=None, delimiter=delimiter)
+
+    if isinstance(content, AsyncIterable):
+        async for row in content:
+            yield _render_csv_row(row, headers=headers, delimiter=delimiter)
+    else:
+        for row in content:
+            yield _render_csv_row(row, headers=headers, delimiter=delimiter)
+
+
+class StreamingCSVResponse(StreamingResponse):
+    """Stream CSV rows without materialising the full export in memory."""
+
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        content: AsyncIterable[CSVRow] | Iterable[CSVRow],
+        status_code: int = 200,
+        headers: Sequence[str] | None = None,
+        response_headers: Mapping[str, str] | None = None,
+        filename: str = "export.csv",
+        delimiter: str = ",",
+        background: Any = None,
+    ) -> None:
+        rendered_rows = _iterate_csv_rows(
+            content,
+            headers=headers,
+            delimiter=delimiter,
+        )
+        http_headers = dict(response_headers or {})
+        http_headers.setdefault(
+            "Content-Disposition",
+            f'attachment; filename="{_quote_content_disposition_filename(filename)}"',
+        )
+        super().__init__(
+            rendered_rows,
+            status_code=status_code,
+            headers=http_headers,
+            media_type=self.media_type,
+            background=background,
+        )
 
 
 class _UjsonModule(Protocol):
