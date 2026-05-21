@@ -44,13 +44,13 @@ contract StakingVault {
         require(balances[msg.sender] >= amount, "Insufficient balance");
         _updateReward(msg.sender);
 
-        // External call before state update
+        balances[msg.sender] -= amount;
+        totalStaked -= amount;
+
+        // External call after state update (Checks-Effects-Interactions pattern)
         (bool success, ) = payable(msg.sender).call{value: amount}("");
         require(success, "Transfer failed");
 
-        // State update after external call — vulnerable to reentrancy
-        balances[msg.sender] -= amount;
-        totalStaked -= amount;
         emit Withdrawn(msg.sender, amount);
     }
 
@@ -60,10 +60,12 @@ contract StakingVault {
         uint256 reward = rewards[msg.sender];
         require(reward > 0, "No rewards");
 
+        // State update before external call (Checks-Effects-Interactions pattern)
+        rewards[msg.sender] = 0;
+
         (bool success, ) = payable(msg.sender).call{value: reward}("");
         require(success, "Transfer failed");
 
-        rewards[msg.sender] = 0;
         emit RewardClaimed(msg.sender, reward);
     }
 
