@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
+import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../../electron/ElectronMenu.ts";
 import * as ElectronShell from "../../electron/ElectronShell.ts";
@@ -99,7 +100,9 @@ export const setTheme = makeIpcMethod({
   result: Schema.Void,
   handler: Effect.fn("desktop.ipc.window.setTheme")(function* (theme) {
     const electronTheme = yield* ElectronTheme.ElectronTheme;
+    const settings = yield* DesktopAppSettings.DesktopAppSettings;
     yield* electronTheme.setSource(theme);
+    yield* settings.setTheme(theme);
   }),
 });
 

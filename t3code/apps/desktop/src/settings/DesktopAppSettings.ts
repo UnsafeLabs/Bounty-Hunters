@@ -1,8 +1,10 @@
 import {
   DesktopServerExposureModeSchema,
   DesktopUpdateChannelSchema,
+  DesktopThemeSchema,
   type DesktopServerExposureMode,
   type DesktopUpdateChannel,
+  type DesktopTheme,
 } from "@t3tools/contracts";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import * as Context from "effect/Context";
@@ -26,6 +28,7 @@ export interface DesktopSettings {
   readonly tailscaleServePort: number;
   readonly updateChannel: DesktopUpdateChannel;
   readonly updateChannelConfiguredByUser: boolean;
+  readonly theme: DesktopTheme;
 }
 
 export interface DesktopSettingsChange {
@@ -41,6 +44,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   tailscaleServePort: DEFAULT_TAILSCALE_SERVE_PORT,
   updateChannel: "latest",
   updateChannelConfiguredByUser: false,
+  theme: "system",
 };
 
 const DesktopSettingsDocument = Schema.Struct({
@@ -49,6 +53,7 @@ const DesktopSettingsDocument = Schema.Struct({
   tailscaleServePort: Schema.optionalKey(Schema.Number),
   updateChannel: Schema.optionalKey(DesktopUpdateChannelSchema),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
+  theme: Schema.optionalKey(DesktopThemeSchema),
 });
 
 type DesktopSettingsDocument = typeof DesktopSettingsDocument.Type;
@@ -83,6 +88,9 @@ export interface DesktopAppSettingsShape {
   }) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
   readonly setUpdateChannel: (
     channel: DesktopUpdateChannel,
+  ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+  readonly setTheme: (
+    theme: DesktopTheme,
   ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
 }
 
@@ -124,6 +132,10 @@ function normalizeDesktopSettingsDocument(
       ? Option.getOrElse(parsedUpdateChannel, () => defaultSettings.updateChannel)
       : defaultSettings.updateChannel,
     updateChannelConfiguredByUser,
+    theme:
+      parsed.theme === "light" || parsed.theme === "dark" || parsed.theme === "system"
+        ? parsed.theme
+        : defaultSettings.theme,
   };
 }
 
@@ -147,6 +159,9 @@ function toDesktopSettingsDocument(
   }
   if (settings.updateChannelConfiguredByUser !== defaults.updateChannelConfiguredByUser) {
     document.updateChannelConfiguredByUser = settings.updateChannelConfiguredByUser;
+  }
+  if (settings.theme !== defaults.theme) {
+    document.theme = settings.theme;
   }
 
   return document;
@@ -191,6 +206,18 @@ function setUpdateChannel(
         ...settings,
         updateChannel: requestedChannel,
         updateChannelConfiguredByUser: true,
+      };
+}
+
+function setTheme(
+  settings: DesktopSettings,
+  theme: DesktopTheme,
+): DesktopSettings {
+  return settings.theme === theme
+    ? settings
+    : {
+        ...settings,
+        theme,
       };
 }
 
@@ -285,6 +312,10 @@ export const layer = Layer.effect(
         persist((settings) => setUpdateChannel(settings, channel)).pipe(
           Effect.withSpan("desktop.settings.setUpdateChannel", { attributes: { channel } }),
         ),
+      setTheme: (theme) =>
+        persist((settings) => setTheme(settings, theme)).pipe(
+          Effect.withSpan("desktop.settings.setTheme", { attributes: { theme } }),
+        ),
     });
   }),
 );
@@ -313,6 +344,7 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
           update((settings) => setServerExposureMode(settings, mode)),
         setTailscaleServe: (input) => update((settings) => setTailscaleServe(settings, input)),
         setUpdateChannel: (channel) => update((settings) => setUpdateChannel(settings, channel)),
+        setTheme: (theme) => update((settings) => setTheme(settings, theme)),
       });
     }),
   );

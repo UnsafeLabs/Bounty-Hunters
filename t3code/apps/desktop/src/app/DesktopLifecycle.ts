@@ -6,7 +6,9 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 
-import type * as Electron from "electron";
+import * as Electron from "electron";
+import * as IpcChannels from "../ipc/channels.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
@@ -190,11 +192,30 @@ export const layer = Layer.succeed(
       const context = yield* Effect.context<DesktopLifecycleRuntimeServices>();
       const runEffect = Effect.runPromiseWith(context);
       let quitAllowed = false;
+
       yield* electronTheme.onUpdated(() => {
         void runEffect(
-          desktopWindow.syncAppearance.pipe(Effect.withSpan("desktop.lifecycle.themeUpdated")),
+          Effect.gen(function* () {
+            const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
+            const currentTheme = (yield* appSettings.get).theme;
+            if (currentTheme === "system") {
+              yield* desktopWindow.syncAppearance.pipe(
+                Effect.withSpan("desktop.lifecycle.themeUpdated"),
+              );
+              electronApp.sendToAll(
+                IpcChannels.THEME_UPDATE_CHANNEL,
+                Electron.nativeTheme.shouldUseDarkColors ? "dark" : "light",
+              );
+            }
+          }).pipe(Effect.withSpan("desktop.lifecycle.nativeThemeUpdated")),
         );
       });
+
+      // Sync initial theme from settings
+      const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
+      const initialTheme = (yield* appSettings.get).theme;
+      yield* electronTheme.setSource(initialTheme);
+      yield* desktopWindow.syncAppearance.pipe(Effect.withSpan("desktop.lifecycle.initialThemeSync"));
       yield* electronApp.on("before-quit", (event: Electron.Event) => {
         handleBeforeQuit(
           event,

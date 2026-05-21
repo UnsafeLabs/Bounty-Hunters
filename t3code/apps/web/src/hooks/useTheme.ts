@@ -164,10 +164,18 @@ function subscribe(listener: () => void): () => void {
   };
   window.addEventListener("storage", handleStorage);
 
+  // Listen for theme updates from the desktop
+  const handleDesktopThemeUpdate = () => {
+    applyTheme(getStored(), true);
+    emitChange();
+  };
+  const unregisterDesktop = window.desktopBridge?.onThemeUpdate?.(handleDesktopThemeUpdate);
+
   return () => {
     listeners = listeners.filter((l) => l !== listener);
     mq.removeEventListener("change", handleChange);
     window.removeEventListener("storage", handleStorage);
+    unregisterDesktop?.();
   };
 }
 
