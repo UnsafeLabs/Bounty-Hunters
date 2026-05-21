@@ -20,6 +20,7 @@ import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopState from "./DesktopState.ts";
+import * as DesktopTray from "../electron/ElectronTray.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 
 const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
@@ -215,6 +216,8 @@ const startup = Effect.gen(function* () {
   yield* appIdentity.configure;
   yield* applicationMenu.configure;
   yield* electronProtocol.registerDesktopFileProtocol;
+  const electronTray = yield* DesktopTray.ElectronTray;
+  yield* electronTray.create;
   yield* updates.configure;
   yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
 }).pipe(Effect.withSpan("desktop.startup"));
