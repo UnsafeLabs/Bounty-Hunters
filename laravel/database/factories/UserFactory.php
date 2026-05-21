@@ -13,9 +13,11 @@ use Illuminate\Support\Str;
 class UserFactory extends Factory
 {
     /**
-     * The current password being used by the factory.
+     * Cached password hashes by bcrypt round count.
+     *
+     * @var array<int, string>
      */
-    protected static ?string $password;
+    protected static array $passwords = [];
 
     /**
      * Define the model's default state.
@@ -24,11 +26,15 @@ class UserFactory extends Factory
      */
     public function definition(): array
     {
+        $rounds = (int) config('hashing.bcrypt.rounds', 12);
+
         return [
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
-            'password' => static::$password ??= Hash::make('password'),
+            'password' => static::$passwords[$rounds] ??= Hash::make('password', [
+                'rounds' => $rounds,
+            ]),
             'remember_token' => Str::random(10),
         ];
     }
