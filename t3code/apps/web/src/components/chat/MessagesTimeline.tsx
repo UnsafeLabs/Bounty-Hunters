@@ -190,6 +190,45 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }
   }, [listRef, onIsAtEndChange]);
 
+  // Keyboard navigation: Arrow Up/Down to move between messages, Enter to expand/reply
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const list = listRef.current;
+      if (!list) return;
+
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        const state = list.getState?.();
+        if (!state) return;
+
+        const currentIndex = state.visibleRange ? state.visibleRange[0] : 0;
+        const nextIndex = Math.max(0, Math.min(rows.length - 1, currentIndex + direction));
+
+        list.scrollToIndex?.(nextIndex, { animated: true, alignment: "smart" });
+      }
+
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const state = list.getState?.();
+        if (!state) return;
+
+        const currentIndex = state.visibleRange ? state.visibleRange[0] : 0;
+        const currentRow = rows[currentIndex];
+        if (!currentRow) return;
+        if (currentRow.kind === "message" && currentRow.message.role === "user") {
+          const composerInput = document.querySelector(
+            '[data-chat-composer-input="true"]'
+          ) as HTMLInputElement | null;
+          composerInput?.focus();
+        }
+      }
+    },
+    [listRef, rows],
+  );
+
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {
     const previousRowCount = previousRowCountRef.current;
@@ -246,7 +285,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true" role="listitem">
         <TimelineRowContent row={item} />
       </div>
     ),
@@ -266,21 +305,29 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <LegendList<MessagesTimelineRow>
-          ref={listRef}
-          data={rows}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          estimatedItemSize={90}
-          initialScrollAtEnd
-          maintainScrollAtEnd
-          maintainScrollAtEndThreshold={0.1}
-          maintainVisibleContentPosition
-          onScroll={handleScroll}
-          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-          ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={TIMELINE_LIST_FOOTER}
-        />
+        <div
+          tabIndex={0}
+          role="list"
+          aria-label="Chat messages timeline"
+          onKeyDown={handleKeyDown}
+          className="h-full"
+        >
+          <LegendList<MessagesTimelineRow>
+            ref={listRef}
+            data={rows}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            estimatedItemSize={90}
+            initialScrollAtEnd
+            maintainScrollAtEnd
+            maintainScrollAtEndThreshold={0.1}
+            maintainVisibleContentPosition
+            onScroll={handleScroll}
+            className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListFooterComponent={TIMELINE_LIST_FOOTER}
+          />
+        </div>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );
