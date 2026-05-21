@@ -120,12 +120,15 @@ const make = Effect.gen(function* () {
     );
   };
 
-  const configure = Effect.gen(function* () {
+    const configure = Effect.gen(function* () {
     const checkForUpdatesClick = () => {
       runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
     };
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
+    };
+    const devClick = (action: string) => () => {
+      runMenuEffect(action, dispatchMenuAction(action));
     };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
@@ -187,6 +190,62 @@ const make = Effect.gen(function* () {
           { role: "zoomOut" },
           { type: "separator" },
           { role: "togglefullscreen" },
+        ],
+      },
+      {
+        label: "Developer",
+        submenu: [
+          {
+            label: "Toggle Terminal",
+            accelerator: "CmdOrCtrl+`",
+            click: devClick("toggle-terminal"),
+          },
+          {
+            label: "Clear Terminal",
+            accelerator: "CmdOrCtrl+K",
+            click: devClick("clear-terminal"),
+          },
+          { type: "separator" },
+          {
+            label: "Restart Backend",
+            accelerator: "CmdOrCtrl+Shift+R",
+            click: devClick("restart-backend"),
+          },
+          { type: "separator" },
+          {
+            label: "Open DevTools",
+            accelerator: process.platform === "darwin" ? "Cmd+Alt+I" : "F12",
+            click: devClick("open-devtools"),
+          },
+        ],
+      },
+      {
+        label: "Git",
+        submenu: [
+          {
+            label: "Stage All Changes",
+            click: devClick("git-stage-all"),
+          },
+          {
+            label: "Commit",
+            accelerator: "CmdOrCtrl+Shift+C",
+            click: devClick("git-commit"),
+          },
+          { type: "separator" },
+          {
+            label: "Push",
+            click: devClick("git-push"),
+          },
+          {
+            label: "Pull",
+            accelerator: "CmdOrCtrl+Shift+P",
+            click: devClick("git-pull"),
+          },
+          { type: "separator" },
+          {
+            label: "Create Branch…",
+            click: devClick("git-create-branch"),
+          },
         ],
       },
       { role: "windowMenu" },
