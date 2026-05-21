@@ -891,6 +891,14 @@ class FastAPI(Starlette):
                 """
             ),
         ] = None,
+        redoc_css_url: Annotated[
+            str | None,
+            Doc(
+                """
+                The URL to use to load the ReDoc CSS.
+                """
+            ),
+        ] = None,
         redoc_favicon_url: Annotated[
             str | None,
             Doc(
@@ -932,6 +940,7 @@ class FastAPI(Starlette):
         self.swagger_css_url = swagger_css_url
         self.swagger_favicon_url = swagger_favicon_url
         self.redoc_js_url = redoc_js_url
+        self.redoc_css_url = redoc_css_url
         self.redoc_favicon_url = redoc_favicon_url
         self.extra = extra
         self.openapi_version: Annotated[
@@ -1203,6 +1212,8 @@ class FastAPI(Starlette):
                 redoc_kwargs = {}
                 if self.redoc_js_url is not None:
                     redoc_kwargs["redoc_js_url"] = self.redoc_js_url
+                if self.redoc_css_url is not None:
+                    redoc_kwargs["redoc_css_url"] = self.redoc_css_url
                 if self.redoc_favicon_url is not None:
                     redoc_kwargs["redoc_favicon_url"] = self.redoc_favicon_url
                 return get_redoc_html(

@@ -46,15 +46,18 @@ def test_strings_in_generated_redoc():
 
 def test_strings_in_custom_redoc():
     redoc_js_url = "fake_redoc_file.js"
+    redoc_css_url = "fake_redoc_file.css"
     redoc_favicon_url = "fake_redoc_file.png"
     html = get_redoc_html(
         openapi_url="/docs",
         title="title",
         redoc_js_url=redoc_js_url,
+        redoc_css_url=redoc_css_url,
         redoc_favicon_url=redoc_favicon_url,
     )
     body_content = html.body.decode()
     assert redoc_js_url in body_content
+    assert redoc_css_url in body_content
     assert redoc_favicon_url in body_content
 
 
@@ -75,6 +78,7 @@ def test_fastapi_custom_docs_urls():
         swagger_css_url="https://example.com/swagger.css",
         swagger_favicon_url="https://example.com/swagger-favicon.png",
         redoc_js_url="https://example.com/redoc.js",
+        redoc_css_url="https://example.com/redoc.css",
         redoc_favicon_url="https://example.com/redoc-favicon.png",
     )
     client = TestClient(app)
@@ -90,4 +94,5 @@ def test_fastapi_custom_docs_urls():
     assert response_redoc.status_code == 200
     html_redoc = response_redoc.text
     assert "https://example.com/redoc.js" in html_redoc
+    assert "https://example.com/redoc.css" in html_redoc
     assert "https://example.com/redoc-favicon.png" in html_redoc
