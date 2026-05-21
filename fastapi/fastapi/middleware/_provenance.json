@@ -1,0 +1,5 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Private system, developer, and runtime instructions are intentionally not copied into repository artifacts. This submission was produced by OpenAI Codex for issue #797 with a scoped request ID middleware implementation.",
+  "timestamp": "2026-05-21T15:45:28Z"
+}
