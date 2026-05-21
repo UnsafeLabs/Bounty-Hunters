@@ -308,6 +308,42 @@ def test_encode_deque_encodes_child_models():
     assert jsonable_encoder(dq)[0]["test"] == "test"
 
 
+def test_encode_bytes_base64():
+    data = b"hello world"
+    assert jsonable_encoder(data) == "aGVsbG8gd29ybGQ="
+
+
+def test_encode_bytes_in_dict():
+    assert jsonable_encoder({"key": b"test"}) == {"key": "dGVzdA=="}
+
+
+def test_encode_bytes_in_list():
+    assert jsonable_encoder([b"a", b"b"]) == ["YQ==", "Yg=="]
+
+
+def test_encode_bytes_nested():
+    data = {"outer": {"inner": b"nested"}}
+    assert jsonable_encoder(data) == {"outer": {"inner": "bmVzdGVk"}}
+
+
+def test_encode_memoryview_base64():
+    assert jsonable_encoder(memoryview(b"hello")) == "aGVsbG8="
+
+
+def test_encode_non_utf8_bytes():
+    assert jsonable_encoder(b"\xff\xfe\x00\x01") == "//4AAQ=="
+
+
+def test_encode_bytes_in_dataclass():
+    @dataclass
+    class BinaryItem:
+        name: str
+        content: bytes
+
+    item = BinaryItem(name="test", content=b"data")
+    assert jsonable_encoder(item) == {"name": "test", "content": "ZGF0YQ=="}
+
+
 def test_encode_pydantic_undefined():
     data = {"value": Undefined}
     assert jsonable_encoder(data) == {"value": None}
