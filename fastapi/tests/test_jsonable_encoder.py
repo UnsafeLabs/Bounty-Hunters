@@ -308,30 +308,18 @@ def test_encode_deque_encodes_child_models():
     assert jsonable_encoder(dq)[0]["test"] == "test"
 
 
-def test_encode_bytes_base64():
-    data = b"hello world"
-    assert jsonable_encoder(data) == "aGVsbG8gd29ybGQ="
-
-
-def test_encode_bytes_in_dict():
-    assert jsonable_encoder({"key": b"test"}) == {"key": "dGVzdA=="}
-
-
-def test_encode_bytes_in_list():
-    assert jsonable_encoder([b"a", b"b"]) == ["YQ==", "Yg=="]
-
-
-def test_encode_bytes_nested():
-    data = {"outer": {"inner": b"nested"}}
-    assert jsonable_encoder(data) == {"outer": {"inner": "bmVzdGVk"}}
-
-
-def test_encode_memoryview_base64():
-    assert jsonable_encoder(memoryview(b"hello")) == "aGVsbG8="
-
-
-def test_encode_non_utf8_bytes():
+def test_encode_bytes():
+    assert jsonable_encoder(b"hello world") == "aGVsbG8gd29ybGQ="
     assert jsonable_encoder(b"\xff\xfe\x00\x01") == "//4AAQ=="
+    assert jsonable_encoder({"key": b"test"}) == {"key": "dGVzdA=="}
+    assert jsonable_encoder([b"a", b"b"]) == ["YQ==", "Yg=="]
+    assert jsonable_encoder({"outer": {"inner": b"nested"}}) == {
+        "outer": {"inner": "bmVzdGVk"}
+    }
+
+
+def test_encode_memoryview():
+    assert jsonable_encoder(memoryview(b"hello")) == "aGVsbG8="
 
 
 def test_encode_bytes_in_dataclass():
