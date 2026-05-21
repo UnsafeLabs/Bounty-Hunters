@@ -108,6 +108,7 @@
        01  WS-SIG-VERIFY-RESULT        PIC X(1).
            88  WS-SIG-VALID            VALUE 'V'.
            88  WS-SIG-INVALID          VALUE 'I'.
+       01  WS-SIG-VERIFY-BUFFER        PIC N(64) USAGE NATIONAL.
        01  WS-MIN-KEY-LENGTH           PIC 9(5)  VALUE 02048.
        01  WS-ALLOWED-ALGORITHMS.
            05  FILLER  PIC X(20) VALUE 'SHA256WITHRSA       '.
@@ -248,6 +249,14 @@
            END-PERFORM
            IF WS-ALGO-FOUND = 'N'
                SET WS-SIG-INVALID TO TRUE
+               GO TO 4000-EXIT
+           END-IF
+           MOVE WS-CERT-FINGERPRINT TO WS-SIG-VERIFY-BUFFER
+           IF WS-SIG-VERIFY-BUFFER NOT = CS-FINGERPRINT
+               SET WS-SIG-INVALID TO TRUE
+               DISPLAY 'TLSVAL-E041: FINGERPRINT MISMATCH'
+               DISPLAY 'EXPECTED: ' CS-FINGERPRINT
+               DISPLAY 'ACTUAL  : ' WS-SIG-VERIFY-BUFFER
                GO TO 4000-EXIT
            END-IF
            SET WS-SIG-VALID TO TRUE
