@@ -138,6 +138,109 @@ const EnvServerConfig = Config.all({
   ),
 });
 
+// Environment variable registry for validation
+const ENV_VAR_SCHEMA: Array<{
+  key: string;
+  required: boolean;
+  description: string;
+  pattern?: RegExp;
+}> = [
+  { key: "T3CODE_LOG_LEVEL", required: false, description: "Server log level (Debug|Info|Warn|Error)" },
+  { key: "T3CODE_TRACE_MIN_LEVEL", required: false, description: "Trace minimum level" },
+  { key: "T3CODE_TRACE_TIMING_ENABLED", required: false, description: "Enable trace timing" },
+  { key: "T3CODE_TRACE_FILE", required: false, description: "Trace output file path" },
+  { key: "T3CODE_TRACE_MAX_BYTES", required: false, description: "Max trace file size in bytes" },
+  { key: "T3CODE_TRACE_MAX_FILES", required: false, description: "Max number of trace files" },
+  { key: "T3CODE_TRACE_BATCH_WINDOW_MS", required: false, description: "Trace batch window in ms" },
+  { key: "T3CODE_OTLP_TRACES_URL", required: false, description: "OTLP traces collector URL" },
+  { key: "T3CODE_OTLP_METRICS_URL", required: false, description: "OTLP metrics collector URL" },
+  { key: "T3CODE_OTLP_EXPORT_INTERVAL_MS", required: false, description: "OTLP export interval in ms" },
+  { key: "T3CODE_OTLP_SERVICE_NAME", required: false, description: "OTLP service name" },
+  { key: "T3CODE_MODE", required: false, description: "Runtime mode (web|desktop)" },
+  { key: "T3CODE_PORT", required: false, description: "Server port number" },
+  { key: "T3CODE_HOST", required: false, description: "Server bind host" },
+  { key: "T3CODE_HOME", required: false, description: "Base directory for state and config" },
+  { key: "VITE_DEV_SERVER_URL", required: false, description: "Dev web server URL for proxy" },
+  { key: "T3CODE_NO_BROWSER", required: false, description: "Disable automatic browser opening" },
+  { key: "T3CODE_BOOTSTRAP_FD", required: false, description: "File descriptor for bootstrap secrets" },
+  { key: "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD", required: false, description: "Auto-create project from working directory" },
+  { key: "T3CODE_LOG_WS_EVENTS", required: false, description: "Log WebSocket events" },
+  { key: "T3CODE_TAILSCALE_SERVE", required: false, description: "Enable Tailscale Serve" },
+  { key: "T3CODE_TAILSCALE_SERVE_PORT", required: false, description: "Tailscale Serve HTTPS port" },
+];
+
+interface EnvVarValidation {
+  key: string;
+  description: string;
+  required: boolean;
+  present: boolean;
+  value: string;
+  valid: boolean;
+  error?: string;
+}
+
+/**
+ * Validate all registered environment variables.
+ * Returns a list of validation results and whether the config is valid.
+ */
+export function validateEnvironmentVars(): {
+  valid: boolean;
+  results: EnvVarValidation[];
+} {
+  const results: EnvVarValidation[] = [];
+  let valid = true;
+
+  for (const entry of ENV_VAR_SCHEMA) {
+    const value = process.env[entry.key];
+    const present = value !== undefined;
+    let validVar = true;
+    let error: string | undefined;
+
+    if (present && entry.pattern && !entry.pattern.test(value)) {
+      validVar = false;
+      error = `value "${value}" does not match expected format`;
+    }
+
+    if (!present && entry.required) {
+      validVar = false;
+      valid = false;
+    }
+
+    if (!validVar && entry.required) {
+      valid = false;
+    }
+
+    results.push({
+      key: entry.key,
+      description: entry.description,
+      required: entry.required,
+      present,
+      value: present ? value : "(not set)",
+      valid: validVar,
+      error,
+    });
+  }
+
+  return { valid, results };
+}
+
+/**
+ * Format and print the validation table to console.
+ */
+export function printEnvValidationTable(results: EnvVarValidation[]): void {
+  const { Console } = Effect.sync(() => {
+    // Use Effect.sync to access Console synchronously
+    return globalThis.console as Console & { table: (obj: unknown) => void };
+  });
+  void Console.table(results.map((r) => ({
+    Variable: r.key,
+    Required: r.required ? "YES" : "no",
+    Present: r.present ? "YES" : "MISSING",
+    Value: r.value,
+    Status: r.error ? `INVALID: ${r.error}` : r.present ? "OK" : "—",
+  })));
+}
+
 export interface CliServerFlags {
   readonly mode: Option.Option<RuntimeMode>;
   readonly port: Option.Option<number>;
@@ -151,6 +254,7 @@ export interface CliServerFlags {
   readonly logWebSocketEvents: Option.Option<boolean>;
   readonly tailscaleServeEnabled: Option.Option<boolean>;
   readonly tailscaleServePort: Option.Option<number>;
+  readonly validateConfig: Option.Option<boolean>;
 }
 
 export interface CliAuthLocationFlags {
@@ -166,6 +270,13 @@ export const sharedServerLocationFlags = {
 export const projectLocationFlags = {
   baseDir: baseDirFlag,
 } as const;
+
+export const validateConfigFlag = Flag.boolean("validate-config").pipe(
+  Flag.withDescription(
+    "Validate environment variables and exit without starting the server.",
+  ),
+  Flag.optional,
+);
 
 export const sharedServerCommandFlags = {
   mode: modeFlag,
@@ -185,6 +296,7 @@ export const sharedServerCommandFlags = {
   logWebSocketEvents: logWebSocketEventsFlag,
   tailscaleServeEnabled: tailscaleServeFlag,
   tailscaleServePort: tailscaleServePortFlag,
+  "validate-config": validateConfigFlag,
 } as const;
 
 export const authLocationFlags = sharedServerLocationFlags;
