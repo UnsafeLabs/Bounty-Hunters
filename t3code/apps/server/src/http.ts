@@ -24,6 +24,7 @@ import {
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
+import { PrometheusMetricsService } from "./observability/Services/PrometheusMetrics.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { respondToAuthError } from "./auth/http.ts";
@@ -230,6 +231,19 @@ export const projectFaviconRouteLayer = HttpRouter.add(
       ),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const metricsRouteLayer = HttpRouter.add(
+  "GET",
+  "/metrics",
+  Effect.gen(function* () {
+    const metrics = yield* PrometheusMetricsService;
+    const text = yield* metrics.getMetricsText();
+    return HttpServerResponse.text(text, {
+      status: 200,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }),
 );
 
 export const staticAndDevRouteLayer = HttpRouter.add(
