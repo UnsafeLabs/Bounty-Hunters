@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { isElectron } from "~/env";
 import { cn } from "~/lib/utils";
@@ -16,6 +16,28 @@ function getDiffPanelHeaderRowClassName(mode: DiffPanelMode) {
       : "h-12 wco:max-h-[env(titlebar-area-height)]",
   );
 }
+
+// --- Inline commenting types ---
+
+export type AnnotationSide = "deletions" | "additions";
+
+export interface InlineComment {
+  id: string;
+  text: string;
+  createdAt: number;
+}
+
+export interface InlineCommentKey {
+  filePath: string;
+  side: AnnotationSide;
+  lineNumber: number;
+}
+
+function serializeCommentKey(key: InlineCommentKey): string {
+  return `${key.filePath}\x00${key.side}\x00${key.lineNumber}`;
+}
+
+// --- Main exports ---
 
 export function DiffPanelShell(props: {
   mode: DiffPanelMode;
@@ -44,6 +66,73 @@ export function DiffPanelShell(props: {
     </div>
   );
 }
+
+// --- Inline comment hook ---
+
+/**
+ * Manages inline comments keyed by (filePath, side, lineNumber).
+ * Comments persist for the session and are cleared when the patch changes.
+ */
+export function useInlineComments() {
+  const [commentsMap, setCommentsMap] = useState<
+    Record<string, InlineComment[]>
+  >(() => ({}));
+  const [activeTarget, setActiveTarget] = useState<{
+    key: InlineCommentKey;
+    mode: "add" | "view";
+  } | null>(null);
+
+  const getComments = useCallback(
+    (key: InlineCommentKey): InlineComment[] => {
+      return commentsMap[serializeCommentKey(key)] ?? [];
+    },
+    [commentsMap],
+  );
+
+  const getCommentCount = useCallback(
+    (key: InlineCommentKey): number => {
+      return getComments(key).length;
+    },
+    [getComments],
+  );
+
+  const addComment = useCallback((key: InlineCommentKey, text: string) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setCommentsMap((prev) => {
+      const serialized = serializeCommentKey(key);
+      const existing = prev[serialized] ?? [];
+      return { ...prev, [serialized]: [...existing, { id, text, createdAt: Date.now() }] };
+    });
+  }, []);
+
+  const deleteComment = useCallback((key: InlineCommentKey, id: string) => {
+    setCommentsMap((prev) => {
+      const serialized = serializeCommentKey(key);
+      const existing = prev[serialized] ?? [];
+      return {
+        ...prev,
+        [serialized]: existing.filter((c) => c.id !== id),
+      };
+    });
+  }, []);
+
+  const clearActiveTarget = useCallback(() => {
+    setActiveTarget(null);
+  }, []);
+
+  return {
+    commentsMap,
+    activeTarget,
+    setActiveTarget,
+    getComments,
+    getCommentCount,
+    addComment,
+    deleteComment,
+    clearActiveTarget,
+  };
+}
+
+// --- Skeleton components ---
 
 export function DiffPanelHeaderSkeleton() {
   return (

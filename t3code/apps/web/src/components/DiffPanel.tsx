@@ -9,6 +9,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   Columns2Icon,
+  MessageCircleIcon,
   PilcrowIcon,
   Rows3Icon,
   TextWrapIcon,
@@ -37,7 +38,16 @@ import { createThreadSelectorByRef } from "../storeSelectors";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { useSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
-import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
+import ChatMarkdown from "./ChatMarkdown";
+import {
+  DiffPanelLoadingState,
+  DiffPanelShell,
+  type AnnotationSide,
+  type DiffPanelMode,
+  type InlineComment,
+  type InlineCommentKey,
+  useInlineComments,
+} from "./DiffPanelShell";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 
 type DiffRenderMode = "stacked" | "split";
@@ -177,6 +187,146 @@ function getDiffCollapseIconClassName(fileDiff: FileDiffMetadata): string {
   }
 }
 
+// --- Inline comment overlay components ---
+
+interface CommentInputPopoverProps {
+  onSubmit: (text: string) => void;
+  onCancel: () => void;
+}
+
+function CommentInputPopover({ onSubmit, onCancel }: CommentInputPopoverProps) {
+  const [text, setText] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+        return;
+      }
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        if (text.trim()) {
+          onSubmit(text.trim());
+        }
+      }
+    },
+    [onCancel, onSubmit, text],
+  );
+
+  return (
+    <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-md border border-border bg-background p-2 shadow-md">
+      <textarea
+        ref={textareaRef}
+        className="min-h-[60px] w-full resize-none rounded border border-border bg-background p-2 text-xs text-foreground/80 placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+        placeholder="Add a comment... (Cmd+Enter to submit, Esc to cancel)"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={handleKeyDown}
+        rows={3}
+      />
+      <div className="mt-1.5 flex items-center justify-end gap-1">
+        <button
+          type="button"
+          className="rounded-sm border border-border/70 bg-background px-2 py-1 text-xs text-muted-foreground/80 hover:border-border hover:text-foreground/80"
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="rounded-sm border border-primary/30 bg-primary px-2 py-1 text-xs text-primary-foreground hover:border-primary/60"
+          onClick={() => {
+            if (text.trim()) {
+              onSubmit(text.trim());
+            }
+          }}
+        >
+          Comment
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface CommentsPopoverProps {
+  comments: InlineComment[];
+  onAddComment: () => void;
+  onDeleteComment: (id: string) => void;
+  cwd: string | undefined;
+}
+
+function CommentsPopover({ comments, onAddComment, onDeleteComment, cwd }: CommentsPopoverProps) {
+  const [expanded, setExpanded] = useState(true);
+
+  if (comments.length === 0) {
+    return (
+      <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-md border border-border bg-background p-2 shadow-md">
+        <p className="mb-2 text-xs text-muted-foreground/70">No comments yet.</p>
+        <button
+          type="button"
+          className="w-full rounded-sm border border-border/70 bg-background px-2 py-1 text-xs text-muted-foreground/80 hover:border-border hover:text-foreground/80"
+          onClick={onAddComment}
+        >
+          Add comment
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-md border border-border bg-background p-2 shadow-md">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-foreground/80">
+          {comments.length} comment{comments.length === 1 ? "" : "s"}
+        </span>
+        <button
+          type="button"
+          className="text-xs text-muted-foreground/60 hover:text-muted-foreground/90"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "Collapse" : "Expand"}
+        </button>
+      </div>
+      {expanded && (
+        <div className="space-y-2">
+          {comments.map((comment) => (
+            <div
+              key={comment.id}
+              className="relative rounded-sm border border-border/60 bg-card/50 p-2"
+            >
+              <div className="text-xs leading-relaxed text-foreground/80">
+                <ChatMarkdown text={comment.text} cwd={cwd} />
+              </div>
+              <button
+                type="button"
+                className="absolute right-1 top-1 size-4 text-muted-foreground/40 hover:text-destructive"
+                onClick={() => onDeleteComment(comment.id)}
+                aria-label="Delete comment"
+                title="Delete comment"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        className="mt-2 w-full rounded-sm border border-border/70 bg-background px-2 py-1 text-xs text-muted-foreground/80 hover:border-border hover:text-foreground/80"
+        onClick={onAddComment}
+      >
+        Add another
+      </button>
+    </div>
+  );
+}
+
 interface DiffPanelProps {
   mode?: DiffPanelMode;
 }
@@ -198,6 +348,18 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const previousDiffOpenRef = useRef(false);
   const [canScrollTurnStripLeft, setCanScrollTurnStripLeft] = useState(false);
   const [canScrollTurnStripRight, setCanScrollTurnStripRight] = useState(false);
+
+  // --- Inline comment state ---
+  const {
+    activeTarget,
+    setActiveTarget,
+    getComments,
+    getCommentCount,
+    addComment,
+    deleteComment,
+    clearActiveTarget,
+  } = useInlineComments();
+
   const routeThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
@@ -336,6 +498,28 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     );
   }, [renderablePatch]);
 
+  // --- Clear active target when patch changes ---
+  const lastPatchRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (selectedPatch !== lastPatchRef.current) {
+      lastPatchRef.current = selectedPatch;
+      clearActiveTarget();
+    }
+  }, [selectedPatch, clearActiveTarget]);
+
+  // --- Escape key closes active comment input ---
+  useEffect(() => {
+    if (!activeTarget || activeTarget.mode !== "add") return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        clearActiveTarget();
+      }
+    };
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [activeTarget, clearActiveTarget]);
+
   useEffect(() => {
     if (renderableFiles.length === 0) {
       setCollapsedDiffFileKeys((current) => (current.size === 0 ? current : new Set()));
@@ -472,6 +656,41 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     const selectedChip = element.querySelector<HTMLElement>("[data-turn-chip-selected='true']");
     selectedChip?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
   }, [selectedTurn?.turnId, selectedTurnId]);
+
+  // --- Inline comment helpers ---
+  const handleLineClick = useCallback(
+    (key: InlineCommentKey) => {
+      if (
+        activeTarget?.key.filePath === key.filePath &&
+        activeTarget.key.side === key.side &&
+        activeTarget.key.lineNumber === key.lineNumber
+      ) {
+        clearActiveTarget();
+        return;
+      }
+      const existing = getComments(key);
+      setActiveTarget({
+        key,
+        mode: existing.length > 0 ? "view" : "add",
+      });
+    },
+    [activeTarget, clearActiveTarget, getComments, setActiveTarget],
+  );
+
+  const handleAddCommentSubmit = useCallback(
+    (key: InlineCommentKey, text: string) => {
+      addComment(key, text);
+      setActiveTarget({ key, mode: "view" });
+    },
+    [addComment, setActiveTarget],
+  );
+
+  const handleDeleteComment = useCallback(
+    (key: InlineCommentKey, id: string) => {
+      deleteComment(key, id);
+    },
+    [deleteComment],
+  );
 
   const headerRow = (
     <>
@@ -683,26 +902,28 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                       <FileDiff
                         fileDiff={fileDiff}
                         renderHeaderPrefix={() => (
-                          <button
-                            type="button"
-                            className={cn(
-                              "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
-                              getDiffCollapseIconClassName(fileDiff),
-                            )}
-                            aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
-                            aria-expanded={!collapsed}
-                            title={collapsed ? "Expand diff" : "Collapse diff"}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              toggleDiffFileCollapsed(fileKey);
-                            }}
-                          >
-                            {collapsed ? (
-                              <ChevronRightIcon className="size-4" />
-                            ) : (
-                              <ChevronDownIcon className="size-4" />
-                            )}
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              className={cn(
+                                "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
+                                getDiffCollapseIconClassName(fileDiff),
+                              )}
+                              aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
+                              aria-expanded={!collapsed}
+                              title={collapsed ? "Expand diff" : "Collapse diff"}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleDiffFileCollapsed(fileKey);
+                              }}
+                            >
+                              {collapsed ? (
+                                <ChevronRightIcon className="size-4" />
+                              ) : (
+                                <ChevronDownIcon className="size-4" />
+                              )}
+                            </button>
+                          </div>
                         )}
                         options={{
                           collapsed,
@@ -712,6 +933,85 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                           theme: resolveDiffThemeName(resolvedTheme),
                           themeType: resolvedTheme as DiffThemeType,
                           unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
+                        }}
+                        renderGutterUtility={(
+                          getHoveredLine: () =>
+                            | { lineNumber: number; side: "deletions" | "additions" }
+                            | undefined,
+                        ) => {
+                          const hovered = getHoveredLine();
+                          if (!hovered || hovered.side === undefined) {
+                            return null;
+                          }
+                          const side: AnnotationSide = hovered.side;
+                          const lineNumber = hovered.lineNumber;
+                          const key: InlineCommentKey = { filePath, side, lineNumber };
+                          const count = getCommentCount(key);
+                          const isActive =
+                            activeTarget?.key.filePath === filePath &&
+                            activeTarget?.key.side === side &&
+                            activeTarget?.key.lineNumber === lineNumber;
+
+                          return (
+                            <div className="relative">
+                              <button
+                                type="button"
+                                className={cn(
+                                  "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                                  isActive
+                                    ? "text-foreground/90 bg-accent"
+                                    : count > 0
+                                      ? "text-primary"
+                                      : "text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground/80",
+                                )}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleLineClick(key);
+                                }}
+                                title={
+                                  count > 0
+                                    ? `${count} comment${count === 1 ? "" : "s"} on line ${lineNumber}`
+                                    : `Add comment on line ${lineNumber}`
+                                }
+                                aria-label={
+                                  count > 0
+                                    ? `${count} comment${count === 1 ? "" : "s"} on line ${lineNumber}`
+                                    : `Add comment on line ${lineNumber}`
+                                }
+                              >
+                                {count > 0 ? (
+                                  <>
+                                    <MessageCircleIcon className="size-3" />
+                                    <span className="absolute -bottom-0.5 -right-0.5 flex size-3 items-center justify-center rounded-full bg-primary text-[8px] font-medium leading-none text-primary-foreground">
+                                      {count > 9 ? "9+" : count}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <span className="text-[10px] font-medium leading-none">
+                                    {lineNumber}
+                                  </span>
+                                )}
+                              </button>
+
+                              {isActive && activeTarget.mode === "add" && (
+                                <CommentInputPopover
+                                  onSubmit={(text) => handleAddCommentSubmit(key, text)}
+                                  onCancel={clearActiveTarget}
+                                />
+                              )}
+
+                              {isActive && activeTarget.mode === "view" && (
+                                <CommentsPopover
+                                  comments={getComments(key)}
+                                  onAddComment={() =>
+                                    setActiveTarget({ key, mode: "add" })
+                                  }
+                                  onDeleteComment={(id) => handleDeleteComment(key, id)}
+                                  cwd={activeCwd ?? undefined}
+                                />
+                              )}
+                            </div>
+                          );
                         }}
                       />
                     </div>
