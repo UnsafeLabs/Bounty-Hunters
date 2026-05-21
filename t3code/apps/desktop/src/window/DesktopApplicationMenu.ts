@@ -12,6 +12,7 @@ import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
+import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
 export interface DesktopApplicationMenuShape {
@@ -24,6 +25,7 @@ export class DesktopApplicationMenu extends Context.Service<
 >()("t3/desktop/ApplicationMenu") {}
 
 type DesktopApplicationMenuRuntimeServices =
+  | DesktopSavedEnvironments.DesktopSavedEnvironments
   | DesktopUpdates.DesktopUpdates
   | DesktopWindow.DesktopWindow
   | ElectronDialog.ElectronDialog;
@@ -94,6 +96,28 @@ const handleCheckForUpdatesMenuClick: Effect.Effect<
   yield* checkForUpdatesFromMenu;
 }).pipe(Effect.withSpan("desktop.menu.handleCheckForUpdatesClick"));
 
+const handleRotateKeysClick: Effect.Effect<
+  void,
+  | DesktopSavedEnvironments.DesktopSavedEnvironmentsRotateKeysError
+  | DesktopWindow.DesktopWindowError,
+  | DesktopSavedEnvironments.DesktopSavedEnvironments
+  | ElectronDialog.ElectronDialog
+  | DesktopWindow.DesktopWindow
+> = Effect.gen(function* () {
+  const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+  const electronDialog = yield* ElectronDialog.ElectronDialog;
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
+  yield* desktopWindow.ensureMain;
+  const result = yield* savedEnvironments.rotateKeys;
+  yield* electronDialog.showMessageBox({
+    type: "info",
+    title: "Key Rotation Complete",
+    message: `Rotated encryption keys for ${result.rotatedCount} credential(s).`,
+    detail: `Timestamp: ${result.timestamp}`,
+    buttons: ["OK"],
+  });
+}).pipe(Effect.withSpan("desktop.menu.handleRotateKeysClick"));
+
 const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const electronMenu = yield* ElectronMenu.ElectronMenu;
@@ -123,6 +147,9 @@ const make = Effect.gen(function* () {
   const configure = Effect.gen(function* () {
     const checkForUpdatesClick = () => {
       runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
+    };
+    const rotateKeysClick = () => {
+      runMenuEffect("rotate-keys", handleRotateKeysClick);
     };
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
@@ -190,6 +217,20 @@ const make = Effect.gen(function* () {
         ],
       },
       { role: "windowMenu" },
+      {
+        label: "Developer",
+        submenu: [
+          {
+            label: "Rotate Encryption Keys",
+            click: rotateKeysClick,
+          },
+          { type: "separator" },
+          {
+            label: "Check for Updates...",
+            click: checkForUpdatesClick,
+          },
+        ],
+      },
       {
         role: "help",
         submenu: [

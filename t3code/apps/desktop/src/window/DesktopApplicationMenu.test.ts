@@ -14,6 +14,7 @@ import * as DesktopApplicationMenu from "./DesktopApplicationMenu.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
+import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
 const environmentInput = {
@@ -85,6 +86,15 @@ const makeElectronMenuLayer = (
     showContextMenu: () => Effect.succeed(Option.none()),
   } satisfies ElectronMenu.ElectronMenuShape);
 
+const desktopSavedEnvironmentsLayer = Layer.succeed(DesktopSavedEnvironments.DesktopSavedEnvironments, {
+  getRegistry: Effect.succeed([]),
+  setRegistry: () => Effect.void,
+  getSecret: () => Effect.succeed(Option.none()),
+  setSecret: () => Effect.succeed(false),
+  removeSecret: () => Effect.void,
+  rotateKeys: Effect.succeed({ rotatedCount: 0, timestamp: "2026-01-01T00:00:00.000Z" }),
+} satisfies DesktopSavedEnvironments.DesktopSavedEnvironmentsShape);
+
 describe("DesktopApplicationMenu", () => {
   it.effect("installs the native menu and routes Settings through DesktopWindow", () =>
     Effect.gen(function* () {
@@ -103,6 +113,7 @@ describe("DesktopApplicationMenu", () => {
             Layer.provideMerge(desktopUpdatesLayer),
             Layer.provideMerge(electronDialogLayer),
             Layer.provideMerge(electronAppLayer),
+            Layer.provideMerge(desktopSavedEnvironmentsLayer),
             Layer.provideMerge(
               DesktopEnvironment.layer(environmentInput).pipe(
                 Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
