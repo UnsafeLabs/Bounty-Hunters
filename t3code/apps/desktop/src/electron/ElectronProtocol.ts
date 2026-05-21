@@ -269,4 +269,50 @@ const make = Effect.gen(function* () {
   });
 });
 
+export type DeepLinkAction =
+  | { readonly type: "openProject"; readonly path: string }
+  | { readonly type: "openChat"; readonly threadId: string }
+  | { readonly type: "openSettings"; readonly section?: string };
+
+export function parseDeepLinkUrl(url: string): DeepLinkAction | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "t3code:") return null;
+
+    if (parsed.hostname === "open" && parsed.pathname === "/project") {
+      const path = parsed.searchParams.get("path");
+      if (path) return { type: "openProject", path };
+    }
+    if (parsed.hostname === "chat" && parsed.pathname === "/thread") {
+      const threadId = parsed.searchParams.get("id");
+      if (threadId) return { type: "openChat", threadId };
+    }
+    if (parsed.hostname === "settings") {
+      const section = parsed.searchParams.get("section") ?? undefined;
+      return { type: "openSettings", section };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function handleDeepLink(url: string): Effect.Effect<void, never, never> {
+  const action = parseDeepLinkUrl(url);
+  if (!action) {
+    return Effect.logWarning(`Unknown deep link: ${url}`);
+  }
+  return Effect.sync(() => {
+    switch (action.type) {
+      case "openProject":
+        Electron.shell.openPath(action.path);
+        break;
+      case "openChat":
+        break;
+      case "openSettings":
+        break;
+    }
+  }).pipe(Effect.withSpan("desktop.electron.deepLink.handleDeepLink"));
+}
+
 export const layer = Layer.effect(ElectronProtocol, make);
