@@ -34,6 +34,46 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "dist-electron/**"]
     },
+    "@t3tools/web#build": {
+      "dependsOn": ["@t3tools/contracts#build", "@t3tools/client-runtime#build"],
+      "outputs": ["dist/**"],
+      "cache": true
+    },
+    "t3#build": {
+      "dependsOn": [
+        "@t3tools/contracts#build",
+        "@t3tools/shared#build",
+        "effect-acp#build",
+        "effect-codex-app-server#build"
+      ],
+      "outputs": ["dist/**"],
+      "cache": true
+    },
+    "@t3tools/desktop#build": {
+      "dependsOn": ["@t3tools/web#build", "t3#build"],
+      "outputs": ["dist-electron/**"],
+      "cache": true
+    },
+    "@t3tools/contracts#build": {
+      "outputs": ["dist/**"],
+      "cache": true
+    },
+    "@t3tools/client-runtime#build": {
+      "outputs": ["dist/**"],
+      "cache": true
+    },
+    "@t3tools/shared#build": {
+      "outputs": ["dist/**"],
+      "cache": true
+    },
+    "effect-acp#build": {
+      "outputs": ["dist/**"],
+      "cache": true
+    },
+    "effect-codex-app-server#build": {
+      "outputs": ["dist/**"],
+      "cache": true
+    },
     "dev": {
       "dependsOn": ["@t3tools/contracts#build"],
       "cache": false,
