@@ -1,0 +1,5 @@
+{
+  "agent": "libazza",
+  "pre_task_context": "Fix ProviderModelPicker not persisting selection across reloads. The ProviderModelPicker.tsx in t3code/apps/web/src/components/chat/ allows selecting AI providers but does not remember the last selected provider and model across page reloads. Fix: persist selected provider ID and model ID to localStorage on change, restore on mount with fallback to first available provider if persisted value is invalid, add Reset to default option, sync across tabs via storage event.",
+  "timestamp": "2026-05-23T00:00:00Z"
+}

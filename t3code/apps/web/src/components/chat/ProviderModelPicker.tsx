@@ -3,9 +3,9 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, RotateCcwIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -19,6 +19,38 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+
+const STORAGE_KEY = "t3code:lastProviderSelection";
+
+interface PersistedSelection {
+  instanceId: ProviderInstanceId;
+  model: string;
+}
+
+function readPersistedSelection(): PersistedSelection | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as PersistedSelection) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedSelection(selection: PersistedSelection): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(selection));
+  } catch {
+    // localStorage may be full or unavailable
+  }
+}
+
+function clearPersistedSelection(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // noop
+  }
+}
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -79,12 +111,68 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     }
   };
 
+  // Persist selection to localStorage on change
+  useEffect(() => {
+    writePersistedSelection({ instanceId: props.activeInstanceId, model: props.model });
+  }, [props.activeInstanceId, props.model]);
+
+  // Restore persisted selection on mount if available and valid
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    const persisted = readPersistedSelection();
+    if (persisted && persisted.instanceId !== props.activeInstanceId && !restoredRef.current) {
+      const stillAvailable = props.instanceEntries.some(
+        (e) => e.instanceId === persisted.instanceId,
+      );
+      if (stillAvailable) {
+        const models = props.modelOptionsByInstance.get(persisted.instanceId);
+        const modelValid = models?.some((m) => m.slug === persisted.model);
+        if (modelValid) {
+          props.onInstanceModelChange(persisted.instanceId, persisted.model);
+          restoredRef.current = true;
+        }
+      }
+    }
+  }, [props.instanceEntries, props.modelOptionsByInstance, props.activeInstanceId, props.onInstanceModelChange]);
+
+  // Sync across tabs via storage event
+  useEffect(() => {
+    const handler = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY && e.newValue) {
+        try {
+          const incoming = JSON.parse(e.newValue) as PersistedSelection;
+          if (incoming.instanceId !== props.activeInstanceId) {
+            const stillAvailable = props.instanceEntries.some(
+              (entry) => entry.instanceId === incoming.instanceId,
+            );
+            if (stillAvailable) {
+              const models = props.modelOptionsByInstance.get(incoming.instanceId);
+              const modelValid = models?.some((m) => m.slug === incoming.model);
+              if (modelValid) {
+                props.onInstanceModelChange(incoming.instanceId, incoming.model);
+              }
+            }
+          }
+        } catch {
+          // ignore malformed storage events
+        }
+      }
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, [props.instanceEntries, props.modelOptionsByInstance, props.activeInstanceId, props.onInstanceModelChange]);
+
   useEffect(() => {
     setModelPickerOpen(isMenuOpen);
     return () => {
       setModelPickerOpen(false);
     };
   }, [isMenuOpen]);
+
+  const handleResetToDefault = useCallback(() => {
+    clearPersistedSelection();
+  }, []);
 
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
@@ -181,6 +269,18 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
         />
+        {readPersistedSelection() && (
+          <div className="border-t border-border px-3 py-1.5">
+            <button
+              type="button"
+              onClick={handleResetToDefault}
+              className="flex w-full items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <RotateCcwIcon className="size-3" />
+              Reset to default
+            </button>
+          </div>
+        )}
       </PopoverPopup>
     </Popover>
   );
