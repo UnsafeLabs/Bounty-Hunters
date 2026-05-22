@@ -1,7 +1,7 @@
 ```diff
 --- /dev/null
 +++ b/t3code/packages/effect-codex-app-server/src/CodexStream.ts
-@@ -0,0 +1,298 @@
+@@ -0,0 +1,266 @@
 +import * as Effect from "effect/Effect";
 +import * as Stream from "effect/Stream";
 +import * as Queue from "effect/Queue";
@@ -10,27 +10,31 @@
 +import * as Option from "effect/Option";
 +import * as Cause from "effect/Cause";
 +import * as Either from "effect/Either";
++import * as Chunk from "effect/Chunk";
 +import * as Duration from "effect/Duration";
 +import * as Schedule from "effect/Schedule";
 +import { pipe } from "effect/Function";
 +
 +/**
-+ * Configuration for streaming with backpressure, timeouts, and abort support.
++ * Configuration for streaming with backpressure and timeouts
 + */
-+export interface CodexStreamConfig {
-+  readonly perChunkTimeout: Duration.DurationInput;
-+  readonly totalTimeout: Duration.DurationInput;
-+  readonly warningTimeout: Duration.DurationInput;
++export interface StreamConfig {
++  /** Maximum time to wait for a chunk before emitting warning (ms) */
++  readonly chunkWarningTimeout: number;
++  /** Maximum time to wait for a chunk before failing (ms) */
++  readonly chunkErrorTimeout: number;
++  /** Queue buffer size for backpressure */
++  readonly bufferSize: number;
 +}
 +
-+export const defaultCodexStreamConfig: CodexStreamConfig = {
-+  perChunkTimeout: "120 seconds",
-+  warningTimeout: "30 seconds",
-+  totalTimeout: "120 seconds",
++export const defaultStreamConfig: StreamConfig = {
++  chunkWarningTimeout: 30000,
++  chunkErrorTimeout: 120000,
++  bufferSize: 16,
 +};
 +
 +/**
-+ * Events emitted during streaming.
++ * Events emitted during streaming
 + */
 +export type StreamEvent<A> =
 +  | { readonly _tag: "Chunk"; readonly chunk: A }
@@ -38,10 +42,10 @@
 +  | { readonly _tag: "Abort" };
 +
 +/**
-+ * Custom error types for stream failures.
++ * Custom errors for streaming operations
 + */
-+export class CodexStreamTimeoutError extends Schema.TaggedErrorClass<CodexStreamTimeoutError>()(
-+  "CodexStreamTimeoutError",
++export class StreamTimeoutError extends Schema.TaggedErrorClass<StreamTimeoutError>()(
++  "StreamTimeoutError",
 +  {
 +    message: Schema.String,
 +  }
@@ -51,8 +55,8 @@
 +  }
 +}
 +
-+export class CodexStreamAbortError extends Schema.TaggedErrorClass<CodexStreamAbortError>()(
-+  "CodexStreamAbortError",
++export class StreamAbortError extends Schema.TaggedErrorClass<StreamAbortError>()(
++  "StreamAbortError",
 +  {
 +    message: Schema.String,
 +  }
@@ -65,124 +69,119 @@
 +import * as Schema from "effect/Schema";
 +
 +/**
-+ * Internal state for tracking chunk-level timeouts.
++ * Creates a backpressured stream from an async iterable with timeout and abort support
 + */
-+interface ChunkTimeoutState {
-+  readonly lastChunkTime: number;
-+  readonly warningEmitted: boolean;
++export function fromAsyncIterable<A>(
++  iterable: AsyncIterable<A>,
++  abortSignal?: AbortSignal
++): Effect.Effect<Stream.Stream<StreamEvent<A>, StreamTimeoutError | StreamAbortError, never>> {
++  return Effect.gen(function* (_) {
++    const queue = yield* _(Queue.bounded<StreamEvent<A>>(defaultStreamConfig.bufferSize));
++    const abortRef = yield* _(Ref.make(false));
++    const fiberRef = yield* _(Ref.make<Option.Option<Fiber.RuntimeFiber<void, never>>>(Option.none()));
++
++    const producer = Effect.gen(function* (_) {
++      const iterator = iterable[Symbol.asyncIterator]();
++
++      while (true) {
++        const isAborted = yield* _(Ref.get(abortRef));
++        if (isAborted) {
++          yield* _(Queue.offer(queue, { _tag: "Abort" as const }));
++          break;
++        }
++
++        const nextResult = yield* _(
++          Effect.promise(() => iterator.next()),
++          Effect.timeoutFail({
++            duration: Duration.millis(defaultStreamConfig.chunkErrorTimeout),
++            onTimeout: () => new StreamTimeoutError({
++              message: `No chunk received within ${defaultStreamConfig.chunkErrorTimeout}ms`,
++            }),
++          }),
++          Effect.catchAll((error) => {
++            if (error instanceof StreamTimeoutError) {
++              return Effect.fail(error);
++            }
++            return Effect.succeed({ done: true, value: undefined });
++          })
++        );
++
++        if (nextResult.done) {
++          break;
++        }
++
++        yield* _(Queue.offer(queue, { _tag: "Chunk" as const, chunk: nextResult.value }));
++      }
++    }).pipe(
++      Effect.catchAll((error) => {
++        if (error instanceof StreamTimeoutError) {
++          return Queue.offer(queue, { _tag: "Chunk" as const, chunk: error as unknown as A });
++        }
++        return Effect.void;
++      }),
++      Effect.fork
++    );
++
++    const fiber = yield* _(producer);
++    yield* _(Ref.set(fiberRef, Option.some(fiber)));
++
++    // Handle abort signal
++    if (abortSignal) {
++      yield* _(
++        Effect.sync(() => {
++          abortSignal.addEventListener("abort", () => {
++            Effect.runFork(
++              Effect.gen(function* (_) {
++                yield* _(Ref.set(abortRef, true));
++                const fib = yield* _(Ref.get(fiberRef));
++                yield* _(Option.match(fib, {
++                  onNone: () => Effect.void,
++                  onSome: (f) => Fiber.interrupt(f),
++                }));
++              })
++            );
++          });
++        })
++      );
++    }
++
++    return Stream.fromQueue(queue).pipe(
++      Stream.map((event) => {
++        if (event._tag === "Abort") {
++          return Stream.fail(new StreamAbortError({ message: "Stream aborted" }));
++        }
++        return Stream.succeed(event);
++      }),
++      Stream.flatMap((s) => s),
++      Stream.takeWhile((event) => event._tag !== "Abort"),
++      Stream.map((event) => {
++        if (event._tag === "Chunk") {
++          return event.chunk;
++        }
++        throw new Error("Unexpected event type");
++      })
++    ) as Stream.Stream<StreamEvent<A>, StreamTimeoutError | StreamAbortError, never>;
++  });
 +}
 +
 +/**
-+ * Creates a backpressured Effect.Stream from an async iterable source.
-+ * The stream uses a bounded queue to propagate backpressure to the producer.
-+ *
-+ * @param source - The async iterable source of chunks
-+ * @param config - Stream configuration for timeouts
-+ * @param abortSignal - Optional AbortSignal for cancellation
-+ * @returns A Stream of chunks with backpressure and timeout handling
++ * Creates a stream with per-chunk timeout warning and total timeout
 + */
-+export const makeBackpressuredStream = <A>(
-+  source: AsyncIterable<A>,
-+  config: CodexStreamConfig = defaultCodexStreamConfig,
-+  abortSignal?: AbortSignal
-+): Effect.Effect<Stream.Stream<A, CodexStreamTimeoutError | CodexStreamAbortError>, never, never> =>
-+  Effect.gen(function* () {
-+    const queue = yield* Queue.bounded<A | StreamEvent<A>>(32);
-+    const abortRef = yield* Ref.make(false);
-+    const chunkStateRef = yield* Ref.make<ChunkTimeoutState>({
-+      lastChunkTime: Date.now(),
-+      warningEmitted: false,
-+    });
-+
-+    // Set up abort signal listener
-+    if (abortSignal) {
-+      yield* Effect.sync(() => {
-+        const handler = () => {
-+          Effect.runSync(Ref.update(abortRef, () => true));
-+          Effect.runSync(Queue.offer(queue, { _tag: "Abort" as const }));
-+        };
-+        abortSignal.addEventListener("abort", handler, { once: true });
-+        return handler;
-+      });
-+    }
-+
-+    // Producer fiber that reads from source and writes to queue
-+    const producerFiber = yield* Effect.fork(
-+      Effect.gen(function* () {
-+        try {
-+          for await (const chunk of source) {
-+            const isAborted = yield* Ref.get(abortRef);
-+            if (isAborted) {
-+              break;
-+            }
-+
-+            // Update chunk state
-+            yield* Ref.set(chunkStateRef, {
-+              lastChunkTime: Date.now(),
-+              warningEmitted: false,
-+            });
-+
-+            yield* Queue.offer(queue, chunk);
-+          }
-+        } catch (error) {
-+          // Source error, queue will be closed on finally
-+        } finally {
-+          yield* Queue.shutdown(queue);
-+        }
-+      }).pipe(
-+        Effect.timeout(config.totalTimeout),
-+        Effect.catchAll((error) =>
-+          Effect.gen(function* () {
-+            yield* Queue.offer(queue, {
-+              _tag: "Warning" as const,
-+              message: `Total timeout exceeded after ${Duration.toMillis(config.totalTimeout)}ms`,
-+            });
-+            yield* Queue.shutdown(queue);
-+          })
-+        )
-+      )
-+    );
-+
-+    // Chunk timeout monitor fiber
-+    const monitorFiber = yield* Effect.fork(
-+      Effect.gen(function* () {
-+        const warningMillis = Duration.toMillis(config.warningTimeout);
-+        const totalMillis = Duration.toMillis(config.totalTimeout);
-+
-+        while (true) {
-+          yield* Effect.sleep("1 second");
-+
-+          const isAborted = yield* Ref.get(abortRef);
-+          if (isAborted) {
-+            yield* Queue.offer(queue, { _tag: "Abort" as const });
-+            yield* Queue.shutdown(queue);
-+            break;
-+          }
-+
-+          const state = yield* Ref.get(chunkStateRef);
-+          const elapsed = Date.now() - state.lastChunkTime;
-+
-+          if (elapsed > totalMillis) {
-+            yield* Queue.offer(queue, {
-+              _tag: "Warning" as const,
-+              message: `Chunk timeout: no data for ${elapsed}ms, exceeding total timeout of ${totalMillis}ms`,
-+            });
-+            yield* Queue.shutdown(queue);
-+            break;
-+          }
-+
-+          if (elapsed > warningMillis && !state.warningEmitted) {
-+            yield* Ref.update(chunkStateRef, (s) => ({ ...s, warningEmitted: true }));
-+            yield* Queue.offer(queue, {
-+              _tag: "Warning" as const,
-+              message: `Chunk timeout warning: no data for ${elapsed}ms (warning at ${warningMillis}ms)`,
-+            });
-+          }
-+        }
-+      })
-+    );
-+
-+    // Build the stream from the queue
-+    const stream = Stream.fromQueue(queue).pipe(
-+      Stream.takeWhile((item) => {
-+        if (typeof item === "object"
++export function withChunkTimeout<A>(
++  stream: Stream.Stream<A, E, R>
++): Stream.Stream<A, E | StreamTimeoutError, R> {
++  return stream.pipe(
++    Stream.mapEffect((chunk) =>
++      Effect.succeed(chunk).pipe(
++        Effect.timeout(Duration.millis(defaultStreamConfig.chunkWarningTimeout)),
++        Effect.catchAll(() => {
++          // Emit warning but continue
++          return Effect.logWarning(
++            `No chunk received within ${defaultStreamConfig.chunkWarningTimeout}ms, continuing to wait...`
++          ).pipe(
++            Effect.flatMap(() =>
++              Effect.succeed(chunk).pipe(
++                Effect.timeout(
++                  Duration.millis(defaultStreamConfig.chunkErrorTimeout - defaultStreamConfig.chunkWarningTimeout)
++                ),
++                Effect.mapError
