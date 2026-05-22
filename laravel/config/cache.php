@@ -103,10 +103,25 @@ return [
                 'database',
                 'array',
             ],
-        ],
 
-    ],
+    'prefix' => env('CACHE_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')).'-cache-'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Cache Health Check
+    |--------------------------------------------------------------------------
+    |
+    | These options control the built-in cache health check functionality.
+    | The health check can be used to verify that the configured cache
+    | store is available and responding before relying on it.
+    |
+    */
+
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+
+    'health_check_interval' => env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
+];
     /*
     |--------------------------------------------------------------------------
     | Cache Key Prefix
