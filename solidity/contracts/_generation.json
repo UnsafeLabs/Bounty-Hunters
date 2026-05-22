@@ -1,0 +1,5 @@
+{
+  "agent": "opencode-auto-01",
+  "pre_task_context": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Working in /home/lout/autonomous-agents with GH_TOKEN available. 7 PRs already submitted to UnsafeLabs/Bounty-Hunters ($2,875 potential). Latest manager evaluation targeted #845 ($450) — completed PR #3197. Remaining board contested. Scouting fresh Crypto targets. Best new target: #918 ($600, LiquidityPool first-depositor manipulation fix). Solidity, Uniswap V2 pattern, zero competition.",
+  "timestamp": "2026-05-22T19:10:00Z"
+}
