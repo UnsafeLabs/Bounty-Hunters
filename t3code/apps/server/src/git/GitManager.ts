@@ -1781,4 +1781,139 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   } satisfies GitManagerShape;
 });
 
+import { Effect, pipe } from "effect";
+import * as Exec from "@effect/platform/Command";
+import * as FS from "@effect/platform/FileSystem";
+import { GitError, RebaseConflictError } from "../errors";
+
+export class GitManager {
+  constructor(private readonly repoPath: string) {}
+
+  /**
+   * Checks if a rebase conflict occurred by looking for REBASE_HEAD
+   */
+  readonly checkRebaseConflict = Effect.gen(function*(_) {
+    const hasRebaseHead = yield* _(FS.exists(`${yield* _(FS.fromPath)}/.git/REBASE_HEAD`));
+    return hasRebaseHead;
+  });
+
+  /**
+   * Gets list of conflicted files from git
+   */
+  readonly getConflictFiles = Effect.gen(function*(_) {
+    const command = yield* _(Exec.command("git", ["diff", "--name-only", "--diff-filter=U"]));
+    const output = yield* _(command.pipe(Exec.run));
+    return output.stdout.trim().split('\n').filter(file => file.length > 0);
+  });
+
+  /**
+   * Detects if there are conflicts after a rebase operation
+   */
+  readonly detectRebaseConflicts = Effect.gen(function*(_) {
+    const hasConflicts = yield* _(this.checkRebaseConflict);
+    if (hasConflicts) {
+      const conflictFiles = yield* _(this.getConflictFiles);
+      return conflictFiles;
+    }
+    return [];
+  }).pipe(
+    Effect.catchAll((error) => Effect.fail(new GitError({ message: `Failed to detect rebase conflicts: ${error}` })))
+  );
+
+  /**
+   * Aborts the current rebase operation
+   */
+  readonly abortRebase = Effect.gen(function*(_) {
+    const command = yield* _(Exec.command("git", ["rebase", "--abort"]));
+    yield* _(command.pipe(Exec.run));
+    return yield* _(Effect.void);
+  }).pipe(
+    Effect.catchAll((error) => Effect.fail(new GitError({ message: `Failed to abort rebase: ${error}` })))
+  );
+
+  /**
+   * Continues the current rebase operation
+   */
+  readonly continueRebase = Effect.gen(function*(_) {
+    const command = yield* _(Exec.command("git", ["rebase", "--continue"]));
+    yield* _(command.pipe(Exec.run));
+    return yield* _(Effect.void);
+  }).pipe(
+    Effect.catchAll((error) => Effect.fail(new GitError({ message: `Failed to continue rebase: ${error}` }))))
+  );
+
+  /**
+   * Performs a rebase and handles conflicts
+   */
+  readonly rebase = (branch: string) => Effect.gen(function*(_) {
+    const fs = yield* _(FS.fromPath);
+    const command = yield* _(Exec.command("git", ["rebase", branch]));
+    
+    // Check if rebase resulted in conflicts
+    const hasConflicts = yield* _(this.checkRebaseConflict);
+    if (hasConflicts) {
+      const conflictFiles = yield* _(this.getConflictFiles);
+      if (conflictFiles.length > 0) {
+        return yield* _(Effect.fail(new RebaseConflictError({ files: conflictFiles })));
+      }
+    }
+    
+    return yield* _(command.pipe(Exec.run));
+  }).pipe(
+    Effect.catchAll((error) => Effect.fail(new GitError({ message: `Rebase failed: ${error}` }))))
+  );
+
+  /**
+   * Gets the list of conflicted files during rebase
+   */
+  readonly getConflictFiles = Effect.gen(function*(_) {
+    const command = yield* _(Exec.command("git", ["diff", "--name-only", "--diff-filter=U"]));
+    const output = yield* _(command.pipe(Exec.run));
+    const files = output.stdout.trim().split('\n').filter(file => file.length > 0);
+    return files;
+  });
+}
+
+// Add the error classes
+export class GitError {
+  constructor(readonly message: string) {}
+}
+
+export class RebaseConflictError {
+  constructor(readonly files: string[]) {}
+}
+
+// Effect module imports would typically be at the top
+import { Command } from "@effect/platform/Command";
+import { FileSystem } from "@effect/platform/FileSystem";
+
+// Implementation of the GitManager class with conflict handling
+export class GitManagerWithConflictDetection {
+  constructor(private readonly repoPath: string) {}
+
+  // Check for rebase conflicts
+  checkRebaseConflict() {
+    return pipe(
+      FileSystem.fromPath(this.repoPath),
+      Effect.map((path) => `${path}/.git/REBASE_HEAD`),
+      Effect.flatMap((rebaseHeadPath) => FileSystem.exists(rebaseHeadPath)),
+      Effect.map((exists) => exists)
+    );
+  }
+
+  // Get conflicted files
+  getConflictFiles() {
+    return pipe(
+      Exec.command("git", "diff", "--name-only", "--diff-filter=U"),
+      Exec.run,
+      Effect.map((result) => 
+        result.stdout
+          .trim()
+          .split('\n')
+          .filter(file => file.length > 0)
+      ),
+      Effect.orElse(() => Effect.succeed([]))
+    );
+  }
+}
 export const layer = Layer.effect(GitManager, makeGitManager());
