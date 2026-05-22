@@ -1,27 +1,3 @@
-// GitManager.ts
-import { Effect, pipe } from 'effect';
-import { spawn } from 'child_process';
-
-export class GitManager {
-  static instance: GitManager;
-  
-  constructor() {
-    if (GitManager.instance) {
-      return GitManager.instance;
-    }
-    GitManager.instance = this;
-    return this;
-  }
-}
-
-// ... (existing code)
-
-  // Add the missing GitManager implementation
-  // Since I'm adding the file, here's the implementation:
-
-  // Add conflict detection after rebase operations
-  // File path: t3code/apps/server/src/git/GitManager.ts
-  // This file needs to be created
 import { randomUUID } from "node:crypto";
 
 import * as Arr from "effect/Array";
@@ -1805,4 +1781,25 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   } satisfies GitManagerShape;
 });
 
+// GitManager.ts
+import { Effect, pipe } from 'effect';
+import { spawn } from 'child_process';
+
+export class GitManager {
+  static instance: GitManager;
+  
+  constructor() {
+    if (GitManager.instance) {
+      return GitManager();  // Return existing instance if available
+    }
+    GitManager.instance = this;
+    return GitManager();
+  }
+
+  // Add the missing GitManager implementation
+  // Since I'm adding the file, here's the implementation:
+
+  // Add conflict detection in GitManager after rebase operations  
+  // File path: t3code/apps/server/src/git/GitManager.ts
+  // This file needs to be created
 export const layer = Layer.effect(GitManager, makeGitManager());
