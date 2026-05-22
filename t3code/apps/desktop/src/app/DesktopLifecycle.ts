@@ -14,6 +14,9 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
+import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import * as IpcChannels from "../ipc/channels.ts";
 
 export interface DesktopShutdownShape {
   readonly request: Effect.Effect<void>;
@@ -195,6 +198,7 @@ export const layer = Layer.succeed(
           desktopWindow.syncAppearance.pipe(Effect.withSpan("desktop.lifecycle.themeUpdated")),
         );
       });
+      yield* ElectronProtocol.registerDeepLinkProtocol;
       yield* electronApp.on("before-quit", (event: Electron.Event) => {
         handleBeforeQuit(
           event,
@@ -219,6 +223,54 @@ export const layer = Layer.succeed(
           }).pipe(Effect.withSpan("desktop.lifecycle.windowAllClosed")),
         );
       });
+
+      yield* electronApp.on("open-url", (_event: Electron.Event, url: string) => {
+        void runEffect(
+          Effect.gen(function* () {
+            const action = yield* ElectronProtocol.parseDeepLinkUrl(url);
+            const window = yield* ElectronWindow.ElectronWindow;
+            yield* window.sendAll(IpcChannels.DEEP_LINK_CHANNEL, action);
+          }).pipe(
+            Effect.catchCause((cause) =>
+              logLifecycleError("deep-link failed", { cause: Cause.pretty(cause) }),
+            ),
+            Effect.withSpan("desktop.lifecycle.deepLink"),
+          ),
+        );
+      });
+
+      const maybeDeepLinkFromArgv = process.argv.find(
+        (arg) => arg.startsWith(`${ElectronProtocol.DEEP_LINK_SCHEME}:`),
+      );
+
+      yield* electronApp.on("second-instance", (_event: Electron.Event, argv: ReadonlyArray<string>) => {
+        void runEffect(
+          Effect.gen(function* () {
+            const deepArg = argv.find((arg) =>
+              arg.startsWith(`${ElectronProtocol.DEEP_LINK_SCHEME}:`),
+            );
+            if (!deepArg) return;
+            const action = yield* ElectronProtocol.parseDeepLinkUrl(deepArg);
+            const desktopWindow = yield* DesktopWindow.DesktopWindow;
+            yield* desktopWindow.activate;
+            const window = yield* ElectronWindow.ElectronWindow;
+            yield* window.sendAll(IpcChannels.DEEP_LINK_CHANNEL, action);
+          }).pipe(
+            Effect.catchCause((cause) =>
+              logLifecycleError("second-instance deep-link failed", {
+                cause: Cause.pretty(cause),
+              }),
+            ),
+            Effect.withSpan("desktop.lifecycle.secondInstanceDeepLink"),
+          ),
+        );
+      });
+
+      if (maybeDeepLinkFromArgv) {
+        const action = yield* ElectronProtocol.parseDeepLinkUrl(maybeDeepLinkFromArgv);
+        const window = yield* ElectronWindow.ElectronWindow;
+        yield* window.sendAll(IpcChannels.DEEP_LINK_CHANNEL, action);
+      }
 
       if (environment.platform !== "win32") {
         yield* addScopedListener(process, "SIGINT", () => {

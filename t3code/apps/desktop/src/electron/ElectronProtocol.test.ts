@@ -102,4 +102,79 @@ describe("ElectronProtocol", () => {
       assert.deepEqual(unregisterProtocolMock.mock.calls, [["t3"]]);
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
+
+  describe("parseDeepLinkUrl", () => {
+    it.effect("parses open/project URL", () =>
+      Effect.gen(function* () {
+        const action = yield* ElectronProtocol.parseDeepLinkUrl(
+          "t3code://open/project?path=%2Fhome%2Fuser%2Fmy-project",
+        );
+        assert.deepEqual(action, {
+          kind: "open-project",
+          path: "/home/user/my-project",
+        });
+      }),
+    );
+
+    it.effect("parses chat/thread URL", () =>
+      Effect.gen(function* () {
+        const action = yield* ElectronProtocol.parseDeepLinkUrl(
+          "t3code://chat/thread?id=abc123",
+        );
+        assert.deepEqual(action, { kind: "open-chat-thread", id: "abc123" });
+      }),
+    );
+
+    it.effect("parses settings URL", () =>
+      Effect.gen(function* () {
+        const action = yield* ElectronProtocol.parseDeepLinkUrl("t3code://settings");
+        assert.deepEqual(action, { kind: "open-settings" });
+      }),
+    );
+
+    it.effect("rejects path traversal in open/project", () =>
+      Effect.gen(function* () {
+        const result = yield* Effect.flip(
+          ElectronProtocol.parseDeepLinkUrl("t3code://open/project?path=../../etc"),
+        );
+        assert.include(result.cause, "traversal");
+      }),
+    );
+
+    it.effect("rejects unknown action", () =>
+      Effect.gen(function* () {
+        const result = yield* Effect.flip(
+          ElectronProtocol.parseDeepLinkUrl("t3code://unknown/action"),
+        );
+        assert.include(result.cause, "Unknown action");
+      }),
+    );
+
+    it.effect("rejects missing path parameter", () =>
+      Effect.gen(function* () {
+        const result = yield* Effect.flip(
+          ElectronProtocol.parseDeepLinkUrl("t3code://open/project"),
+        );
+        assert.include(result.cause, "Missing path");
+      }),
+    );
+
+    it.effect("rejects missing id parameter", () =>
+      Effect.gen(function* () {
+        const result = yield* Effect.flip(
+          ElectronProtocol.parseDeepLinkUrl("t3code://chat/thread"),
+        );
+        assert.include(result.cause, "Missing id");
+      }),
+    );
+
+    it.effect("rejects wrong protocol", () =>
+      Effect.gen(function* () {
+        const result = yield* Effect.flip(
+          ElectronProtocol.parseDeepLinkUrl("t3://settings"),
+        );
+        assert.include(result.cause, "Invalid protocol");
+      }),
+    );
+  });
 });

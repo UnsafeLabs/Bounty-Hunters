@@ -13,6 +13,60 @@ import * as Electron from "electron";
 import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/DesktopEnvironment.ts";
 
 export const DESKTOP_SCHEME = "t3";
+export const DEEP_LINK_SCHEME = "t3code";
+
+export type DeepLinkAction =
+  | { readonly kind: "open-project"; readonly path: string }
+  | { readonly kind: "open-chat-thread"; readonly id: string }
+  | { readonly kind: "open-settings" };
+
+export class DeepLinkParseError extends Data.TaggedError("DeepLinkParseError")<{
+  readonly url: string;
+  readonly cause: string;
+}> {
+  override get message() {
+    return `Failed to parse deep link URL: ${this.url} — ${this.cause}`;
+  }
+}
+
+export function parseDeepLinkUrl(input: string): Effect.Effect<DeepLinkAction, DeepLinkParseError> {
+  return Effect.try({
+    try: () => {
+      const url = new URL(input);
+      if (url.protocol !== `${DEEP_LINK_SCHEME}:`) {
+        throw new Error(`Invalid protocol: ${url.protocol}`);
+      }
+      const path = url.pathname.replace(/^\/+/, "");
+      switch (path) {
+        case "open/project": {
+          const projectPath = url.searchParams.get("path");
+          if (!projectPath) {
+            throw new Error("Missing path parameter");
+          }
+          const decoded = decodeURIComponent(projectPath);
+          if (decoded.includes("..") || decoded.includes("~")) {
+            throw new Error("Path traversal detected");
+          }
+          return { kind: "open-project" as const, path: decoded };
+        }
+        case "chat/thread": {
+          const id = url.searchParams.get("id");
+          if (!id) throw new Error("Missing id parameter");
+          return { kind: "open-chat-thread" as const, id };
+        }
+        case "settings":
+          return { kind: "open-settings" as const };
+        default:
+          throw new Error(`Unknown action: ${path}`);
+      }
+    },
+    catch: (cause) =>
+      new DeepLinkParseError({
+        url: input,
+        cause: cause instanceof Error ? cause.message : String(cause),
+      }),
+  });
+}
 
 export class ElectronProtocolRegistrationError extends Data.TaggedError(
   "ElectronProtocolRegistrationError",
@@ -69,10 +123,23 @@ export function normalizeDesktopProtocolPathname(rawPath: string): Option.Option
   return Option.some(segments.join("/"));
 }
 
+export const registerDeepLinkProtocol = Effect.sync(() => {
+  Electron.app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+}).pipe(Effect.withSpan("desktop.electron.protocol.registerDeepLink"));
+
 const registerDesktopSchemePrivileges = Effect.sync(() => {
   Electron.protocol.registerSchemesAsPrivileged([
     {
       scheme: DESKTOP_SCHEME,
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+      },
+    },
+    {
+      scheme: DEEP_LINK_SCHEME,
       privileges: {
         standard: true,
         secure: true,
