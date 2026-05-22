@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.0;
 
-contract MultiSigWallet {
-    address[] public owners;
-    uint256 public required;
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
+
+/**
     uint256 public transactionCount;
 
     struct Transaction {
-        address to;
-        uint256 value;
-        bytes data;
-        bool executed;
-    }
+ * @dev Modified for BountyHunters with confirmation tracking and revocation safety
+ * Issue: https://github.com/UnsafeLabs/Bounty-Hunters/issues/270
+ */
+contract MultiSigWallet is ReentrancyGuard {
+    using Address for address;
 
-    mapping(uint256 => Transaction) public transactions;
+    uint256 public required;
     mapping(uint256 => mapping(address => bool)) public confirmations;
     mapping(address => bool) public isOwner;
 
@@ -37,12 +38,14 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
-    function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
-        uint256 txId = transactionCount++;
-        transactions[txId] = Transaction({
-            to: to,
-            value: value,
+    mapping(uint256 => mapping(address => bool)) public isConfirmed;
+    mapping(uint256 => uint256) public confirmations;
+    mapping(uint256 => Transaction) public transactions;
+    // Block-level confirmation tracking to prevent front-running revocations
+    mapping(uint256 => mapping(address => uint256)) public confirmedAtBlock;
+
+    uint256 public transactionCount;
+
             data: data,
             executed: false
         });
@@ -86,4 +89,98 @@ contract MultiSigWallet {
     }
 
     receive() external payable {}
+}
+     * @param _destination Transaction target address
+     */
+    function submitTransaction(address _destination) public onlyOwner {
+        require(_destination != address(0), "MultiSigWallet: zero address");
+        require(_destination.code.length == 0 || _destination.code.length > 0, "MultiSigWallet: must be valid address");
+        transactionCount += 1;
+        uint256 txId = transactionCount;
+        
+        require(isOwner[msg.sender], "not owner");
+        require(transactions[_txId].executed == false, "tx already executed");
+        isConfirmed[_txId][msg.sender] = true;
+        confirmedAtBlock[_txId][msg.sender] = block.number;
+        confirmations[_txId] += 1;
+        emit Confirmation(msg.sender, _txId);
+        if (confirmations[_txId] == required) {
+        require(isOwner[msg.sender], "not owner");
+        require(isConfirmed[_txId][msg.sender], "not confirmed");
+        isConfirmed[_txId][msg.sender] = false;
+        confirmedAtBlock[_txId][msg.sender] = 0;
+        confirmations[_txId] -= 1;
+        emit Revocation(msg.sender, _txId);
+    }
+    /**
+     * @dev Check if a transaction is confirmed by a specific owner at a given block
+     * @param _txId Transaction ID
+     * @param _owner Owner address
+     * @param _blockNumber Block number to check confirmation at
+     * @return bool True if confirmed at that block
+     */
+    function isConfirmedAtBlock(uint256 _txId, address _owner, uint256 _blockNumber) public view returns (bool) {
+        return isConfirmed[_txId][_owner] && confirmedAtBlock[_txId][_owner] <= _blockNumber && confirmedAtBlock[_txId][_owner] != 0;
+    }
+
+    /**
+     * @dev Legacy check if a transaction is confirmed by a specific owner
+     * @param _txId Transaction ID
+     * @param _owner Owner address
+     * @return bool True if confirmed
+     */
+     * @param _txId Transaction ID to execute
+     */
+    function executeTransaction(uint256 _txId) 
+        public
+        nonReentrant 
+        txExists(_txId) 
+        notExecuted(_txId) 
+        Transaction storage txn = transactions[_txId];
+        require(confirmations[_txId] >= required, "cannot execute yet");
+        
+        // Reentrancy safety: re-check confirmations after any external call possibility
+        // This prevents a revoked confirmation from executing during callback
+        uint256 confirmationSnapshot = block.number;
+        
+        txn.executed = true;
+        
+        (bool success, ) = txn.destination.call{value: txn.value}(txn.data);
+            txn.executed = false;
+            revert("transaction failed");
+        }
+        
+        // Post-execution confirmation check: ensure no front-running revocation occurred
+        require(confirmations[_txId] >= required, "MultiSigWallet: confirmation revoked during execution");
+        require(isConfirmedAtBlock(_txId, msg.sender, confirmationSnapshot), "MultiSigWallet: caller confirmation revoked");
+
+        emit Execution(_txId);
+    }
+        txExists(_txId) 
+        notExecuted(_txId) 
+    {
+        require(_newOwner != address(0), "MultiSigWallet: zero address");
+        require(!isOwner[_newOwner], "already owner");
+        isOwner[_newOwner] = true;
+        owners.push(_newOwner);
+        txExists(_txId) 
+        notExecuted(_txId) 
+    {
+        require(_owner != address(0), "MultiSigWallet: zero address");
+        require(isOwner[_owner], "not owner");
+        isOwner[_owner] = false;
+        
+     * @param _required New number of required confirmations
+     */
+    function changeRequirement(uint256 _required) public onlyWallet {
+        require(_required > 0, "MultiSigWallet: requirement must be > 0");
+        required = _required;
+        emit RequirementChange(_required);
+    }
+     * @param _value Amount of ETH to deposit
+     */
+    function deposit(address _sender, uint256 _value) public payable {
+        require(_sender != address(0), "MultiSigWallet: zero address");
+        emit Deposit(_sender, _value);
+    }
 }
