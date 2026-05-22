@@ -34,6 +34,29 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "dist-electron/**"]
     },
+    "@t3tools/web#build": {
+      "dependsOn": [
+        "@t3tools/contracts#build",
+        "@t3tools/client-runtime#build"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "@t3tools/server#build": {
+      "dependsOn": [
+        "@t3tools/contracts#build",
+        "@t3tools/shared#build",
+        "@t3tools/effect-acp#build",
+        "@t3tools/effect-codex-app-server#build"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "@t3tools/desktop#build": {
+      "dependsOn": [
+        "@t3tools/web#build",
+        "@t3tools/server#build"
+      ],
+      "outputs": ["dist-electron/**", "dist/**"]
+    },
     "dev": {
       "dependsOn": ["@t3tools/contracts#build"],
       "cache": false,
