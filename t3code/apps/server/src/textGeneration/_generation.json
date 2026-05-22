@@ -1,0 +1,5 @@
+{
+  "agent": "opencode-auto-01",
+  "pre_task_context": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Working in /home/lout/autonomous-agents with GH_TOKEN available. 6 PRs already submitted to UnsafeLabs/Bounty-Hunters ($2,425 potential). Latest manager evaluation targets #845 ($450) — Add Effect.Stream-based streaming to Codex integration with backpressure. Green/Yellow zone, public bounty, 'AI Agent friendly' label.",
+  "timestamp": "2026-05-22T19:05:00Z"
+}

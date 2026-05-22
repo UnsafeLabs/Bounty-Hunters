@@ -1,3 +1,5 @@
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -40,7 +42,139 @@ import {
 
 const CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT = "low";
 const CODEX_TIMEOUT_MS = 180_000;
+const STREAM_CHUNK_WARN_MS = 30_000;
+const STREAM_CHUNK_FAIL_MS = 120_000;
 const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString);
+
+export interface CodexStreamingOptions {
+  readonly modelSelection: ModelSelection;
+  readonly abortSignal?: AbortSignal;
+  readonly environment?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Run a Codex CLI process in streaming mode and yield output chunks as an
+ * Effect.Stream.
+ *
+ * Backpressure is provided by Effect.Stream natively — the stream pauses
+ * when the consumer is slower than the producer. Per-chunk timeout:
+ * emits a warning after 30 s and fails after 120 s of inactivity.
+ * An optional AbortSignal cleanly terminates the upstream process.
+ */
+export const runCodexStream = Effect.fn("runCodexStream")(function* (
+  codexConfig: CodexSettings,
+  prompt: string,
+  options: CodexStreamingOptions,
+): Effect.fn.Return<Stream.Stream<Uint8Array, TextGenerationError>, Scope.Scope> {
+  const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const environment = options.environment ?? process.env;
+
+  const reasoningEffort =
+    getModelSelectionStringOptionValue(options.modelSelection, "reasoningEffort") ??
+    CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT;
+
+  const command = ChildProcess.make(
+    codexConfig.binaryPath || "codex",
+    [
+      "exec",
+      "--ephemeral",
+      "--skip-git-repo-check",
+      "-s",
+      "read-only",
+      "--model",
+      options.modelSelection.model,
+      "--config",
+      `model_reasoning_effort="${reasoningEffort}"`,
+      ...(getModelSelectionBooleanOptionValue(options.modelSelection, "fastMode") === true
+        ? ["--config", `service_tier="fast"`]
+        : []),
+      "-",
+    ],
+    {
+      env: {
+        ...environment,
+        ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
+      },
+      cwd: process.cwd(),
+      shell: process.platform === "win32",
+      stdin: {
+        stream: Stream.encodeText(Stream.make(prompt)),
+      },
+    },
+  );
+
+  const child = yield* commandSpawner
+    .spawn(command)
+    .pipe(
+      Effect.mapError((cause) =>
+        normalizeCliError("codex", "codexStream", cause, "Failed to spawn Codex CLI process"),
+      ),
+    );
+
+  const stream: Stream.Stream<Uint8Array, TextGenerationError> = child.stdout.pipe(
+    Stream.mapError((cause) =>
+      normalizeCliError("codex", "codexStream", cause, "Failed to read Codex CLI stdout"),
+    ),
+  );
+
+  if (options.abortSignal) {
+    const deferred = yield* Deferred.make<void>();
+    options.abortSignal.addEventListener("abort", () => {
+      Deferred.unsafeDone(deferred)(Deferred.voidResult);
+    }, { once: true });
+    return stream.pipe(
+      Stream.interruptWhen(Deferred.await(deferred)),
+    );
+  }
+
+  return stream;
+});
+
+/**
+ * Decode a Codex stream into text chunks with per-chunk timeout.
+ * Emits warning after 30 s of inactivity per chunk, fails after 120 s.
+ */
+export const decodeCodexStream = (
+  stream: Stream.Stream<Uint8Array, TextGenerationError>,
+): Stream.Stream<string, TextGenerationError> => {
+  const textStream = stream.pipe(
+    Stream.decodeText(),
+    Stream.splitOn("\n"),
+    Stream.filter((chunk) => chunk.length > 0),
+  );
+
+  return textStream.pipe(
+    Stream.mapEffect((chunk) =>
+      Effect.raceAll([
+        Effect.succeed(chunk as string | typeof WARNING | typeof TIMEOUT),
+        Effect.sleep(Duration.millis(STREAM_CHUNK_WARN_MS)).pipe(
+          Effect.as("warning" as const),
+        ),
+        Effect.sleep(Duration.millis(STREAM_CHUNK_FAIL_MS)).pipe(
+          Effect.as("timeout" as const),
+        ),
+      ]).pipe(
+        Effect.flatMap((result) => {
+          if (result === "warning") {
+            return Effect.logWarning("Codex stream chunk delayed beyond 30s").pipe(
+              Effect.andThen(Effect.succeed(chunk)),
+            );
+          }
+          if (result === "timeout") {
+            return Effect.fail(
+              new TextGenerationError({
+                operation: "codexStream",
+                detail: "Codex stream chunk timeout: no data received for 120s.",
+              }),
+            );
+          }
+          return Effect.succeed(result);
+        }),
+      ),
+    ),
+  );
+};
+
 /**
  * Build a Codex text-generation closure bound to a specific `CodexSettings`
  * payload. See `makeCodexAdapter` for the overall per-instance rationale.
