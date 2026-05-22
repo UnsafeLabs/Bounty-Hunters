@@ -1,0 +1,5 @@
+{
+  "tool_name": "libazza",
+  "boot_context": "Fix logging config to separate error logs and add JSON structured logging. The laravel/config/logging.php sends all log entries to a single file. No separation between error logs and general application logs. Repository: UnsafeLabs/Bounty-Hunters, Laravel directory. Add error channel writing ERROR+ to error.log, modify stack to include daily+error channels, set 14-day rotation, add JSON channel with structured formatting.",
+  "timestamp": "2026-05-22T00:00:00Z"
+}
