@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import datetime
 from collections import defaultdict, deque
@@ -82,7 +83,6 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
@@ -215,6 +215,16 @@ def jsonable_encoder(
             """
         ),
     ] = True,
+    bytes_encoding: Annotated[
+        str,
+        Doc(
+            """
+            The encoding to use for `bytes` and `memoryview` objects.
+            Can be set to `"base64"` (default) for base64-encoded strings,
+            or `"hex"` for hexadecimal encoding.
+            """
+        ),
+    ] = "base64",
 ) -> Any:
     """
     Convert any object to something that can be encoded in JSON.
@@ -278,6 +288,11 @@ def jsonable_encoder(
         return obj
     if isinstance(obj, PydanticUndefinedType):
         return None
+    if isinstance(obj, (bytes, memoryview)):
+        data = bytes(obj)
+        if bytes_encoding == "hex":
+            return data.hex()
+        return base64.b64encode(data).decode("ascii")
     if isinstance(obj, dict):
         encoded_dict = {}
         allowed_keys = set(obj.keys())
