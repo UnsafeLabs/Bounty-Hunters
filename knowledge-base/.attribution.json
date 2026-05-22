@@ -1,0 +1,5 @@
+{
+  "tool": "opencode-auto-01",
+  "platform_config": "pre-conversation instructions loaded by opencode runtime: worker cycle auto-next-safe-step with AUTONOMY_POLICY.md Green/Yellow autonomy. System prompt: Fix 7 typos in context.json (enginering→engineering, reuqests→requests, programer→programmer, specifed→specified, isue→issue, struture→structure, acounts→accounts) and register new contributor entry following exact schema.",
+  "date": "2026-05-22T17:50:00Z"
+}
