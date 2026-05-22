@@ -3777,4 +3777,148 @@ export default function ChatView(props: ChatViewProps) {
       )}
     </div>
   );
+import React, { useState, useRef, useEffect } from 'react';
+
+interface Message {
+  id: string;
+  content: string;
+  sender: string;
+  timestamp: string;
+  expanded?: boolean;
+}
+
+interface ChatViewProps {
+  messages: Message[];
+  onMessageSend?: (message: string) => void;
+  onClearChat?: () => void;
+  onAttachFile?: () => void;
+}
+
+export const ChatView: React.FC<ChatViewProps> = ({ messages = [], onMessageSend, onClearChat, onAttachFile }) => {
+  const [activeMessageIndex, setActiveMessageIndex] = useState<number>(-1);
+  const [currentMessage, setCurrentMessage] = useState<Message | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const skipLinkRef = useRef<HTMLAnchorElement>(null);
+
+  // Focus management for keyboard navigation
+  const handleMessageKeyDown = (e: React.KeyboardEvent, index: number) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      setCurrentMessage(messages[index]);
+      setActiveMessageIndex(index);
+    }
+  };
+
+  const handleComposerKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setActiveMessageIndex(-1);
+      setCurrentMessage(null);
+    }
+  };
+
+  const handleSkipToComposer = () => {
+    if (composerRef.current) {
+      composerRef.current.focus();
+    }
+  };
+
+  const handleSkipToMessages = () => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.focus();
+    }
+  };
+
+  const handleSkipToSidebar = () => {
+    // Implementation would depend on sidebar structure
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Skip links for accessibility */}
+      <div className="sr-only">
+        <a 
+          ref={skipLinkRef}
+          href="#"
+          onClick={(e) => {
+            e.preventDefault();
+            handleSkipToMessages();
+          }}
+          className="focus:not-sr-only fixed top-0 left-0 z-50 p-4 text-sm font-medium bg-white border-2 border-blue-500 rounded-md shadow-lg"
+          style={{ display: 'none' }}
+        >
+          Skip to Chat Messages
+        </a>
+      </div>
+      
+      {/* Main chat view container with ARIA attributes */}
+      <div 
+        role="log" 
+        aria-live="polite"
+        ref={messagesContainerRef}
+        tabIndex={-1}
+        className="flex-1 overflow-y-auto"
+      >
+        <div className="flex flex-col h-full">
+          {messages.map((message, index) => (
+            <div 
+              key={message.id}
+              role="listitem"
+              tabIndex={0}
+              className="message-item p-2 mb-2"
+              onKeyDown={(e) => handleMessageKeyDown(e, index)}
+            >
+              {message.content}
+            </div>
+          ))}
+        </div>
+      </div>
+      
+      {/* Chat composer with accessible buttons */}
+      <div className="border-t p-4">
+        <div className="flex items-end space-x-2">
+          <div className="flex-1">
+            <textarea
+              ref={composerRef}
+              className="w-full p-2 border rounded"
+              aria-label="Type your message here"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  handleComposerKeyDown(e);
+                }
+              }}
+            />
+          </div>
+          <div className="flex space-x-2">
+            <button 
+              className="p-2 bg-blue-500 text-white rounded"
+              aria-label="Send message"
+              onClick={() => onMessageSend && onMessageSend('')}
+            >
+              Send
+            </button>
+            <button 
+              className="p-2 bg-gray-500 text-white rounded"
+              aria-label="Attach file"
+              onClick={() => onAttachFile && onAttachFile()}
+            >
+              📎
+            </button>
+            <button 
+              className="p-2 bg-red-500 text-white rounded"
+              aria-label="Clear chat"
+              onClick={() => onClearChat && onClearChat()}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ChatView;
+
 }
