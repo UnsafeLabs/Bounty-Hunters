@@ -80,7 +80,7 @@ VALID_TRANSITIONS: Dict[HandshakeState, List[HandshakeState]] = {
     HandshakeState.IDLE: [HandshakeState.CLIENT_HELLO],
     HandshakeState.CLIENT_HELLO: [
         HandshakeState.SERVER_HELLO,
-        HandshakeState.FINISHED,       # BUG 1: allows skipping key exchange
+# BUG 1 FIX: Removed CLIENT_HELLO → FINISHED transition (skipping key exchange)
     ],
     HandshakeState.SERVER_HELLO: [HandshakeState.CERTIFICATE],
     HandshakeState.CERTIFICATE: [HandshakeState.KEY_EXCHANGE],
