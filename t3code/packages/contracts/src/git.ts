@@ -16,7 +16,7 @@ export const GitStackedAction = Schema.Literals([
   "commit_push_pr",
 ]);
 export type GitStackedAction = typeof GitStackedAction.Type;
-export const GitActionProgressPhase = Schema.Literals(["branch", "commit", "push", "pr"]);
+export const GitActionProgressPhase = Schema.Literals(["branch", "commit", "push", "pr", "rebase"]);
 export type GitActionProgressPhase = typeof GitActionProgressPhase.Type;
 export const GitActionProgressKind = Schema.Literals([
   "action_started",
@@ -26,6 +26,7 @@ export const GitActionProgressKind = Schema.Literals([
   "hook_finished",
   "action_finished",
   "action_failed",
+  "rebase_conflicts",
 ]);
 export type GitActionProgressKind = typeof GitActionProgressKind.Type;
 export const GitActionProgressStream = Schema.Literals(["stdout", "stderr"]);
@@ -407,6 +408,11 @@ const GitActionFailedEvent = Schema.Struct({
   phase: Schema.NullOr(GitActionProgressPhase),
   message: TrimmedNonEmptyStringSchema,
 });
+const GitRebaseConflictsEvent = Schema.Struct({
+  ...GitActionProgressBase.fields,
+  kind: Schema.Literal("rebase_conflicts"),
+  conflicts: Schema.Array(TrimmedNonEmptyStringSchema),
+});
 
 export const GitActionProgressEvent = Schema.Union([
   GitActionStartedEvent,
@@ -416,5 +422,6 @@ export const GitActionProgressEvent = Schema.Union([
   GitActionHookFinishedEvent,
   GitActionFinishedEvent,
   GitActionFailedEvent,
+  GitRebaseConflictsEvent,
 ]);
 export type GitActionProgressEvent = typeof GitActionProgressEvent.Type;

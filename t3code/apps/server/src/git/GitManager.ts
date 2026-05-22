@@ -84,6 +84,15 @@ export interface GitManagerShape {
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
   ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
+  readonly rebase: (
+    cwd: string,
+    upstreamRef: string,
+  ) => Effect.Effect<{ success: boolean; conflicts: readonly string[] }, GitManagerServiceError>;
+  readonly getConflictFiles: (
+    cwd: string,
+  ) => Effect.Effect<readonly string[], GitManagerServiceError>;
+  readonly abortRebase: (cwd: string) => Effect.Effect<void, GitManagerServiceError>;
+  readonly continueRebase: (cwd: string) => Effect.Effect<void, GitManagerServiceError>;
 }
 
 export class GitManager extends Context.Service<GitManager, GitManagerShape>()(
@@ -693,6 +702,91 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     );
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+
+  // --- Rebase conflict detection ---
+
+  const isRebasing = (cwd: string) =>
+    gitCore.execute({
+      operation: "GitManager.isRebasing",
+      cwd,
+      args: ["rev-parse", "--git-path", "REBASE_HEAD"],
+      allowNonZeroExit: true,
+    }).pipe(Effect.map((result) => result.exitCode === 0));
+
+  const getConflictFiles: GitManagerShape["getConflictFiles"] = Effect.fn("getConflictFiles")(
+    function* (cwd) {
+      const result = yield* gitCore.execute({
+        operation: "GitManager.getConflictFiles",
+        cwd,
+        args: ["diff", "--name-only", "--diff-filter=U"],
+        allowNonZeroExit: true,
+      });
+      if (result.exitCode !== 0 && result.exitCode !== 1) {
+        return yield* gitManagerError(
+          "getConflictFiles",
+          `git diff --name-only --diff-filter=U exited with ${result.exitCode}`,
+        );
+      }
+      const files = result.stdout
+        .split("\n")
+        .map((f) => f.trim())
+        .filter((f) => f.length > 0);
+      return files;
+    },
+  );
+
+  const abortRebase: GitManagerShape["abortRebase"] = Effect.fn("abortRebase")(function* (cwd) {
+    const result = yield* gitCore.execute({
+      operation: "GitManager.abortRebase",
+      cwd,
+      args: ["rebase", "--abort"],
+      allowNonZeroExit: true,
+    });
+    if (result.exitCode !== 0) {
+      return yield* gitManagerError(
+        "abortRebase",
+        `git rebase --abort failed: ${result.stderr.trim() || "unknown error"}`,
+      );
+    }
+  });
+
+  const continueRebase: GitManagerShape["continueRebase"] = Effect.fn("continueRebase")(
+    function* (cwd) {
+      const result = yield* gitCore.execute({
+        operation: "GitManager.continueRebase",
+        cwd,
+        args: ["rebase", "--continue"],
+        allowNonZeroExit: true,
+      });
+      if (result.exitCode !== 0) {
+        return yield* gitManagerError(
+          "continueRebase",
+          `git rebase --continue failed: ${result.stderr.trim() || "unknown error"}`,
+        );
+      }
+    },
+  );
+
+  const rebase: GitManagerShape["rebase"] = Effect.fn("rebase")(function* (cwd, upstreamRef) {
+    const result = yield* gitCore.execute({
+      operation: "GitManager.rebase",
+      cwd,
+      args: ["rebase", upstreamRef],
+      allowNonZeroExit: true,
+    });
+    if (result.exitCode === 0) {
+      return { success: true as const, conflicts: [] as readonly string[] };
+    }
+    const rebasing = yield* isRebasing(cwd);
+    if (!rebasing) {
+      return yield* gitManagerError(
+        "rebase",
+        `Rebase failed for unknown reason (exit ${result.exitCode}): ${result.stderr.trim()}`,
+      );
+    }
+    const conflicts = yield* getConflictFiles(cwd);
+    return { success: false as const, conflicts };
+  });
 
   const tempDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? "/tmp";
   const canonicalizeExistingPath = (value: string) =>
@@ -1778,6 +1872,10 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     resolvePullRequest,
     preparePullRequestThread,
     runStackedAction,
+    rebase,
+    getConflictFiles,
+    abortRebase,
+    continueRebase,
   } satisfies GitManagerShape;
 });
 

@@ -3404,4 +3404,166 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       ]);
     }),
   );
+
+  it.effect("rebase returns success when there are no conflicts", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-rebase-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+
+      // Make a second commit on main
+      yield* runGit(repoDir, ["commit", "--allow-empty", "-m", "Second commit on main"]);
+      yield* runGit(repoDir, ["push", "origin", "main"]);
+
+      // Create a feature branch with a commit
+      yield* runGit(repoDir, ["checkout", "-b", "feature/rebase-test"]);
+      fs.writeFileSync(path.join(repoDir, "feature.txt"), "feature change\n");
+      yield* runGit(repoDir, ["add", "."]);
+      yield* runGit(repoDir, ["commit", "-m", "Add feature"]);
+
+      const { manager } = yield* makeManager();
+      const result = yield* manager.rebase(repoDir, "origin/main");
+
+      expect(result.success).toBe(true);
+      expect(result.conflicts).toEqual([]);
+    }),
+  );
+
+  it.effect("rebase detects conflicts and returns conflict file list", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-rebase-conflict-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+
+      // Create a conflicting commit on main
+      fs.writeFileSync(path.join(repoDir, "conflict.txt"), "main version\n");
+      yield* runGit(repoDir, ["add", "."]);
+      yield* runGit(repoDir, ["commit", "-m", "Main conflict"]);
+      yield* runGit(repoDir, ["push", "origin", "main"]);
+
+      // Create a feature branch with the same file changed
+      yield* runGit(repoDir, ["checkout", "-b", "feature/conflict-branch"]);
+      fs.writeFileSync(path.join(repoDir, "conflict.txt"), "feature version\n");
+      yield* runGit(repoDir, ["add", "."]);
+      yield* runGit(repoDir, ["commit", "-m", "Feature conflict"]);
+
+      const { manager } = yield* makeManager();
+      const result = yield* manager.rebase(repoDir, "origin/main");
+
+      expect(result.success).toBe(false);
+      expect(result.conflicts).toContain("conflict.txt");
+    }),
+  );
+
+  it.effect("getConflictFiles returns list of conflicted files after failed rebase", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-get-conflicts-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+
+      fs.writeFileSync(path.join(repoDir, "a.txt"), "main a\n");
+      yield* runGit(repoDir, ["add", "."]);
+      yield* runGit(repoDir, ["commit", "-m", "Main a"]);
+      yield* runGit(repoDir, ["push", "origin", "main"]);
+
+      yield* runGit(repoDir, ["checkout", "-b", "feature/conflict-a"]);
+      fs.writeFileSync(path.join(repoDir, "a.txt"), "feature a\n");
+      yield* runGit(repoDir, ["add", "."]);
+      yield* runGit(repoDir, ["commit", "-m", "Feature a"];
+
+      const { manager } = yield* makeManager();
+      const rebaseResult = yield* manager.rebase(repoDir, "origin/main");
+      expect(rebaseResult.success).toBe(false);
+
+      const conflicts = yield* manager.getConflictFiles(repoDir);
+      expect(conflicts).toContain("a.txt");
+    }),
+  );
+
+  it.effect("abortRebase restores previous branch state", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-abort-rebase-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+
+      fs.writeFileSync(path.join(repoDir, "c.txt"), "main c\n");
+      yield* runGit(repoDir, ["add", "."]);
+      yield* runGit(repoDir, ["commit", "-m", "Main c"]);
+      yield* runGit(repoDir, ["push", "origin", "main"]);
+
+      yield* runGit(repoDir, ["checkout", "-b", "feature/abort-test"]);
+      fs.writeFileSync(path.join(repoDir, "c.txt"), "feature c\n");
+      yield* runGit(repoDir, ["add", "."]);
+      yield* runGit(repoDir, ["commit", "-m", "Feature c"]);
+
+      const { manager } = yield* makeManager();
+      yield* manager.rebase(repoDir, "origin/main");
+
+      // After abort, branch should be back to feature/abort-test
+      const branchBefore = yield* runGit(repoDir, ["branch", "--show-current"]).pipe(
+        Effect.map((r) => r.stdout.trim()),
+      );
+      expect(branchBefore).toBe("feature/abort-test");
+
+      yield* manager.abortRebase(repoDir);
+
+      // After abort, still on the feature branch (not reverted to main)
+      const branchAfter = yield* runGit(repoDir, ["branch", "--show-current"]).pipe(
+        Effect.map((r) => r.stdout.trim()),
+      );
+      expect(branchAfter).toBe("feature/abort-test");
+
+      // The commit that was being applied should not be present
+      const log = yield* runGit(repoDir, ["log", "--oneline", "-n", "5"]).pipe(
+        Effect.map((r) => r.stdout),
+      );
+      expect(log).not.toContain("Main c");
+    }),
+  );
+
+  it.effect("continueRebase completes rebase after conflicts are resolved", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-continue-rebase-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+
+      fs.writeFileSync(path.join(repoDir, "d.txt"), "main d\n");
+      yield* runGit(repoDir, ["add", "."]);
+      yield* runGit(repoDir, ["commit", "-m", "Main d"]);
+      yield* runGit(repoDir, ["push", "origin", "main"]);
+
+      yield* runGit(repoDir, ["checkout", "-b", "feature/continue-test"]);
+      fs.writeFileSync(path.join(repoDir, "d.txt"), "feature d\n");
+      yield* runGit(repoDir, ["add", "."]);
+      yield* runGit(repoDir, ["commit", "-m", "Feature d"]);
+
+      const { manager } = yield* makeManager();
+      const rebaseResult = yield* manager.rebase(repoDir, "origin/main");
+      expect(rebaseResult.success).toBe(false);
+      expect(rebaseResult.conflicts).toContain("d.txt");
+
+      // Simulate conflict resolution
+      fs.writeFileSync(path.join(repoDir, "d.txt"), "resolved d\n");
+      yield* runGit(repoDir, ["add", "d.txt"]);
+
+      yield* manager.continueRebase(repoDir);
+
+      // Rebase should now be complete
+      const log = yield* runGit(repoDir, ["log", "--oneline", "-n", "3"]).pipe(
+        Effect.map((r) => r.stdout),
+      );
+      expect(log).toContain("Feature d");
+      expect(log).toContain("Main d");
+    }),
+  );
 });

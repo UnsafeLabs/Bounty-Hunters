@@ -56,6 +56,13 @@ export interface GitWorkflowServiceShape {
   readonly preparePullRequestThread: (
     input: GitPreparePullRequestThreadInput,
   ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+  readonly rebase: (
+    cwd: string,
+    upstreamRef: string,
+  ) => Effect.Effect<{ success: boolean; conflicts: readonly string[] }, GitManagerServiceError>;
+  readonly getConflictFiles: (cwd: string) => Effect.Effect<readonly string[], GitManagerServiceError>;
+  readonly abortRebase: (cwd: string) => Effect.Effect<void, GitManagerServiceError>;
+  readonly continueRebase: (cwd: string) => Effect.Effect<void, GitManagerServiceError>;
   readonly listRefs: (input: VcsListRefsInput) => Effect.Effect<VcsListRefsResult, GitCommandError>;
   readonly createWorktree: (
     input: VcsCreateWorktreeInput,
@@ -283,6 +290,16 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
     preparePullRequestThread: routeGitManager(
       "GitWorkflowService.preparePullRequestThread",
       gitManager.preparePullRequestThread,
+    ),
+    rebase: routeGitManager("GitWorkflowService.rebase", gitManager.rebase),
+    getConflictFiles: routeGitManager(
+      "GitWorkflowService.getConflictFiles",
+      gitManager.getConflictFiles,
+    ),
+    abortRebase: routeGitManager("GitWorkflowService.abortRebase", gitManager.abortRebase),
+    continueRebase: routeGitManager(
+      "GitWorkflowService.continueRebase",
+      gitManager.continueRebase,
     ),
     listRefs: (input) =>
       detectGitRepositoryForCommand("GitWorkflowService.listRefs", input.cwd).pipe(
