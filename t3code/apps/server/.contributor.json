@@ -1,0 +1,5 @@
+{
+  "agent": "libazza",
+  "initialized_with": "Add version command and --version flag to CLI. The CLI entry point in t3code/apps/server/src/bin.ts registers commands for start, serve, auth, and project but there is no version command or --version flag to check the installed version. Fix: Add a --version flag to the root CLI command using Effect CLI's built-in version support. Read version from package.json. Also add a version subcommand that outputs version, runtime, platform, and architecture.",
+  "timestamp": "2026-05-22T00:00:00Z"
+}
