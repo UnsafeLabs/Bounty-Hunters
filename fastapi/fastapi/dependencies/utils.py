@@ -89,6 +89,17 @@ multipart_incorrect_install_error = (
     'And then install "python-multipart" with: \n\n'
     "pip install python-multipart\n"
 )
+request_dependency_cache_attr = "_fastapi_dependency_cache"
+
+
+def _get_request_dependency_cache(
+    request: Request | WebSocket,
+) -> dict[DependencyCacheKey, Any]:
+    cache = getattr(request.state, request_dependency_cache_attr, None)
+    if cache is None:
+        cache = {}
+        setattr(request.state, request_dependency_cache_attr, cache)
+    return cache
 
 
 def ensure_multipart_is_installed() -> None:
@@ -130,6 +141,7 @@ def get_parameterless_sub_dependant(*, depends: params.Depends, path: str) -> De
     return get_dependant(
         path=path,
         call=depends.dependency,
+        use_cache=depends.use_cache,
         scope=depends.scope,
         own_oauth_scopes=own_oauth_scopes,
     )
@@ -624,7 +636,7 @@ async def solve_dependencies(
         del response.headers["content-length"]
         response.status_code = None  # type: ignore
     if dependency_cache is None:
-        dependency_cache = {}
+        dependency_cache = _get_request_dependency_cache(request)
     for sub_dependant in dependant.dependencies:
         sub_dependant.call = cast(Callable[..., Any], sub_dependant.call)
         call = sub_dependant.call
@@ -680,7 +692,7 @@ async def solve_dependencies(
             solved = await run_in_threadpool(call, **solved_result.values)
         if sub_dependant.name is not None:
             values[sub_dependant.name] = solved
-        if sub_dependant.cache_key not in dependency_cache:
+        if sub_dependant.use_cache and sub_dependant.cache_key not in dependency_cache:
             dependency_cache[sub_dependant.cache_key] = solved
     path_values, path_errors = request_params_to_args(
         dependant.path_params, request.path_params
