@@ -1,4 +1,5 @@
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import (
     Annotated,
     Any,
@@ -16,6 +17,15 @@ from starlette.datastructures import Headers as Headers  # noqa: F401
 from starlette.datastructures import QueryParams as QueryParams  # noqa: F401
 from starlette.datastructures import State as State  # noqa: F401
 from starlette.datastructures import UploadFile as StarletteUploadFile
+
+from .exceptions import HTTPException
+
+
+@dataclass(frozen=True)
+class ValidationResult:
+    is_valid: bool
+    file_size: int | None
+    content_type: str | None
 
 
 class UploadFile(StarletteUploadFile):
@@ -62,6 +72,25 @@ class UploadFile(StarletteUploadFile):
     content_type: Annotated[
         str | None, Doc("The content type of the request, from the headers.")
     ]
+    max_size: Annotated[int | None, Doc("The maximum allowed file size in bytes.")]
+    allowed_content_types: Annotated[
+        list[str] | None,
+        Doc("The allowed content types for the uploaded file."),
+    ]
+
+    def __init__(
+        self,
+        file: BinaryIO,
+        *,
+        size: int | None = None,
+        filename: str | None = None,
+        headers: Headers | None = None,
+        max_size: int | None = None,
+        allowed_content_types: list[str] | None = None,
+    ) -> None:
+        super().__init__(file=file, size=size, filename=filename, headers=headers)
+        self.max_size = max_size
+        self.allowed_content_types = allowed_content_types
 
     async def write(
         self,
@@ -83,6 +112,35 @@ class UploadFile(StarletteUploadFile):
         """
         return await super().write(data)
 
+    async def validate(self) -> ValidationResult:
+        """
+        Validate the uploaded file size and content type.
+        """
+        file_size = self.size if self.size is not None else self._measure_file_size()
+        content_type = self.content_type
+
+        if (
+            self.max_size is not None
+            and file_size is not None
+            and file_size > self.max_size
+        ):
+            raise HTTPException(status_code=413, detail="Uploaded file is too large")
+
+        if (
+            self.allowed_content_types is not None
+            and content_type not in self.allowed_content_types
+        ):
+            raise HTTPException(
+                status_code=415,
+                detail="Uploaded file content type is not allowed",
+            )
+
+        return ValidationResult(
+            is_valid=True,
+            file_size=file_size,
+            content_type=content_type,
+        )
+
     async def read(
         self,
         size: Annotated[
@@ -99,6 +157,7 @@ class UploadFile(StarletteUploadFile):
 
         To be awaitable, compatible with async, this is run in threadpool.
         """
+        await self.validate()
         return await super().read(size)
 
     async def seek(
@@ -148,6 +207,16 @@ class UploadFile(StarletteUploadFile):
         from ._compat.v2 import with_info_plain_validator_function
 
         return with_info_plain_validator_function(cls._validate)
+
+    def _measure_file_size(self) -> int | None:
+        try:
+            position = self.file.tell()
+            self.file.seek(0, 2)
+            file_size = self.file.tell()
+            self.file.seek(position)
+            return file_size
+        except (OSError, AttributeError):
+            return None
 
 
 class DefaultPlaceholder:
