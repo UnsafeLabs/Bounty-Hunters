@@ -1,0 +1,9 @@
+{
+  "name": "bounty-hunters-solidity",
+  "version": "1.0.0",
+  "description": "Solidity contracts for Bounty-Hunters",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.28.0"
+  }
+}
