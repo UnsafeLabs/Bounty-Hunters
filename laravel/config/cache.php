@@ -122,6 +122,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Health Check
+    |--------------------------------------------------------------------------
+    |
+    | These options control the cache health check feature that validates
+    | connectivity to the active cache store. This is useful for monitoring
+    | and alerting purposes.
+    |
+    */
+
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+
+    'health_check_interval' => env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
+    /*
+    |--------------------------------------------------------------------------
     | Serializable Classes
     |--------------------------------------------------------------------------
     |
