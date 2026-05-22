@@ -27,8 +27,8 @@ contract LiquidityPool is ERC20 {
         tokenB.transferFrom(msg.sender, address(this), amountB);
 
         if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
-            lpTokens = sqrt(amountA * amountB);
+            lpTokens = sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
+            _mint(address(0xdead), MINIMUM_LIQUIDITY);
         } else {
             uint256 lpFromA = amountA * totalSupply() / reserveA;
             uint256 lpFromB = amountB * totalSupply() / reserveB;
@@ -38,34 +38,37 @@ contract LiquidityPool is ERC20 {
         require(lpTokens > 0, "Insufficient liquidity");
         _mint(msg.sender, lpTokens);
 
-        reserveA += amountA;
-        reserveB += amountB;
+        reserveA = tokenA.balanceOf(address(this));
+        reserveB = tokenB.balanceOf(address(this));
 
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
     }
 
-    // BUG: Uses balanceOf instead of internal reserves — manipulable via direct transfer
     function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
         require(lpTokens > 0, "Must burn > 0");
         require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
 
-        // BUG: Should use reserveA/reserveB, not balanceOf
-        uint256 balA = tokenA.balanceOf(address(this));
-        uint256 balB = tokenB.balanceOf(address(this));
-
-        amountA = lpTokens * balA / totalSupply();
-        amountB = lpTokens * balB / totalSupply();
+        amountA = lpTokens * reserveA / totalSupply();
+        amountB = lpTokens * reserveB / totalSupply();
 
         _burn(msg.sender, lpTokens);
 
         tokenA.transfer(msg.sender, amountA);
         tokenB.transfer(msg.sender, amountB);
 
-        reserveA -= amountA;
-        reserveB -= amountB;
+        reserveA = tokenA.balanceOf(address(this));
+        reserveB = tokenB.balanceOf(address(this));
 
         emit LiquidityRemoved(msg.sender, amountA, amountB, lpTokens);
     }
+
+    function sync() external {
+        reserveA = tokenA.balanceOf(address(this));
+        reserveB = tokenB.balanceOf(address(this));
+        emit Sync(reserveA, reserveB);
+    }
+
+    event Sync(uint256 reserveA, uint256 reserveB);
 
     function sqrt(uint256 y) internal pure returns (uint256 z) {
         if (y > 3) {
