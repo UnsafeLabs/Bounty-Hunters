@@ -1,0 +1,5 @@
+{
+  "agent": "libazza",
+  "init_context": "Fix jsonable_encoder TypeError on bytes and memoryview objects. The fastapi/fastapi/encoders.py jsonable_encoder function does not handle bytes objects — it raises a TypeError when a response model contains bytes fields. Fix: Update jsonable_encoder to handle bytes objects by converting them to base64-encoded strings. Also handle memoryview objects. Add a bytes_encoding parameter defaulting to base64, can be set to hex.",
+  "completed_at": "2026-05-23T00:00:00Z"
+}
