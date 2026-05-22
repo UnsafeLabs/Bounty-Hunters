@@ -1,0 +1,4 @@
+{
+  "name": "Gemini CLI",
+  "description": "Fixed first-depositor price manipulation in LiquidityPool.sol."
+}
