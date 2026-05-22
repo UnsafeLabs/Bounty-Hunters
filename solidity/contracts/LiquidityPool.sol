@@ -1,64 +1,130 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-contract LiquidityPool {
-    uint256 public constant MINIMUM_LIQUIDITY = 1000;
-    uint256 public constant TOTAL_LIQUIDITY = 1000000;
-    uint256 public constant MINIMUM_LIQUIDITY_LOCKED = 1000;
-    
-    mapping(address => uint256) public liquidityBalances;
-    uint256 public totalSupply;
-    mapping(address => uint256) public balances;
-    mapping(address => mapping(address => uint256)) public allowances;
-    
-    constructor() {
-        totalSupply = 0;
-        // Mint initial MINIMUM_LIQUidity tokens and lock them
-        _mintInitialLiquidity();
-    }
-    
-    function _mintInitialLiquidity() internal {
-        totalSupply = TOTAL_LIQUIDITY;
-        // Lock the minimum liquidity
-        liquidityBalances[address(0)] = MINIMUM_LIQUIDITY_LOCKED;
-        balances[address(this)] = TOTAL_LIQUIDITY;
-        allowances[address(this)][0] = 0;
-    }
-}
-pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+/**
+ * @title LiquidityPool
+ * @dev A simple liquidity pool for demonstrating LP token mechanics
 contract LiquidityPool is ERC20 {
     IERC20 public tokenA;
     IERC20 public tokenB;
-
+    address public tokenB;
     uint256 public reserveA;
     uint256 public reserveB;
-
-    // BUG: No MINIMUM_LIQUIDITY lock — first depositor can manipulate LP price
+    uint256 public totalSupply;
+    mapping(address => uint256) public balanceOf;
+    
     uint256 public constant MINIMUM_LIQUIDITY = 1000;
+    
+    event Sync(uint256 reserveA, uint256 reserveB);
+    event Mint(address indexed sender, uint256 amountA, uint256 amountB);
+    event Burn(address indexed sender, uint256 amountA, uint256 amountB, address indexed to);
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    
+    constructor(address _tokenA, address _tokenB) {
+        tokenA = _tokenA;
 
-    event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
-    event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
-
-    constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") {
-        tokenA = IERC20(_tokenA);
-        tokenB = IERC20(_tokenB);
+    }
+    
+    /**
+     * @dev Internal function to mint LP tokens
+     */
+    function _mint(address to, uint256 amount) internal {
+        totalSupply += amount;
+        balanceOf[to] += amount;
+        emit Transfer(address(0), to, amount);
+    }
+    
+    /**
+     * @dev Internal function to burn LP tokens
+     */
+    function _burn(address from, uint256 amount) internal {
+        balanceOf[from] -= amount;
+        totalSupply -= amount;
+        emit Transfer(from, address(0), amount);
+    }
+    
+    /**
+     * @dev Update reserves to match actual balances
+     */
+    function sync() external {
+        reserveA = IERC20(tokenA).balanceOf(address(this));
+        reserveB = IERC20(tokenB).balanceOf(address(this));
+        emit Sync(reserveA, reserveB);
+    }
+    
+    /**
+     * @dev Add liquidity to the pool and receive LP tokens
+     */
+    function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 liquidity) {
     }
 
-    function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
-        tokenA.transferFrom(msg.sender, address(this), amountA);
-        tokenB.transferFrom(msg.sender, address(this), amountB);
-
-        if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
-            lpTokens = sqrt(amountA * amountB);
+        
+        uint256 liquidity;
+        if (totalSupply == 0) {
+            liquidity = sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
+            require(liquidity > 0, "Insufficient initial liquidity");
+            _mint(address(0), MINIMUM_LIQUIDITY);
         } else {
-            uint256 lpFromA = amountA * totalSupply() / reserveA;
-            uint256 lpFromB = amountB * totalSupply() / reserveB;
-            lpTokens = lpFromA < lpFromB ? lpFromA : lpFromB;
+            liquidity = min((amountA * totalSupply) / reserveA, (amountB * totalSupply) / reserveB);
+        }
+        
+        require(liquidity > 0, "Insufficient liquidity minted");
+        
+        _mint(msg.sender, liquidity);
+        _updateReserves();
+    }
+    
+    /**
+     * @dev Update internal reserves based on current balances
+     */
+    function _updateReserves() internal {
+        uint256 balanceA = IERC20(tokenA).balanceOf(address(this));
+        uint256 balanceB = IERC20(tokenB).balanceOf(address(this));
+        reserveA = balanceA;
+        reserveB = balanceB;
+        emit Sync(reserveA, reserveB);
+    }
+    
+    /**
+     * @dev Remove liquidity from the pool
+     */
+    function removeLiquidity(uint256 liquidity) external returns (uint256 amountA, uint256 amountB) {
+        require(balanceOf[msg.sender] >= liquidity, "Insufficient LP balance");
+        
+        uint256 _totalSupply = totalSupply;
+        amountA = (liquidity * reserveA) / _totalSupply;
+        amountB = (liquidity * reserveB) / _totalSupply;
+        
+        require(amountA > 0 && amountB > 0, "Insufficient liquidity burned");
+        
+        _burn(msg.sender, liquidity);
+        _updateReserves();
+        
+        IERC20(tokenA).transfer(msg.sender, amountA);
+        IERC20(tokenB).transfer(msg.sender, amountB);
+    }
+    
+    /**
+     * @dev Calculate square root
+     */
+    function sqrt(uint256 x) internal pure returns (uint256 y) {
+        uint256 z = (x + 1) / 2;
+        y = x;
+        while (z < y) {
+            y = z;
+            z = (x / z + z) / 2;
+        }
+    }
+    
+    /**
+     * @dev Calculate minimum of two values
+     */
+    function min(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a < b ? a : b;
+    }
+}
         }
 
         require(lpTokens > 0, "Insufficient liquidity");
