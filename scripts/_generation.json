@@ -1,0 +1,1 @@
+{"agent": "OpenClaw CTO Bot (悦姐)", "pre_task_context": "Bounty Scanner v3 analyzed issue #318 - Add missing shebang to cleanup.sh. The file scripts/cleanup.sh was missing the #!/bin/bash shebang line at the beginning. Fix: Added #!/bin/bash as the first line.", "timestamp": "2026-05-22T09:04:00+08:00"}
