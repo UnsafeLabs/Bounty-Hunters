@@ -3777,4 +3777,68 @@ export default function ChatView(props: ChatViewProps) {
       )}
     </div>
   );
+ "use client";
+ 
+ import { useState, useRef, useEffect } from "react";
+ import { useKeyboardListNavigation } from "./hooks/useKeyboardNavigation";
+ 
+ interface ChatViewProps {
+   messages: any[];
+   onMessageSelect?: (index: number) => void;
+ }
+ 
+ export function ChatView({ messages = [] }: ChatViewProps) {
+   const messagesEndRef = useRef<HTMLDivElement>(null);
+   const [focusedMessage, setFocusedMessage] = useState<number | null>(null);
+   const [expandedMessage, setExpandedMessage] = useState<number | null>(null);
+   
+   useEffect(() => {
+     if (messagesEndRef.current) {
+       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+     }
+   }, []);
+ 
+   const handleKeyDown = (e: KeyboardEvent) => {
+     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+       e.preventDefault();
+       const currentIndex = focusedMessage ?? -1;
+       const direction = e.key === 'ArrowDown' ? 1 : -1;
+       const newIndex = Math.max(0, Math.min(messages.length - 1, currentIndex + direction));
+       setFocusedMessage(newIndex);
+     } else if (e.key === 'Enter' && focusedMessage !== null) {
+       setExpandedMessage(focusedMessage);
+     } else if (e.key === 'Escape') {
+       setExpandedMessage(null);
+     }
+   };
+ 
+   useEffect(() => {
+     window.addEventListener('keydown', (e: KeyboardEvent) => handleKeyDown(e as any));
+     return () => {
+       window.removeEventListener('keydown', (e: KeyboardEvent) => handleKeyDown(e as any));
+     };
+   }, [focusedMessage]);
+ 
+   return (
+     <div className="chat-view" ref={messagesEndRef}>
+       <div 
+         role="log" 
+         aria-live="polite"
+         className="messages-container"
+       >
+         {messages.map((message, index) => (
+           <div 
+             key={index}
+             role="listitem"
+             tabIndex={0}
+             aria-label={`Message ${index + 1} from ${message.sender}`}
+             className={index === focusedMessage ? 'bg-blue-100' : ''}
+           >
+             {message.content}
+           </div>
+         ))}
+       </div>
+     </div>
+   );
+ }
 }
