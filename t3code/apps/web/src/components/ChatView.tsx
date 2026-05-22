@@ -1,3 +1,126 @@
+"use client";
+
+import { useState, useEffect, useRef } from 'react';
+
+interface Message {
+  id: string;
+  content: string;
+  sender: string;
+  timestamp: Date;
+}
+
+export function ChatView() {
+  return (
+    <div 
+      role="log" 
+      aria-live="polite"
+      className="chat-messages"
+    >
+      <MessagesTimeline />
+      <ChatComposer />
+    </div>
+  );
+}
+
+function MessagesTimeline() {
+  return (
+    <div role="listbox" className="messages-timeline">
+      {messages.map((message, index) => (
+        <div 
+          key={message.id} 
+          role="listitem"
+          tabIndex={0}
+        >
+          {message.content}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ChatComposer() {
+  return (
+    <div className="chat-composer">
+      <input 
+        aria-label="Type your message here"
+        role="textbox"
+      />
+      <button 
+        aria-label="Send message"
+        onClick={handleSendMessage}
+      >
+        Send
+      </button>
+      <button 
+        aria-label="Attach file"
+      >
+        Attach
+      </button>
+      <button 
+        aria-label="Clear chat"
+      >
+        Clear
+      </button>
+    </div>
+  );
+}
+
+function ChatView() {
+  return (
+    <div>
+      <a href="#messages" tabIndex={0}>Skip to messages</a>
+      <a href="#composer" tabIndex={0}>Skip to composer</a>
+      <div ref={messagesEndRef} />
+    </div>
+  );
+}
+
+function MessagesTimeline() {
+  const messages = [
+    {id: '1', content: 'Hello there!', sender: 'user1', timestamp: new Date()},
+    {id: '2', content: 'Hi!', sender: 'user2', timestamp: new Date()}
+  ];
+  
+  return (
+    <div id="messages">
+      {messages.map((message) => (
+        <div 
+          key={message.id}
+          role="listitem"
+          tabIndex={0}
+        >
+          <div>{message.content}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ChatComposer() {
+  return (
+    <div>
+      <input 
+        aria-label="Message input"
+        role="textbox"
+      />
+      <button 
+        aria-label="Send message"
+        onClick={handleSend}
+      >
+        Send
+      </button>
+      <button 
+        aria-label="Attach file"
+      >
+      </button>
+      <button 
+        aria-label="Clear chat"
+      >
+        Clear
+      </button>
+    </div>
+  );
+}
 import {
   type ApprovalRequestId,
   DEFAULT_MODEL,
@@ -3777,29 +3900,4 @@ export default function ChatView(props: ChatViewProps) {
       )}
     </div>
   );
-import { useState, useRef, useEffect } from "react";
-
-interface Message {
-  id: string;
-  sender: string;
-  content: string;
-  timestamp: Date;
-}
-
-export function ChatView() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messageContainerRef = useRef<HTMLDivElement>(null);
-  const [activeMessageIndex, setActiveMessageIndex] = useState<number>(-1);
-  const [messageExpanded, setMessageExpanded] = useState<boolean>(false);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown' && activeMessageIndex < messages.length - 1) {
-      setActiveMessageIndex(prev => prev + 1);
-    } else if (e.key === 'ArrowUp' && activeMessageIndex > 0) {
-      setActiveMessageIndex(prev => prev - 1);
-    } else if (e.key === 'Enter') {
-      setMessageExpanded(true);
-    }
-  };
 }
