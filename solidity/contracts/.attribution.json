@@ -1,0 +1,5 @@
+{
+  "tool": "opencode-auto-01",
+  "platform_config": "pre-conversation instructions loaded by opencode runtime: worker cycle auto-next-safe-step with AUTONOMY_POLICY.md Green/Yellow autonomy. System prompt: Fix tx.origin phishing in GovernanceToken.sol by replacing all tx.origin with msg.sender, adding Ownable import and onlyOwner modifier, adding zero-address guards, and removing admin variable.",
+  "date": "2026-05-22T17:50:00Z"
+}
