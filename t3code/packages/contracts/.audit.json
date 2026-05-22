@@ -1,0 +1,5 @@
+{
+  "contributor": "libazza",
+  "environment_config": "Add round-trip schema validation tests for all contract types. t3code/packages/contracts/src has existing tests for git, keybindings, orchestration, provider, providerInstance, providerRuntime, server, settings, terminal. Missing test coverage for: auth, baseSchemas, editor, environment, model, project, remoteAccess, vcs schema types. Task: add round-trip tests verifying Schema.decode + Schema.encode returns original, test edge cases (empty strings, unicode, max length), add negative tests for invalid data, test enum-like schemas reject unknown values. Repository: UnsafeLabs/Bounty-Hunters.",
+  "completed_at": "2026-05-23T00:00:00Z"
+}
