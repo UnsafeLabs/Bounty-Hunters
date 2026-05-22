@@ -1781,8 +1781,6 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   } satisfies GitManagerShape;
 });
 
-// GitManager.ts
-import { Effect, pipe } from 'effect';
 import { spawn } from 'child_process';
 
 export class GitManager {
@@ -1790,11 +1788,12 @@ export class GitManager {
   
   constructor() {
     if (GitManager.instance) {
-      return GitManager();  // Return existing instance if available
+      return GitManager();
     }
     GitManager.instance = this;
     return GitManager();
   }
+}
 
   // Add the missing GitManager implementation
   // Since I'm adding the file, here's the implementation:
