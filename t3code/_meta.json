@@ -1,0 +1,5 @@
+{
+  "contributor": "libazza",
+  "generation_context": "Task: Fix turbo.json missing dependency graph for incremental builds (Issue #828). Environment: GitHub API token-authenticated, Node.js on Windows, UnsafeLabs/Bounty-Hunters repo cloned at t3code/. The monorepo uses Turborepo with apps (web, server, desktop, marketing) and packages (contracts, client-runtime, shared, effect-acp, effect-codex-app-server, ssh, tailscale). Current turbo.json uses generic ^build dependsOn without explicit per-package dependency mapping, causing unnecessary rebuilds. Required: define explicit dependsOn for apps/web (→packages/contracts, packages/client-runtime), apps/server (→packages/contracts, packages/shared, packages/effect-acp, packages/effect-codex-app-server), apps/desktop (→apps/web, apps/server). Add cache output config per package.",
+  "completed_at": "2026-05-22T00:00:00Z"
+}
