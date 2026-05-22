@@ -61,38 +61,40 @@
 +// ============================================================================
 +
 +const mockChatMessages = [
-+  { id: 'msg1', threadId: 'thread1', threadName: 'General', content: 'Welcome to the team! Let me know if you need help with anything.', author: 'Alice', timestamp: '2024-01-15T10:00:00Z' },
-+  { id: 'msg2', threadId: 'thread1', threadName: 'General', content: 'Has anyone seen the latest deployment docs?', author: 'Bob', timestamp: '2024-01-15T10:05:00Z' },
-+  { id: 'msg3', threadId: 'thread2', threadName: 'Frontend', content: 'The new React Query implementation is working great.', author: 'Charlie', timestamp: '2024-01-15T11:00:00Z' },
-+  { id: 'msg4', threadId: 'thread2', threadName: 'Frontend', content: 'We should update the component library soon.', author: 'Diana', timestamp: '2024-01-15T11:30:00Z' },
-+  { id: 'msg5', threadId: 'thread3', threadName: 'Backend', content: 'The API rate limiting is now in production.', author: 'Eve', timestamp: '2024-01-15T12:00:00Z' },
-+  { id: 'msg6', threadId: 'thread3', threadName: 'Backend', content: 'Database migration completed successfully.', author: 'Frank', timestamp: '2024-01-15T12:30:00Z' },
-+  { id: 'msg7', threadId: 'thread1', threadName: 'General', content: 'Great work on the search feature everyone!', author: 'Alice', timestamp: '2024-01-15T13:00:00Z' },
-+  { id: 'msg8', threadId: 'thread4', threadName: 'Design', content: 'The new mockups are ready for review.', author: 'Grace', timestamp: '2024-01-15T14:00:00Z' },
++  { id: 'msg1', threadId: 'thread1', threadName: 'General', content: 'Hey everyone, welcome to the project!', author: 'Alice', timestamp: '2024-01-15T10:00:00Z' },
++  { id: 'msg2', threadId: 'thread1', threadName: 'General', content: 'Thanks Alice, excited to be here', author: 'Bob', timestamp: '2024-01-15T10:05:00Z' },
++  { id: 'msg3', threadId: 'thread2', threadName: 'Development', content: 'Has anyone reviewed the latest PR?', author: 'Charlie', timestamp: '2024-01-15T11:00:00Z' },
++  { id: 'msg4', threadId: 'thread2', threadName: 'Development', content: 'I\'m working on the authentication module now', author: 'Diana', timestamp: '2024-01-15T11:30:00Z' },
++  { id: 'msg5', threadId: 'thread3', threadName: 'Design', content: 'The new mockups are ready for review', author: 'Eve', timestamp: '2024-01-15T12:00:00Z' },
++  { id: 'msg6', threadId: 'thread1', threadName: 'General', content: 'Great work on the search feature implementation', author: 'Frank', timestamp: '2024-01-15T13:00:00Z' },
++  { id: 'msg7', threadId: 'thread2', threadName: 'Development', content: 'We need to fix the bug in the login flow', author: 'Grace', timestamp: '2024-01-15T14:00:00Z' },
++  { id: 'msg8', threadId: 'thread4', threadName: 'Random', content: 'Anyone up for coffee?', author: 'Henry', timestamp: '2024-01-15T15:00:00Z' },
 +];
 +
 +const mockFiles = [
-+  { id: 'file1', name: 'README.md', path: '/README.md', content: '# Project README\n\nThis is the main project documentation.\n\n## Getting Started\n\nRun `npm install` to get started.' },
-+  { id: 'file2', name: 'package.json', path: '/package.json', content: '{\n  "name": "web-app",\n  "version": "1.0.0",\n  "dependencies": {\n    "react": "^18.0.0",\n    "react-query": "^3.0.0"\n  }\n}' },
-+  { id: 'file3', name: 'GlobalSearch.tsx', path: '/src/components/GlobalSearch.tsx', content: 'import React from "react";\n\nexport function GlobalSearch() {\n  return <div>Search</div>;\n}' },
-+  { id: 'file4', name: 'utils.ts', path: '/src/lib/utils.ts', content: 'export function cn(...classes: string[]) {\n  return classes.filter(Boolean).join(" ");\n}' },
-+  { id: 'file5', name: 'api.ts', path: '/src/lib/api.ts', content: 'export async function fetchData(url: string) {\n  const response = await fetch(url);\n  return response.json();\n}' },
++  { name: 'README.md', path: 'README.md', content: '# Project\n\nThis is the main project README.\n\n## Getting Started\n\nRun `npm install` to get started.' },
++  { name: 'package.json', path: 'package.json', content: '{\n  "name": "project",\n  "version": "1.0.0",\n  "dependencies": {}\n}' },
++  { name: 'src/index.ts', path: 'src/index.ts', content: 'import { App } from "./App";\n\nconst app = new App();\napp.start();' },
++  { name: 'src/utils/search.ts', path: 'src/utils/search.ts', content: 'export function search(query: string): Result[] {\n  // Search implementation\n  return [];\n}' },
++  { name: 'src/components/Button.tsx', path: 'src/components/Button.tsx', content: 'import React from "react";\n\nexport function Button({ label }: { label: string }) {\n  return <button>{label}</button>;\n}' },
 +];
 +
 +const mockGitCommits = [
-+  { id: 'git1', hash: 'abc1234', message: 'feat: implement global search component', author: 'Alice', date: '2024-01-15T09:00:00Z', branch: 'main' },
-+  { id: 'git2', hash: 'def5678', message: 'fix: resolve memory leak in chat component', author: 'Bob', date: '2024-01-14T16:00:00Z', branch: 'main' },
-+  { id: 'git3', hash: 'ghi9012', message: 'docs: update API documentation', author: 'Charlie', date: '2024-01-14T10:00:00Z', branch: 'feature/docs' },
-+  { id: 'git4', hash: 'jkl3456', message: 'refactor: simplify file search logic', author: 'Diana', date: '2024-01-13T14:00:00Z', branch: 'main' },
-+  { id: 'git5', hash: 'mno7890', message: 'test: add unit tests for search utils', author: 'Eve', date: '2024-01-12T11:00:00Z', branch: 'feature/search-tests' },
++  { hash: 'abc1234', message: 'Initial commit', author: 'Alice', date: '2024-01-10T09:00:00Z', branch: 'main' },
++  { hash: 'def5678', message: 'Add authentication module', author: 'Bob', date: '2024-01-11T10:00:00Z', branch: 'main' },
++  { hash: 'ghi9012', message: 'Fix bug in search functionality', author: 'Charlie', date: '2024-01-12T11:00:00Z', branch: 'feature/search' },
++  { hash: 'jkl3456', message: 'Update README with setup instructions', author: 'Diana', date: '2024-01-13T12:00:00Z', branch: 'main' },
++  { hash: 'mno7890', message: 'Refactor chat components', author: 'Eve', date: '2024-01-14T13:00:00Z', branch: 'feature/chat' },
++  { hash: 'pqr1234', message: 'Implement global search feature', author: 'Frank', date: '2024-01-15T14:00:00Z', branch: 'feature/global-search' },
++  { hash: 'stu5678', message: 'Add tests for search module', author: 'Grace', date: '2024-01-16T15:00:00Z', branch: 'main' },
 +];
 +
 +// ============================================================================
-+// SEARCH UTILITIES
++// SEARCH API
 +// ============================================================================
 +
-+function createSearchRegex(query: string, filters: SearchFilters): RegExp | null {
-+  if (!query.trim()) return null;
++async function searchChat(query: string, filters: SearchFilters, cursor?: string): Promise<SearchResponse> {
++  const pageSize = 5;
++  const startIndex = cursor ? parseInt(cursor, 10) : 0;
 +  
-+  try {
-+    if (filters.regex) {
++  const
