@@ -204,6 +204,11 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             size="sm"
             type="button"
             onClick={props.onToggleInteractionMode}
+            aria-label={
+              props.interactionMode === "plan"
+                ? "Switch to build mode"
+                : "Switch to plan mode"
+            }
             title={
               props.interactionMode === "plan"
                 ? "Plan mode — click to return to normal build mode"
@@ -1941,6 +1946,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   return (
     <form
       ref={composerFormRef}
+      id="chat-composer"
       onSubmit={submitComposer}
       className="mx-auto w-full min-w-0 max-w-208"
       data-chat-composer-form="true"

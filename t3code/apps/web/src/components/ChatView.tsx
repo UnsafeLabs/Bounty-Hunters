@@ -686,6 +686,12 @@ export default function ChatView(props: ChatViewProps) {
   const composerRef = useComposerHandleContext() ?? localComposerRef;
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
+  const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
+
+  // Reset focused message when thread changes
+  useEffect(() => {
+    setFocusedMessageId(null);
+  }, [activeThreadId]);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
@@ -2459,11 +2465,73 @@ export default function ChatView(props: ChatViewProps) {
     terminalOpenByThreadRef.current[activeThreadKey] = current;
   }, [activeThreadKey, focusComposer, terminalState.terminalOpen]);
 
+  const navigableMessageIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const entry of timelineEntries) {
+      if (entry.kind === "message" && entry.message.role === "assistant") {
+        const messageEntry = entry as Extract<typeof entry, { kind: "message" }>;
+        ids.push(`message:${messageEntry.message.id}`);
+      }
+    }
+    return ids;
+  }, [timelineEntries]);
+
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (!activeThreadId || useCommandPaletteStore.getState().open || event.defaultPrevented) {
         return;
       }
+
+      // Message keyboard navigation (Arrow keys / Enter / Escape)
+      const target = event.target;
+      const isInputFocused =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable);
+
+      if (!isInputFocused && !isTerminalFocused()) {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          if (navigableMessageIds.length === 0) return;
+          event.preventDefault();
+          const currentIdx = focusedMessageId
+            ? navigableMessageIds.indexOf(focusedMessageId)
+            : -1;
+          const nextIdx =
+            event.key === "ArrowDown"
+              ? currentIdx < navigableMessageIds.length - 1
+                ? currentIdx + 1
+                : currentIdx
+              : currentIdx > 0
+                ? currentIdx - 1
+                : 0;
+          setFocusedMessageId(navigableMessageIds[nextIdx]);
+          return;
+        }
+
+        if (event.key === "Escape" && focusedMessageId) {
+          event.preventDefault();
+          setFocusedMessageId(null);
+          focusComposer();
+          return;
+        }
+
+        if (event.key === "Enter" && focusedMessageId) {
+          event.preventDefault();
+          const focusedEl = document.querySelector<HTMLElement>(
+            `[data-message-focused="true"]`,
+          );
+          if (focusedEl) {
+            const expandBtn = focusedEl.querySelector<HTMLButtonElement>(
+              'button[aria-expanded]',
+            );
+            if (expandBtn) {
+              expandBtn.click();
+            }
+          }
+          return;
+        }
+      }
+
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
@@ -2547,6 +2615,9 @@ export default function ChatView(props: ChatViewProps) {
     keybindings,
     onToggleDiff,
     toggleTerminalVisibility,
+    focusedMessageId,
+    focusComposer,
+    navigableMessageIds,
   ]);
 
   const onRevertToTurnCount = useCallback(
@@ -3498,6 +3569,21 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      {/* Skip links for screen reader navigation */}
+      <div role="navigation" aria-label="Skip links">
+        <a
+          href="#chat-messages"
+          className="absolute -top-96 left-4 z-50 rounded bg-background px-3 py-1.5 text-sm opacity-0 ring-2 ring-ring focus-visible:top-2 focus-visible:opacity-100"
+        >
+          Skip to messages
+        </a>
+        <a
+          href="#chat-composer"
+          className="absolute -top-96 left-36 z-50 rounded bg-background px-3 py-1.5 text-sm opacity-0 ring-2 ring-ring focus-visible:top-2 focus-visible:opacity-100"
+        >
+          Skip to composer
+        </a>
+      </div>
       {/* Top bar */}
       <header
         className={cn(
@@ -3551,7 +3637,7 @@ export default function ChatView(props: ChatViewProps) {
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div id="chat-messages" className="relative flex min-h-0 flex-1 flex-col">
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}
@@ -3577,6 +3663,7 @@ export default function ChatView(props: ChatViewProps) {
               workspaceRoot={activeWorkspaceRoot}
               skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
               onIsAtEndChange={onIsAtEndChange}
+              focusedMessageId={focusedMessageId}
             />
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
@@ -3586,6 +3673,7 @@ export default function ChatView(props: ChatViewProps) {
                   type="button"
                   onClick={() => scrollToEnd(true)}
                   className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
+                  aria-label="Scroll to bottom"
                 >
                   <ChevronDownIcon className="size-3.5" />
                   Scroll to bottom
