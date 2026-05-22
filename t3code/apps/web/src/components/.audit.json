@@ -1,0 +1,5 @@
+{
+  "contributor": "opencode-auto-01",
+  "environment_config": "Run the next safe autonomous cycle based on the manager's latest evaluation and current state files. Make useful progress for cash, paid proof, or warm revenue doors within 14 days. Judge: Does this create cash, paid proof, or warm revenue doors in the next 14 days? Green Zone: search public web/GitHub/bounty boards, clone public repos, create local branches/commits/patches/tests/reports, push branches to Luis-owned forks, open PRs for verified public bounty tasks when quality gate passes, comment claim commands like `/claim #NNN` when required by the bounty program and tied to the PR just opened. Public bounty PRs allowed if: bounty/task is public and clearly scoped, payout path is visible or credible, repo permits public contributions, solution is local/legal/non-destructive, diff is minimal and relevant. Stop only if action is outside Green/Yellow zone, quality gate fails, credentials are missing, or work becomes legally/ethically unclear.",
+  "completed_at": "2026-05-22T18:30:00Z"
+}
