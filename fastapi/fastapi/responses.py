@@ -9,6 +9,9 @@ from starlette.responses import JSONResponse as JSONResponse  # noqa
 from starlette.responses import PlainTextResponse as PlainTextResponse  # noqa
 from starlette.responses import RedirectResponse as RedirectResponse  # noqa
 from starlette.responses import Response as Response  # noqa
+from collections.abc import AsyncGenerator
+from typing import Any
+
 from starlette.responses import StreamingResponse as StreamingResponse  # noqa
 from typing_extensions import deprecated
 
@@ -96,3 +99,42 @@ class ORJSONResponse(JSONResponse):
         return orjson.dumps(
             content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
         )
+
+
+def _escape_csv(value: str, delimiter: str) -> str:
+    if any(c in value for c in (delimiter, '"', '\n', '\r')):
+        return '"' + value.replace('"', '""') + '"'
+    return value
+
+
+class StreamingCSVResponse(StreamingResponse):
+    def __init__(
+        self,
+        rows: AsyncGenerator[list[str], None],
+        headers: list[str] | None = None,
+        filename: str = "export.csv",
+        delimiter: str = ",",
+        status_code: int = 200,
+    ) -> None:
+        self.delimiter = delimiter
+        self.filename = filename
+        iterable = self._iter_rows(rows, headers)
+        super().__init__(
+            content=iterable,
+            status_code=status_code,
+            headers={
+                "Content-Type": "text/csv; charset=utf-8",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+            media_type="text/csv",
+        )
+
+    async def _iter_rows(
+        self,
+        rows: AsyncGenerator[list[str], None],
+        headers: list[str] | None,
+    ) -> AsyncGenerator[str, None]:
+        if headers is not None:
+            yield self.delimiter.join(_escape_csv(h, self.delimiter) for h in headers) + "\n"
+        async for row in rows:
+            yield self.delimiter.join(_escape_csv(v, self.delimiter) for v in row) + "\n"

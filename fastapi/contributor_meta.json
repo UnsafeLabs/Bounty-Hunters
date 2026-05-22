@@ -1,0 +1,5 @@
+{
+  "name": "libazza",
+  "session_init": "Add StreamingCSVResponse for large dataset exports. The fastapi/fastapi/responses.py includes JSONResponse, HTMLResponse, and others but lacks a streaming CSV response for large dataset exports. Implementation: Add a StreamingCSVResponse class accepting an async generator of row data, set Content-Type to text/csv and Content-Disposition to attachment with configurable filename, accept a headers parameter for column names, escape special characters per RFC 4180, support custom delimiters.",
+  "ts": "2026-05-22T00:00:00Z"
+}
