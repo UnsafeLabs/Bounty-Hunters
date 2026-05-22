@@ -268,8 +268,8 @@
       ]
     },
     "/home/mohamed/gemini/yyy/github/agent2/workspace/Bounty-Hunters/solidity/contracts/GovernanceToken.sol": {
-      "lastModificationDate": 1779358140866,
-      "contentHash": "8c285eef2e1872be0aa5ea88a8f7b9b8",
+      "lastModificationDate": 1779473912236,
+      "contentHash": "6b512926f48bb0c9277e0d2a838d1fbb",
       "sourceName": "contracts/GovernanceToken.sol",
       "solcConfig": {
         "version": "0.8.20",
@@ -296,7 +296,8 @@
         }
       },
       "imports": [
-        "@openzeppelin/contracts/token/ERC20/ERC20.sol"
+        "@openzeppelin/contracts/token/ERC20/ERC20.sol",
+        "@openzeppelin/contracts/access/Ownable.sol"
       ],
       "versionPragmas": [
         "^0.8.20"
@@ -605,6 +606,81 @@
       ],
       "artifacts": [
         "MockToken"
+      ]
+    },
+    "/home/mohamed/gemini/yyy/github/agent2/workspace/Bounty-Hunters/solidity/contracts/PhishingContract.sol": {
+      "lastModificationDate": 1779473712924,
+      "contentHash": "6ec4be9c274b243fde90642f5ee892d2",
+      "sourceName": "contracts/PhishingContract.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "evmVersion": "paris",
+          "optimizer": {
+            "enabled": false,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "IGovernanceToken",
+        "PhishingContract"
+      ]
+    },
+    "/home/mohamed/gemini/yyy/github/agent2/workspace/Bounty-Hunters/solidity/node_modules/@openzeppelin/contracts/access/Ownable.sol": {
+      "lastModificationDate": 1779473868224,
+      "contentHash": "d3c790edc9ccf808a17c5a6cd13614fd",
+      "sourceName": "@openzeppelin/contracts/access/Ownable.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "evmVersion": "paris",
+          "optimizer": {
+            "enabled": false,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../utils/Context.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "Ownable"
       ]
     }
   }

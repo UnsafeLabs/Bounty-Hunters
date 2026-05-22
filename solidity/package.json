@@ -19,7 +19,7 @@
     "@types/node": "^25.9.1",
     "chai": "^4.5.0",
     "ethers": "^6.16.0",
-    "hardhat": "^2.28.0",
+    "hardhat": "^2.28.6",
     "hardhat-gas-reporter": "^1.0.10",
     "solidity-coverage": "^0.8.17",
     "ts-node": "^10.9.2",
