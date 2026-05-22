@@ -1,0 +1,5 @@
+// The fix for the LiquidityPool contract
+--- a/solidity/contracts/LiquidityPool.sol
++++ b/solidity/contracts/LiquitidyPool.sol
+@@ -1, 10 +1, 10 @@
+ // Minimum: Fix first-depositor price manipulation
