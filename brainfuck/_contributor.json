@@ -1,0 +1,5 @@
+{
+  "identity": "yuzeguitarist via OpenAI Codex",
+  "runtime_instructions": "AI coding agent session for UnsafeLabs/Bounty-Hunters#654. Task: implement brainfuck/sort.bf as a pure Brainfuck program that reads input until newline or EOF, sorts printable ASCII characters up to length 50 in ascending order using comparison and swap operations, preserves spaces and duplicates, prints the sorted output followed by a newline, adds focused validation, avoids duplicate or spam submissions, and communicates professionally with maintainers.",
+  "timestamp": "2026-05-22T02:07:08Z"
+}
