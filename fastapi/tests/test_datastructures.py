@@ -5,6 +5,8 @@ import pytest
 from fastapi import FastAPI, UploadFile
 from fastapi.datastructures import Default
 from fastapi.testclient import TestClient
+from starlette.datastructures import Headers
+from starlette.exceptions import HTTPException
 
 
 def test_upload_file_invalid_pydantic_v2():
@@ -63,3 +65,74 @@ async def test_upload_file():
     await file.seek(0)
     assert await file.read() == b"data and more data!"
     await file.close()
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_returns_metadata():
+    stream = io.BytesIO(b"data")
+    file = UploadFile(
+        filename="file",
+        file=stream,
+        size=4,
+        headers=Headers({"content-type": "text/plain"}),
+        max_size=10,
+        allowed_content_types=["text/plain"],
+    )
+
+    result = await file.validate()
+
+    assert result.is_valid is True
+    assert result.file_size == 4
+    assert result.content_type == "text/plain"
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_calculates_missing_size_without_moving_cursor():
+    stream = io.BytesIO(b"data")
+    stream.seek(2)
+    file = UploadFile(filename="file", file=stream)
+
+    result = await file.validate()
+
+    assert result.file_size == 4
+    assert stream.tell() == 2
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_rejects_large_files():
+    stream = io.BytesIO(b"large")
+    file = UploadFile(filename="file", file=stream, size=5, max_size=4)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await file.validate()
+
+    assert exc_info.value.status_code == 413
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_rejects_disallowed_content_type():
+    stream = io.BytesIO(b"data")
+    file = UploadFile(
+        filename="file",
+        file=stream,
+        size=4,
+        headers=Headers({"content-type": "image/png"}),
+        allowed_content_types=["text/plain"],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await file.validate()
+
+    assert exc_info.value.status_code == 415
+
+
+@pytest.mark.anyio
+async def test_upload_file_validate_skips_unset_constraints():
+    stream = io.BytesIO(b"data")
+    file = UploadFile(filename="file", file=stream)
+
+    result = await file.validate()
+
+    assert result.is_valid is True
+    assert result.file_size == 4
+    assert result.content_type is None

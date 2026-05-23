@@ -1,4 +1,5 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import (
     Annotated,
     Any,
@@ -16,6 +17,14 @@ from starlette.datastructures import Headers as Headers  # noqa: F401
 from starlette.datastructures import QueryParams as QueryParams  # noqa: F401
 from starlette.datastructures import State as State  # noqa: F401
 from starlette.datastructures import UploadFile as StarletteUploadFile
+from starlette.exceptions import HTTPException
+
+
+@dataclass(frozen=True)
+class ValidationResult:
+    is_valid: bool
+    file_size: int
+    content_type: str | None
 
 
 class UploadFile(StarletteUploadFile):
@@ -62,6 +71,58 @@ class UploadFile(StarletteUploadFile):
     content_type: Annotated[
         str | None, Doc("The content type of the request, from the headers.")
     ]
+    max_size: Annotated[
+        int | None, Doc("The maximum allowed file size in bytes.")
+    ]
+    allowed_content_types: Annotated[
+        Sequence[str] | None, Doc("Allowed MIME types for the uploaded file.")
+    ]
+
+    def __init__(
+        self,
+        file: BinaryIO,
+        *,
+        size: int | None = None,
+        filename: str | None = None,
+        headers: Headers | None = None,
+        max_size: int | None = None,
+        allowed_content_types: Sequence[str] | None = None,
+    ) -> None:
+        super().__init__(file, size=size, filename=filename, headers=headers)
+        self.max_size = max_size
+        self.allowed_content_types = allowed_content_types
+
+    def _get_file_size(self) -> int:
+        if self.size is not None:
+            return self.size
+        current_position = self.file.tell()
+        self.file.seek(0, 2)
+        file_size = self.file.tell()
+        self.file.seek(current_position)
+        self.size = file_size
+        return file_size
+
+    async def validate(self) -> ValidationResult:
+        """
+        Validate file size and content type constraints for this upload.
+        """
+        file_size = self._get_file_size()
+        content_type = self.content_type
+
+        if self.max_size is not None and file_size > self.max_size:
+            raise HTTPException(status_code=413, detail="File exceeds maximum size")
+        if (
+            self.allowed_content_types is not None
+            and content_type not in self.allowed_content_types
+        ):
+            raise HTTPException(
+                status_code=415, detail="File content type is not allowed"
+            )
+        return ValidationResult(
+            is_valid=True,
+            file_size=file_size,
+            content_type=content_type,
+        )
 
     async def write(
         self,
