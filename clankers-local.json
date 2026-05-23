@@ -930,6 +930,12 @@
     "last_pr": "2026-05-23T11:33:27.066Z"
   },
   {
+    "username": "proxydom",
+    "total_prs": 2,
+    "first_pr": "2026-05-23T16:23:06.464Z",
+    "last_pr": "2026-05-23T17:23:23.223Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -1330,11 +1336,5 @@
     "total_prs": 1,
     "first_pr": "2026-05-23T10:51:06.663Z",
     "last_pr": "2026-05-23T10:51:06.663Z"
-  },
-  {
-    "username": "proxydom",
-    "total_prs": 1,
-    "first_pr": "2026-05-23T16:23:06.464Z",
-    "last_pr": "2026-05-23T16:23:06.464Z"
   }
 ]
