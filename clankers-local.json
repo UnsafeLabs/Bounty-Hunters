@@ -948,6 +948,12 @@
     "last_pr": "2026-05-23T21:18:43.132Z"
   },
   {
+    "username": "lakumoki",
+    "total_prs": 2,
+    "first_pr": "2026-05-23T22:02:45.889Z",
+    "last_pr": "2026-05-23T22:02:56.052Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -1342,11 +1348,5 @@
     "total_prs": 1,
     "first_pr": "2026-05-23T18:45:40.460Z",
     "last_pr": "2026-05-23T18:45:40.460Z"
-  },
-  {
-    "username": "lakumoki",
-    "total_prs": 1,
-    "first_pr": "2026-05-23T22:02:45.889Z",
-    "last_pr": "2026-05-23T22:02:45.889Z"
   }
 ]
