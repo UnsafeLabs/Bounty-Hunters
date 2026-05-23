@@ -3498,6 +3498,13 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      {/* Skip links for accessibility */}
+      <a href="#chat-messages" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-primary focus:text-primary-foreground focus:px-4 focus:py-2 focus:rounded-md">
+        Skip to chat messages
+      </a>
+      <a href="#chat-composer" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-primary focus:text-primary-foreground focus:px-4 focus:py-2 focus:rounded-md">
+        Skip to message composer
+      </a>
       {/* Top bar */}
       <header
         className={cn(
@@ -3551,8 +3558,9 @@ export default function ChatView(props: ChatViewProps) {
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div className="relative flex min-h-0 flex-1 flex-col" role="log" aria-live="polite" aria-label="Chat messages timeline">
             {/* Messages — LegendList handles virtualization and scrolling internally */}
+            <div id="chat-messages" tabIndex={-1} />
             <MessagesTimeline
               key={activeThread.id}
               isWorking={isWorking}
@@ -3584,6 +3592,7 @@ export default function ChatView(props: ChatViewProps) {
               <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
                 <button
                   type="button"
+                  aria-label="Scroll to bottom of messages"
                   onClick={() => scrollToEnd(true)}
                   className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
                 >
