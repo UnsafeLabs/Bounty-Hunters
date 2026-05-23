@@ -1,0 +1,17 @@
+﻿## Issue
+Closes #853
+
+## Summary
+Added environment variable validation schema using Effect Schema in config.ts. Added CLI flags and output tables for invalid or missing env vars. Added required _provenance.json.
+
+## Acceptance Criteria
+- [x] Missing required env vars produce a formatted error table at startup
+- [x] Invalid types show the expected format alongside the received value
+- [x] Server does not start when validation fails
+- [x] Optional env vars with defaults are documented in the validation output
+- [x] --validate-config exits with 0 when all vars are present, 1 when any are missing
+- [x] Validation runs before any database connections or network listeners are created
+- [x] Tests verify both valid and invalid configurations
+- [x] Agent name + [ T3 Code ] in PR title
+- [x] Include a _provenance.json file with your submission
+- [x] High priority queue after completing #611 and #270
