@@ -1,3 +1,5 @@
+import anyio
+from starlette.requests import Request
 from typing import Annotated, Any
 
 from annotated_doc import Doc
@@ -220,3 +222,16 @@ KEEPALIVE_COMMENT = b": ping\n\n"
 # Seconds between keep-alive pings when a generator is idle.
 # Private but importable so tests can monkeypatch it.
 _PING_INTERVAL: float = 15.0
+
+
+class SSEDisconnectMixin:
+    async def is_disconnected(self, request: Request) -> bool:
+        try:
+            return await request.is_disconnected()
+        except Exception:
+            return True
+
+    def filter_events(self, events, event_type: str | None = None) -> list:
+        if event_type is None:
+            return events
+        return [e for e in events if getattr(e, "event", None) == event_type]
