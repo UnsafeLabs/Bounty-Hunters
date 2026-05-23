@@ -1,4 +1,7 @@
+import csv
 import importlib
+import io
+from collections.abc import AsyncIterable, Mapping, Sequence
 from typing import Any, Protocol, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
@@ -11,6 +14,8 @@ from starlette.responses import RedirectResponse as RedirectResponse  # noqa
 from starlette.responses import Response as Response  # noqa
 from starlette.responses import StreamingResponse as StreamingResponse  # noqa
 from typing_extensions import deprecated
+
+CSVRow = Sequence[Any] | Mapping[str, Any]
 
 
 class _UjsonModule(Protocol):
@@ -34,6 +39,52 @@ try:
     orjson = cast(_OrjsonModule, importlib.import_module("orjson"))
 except ModuleNotFoundError:  # pragma: nocover
     orjson = None  # type: ignore[assignment]
+
+
+class StreamingCSVResponse(StreamingResponse):
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        content: AsyncIterable[CSVRow],
+        *,
+        headers: Sequence[str] | None = None,
+        filename: str = "export.csv",
+        delimiter: str = ",",
+        status_code: int = 200,
+        response_headers: Mapping[str, str] | None = None,
+    ) -> None:
+        self.csv_headers = list(headers) if headers is not None else None
+        self.delimiter = delimiter
+        http_headers = dict(response_headers or {})
+        http_headers.setdefault(
+            "Content-Disposition", f'attachment; filename="{filename}"'
+        )
+        super().__init__(
+            self._stream_csv(content),
+            status_code=status_code,
+            headers=http_headers,
+            media_type=self.media_type,
+        )
+
+    async def _stream_csv(self, content: AsyncIterable[CSVRow]):
+        if self.csv_headers is not None:
+            yield self._render_csv_row(self.csv_headers)
+        async for row in content:
+            yield self._render_csv_row(self._normalize_row(row))
+
+    def _normalize_row(self, row: CSVRow) -> Sequence[Any]:
+        if isinstance(row, Mapping):
+            if self.csv_headers is not None:
+                return [row.get(header, "") for header in self.csv_headers]
+            return list(row.values())
+        return row
+
+    def _render_csv_row(self, row: Sequence[Any]) -> str:
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, delimiter=self.delimiter)
+        writer.writerow(row)
+        return buffer.getvalue()
 
 
 @deprecated(
