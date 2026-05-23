@@ -138,4 +138,106 @@ describe("ChatMarkdown", () => {
       await screen.unmount();
     }
   });
+
+  it("auto-detects unlabeled JavaScript code fences", async () => {
+    const screen = await render(
+      <ChatMarkdown
+        text={"```\nexport function sum(a, b) {\n  return a + b;\n}\n```"}
+        cwd="/repo/project"
+      />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-code-language="javascript"]')).not.toBeNull();
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("renders aligned line numbers for fenced code blocks", async () => {
+    const screen = await render(
+      <ChatMarkdown text={"```ts\nconst first = 1;\nconst second = 2;\n```"} cwd="/repo/project" />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        const lineNumbers = document.querySelectorAll(".chat-markdown-code-line-number");
+        expect(lineNumbers).toHaveLength(2);
+        expect(lineNumbers[0]).toHaveTextContent("1");
+        expect(lineNumbers[1]).toHaveTextContent("2");
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("collapses code blocks longer than twenty lines and expands them on request", async () => {
+    const longCode = Array.from({ length: 25 }, (_, index) => `line ${index + 1}`).join("\n");
+    const screen = await render(
+      <ChatMarkdown text={`\`\`\`text\n${longCode}\n\`\`\``} cwd="/repo/project" />,
+    );
+
+    try {
+      const codeBlock = await vi.waitFor(() => {
+        const element = document.querySelector(".chat-markdown-codeblock");
+        expect(element).not.toBeNull();
+        return element as HTMLElement;
+      });
+
+      expect(codeBlock.dataset.collapsed).toBe("true");
+      expect(document.querySelectorAll(".chat-markdown-code-line")).toHaveLength(10);
+
+      const expandButton = page.getByRole("button", { name: "Expand code block" });
+      await expandButton.click();
+
+      await vi.waitFor(() => {
+        expect(codeBlock.dataset.collapsed).toBe("false");
+        expect(document.querySelectorAll(".chat-markdown-code-line")).toHaveLength(25);
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("copies the full code block even when collapsed", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const longCode = Array.from({ length: 25 }, (_, index) => `line ${index + 1}`).join("\n");
+    const screen = await render(
+      <ChatMarkdown text={`\`\`\`text\n${longCode}\n\`\`\``} cwd="/repo/project" />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector(".chat-markdown-codeblock")).not.toBeNull();
+      });
+
+      await page.getByRole("button", { name: "Copy code" }).click();
+
+      await vi.waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith(`${longCode}\n`);
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("does not add code-block controls to inline code", async () => {
+    const screen = await render(
+      <ChatMarkdown text={"Use `const value = 1` inline."} cwd="/repo/project" />,
+    );
+
+    try {
+      await expect.element(page.getByText("const value = 1")).toBeInTheDocument();
+      expect(document.querySelector(".chat-markdown-codeblock")).toBeNull();
+      expect(document.querySelector(".chat-markdown-code-line-number")).toBeNull();
+    } finally {
+      await screen.unmount();
+    }
+  });
 });

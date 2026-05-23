@@ -1,5 +1,5 @@
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon } from "lucide-react";
 import type { ServerProviderSkill } from "@t3tools/contracts";
 import React, {
   Children,
@@ -67,6 +67,8 @@ interface ChatMarkdownProps {
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
+const CODE_BLOCK_COLLAPSE_THRESHOLD_LINES = 20;
+const CODE_BLOCK_PREVIEW_LINES = 10;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
 const highlightedCodeCache = new LRUCache<string>(
@@ -75,11 +77,53 @@ const highlightedCodeCache = new LRUCache<string>(
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 
-function extractFenceLanguage(className: string | undefined): string {
-  const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
-  const raw = match?.[1] ?? "text";
+function normalizeFenceLanguage(raw: string | undefined): string {
+  if (!raw) return "text";
   // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
   return raw === "gitignore" ? "ini" : raw;
+}
+
+function detectFenceLanguage(code: string): string {
+  const trimmed = code.trim();
+  if (trimmed.length === 0) return "text";
+
+  if (/^(?:import|export)\s/m.test(trimmed) || /\b(?:const|let|var|function)\s+\w+/m.test(trimmed)) {
+    return /:\s*(?:string|number|boolean|unknown|Record<|\w+\[\])\b|interface\s+\w+/m.test(trimmed)
+      ? "typescript"
+      : "javascript";
+  }
+  if (/\bdef\s+\w+\(|\bclass\s+\w+[:(]|\bfrom\s+\w+\s+import\b/m.test(trimmed)) {
+    return "python";
+  }
+  if (/^(?:\$|npm|pnpm|bun|yarn|git|cd|mkdir|rm|cp|mv)\b/m.test(trimmed)) {
+    return "bash";
+  }
+  if (/^<[\w!-][\s\S]*>$/.test(trimmed)) {
+    return "html";
+  }
+  if (/^\s*[{[]/.test(trimmed)) {
+    try {
+      JSON.parse(trimmed);
+      return "json";
+    } catch {
+      // Not JSON; keep looking.
+    }
+  }
+  if (/[.#][\w-]+\s*{[\s\S]*}/.test(trimmed)) {
+    return "css";
+  }
+
+  return "text";
+}
+
+function resolveFenceLanguage(className: string | undefined, code: string): string {
+  const explicitLanguage = className?.match(CODE_FENCE_LANGUAGE_REGEX)?.[1];
+  return normalizeFenceLanguage(explicitLanguage ?? detectFenceLanguage(code));
+}
+
+function getCodeLines(code: string): string[] {
+  const withoutTrailingFenceNewline = code.endsWith("\n") ? code.slice(0, -1) : code;
+  return withoutTrailingFenceNewline.split("\n");
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -146,9 +190,24 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   return promise;
 }
 
-function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
+interface MarkdownCodeBlockProps {
+  className: string | undefined;
+  code: string;
+  themeName: DiffThemeName;
+  isStreaming: boolean;
+}
+
+function MarkdownCodeBlock({ className, code, themeName, isStreaming }: MarkdownCodeBlockProps) {
+  const language = resolveFenceLanguage(className, code);
+  const allLines = useMemo(() => getCodeLines(code), [code]);
+  const isCollapsible = allLines.length > CODE_BLOCK_COLLAPSE_THRESHOLD_LINES;
+  const [isExpanded, setIsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const visibleLines = isCollapsible && !isExpanded ? allLines.slice(0, CODE_BLOCK_PREVIEW_LINES) : allLines;
+  const visibleCode = visibleLines.join("\n");
+  const collapseButtonLabel = isExpanded ? "Collapse code block" : "Expand code block";
+
   const handleCopy = useCallback(() => {
     if (typeof navigator === "undefined" || navigator.clipboard == null) {
       return;
@@ -178,8 +237,16 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
     [],
   );
 
+  useEffect(() => {
+    setIsExpanded(false);
+  }, [code]);
+
   return (
-    <div className="chat-markdown-codeblock leading-snug">
+    <div
+      className="chat-markdown-codeblock leading-snug"
+      data-code-language={language}
+      data-collapsed={isCollapsible ? String(!isExpanded) : "false"}
+    >
       <button
         type="button"
         className="chat-markdown-copy-button"
@@ -189,25 +256,68 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
       >
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </button>
-      {children}
+      <div className="chat-markdown-numbered-code">
+        <div className="chat-markdown-code-line-numbers" aria-hidden="true">
+          {visibleLines.map((_line, index) => (
+            <span className="chat-markdown-code-line" key={index}>
+              <span className="chat-markdown-code-line-number">{index + 1}</span>
+            </span>
+          ))}
+        </div>
+        <div className="chat-markdown-code-content">
+          <CodeHighlightErrorBoundary
+            fallback={
+              <pre>
+                <code>{visibleCode}</code>
+              </pre>
+            }
+          >
+            <Suspense
+              fallback={
+                <pre>
+                  <code>{visibleCode}</code>
+                </pre>
+              }
+            >
+              <SuspenseShikiCodeBlock
+                code={visibleCode}
+                language={language}
+                themeName={themeName}
+                isStreaming={isStreaming}
+              />
+            </Suspense>
+          </CodeHighlightErrorBoundary>
+        </div>
+      </div>
+      {isCollapsible ? (
+        <button
+          type="button"
+          className="chat-markdown-collapse-button"
+          onClick={() => setIsExpanded((value) => !value)}
+          aria-label={collapseButtonLabel}
+          title={collapseButtonLabel}
+        >
+          {isExpanded ? <ChevronUpIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
+          <span>{isExpanded ? "Show less" : `Show all ${allLines.length} lines`}</span>
+        </button>
+      ) : null}
     </div>
   );
 }
 
 interface SuspenseShikiCodeBlockProps {
-  className: string | undefined;
   code: string;
+  language: string;
   themeName: DiffThemeName;
   isStreaming: boolean;
 }
 
 function SuspenseShikiCodeBlock({
-  className,
   code,
+  language,
   themeName,
   isStreaming,
 }: SuspenseShikiCodeBlockProps) {
-  const language = extractFenceLanguage(className);
   const cacheKey = createHighlightCacheKey(code, language, themeName);
   const cachedHighlightedHtml = !isStreaming ? highlightedCodeCache.get(cacheKey) : null;
 
@@ -587,18 +697,12 @@ function ChatMarkdown({
         }
 
         return (
-          <MarkdownCodeBlock code={codeBlock.code}>
-            <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
-              <Suspense fallback={<pre {...props}>{children}</pre>}>
-                <SuspenseShikiCodeBlock
-                  className={codeBlock.className}
-                  code={codeBlock.code}
-                  themeName={diffThemeName}
-                  isStreaming={isStreaming}
-                />
-              </Suspense>
-            </CodeHighlightErrorBoundary>
-          </MarkdownCodeBlock>
+          <MarkdownCodeBlock
+            className={codeBlock.className}
+            code={codeBlock.code}
+            themeName={diffThemeName}
+            isStreaming={isStreaming}
+          />
         );
       },
     }),
