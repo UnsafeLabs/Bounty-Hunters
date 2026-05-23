@@ -13,7 +13,7 @@ contract MultiSigWallet is ReentrancyGuard {
         uint256 value;
         bytes data;
         bool executed;
-        uint256 confirmationBlock;  // block number when confirmed
+        uint256 confirmationBlock;
     }
 
     mapping(uint256 => Transaction) public transactions;
@@ -52,11 +52,7 @@ contract MultiSigWallet is ReentrancyGuard {
             executed: false,
             confirmationBlock: 0
         });
-        // Auto-confirm by submitter
-        confirmations[txId][msg.sender] = true;
-        confirmationBlock[txId][msg.sender] = block.number;
         emit Submitted(txId);
-        emit Confirmed(txId, msg.sender);
         return txId;
     }
 
@@ -83,7 +79,7 @@ contract MultiSigWallet is ReentrancyGuard {
     }
 
     function isConfirmedAtBlock(uint256 txId, address owner, uint256 targetBlock) public view returns (bool) {
-        return confirmations[txId][owner] && confirmationBlock[txId][owner] <= targetBlock;
+        return confirmations[txId][owner] && confirmationBlock[txId][owner] > 0 && confirmationBlock[txId][owner] <= targetBlock;
     }
 
     function getConfirmationCountAtBlock(uint256 txId, uint256 targetBlock) public view returns (uint256 count) {
@@ -96,7 +92,7 @@ contract MultiSigWallet is ReentrancyGuard {
         Transaction storage txn = transactions[txId];
         require(!txn.executed, "Already executed");
 
-        // Snapshot confirmation count at this block to prevent front-running
+        // Snapshot confirmation count at previous block to prevent front-running
         uint256 snapshotBlock = block.number - 1;
         require(getConfirmationCountAtBlock(txId, snapshotBlock) >= required, "Not enough confirmations at block");
 
