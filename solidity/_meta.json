@@ -1,0 +1,13 @@
+{
+  "completed": [
+    "PriceOracle (#910)",
+    "SimpleSwap (#911)",
+    "TokenVesting (#917)",
+    "GovernanceToken (#912)",
+    "MultiSigWallet (#916)",
+    "CrossChainBridge (#920)"
+  ],
+  "bounty_based": true,
+  "author": "proxydom",
+  "notes": "Contracts written with AI assistance, tested via forge. All PRs target main."
+}
