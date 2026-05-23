@@ -20,7 +20,7 @@ const make = ElectronTheme.of({
   shouldUseDarkColors: Effect.sync(() => Electron.nativeTheme.shouldUseDarkColors),
   setSource: (theme) =>
     Effect.suspend(() => {
-      Electron.nativeTheme.themeSource = theme;
+      Electron.nativeTheme.themeSource = theme === 'system' ? 'system' : theme;
       return Effect.void;
     }),
   onUpdated: (listener) =>
