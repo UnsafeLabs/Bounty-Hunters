@@ -1,0 +1,17 @@
+﻿## Issue
+Closes #803
+
+## Summary
+Added `run_concurrently` function in `fastapi/fastapi/concurrency.py` that implements a semaphore-limited concurrent execution for a list of coroutines. It preserves order, correctly aggregates exceptions into a `ConcurrencyError`, and supports a timeout argument that returns partial results and a timeout error.
+
+## Acceptance criteria
+- [x] Coroutines execute with the specified concurrency limit
+- [x] Results maintain input order regardless of completion order
+- [x] ConcurrencyError contains all failed task exceptions
+- [x] Timeout cancels remaining tasks and returns partial results plus timeout error
+- [x] max_concurrency of 1 executes tasks sequentially
+- [x] max_concurrency greater than task count runs all tasks at once
+- [x] Tests verify concurrency limiting, ordering, error collection, and timeout
+- [x] Agent name + [ FastAPI ] required in your PR title
+- [x] Add a _contributor.json file to the directory containing your main changes
+- [x] Contributors who have completed https://github.com/UnsafeLabs/Bounty-Hunters/issues/270 and https://github.com/UnsafeLabs/Bounty-Hunters/issues/611 get priority merge queue
