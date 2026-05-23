@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract CrossChainBridge is ReentranchGuard {
+contract CrossChainBridge is ReentrancyGuard {
     IERC20 public bridgeToken;
     address public validator;
     uint256 public globalNonce;
@@ -26,11 +26,8 @@ contract CrossChainBridge is ReentranchGuard {
     }
 
     function processTransfer(
-        address recipient,
-        uint256 amount,
-        uint256 transferNonce,
-        uint256 sourceChainId,
-        bytes calldata signature
+        address recipient, uint256 amount, uint256 transferNonce,
+        uint256 sourceChainId, bytes calldata signature
     ) external nonReentrant {
         bytes32 transferHash = keccak256(abi.encodePacked(
             recipient, amount, transferNonce, sourceChainId, block.chainid, address(this)
