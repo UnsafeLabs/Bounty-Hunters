@@ -19,9 +19,9 @@
   },
   {
     "username": "lqkhanh295",
-    "total_prs": 87,
+    "total_prs": 91,
     "first_pr": "2026-05-22T11:58:46.572Z",
-    "last_pr": "2026-05-23T04:31:33.048Z"
+    "last_pr": "2026-05-23T09:43:34.331Z"
   },
   {
     "username": "mkcash",
@@ -418,6 +418,12 @@
     "total_prs": 9,
     "first_pr": "2026-05-21T02:53:24.037Z",
     "last_pr": "2026-05-21T03:30:06.032Z"
+  },
+  {
+    "username": "kpoxo6op",
+    "total_prs": 9,
+    "first_pr": "2026-05-23T04:44:46.420Z",
+    "last_pr": "2026-05-23T10:36:34.921Z"
   },
   {
     "username": "hamademon168-bot",
@@ -1056,6 +1062,12 @@
     "last_pr": "2026-05-22T20:16:21.727Z"
   },
   {
+    "username": "bao0541",
+    "total_prs": 2,
+    "first_pr": "2026-05-23T10:30:28.707Z",
+    "last_pr": "2026-05-23T10:30:56.005Z"
+  },
+  {
     "username": "kingskuan",
     "total_prs": 2,
     "first_pr": "2026-05-15T14:10:31.174Z",
@@ -1456,12 +1468,6 @@
     "total_prs": 1,
     "first_pr": "2026-05-22T23:32:50.781Z",
     "last_pr": "2026-05-22T23:32:50.781Z"
-  },
-  {
-    "username": "kpoxo6op",
-    "total_prs": 1,
-    "first_pr": "2026-05-23T04:44:46.420Z",
-    "last_pr": "2026-05-23T04:44:46.420Z"
   },
   {
     "username": "nporter-codes",
