@@ -329,3 +329,15 @@ def test_encode_color(module_path):
 
     data = {"color": Color("blue")}
     assert jsonable_encoder(data) == {"color": "blue"}
+
+def test_encode_bytes():
+    data = b"hello"
+    assert jsonable_encoder(data) == "aGVsbG8="
+    assert jsonable_encoder(data, bytes_encoding="hex") == "68656c6c6f"
+
+
+def test_encode_memoryview():
+    data = memoryview(b"hello")
+    assert jsonable_encoder(data) == "aGVsbG8="
+    assert jsonable_encoder(data, bytes_encoding="hex") == "68656c6c6f"
+
