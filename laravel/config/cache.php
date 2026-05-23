@@ -17,6 +17,10 @@ return [
 
     'default' => env('CACHE_STORE', 'database'),
 
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+
+    'health_check_interval' => env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
     /*
     |--------------------------------------------------------------------------
     | Cache Stores
