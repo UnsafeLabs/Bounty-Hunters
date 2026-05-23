@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract GovernanceToken is ERC20 {
+contract GovernanceToken is ERC20, Ownable {
     mapping(address => address) public delegates;
     mapping(address => uint256) public delegatedPower;
     mapping(uint256 => mapping(address => bool)) public hasVoted;
@@ -17,7 +18,6 @@ contract GovernanceToken is ERC20 {
     }
 
     Proposal[] public proposals;
-    address public admin;
 
     event DelegateChanged(address indexed delegator, address indexed toDelegate);
     event ProposalCreated(uint256 indexed proposalId, string description);
@@ -25,35 +25,28 @@ contract GovernanceToken is ERC20 {
 
     constructor(uint256 initialSupply) ERC20("Governance", "GOV") {
         _mint(msg.sender, initialSupply);
-        admin = msg.sender;
     }
 
-    // BUG: Uses tx.origin instead of msg.sender — phishing vulnerability
     function delegateVote(address to) external {
-        require(tx.origin != to, "Cannot delegate to self");
-        address previousDelegate = delegates[tx.origin];
-        if (previousDelegate != address(0)) {
-            delegatedPower[previousDelegate] -= balanceOf(tx.origin);
-        }
-        delegates[tx.origin] = to;
-        delegatedPower[to] += balanceOf(tx.origin);
-        emit DelegateChanged(tx.origin, to);
+        require(msg.sender != address(0), "Zero address");
+        require(msg.sender != to, "Cannot delegate to self");
+        address previous = delegates[msg.sender];
+        if (previous != address(0)) { delegatedPower[previous] -= balanceOf(msg.sender); }
+        delegates[msg.sender] = to;
+        delegatedPower[to] += balanceOf(msg.sender);
+        emit DelegateChanged(msg.sender, to);
     }
 
-    // BUG: Same tx.origin issue
     function revokeDelegate() external {
-        address currentDelegate = delegates[tx.origin];
-        require(currentDelegate != address(0), "No delegate");
-        delegatedPower[currentDelegate] -= balanceOf(tx.origin);
-        delegates[tx.origin] = address(0);
-        emit DelegateChanged(tx.origin, address(0));
+        require(msg.sender != address(0), "Zero address");
+        address current = delegates[msg.sender];
+        require(current != address(0), "No delegate");
+        delegatedPower[current] -= balanceOf(msg.sender);
+        delegates[msg.sender] = address(0);
+        emit DelegateChanged(msg.sender, address(0));
     }
 
-    // BUG: tx.origin for admin check
-    function snapshot() external {
-        require(tx.origin == admin, "Not admin");
-        // snapshot logic placeholder
-    }
+    function snapshot() external onlyOwner {}
 
     function getVotingPower(address account) public view returns (uint256) {
         return balanceOf(account) + delegatedPower[account];
@@ -61,31 +54,22 @@ contract GovernanceToken is ERC20 {
 
     function createProposal(string calldata description, uint256 duration) external returns (uint256) {
         proposals.push(Proposal({
-            description: description,
-            forVotes: 0,
-            againstVotes: 0,
-            endTime: block.timestamp + duration,
-            executed: false
+            description: description, forVotes: 0, againstVotes: 0,
+            endTime: block.timestamp + duration, executed: false
         }));
-        uint256 proposalId = proposals.length - 1;
-        emit ProposalCreated(proposalId, description);
-        return proposalId;
+        uint256 id = proposals.length - 1;
+        emit ProposalCreated(id, description);
+        return id;
     }
 
     function vote(uint256 proposalId, bool support) external {
-        Proposal storage proposal = proposals[proposalId];
-        require(block.timestamp < proposal.endTime, "Voting ended");
+        Proposal storage p = proposals[proposalId];
+        require(block.timestamp < p.endTime, "Voting ended");
         require(!hasVoted[proposalId][msg.sender], "Already voted");
-
         uint256 power = getVotingPower(msg.sender);
         require(power > 0, "No voting power");
-
         hasVoted[proposalId][msg.sender] = true;
-        if (support) {
-            proposal.forVotes += power;
-        } else {
-            proposal.againstVotes += power;
-        }
+        if (support) { p.forVotes += power; } else { p.againstVotes += power; }
         emit VoteCast(proposalId, msg.sender, support);
     }
 }
