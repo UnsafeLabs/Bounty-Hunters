@@ -1,5 +1,8 @@
 import binascii
+import hmac
+import time
 from base64 import b64decode
+from collections import defaultdict
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -10,7 +13,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -217,6 +220,67 @@ class HTTPBasic(HTTPBase):
         if not separator:
             raise self.make_not_authenticated_error()
         return HTTPBasicCredentials(username=username, password=password)
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    def __init__(
+        self,
+        *,
+        max_attempts: int = 5,
+        window_seconds: int = 300,
+        scheme_name: str | None = None,
+        realm: str | None = None,
+        description: str | None = None,
+        auto_error: bool = True,
+    ):
+        super().__init__(
+            scheme_name=scheme_name,
+            realm=realm,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self._attempts: dict[str, list[float]] = defaultdict(list)
+
+    def _get_client_ip(self, request: Request) -> str:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
+
+    def _is_rate_limited(self, ip: str) -> bool:
+        now = time.time()
+        self._attempts[ip] = [t for t in self._attempts[ip] if now - t < self.window_seconds]
+        return len(self._attempts[ip]) >= self.max_attempts
+
+    def _get_retry_after(self, ip: str) -> int:
+        if not self._attempts[ip]:
+            return 0
+        oldest = min(self._attempts[ip])
+        return int(self.window_seconds - (time.time() - oldest))
+
+    @staticmethod
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        return hmac.compare_digest(plain_password, hashed_password)
+
+    async def __call__(self, request: Request) -> HTTPBasicCredentials | None:
+        ip = self._get_client_ip(request)
+        if self._is_rate_limited(ip):
+            retry_after = self._get_retry_after(ip)
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many authentication attempts",
+                headers={"Retry-After": str(retry_after)},
+            )
+        try:
+            result = await super().__call__(request)
+        except HTTPException:
+            self._attempts[ip].append(time.time())
+            raise
+        if result is not None:
+            self._attempts[ip].clear()
+        return result
 
 
 class HTTPBearer(HTTPBase):
