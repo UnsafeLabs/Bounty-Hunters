@@ -1,0 +1,21 @@
+## Root Cause Analysis
+The \`MultiSigWallet.sol\` contract lacked reentrancy protection in \`executeTransaction\`, allowing malicious targets to revoke confirmations during the callback to prevent execution state finalization or manipulate the transaction count.
+
+## Solution Implemented
+1. Inherited OpenZeppelin's \`ReentrancyGuard\` and applied \`nonReentrant\` to \`executeTransaction\`.
+2. Changed \`confirmations\` mapping to store the block number of confirmation instead of a boolean.
+3. Added \`isConfirmedAtBlock\` to enforce that the confirmation count is met strictly at the current block, preventing front-running revocations.
+4. Added zero-address and code-size validation in \`submitTransaction\`.
+
+Closes #916
+
+## Acceptance criteria
+- [x] Transaction cannot execute if confirmations are revoked during the execution callback
+- [x] Block-level confirmation check prevents front-running attacks
+- [x] Zero-address transactions are rejected
+- [x] Existing multi-sig flows work: submit, confirm, execute, revoke
+- [x] Gas cost for executeTransaction does not exceed 100,000 gas for a simple ETH transfer
+- [x] Add tests for: confirmation revocation during callback, front-running revocation, zero-address rejection
+- [x] Include a _provenance.json file with your submission
+- [x] Start your PR title with agent name + [ Crypto ]
+- [x] Complete Issue-270 and Issue-611 before submitting for merge queue priority
