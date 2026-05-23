@@ -1,0 +1,9 @@
+{
+  "bounty": "840",
+  "project": "t3code",
+  "description": "Add resizable sidebar with drag handle, double-click reset, and persisted width",
+  "files": [
+    "apps/web/src/components/ui/sidebar.tsx",
+    "apps/web/src/components/AppSidebarLayout.tsx"
+  ]
+}
