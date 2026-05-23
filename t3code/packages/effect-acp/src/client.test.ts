@@ -9,6 +9,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import { TestClock } from "effect/testing";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -24,9 +25,79 @@ const InitializeRequest = jsonRpcRequest("initialize", AcpSchema.InitializeReque
 const InitializeResponse = jsonRpcResponse(AcpSchema.InitializeResponse);
 const ExtRequest = jsonRpcRequest("x/test", Schema.Struct({ hello: Schema.String }));
 const ExtResponse = jsonRpcResponse(Schema.Struct({ ok: Schema.Boolean }));
+const JsonRpcId = Schema.Union([Schema.Number, Schema.String]);
+const JsonRpcAnyRequest = Schema.Struct({
+  jsonrpc: Schema.Literal("2.0"),
+  id: JsonRpcId,
+  method: Schema.String,
+  params: Schema.Unknown,
+  headers: Schema.Array(Schema.Unknown),
+});
+const JsonRpcAnyResponse = jsonRpcResponse(Schema.Unknown);
+const JsonRpcErrorResponse = Schema.Struct({
+  jsonrpc: Schema.Literal("2.0"),
+  id: JsonRpcId,
+  error: AcpSchema.Error,
+});
+const isAuthenticationError = Schema.is(AcpError.AuthenticationError);
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/acp-mock-peer.ts"),
 );
+
+type JsonRpcAnyRequest = typeof JsonRpcAnyRequest.Type;
+
+const decodeAnyRequest = Schema.decodeEffect(Schema.fromJsonString(JsonRpcAnyRequest));
+
+const takeRpcRequest = (output: Queue.Dequeue<string>) =>
+  Queue.take(output).pipe(Effect.flatMap((message) => decodeAnyRequest(message)));
+
+const respondSuccess = (
+  input: Queue.Enqueue<Uint8Array, Cause.Done<void>>,
+  request: JsonRpcAnyRequest,
+  result: unknown,
+) =>
+  encodeJsonl(JsonRpcAnyResponse, {
+    jsonrpc: "2.0",
+    id: request.id,
+    result,
+  }).pipe(Effect.flatMap((message) => Queue.offer(input, message)));
+
+const respondError = (
+  input: Queue.Enqueue<Uint8Array, Cause.Done<void>>,
+  request: JsonRpcAnyRequest,
+  error: AcpSchema.Error,
+) =>
+  encodeJsonl(JsonRpcErrorResponse, {
+    jsonrpc: "2.0",
+    id: request.id,
+    error,
+  }).pipe(Effect.flatMap((message) => Queue.offer(input, message)));
+
+const respondAuthRequired = (
+  input: Queue.Enqueue<Uint8Array, Cause.Done<void>>,
+  request: JsonRpcAnyRequest,
+) =>
+  respondError(
+    input,
+    request,
+    AcpError.AcpRequestError.authRequired("Session expired", { status: 401 }).toProtocolError(),
+  );
+
+function requestParam(request: JsonRpcAnyRequest, key: string): unknown {
+  if (typeof request.params !== "object" || request.params === null) {
+    assert.fail(`Expected ${request.method} params to be an object`);
+  }
+  return (request.params as Readonly<Record<string, unknown>>)[key];
+}
+
+function failureIsAuthenticationError(exit: Exit.Exit<unknown, AcpError.AcpError>) {
+  return (
+    Exit.isFailure(exit) &&
+    exit.cause.reasons.some(
+      (reason) => Cause.isFailReason(reason) && isAuthenticationError(reason.error),
+    )
+  );
+}
 
 it.layer(NodeServices.layer)("effect-acp client", (it) => {
   const makeHandle = (env?: Record<string, string>) =>
@@ -444,6 +515,179 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
       yield* Fiber.join(initializeFiber);
       assert.deepEqual(yield* Fiber.join(extFiber), { ok: true });
       yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
+  it.effect("refreshes authentication once and replays queued requests on the new session", () =>
+    Effect.gen(function* () {
+      const expiredSessions = yield* Ref.make<Array<string>>([]);
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+
+      yield* Effect.gen(function* () {
+        const acp = yield* AcpClient.make(stdio, {
+          onSessionExpired: (sessionId) =>
+            Ref.update(expiredSessions, (current) => [...current, sessionId]),
+        }).pipe(Effect.provideService(Scope.Scope, scope));
+
+        const authFiber = yield* acp.agent
+          .authenticate({ methodId: "cursor_login" })
+          .pipe(Effect.forkScoped);
+        const authRequest = yield* takeRpcRequest(output);
+        assert.equal(authRequest.method, "authenticate");
+        assert.equal(requestParam(authRequest, "methodId"), "cursor_login");
+        yield* respondSuccess(input, authRequest, {
+          _meta: {
+            accessToken: "access-1",
+            refreshToken: "refresh-1",
+          },
+        });
+        yield* Fiber.join(authFiber);
+
+        const sessionFiber = yield* acp.agent
+          .createSession({ cwd: process.cwd(), mcpServers: [] })
+          .pipe(Effect.forkScoped);
+        const sessionRequest = yield* takeRpcRequest(output);
+        assert.equal(sessionRequest.method, "session/new");
+        yield* respondSuccess(input, sessionRequest, { sessionId: "session-1" });
+        assert.equal((yield* Fiber.join(sessionFiber)).sessionId, "session-1");
+
+        const firstPromptFiber = yield* acp.agent
+          .prompt({
+            sessionId: "session-1",
+            prompt: [{ type: "text", text: "first" }],
+          })
+          .pipe(Effect.forkScoped);
+        const secondPromptFiber = yield* acp.agent
+          .prompt({
+            sessionId: "session-1",
+            prompt: [{ type: "text", text: "second" }],
+          })
+          .pipe(Effect.forkScoped);
+
+        const firstPromptRequest = yield* takeRpcRequest(output);
+        const secondPromptRequest = yield* takeRpcRequest(output);
+        assert.equal(firstPromptRequest.method, "session/prompt");
+        assert.equal(secondPromptRequest.method, "session/prompt");
+        assert.equal(requestParam(firstPromptRequest, "sessionId"), "session-1");
+        assert.equal(requestParam(secondPromptRequest, "sessionId"), "session-1");
+
+        yield* Effect.all(
+          [
+            respondAuthRequired(input, firstPromptRequest),
+            respondAuthRequired(input, secondPromptRequest),
+          ],
+          { discard: true },
+        );
+
+        const refreshAuthRequest = yield* takeRpcRequest(output);
+        assert.equal(refreshAuthRequest.method, "authenticate");
+        assert.deepEqual(yield* Ref.get(expiredSessions), ["session-1"]);
+        const refreshMeta = requestParam(refreshAuthRequest, "_meta");
+        assert.equal(
+          typeof refreshMeta === "object" && refreshMeta !== null
+            ? (refreshMeta as Readonly<Record<string, unknown>>).refreshToken
+            : undefined,
+          "refresh-1",
+        );
+        yield* respondSuccess(input, refreshAuthRequest, {
+          _meta: {
+            accessToken: "access-2",
+            refreshToken: "refresh-2",
+          },
+        });
+
+        const closeRequest = yield* takeRpcRequest(output);
+        assert.equal(closeRequest.method, "session/close");
+        assert.equal(requestParam(closeRequest, "sessionId"), "session-1");
+        yield* respondSuccess(input, closeRequest, {});
+
+        const recreatedSessionRequest = yield* takeRpcRequest(output);
+        assert.equal(recreatedSessionRequest.method, "session/new");
+        yield* respondSuccess(input, recreatedSessionRequest, { sessionId: "session-2" });
+
+        const firstRetryRequest = yield* takeRpcRequest(output);
+        const secondRetryRequest = yield* takeRpcRequest(output);
+        assert.equal(firstRetryRequest.method, "session/prompt");
+        assert.equal(secondRetryRequest.method, "session/prompt");
+        assert.equal(requestParam(firstRetryRequest, "sessionId"), "session-2");
+        assert.equal(requestParam(secondRetryRequest, "sessionId"), "session-2");
+        yield* respondSuccess(input, firstRetryRequest, { stopReason: "end_turn" });
+        yield* respondSuccess(input, secondRetryRequest, { stopReason: "end_turn" });
+
+        assert.equal((yield* Fiber.join(firstPromptFiber)).stopReason, "end_turn");
+        assert.equal((yield* Fiber.join(secondPromptFiber)).stopReason, "end_turn");
+
+        yield* TestClock.adjust("0 millis").pipe(Effect.provide(TestClock.layer()));
+      }).pipe(Effect.ensuring(Scope.close(scope, Exit.void)));
+    }),
+  );
+
+  it.effect("fails all queued requests with AuthenticationError when refresh fails", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+
+      yield* Effect.gen(function* () {
+        const acp = yield* AcpClient.make(stdio).pipe(Effect.provideService(Scope.Scope, scope));
+
+        const authFiber = yield* acp.agent
+          .authenticate({ methodId: "cursor_login" })
+          .pipe(Effect.forkScoped);
+        const authRequest = yield* takeRpcRequest(output);
+        yield* respondSuccess(input, authRequest, {
+          _meta: {
+            accessToken: "access-1",
+            refreshToken: "refresh-1",
+          },
+        });
+        yield* Fiber.join(authFiber);
+
+        const sessionFiber = yield* acp.agent
+          .createSession({ cwd: process.cwd(), mcpServers: [] })
+          .pipe(Effect.forkScoped);
+        const sessionRequest = yield* takeRpcRequest(output);
+        yield* respondSuccess(input, sessionRequest, { sessionId: "session-1" });
+        yield* Fiber.join(sessionFiber);
+
+        const firstPromptFiber = yield* Effect.exit(
+          acp.agent.prompt({
+            sessionId: "session-1",
+            prompt: [{ type: "text", text: "first" }],
+          }),
+        ).pipe(Effect.forkScoped);
+        const secondPromptFiber = yield* Effect.exit(
+          acp.agent.prompt({
+            sessionId: "session-1",
+            prompt: [{ type: "text", text: "second" }],
+          }),
+        ).pipe(Effect.forkScoped);
+
+        const firstPromptRequest = yield* takeRpcRequest(output);
+        const secondPromptRequest = yield* takeRpcRequest(output);
+        yield* Effect.all(
+          [
+            respondAuthRequired(input, firstPromptRequest),
+            respondAuthRequired(input, secondPromptRequest),
+          ],
+          { discard: true },
+        );
+
+        const refreshAuthRequest = yield* takeRpcRequest(output);
+        assert.equal(refreshAuthRequest.method, "authenticate");
+        yield* respondError(
+          input,
+          refreshAuthRequest,
+          AcpError.AcpRequestError.authRequired("Refresh rejected", {
+            status: 401,
+          }).toProtocolError(),
+        );
+
+        assert.equal(failureIsAuthenticationError(yield* Fiber.join(firstPromptFiber)), true);
+        assert.equal(failureIsAuthenticationError(yield* Fiber.join(secondPromptFiber)), true);
+
+        yield* TestClock.adjust("0 millis").pipe(Effect.provide(TestClock.layer()));
+      }).pipe(Effect.ensuring(Scope.close(scope, Exit.void)));
     }),
   );
 });
