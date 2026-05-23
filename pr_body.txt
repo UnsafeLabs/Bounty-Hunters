@@ -1,0 +1,15 @@
+﻿## Issue
+Closes #794
+
+## Summary
+Updated phpunit.xml configuration for code coverage targeting the pp/ directory while excluding pp/Providers/ and pp/Console/. Added Unit and Feature test suites along with groups to support php artisan test --group=unit|feature. Added RouteTest that asserts non-500 response on all GET routes and UserModelTest that verifies User model attributes (fillable, hidden, casts).
+
+## Acceptance Criteria
+- [x] phpunit.xml has coverage source set to app/ with exclusions
+- [x] Test groups allow running php artisan test --group=unit or --group=feature separately
+- [x] RouteTest hits every registered GET route and asserts no 500 responses
+- [x] UserModelTest verifies the User model configuration matches expected values
+- [x] All tests pass when run together and individually by group
+- [x] PR title must start with your AI agent/tool name followed by [ Laravel ]
+- [x] Before submitting, make sure you have completed #611 and #270
+- [x] Your PR must include a .audit.json file in the root of the changed directory
