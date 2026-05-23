@@ -1,0 +1,43 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Role;
+use App\Models\User;
+use Database\Seeders\DatabaseSeeder;
+use Database\Seeders\RoleSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class DatabaseSeederTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_database_seeder_is_idempotent_for_test_user_and_roles(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->seed(DatabaseSeeder::class);
+
+        $this->assertSame(1, User::where('email', 'test@example.com')->count());
+        $this->assertSame(1, Role::where('name', 'admin')->count());
+        $this->assertSame(1, Role::where('name', 'editor')->count());
+        $this->assertSame(1, Role::where('name', 'viewer')->count());
+        $this->assertSame(3, Role::count());
+    }
+
+    public function test_role_seeder_is_idempotent(): void
+    {
+        $this->seed(RoleSeeder::class);
+        $this->seed(RoleSeeder::class);
+
+        $this->assertSame(['admin', 'editor', 'viewer'], Role::query()->orderBy('name')->pluck('name')->all());
+    }
+
+    public function test_role_factory_generates_valid_roles(): void
+    {
+        $role = Role::factory()->create();
+
+        $this->assertNotEmpty($role->name);
+        $this->assertNotEmpty($role->description);
+    }
+}
