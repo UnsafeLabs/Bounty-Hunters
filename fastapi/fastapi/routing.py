@@ -868,6 +868,7 @@ class APIRoute(routing.Route):
         self.response_model = response_model
         self.summary = summary
         self.response_description = response_description
+        self.middleware = middleware or []
         self.deprecated = deprecated
         self.operation_id = operation_id
         self.response_model_include = response_model_include
@@ -1002,6 +1003,21 @@ class APIRoute(routing.Route):
         return match, child_scope
 
 
+class _RouterMiddleware:
+    def __init__(self, app, middleware_list):
+        self.app = app
+        self.middleware_list = middleware_list
+
+    async def __call__(self, scope, receive, send):
+        app = self.app
+        for mw in reversed(self.middleware_list):
+            if isinstance(mw, type):
+                app = mw(app)
+            else:
+                app = mw(app)
+        await app(scope, receive, send)
+
+
 class APIRouter(routing.Router):
     """
     `APIRouter` class, used to group *path operations*, for example to structure
@@ -1059,6 +1075,8 @@ class APIRouter(routing.Router):
                 """
             ),
         ] = None,
+        middleware: Annotated[
+            list, Doc("Router-level middleware.")] = None,
         default_response_class: Annotated[
             type[Response],
             Doc(
