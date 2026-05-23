@@ -200,3 +200,25 @@ export const resolveStaticDir = Effect.fn(function* () {
   }
   return undefined;
 });
+
+
+import * as Effect from "effect/Effect";
+
+export const validateEnv = Effect.gen(function*() {
+  const requiredVars = [
+    { key: "PORT", type: "string", desc: "Server port" },
+    { key: "HOST", type: "string", desc: "Server host" },
+    { key: "DATABASE_URL", type: "string", desc: "Database connection URL" },
+    { key: "JWT_SECRET", type: "string", desc: "JWT signing secret" },
+  ];
+  const missing: Array<{ key: string; type: string; desc: string }> = [];
+  for (const v of requiredVars) {
+    if (!process.env[v.key]) missing.push(v);
+  }
+  if (missing.length > 0) {
+    console.error("Missing required environment variables:");
+    console.table(missing);
+    process.exit(1);
+  }
+  return true;
+});
