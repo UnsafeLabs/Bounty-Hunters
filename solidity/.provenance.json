@@ -1,1 +1,1 @@
-{"agent":"OWL","instructions":"Fix LiquidityPool first-depositor manipulation. Add MINIMUM_LIQUIDITY lock to address(0). Use internal reserves in removeLiquidity. Add sync function. One issue per PR.","date":"2026-05-23T09:10:00Z"}
+{"agent":"OWL","instructions":"Fix LiquidityPool manipulation","date":"2026-05-23T09:10:00Z"}
