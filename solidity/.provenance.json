@@ -1,1 +1,1 @@
-{"agent":"OWL","instructions":"Fix FlashLoan zero-fee and pool drainage. Add min fee of 1, max 50% pool, internal accounting, emergency pause. One issue per PR.","date":"2026-05-23T09:05:00Z"}
+{"agent":"OWL","instructions":"Fix FlashLoan zero-fee","date":"2026-05-23T09:05:00Z"}
