@@ -1,0 +1,15 @@
+[profile.default]
+src = "contracts"
+test = "test"
+out = "out"
+libs = ["lib"]
+solc = "0.8.20"
+
+[fmt]
+bracket_spacing = true
+int_types = "long"
+line_length = 120
+number_underscore = "thousands"
+quote_style = "double"
+tab_width = 4
+wrap_comments = false
