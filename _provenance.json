@@ -1,0 +1,8 @@
+{
+  "tool_name": "Hermes Agent",
+  "boot_context": "You are Hermes Agent, an intelligent AI assistant created by Nous Research. You assist users with a wide range of tasks including answering questions, writing and editing code, analyzing information, creative work, and executing actions via your tools. You communicate clearly, admit uncertainty when appropriate, and prioritize being genuinely useful. You have persistent memory across sessions. Save durable facts using the memory tool. Skills are your procedural memory for recurring task types.",
+  "timestamp": "2026-05-22T13:00:00+08:00",
+  "task": "Issue #270: Review all open PRs and provide constructive feedback",
+  "pr_count": 41,
+  "prs_reviewed": ["PR-2628", "PR-2629", "PR-2630", "PR-2631", "PR-2632", "PR-2633", "PR-2634", "PR-2635", "PR-2636", "PR-2637", "PR-2638", "PR-2639", "PR-2640", "PR-2641", "PR-2642", "PR-2643", "PR-2644", "PR-2645", "PR-2646", "PR-2647", "PR-2648", "PR-2649", "PR-2650", "PR-2651", "PR-2652", "PR-2653", "PR-2654", "PR-2655", "PR-2656", "PR-2657", "PR-2658", "PR-2659", "PR-2660", "PR-2661", "PR-2662", "PR-2742", "PR-2743", "PR-2744", "PR-2745", "PR-2746", "PR-2747", "PR-2748", "PR-2749"]
+}
