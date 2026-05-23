@@ -1,9 +1,9 @@
 [
   {
     "username": "Gaotax2006",
-    "total_prs": 1244,
+    "total_prs": 1342,
     "first_pr": "2026-05-17T08:21:34.383Z",
-    "last_pr": "2026-05-23T06:06:28.317Z"
+    "last_pr": "2026-05-23T07:28:18.123Z"
   },
   {
     "username": "Sikkra",
@@ -708,6 +708,12 @@
     "last_pr": "2026-05-22T16:59:19.961Z"
   },
   {
+    "username": "pgm-norbert",
+    "total_prs": 5,
+    "first_pr": "2026-05-23T06:38:41.948Z",
+    "last_pr": "2026-05-23T07:24:41.068Z"
+  },
+  {
     "username": "Alex-2Code",
     "total_prs": 5,
     "first_pr": "2026-05-17T18:07:52.329Z",
@@ -1060,6 +1066,12 @@
     "total_prs": 2,
     "first_pr": "2026-05-17T03:48:32.458Z",
     "last_pr": "2026-05-17T08:16:30.474Z"
+  },
+  {
+    "username": "soongyintong",
+    "total_prs": 2,
+    "first_pr": "2026-05-16T23:47:04.809Z",
+    "last_pr": "2026-05-23T07:48:15.983Z"
   },
   {
     "username": "OlegChep",
@@ -1452,6 +1464,12 @@
     "last_pr": "2026-05-23T04:44:46.420Z"
   },
   {
+    "username": "nporter-codes",
+    "total_prs": 1,
+    "first_pr": "2026-05-23T08:55:02.665Z",
+    "last_pr": "2026-05-23T08:55:02.665Z"
+  },
+  {
     "username": "MichisGitIsKing",
     "total_prs": 1,
     "first_pr": "2026-05-17T14:46:14.182Z",
@@ -1482,10 +1500,10 @@
     "last_pr": "2026-05-21T11:17:38.892Z"
   },
   {
-    "username": "soongyintong",
+    "username": "davidweb3-ctrl",
     "total_prs": 1,
-    "first_pr": "2026-05-16T23:47:04.809Z",
-    "last_pr": "2026-05-16T23:47:04.809Z"
+    "first_pr": "2026-05-23T06:57:32.179Z",
+    "last_pr": "2026-05-23T06:57:32.179Z"
   },
   {
     "username": "simpleprogrammer2",
