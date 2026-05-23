@@ -39,3 +39,39 @@ async def contextmanager_in_threadpool(
         await anyio.to_thread.run_sync(
             cm.__exit__, None, None, None, limiter=exit_limiter
         )
+
+
+import asyncio
+
+
+class ConcurrencyError(Exception):
+    def __init__(self, errors: list[Exception]):
+        self.errors = errors
+        super().__init__(f"{len(errors)} task(s) failed")
+
+
+async def run_concurrently(
+    coros: list,
+    max_concurrency: int = 5,
+    timeout: float | None = None,
+) -> list:
+    semaphore = asyncio.Semaphore(max_concurrency)
+    results: list = [None] * len(coros)
+    errors: list[Exception] = []
+    lock = asyncio.Lock()
+
+    async def run(idx: int, coro) -> None:
+        async with semaphore:
+            try:
+                result = await asyncio.wait_for(asyncio.ensure_future(coro), timeout=timeout) if timeout else await asyncio.ensure_future(coro)
+                async with lock:
+                    results[idx] = result
+            except Exception as e:
+                async with lock:
+                    errors.append(e)
+
+    tasks = [asyncio.create_task(run(i, c)) for i, c in enumerate(coros)]
+    await asyncio.gather(*tasks, return_exceptions=True)
+    if errors:
+        raise ConcurrencyError(errors)
+    return results
