@@ -624,7 +624,10 @@ async def solve_dependencies(
         del response.headers["content-length"]
         response.status_code = None  # type: ignore
     if dependency_cache is None:
-        dependency_cache = {}
+        dependency_cache = getattr(request.state, "fastapi_dependency_cache", {})
+        if not isinstance(dependency_cache, dict):
+            dependency_cache = {}
+        request.state.fastapi_dependency_cache = dependency_cache
     for sub_dependant in dependant.dependencies:
         sub_dependant.call = cast(Callable[..., Any], sub_dependant.call)
         call = sub_dependant.call
