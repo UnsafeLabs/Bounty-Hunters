@@ -234,6 +234,16 @@ def get_redoc_html(
             """
         ),
     ] = "https://cdn.jsdelivr.net/npm/redoc@2/bundles/redoc.standalone.js",
+    redoc_css_url: Annotated[
+        str | None,
+        Doc(
+            """
+            The URL to use to load the ReDoc CSS.
+
+            It is normally set to a CDN URL.
+            """
+        ),
+    ] = None,
     redoc_favicon_url: Annotated[
         str,
         Doc(
@@ -275,7 +285,11 @@ def get_redoc_html(
     <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
     """
     html += f"""
-    <link rel="shortcut icon" href="{redoc_favicon_url}">
+    <link rel="shortcut icon" href="{redoc_favicon_url}">"""
+    if redoc_css_url:
+        html += f"""
+    <link type="text/css" rel="stylesheet" href="{redoc_css_url}">"""
+    html += """
     <!--
     ReDoc doesn't change outer page styles
     -->
