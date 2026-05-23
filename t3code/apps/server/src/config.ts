@@ -200,3 +200,16 @@ export const resolveStaticDir = Effect.fn(function* () {
   }
   return undefined;
 });
+
+export const validateConfig = Effect.fn(function* () {
+  const missing: string[] = [];
+  const required = ["T3CODE_HOME", "T3CODE_AUTH_TOKEN"];
+  for (const key of required) {
+    if (!process.env[key]) missing.push(key);
+  }
+  if (missing.length > 0) {
+    console.error("Missing required environment variables:");
+    for (const key of missing) console.error("  - " + key);
+    process.exit(1);
+  }
+});
