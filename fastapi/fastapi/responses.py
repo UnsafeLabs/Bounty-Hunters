@@ -96,3 +96,37 @@ class ORJSONResponse(JSONResponse):
         return orjson.dumps(
             content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
         )
+
+
+import csv
+import io
+from collections.abc import AsyncGenerator
+
+
+class StreamingCSVResponse(StreamingResponse):
+    def __init__(
+        self,
+        rows: AsyncGenerator[list[str], None],
+        headers: list[str] | None = None,
+        filename: str = "export.csv",
+        delimiter: str = ",",
+        status_code: int = 200,
+    ):
+        async def stream() -> AsyncGenerator[bytes, None]:
+            buffer = io.StringIO()
+            writer = csv.writer(buffer, delimiter=delimiter, quoting=csv.QUOTE_MINIMAL)
+            if headers:
+                writer.writerow(headers)
+                yield buffer.getvalue().encode("utf-8")
+                buffer.seek(0)
+                buffer.truncate()
+            async for row in rows:
+                writer.writerow(row)
+                yield buffer.getvalue().encode("utf-8")
+                buffer.seek(0)
+                buffer.truncate()
+
+        super().__init__(
+            content=stream(), status_code=status_code, media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
