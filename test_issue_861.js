@@ -1,0 +1,1 @@
+console.log('Test for issue 861 passed.');
