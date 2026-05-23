@@ -1,0 +1,1 @@
+{"agent":"OWL","instructions":"Fix CrossChainBridge replay attack. Add chainid, contract address, nonce per sender to hash. Check ecrecover zero address. One issue per PR.","date":"2026-05-23T09:00:00Z"}
