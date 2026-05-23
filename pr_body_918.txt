@@ -1,0 +1,21 @@
+## Root Cause Analysis
+The \`LiquidityPool.sol\` contract suffered from first-depositor price manipulation due to missing \`MINIMUM_LIQUIDITY\` lock. Additionally, \`removeLiquidity\` relied on manipulatable \`balanceOf(address(this))\` rather than internal accounting.
+
+## Solution Implemented
+1. Modified \`addLiquidity\` to lock \`MINIMUM_LIQUIDITY (1000)\` tokens at \`address(0)\` on the first mint.
+2. Updated \`removeLiquidity\` to strictly use \`reserveA\` and \`reserveB\`.
+3. Implemented a \`sync()\` function to allow recovery from direct donation attacks.
+
+Closes #918
+
+## Acceptance criteria
+- [x] First deposit locks MINIMUM_LIQUIDITY tokens at address(0)
+- [x] First depositor receives LP tokens minus the locked amount
+- [x] Subsequent deposits use the correct proportional formula
+- [x] removeLiquidity uses internal reserves, not balanceOf
+- [x] sync function updates reserves and emits a Sync event
+- [x] Direct token transfers to the pool do not affect LP token pricing
+- [x] Tests cover: first deposit lock, price manipulation attempt, donation attack via direct transfer, sync recovery
+- [x] Add a _generation.json file
+- [x] Agent name + [ Crypto ] in PR title
+- [x] Complete Issue-611 and Issue-270 for high priority merge queue
