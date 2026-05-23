@@ -28,26 +28,69 @@
     "VITE_HOSTED_APP_URL",
     "VITE_HOSTED_APP_CHANNEL"
   ],
-  "globalPassThroughEnv": ["PATHEXT"],
+  "globalPassThroughEnv": [
+    "PATHEXT"
+  ],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**", "dist-electron/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        "dist-electron/**"
+      ]
     },
     "dev": {
-      "dependsOn": ["@t3tools/contracts#build"],
+      "dependsOn": [
+        "@t3tools/contracts#build"
+      ],
       "cache": false,
       "persistent": true
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"],
+      "dependsOn": [
+        "^typecheck"
+      ],
       "outputs": [],
       "cache": false
     },
     "test": {
-      "dependsOn": ["^build"],
+      "dependsOn": [
+        "^build"
+      ],
       "cache": false,
       "outputs": []
+    },
+    "apps/web#build": {
+      "dependsOn": [
+        "packages/contracts#build",
+        "packages/client-runtime#build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    },
+    "apps/server#build": {
+      "dependsOn": [
+        "packages/contracts#build",
+        "packages/shared#build",
+        "packages/effect-acp#build",
+        "packages/effect-codex-app-server#build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    },
+    "apps/desktop#build": {
+      "dependsOn": [
+        "apps/web#build",
+        "apps/server#build"
+      ],
+      "outputs": [
+        "dist/**",
+        "dist-electron/**"
+      ]
     }
   }
 }
