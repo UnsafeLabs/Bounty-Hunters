@@ -691,3 +691,24 @@ class SecurityScopes:
                 """
             ),
         ] = " ".join(self.scopes)
+
+
+class OAuth2PasswordBearerWithRefresh(OAuth2PasswordBearer):
+    def __init__(self, tokenUrl: str, refresh_url: str | None = None, scheme_name: str | None = None,
+                 scopes: dict[str, str] | None = None, description: str | None = None, auto_error: bool = True):
+        super().__init__(tokenUrl=tokenUrl, scheme_name=scheme_name, scopes=scopes, description=description, auto_error=auto_error)
+        self.refresh_url = refresh_url
+
+    @property
+    def refreshUrl(self) -> str | None:
+        return self.refresh_url
+
+
+class OAuth2RefreshRequestForm:
+    def __init__(self, grant_type: str = "refresh_token", refresh_token: str = "",
+                 scope: str = "", client_id: str | None = None, client_secret: str | None = None):
+        self.grant_type = grant_type
+        self.refresh_token = refresh_token
+        self.scopes = scope.split()
+        self.client_id = client_id
+        self.client_secret = client_secret
