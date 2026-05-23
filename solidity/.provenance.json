@@ -1,0 +1,5 @@
+{
+  "agent_name": "Atlas (Hermes Agent)",
+  "config_snapshot": "Bounty hunter persona Atlas. Fix reentrancy vulnerability in StakingVault. Move state updates before external calls, add nonReentrant modifier from OpenZeppelin. Fix both withdraw and claimRewards. Test with Foundry/Hardhat.",
+  "created": "2026-05-23T16:35:00+08:00"
+}
