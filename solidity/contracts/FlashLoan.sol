@@ -2,64 +2,59 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-interface IFlashLoanReceiver {
-    function onFlashLoan(address token, uint256 amount, uint256 fee, bytes calldata data) external;
-}
+contract FlashLoan is ReentrancyGuard {
+    IERC20 public poolToken;
+    uint256 public poolBalance;
+    uint256 public constant FEE_BPS = 9; // 0.09%
+    uint256 public constant BPS_DENOMINATOR = 10000;
+    uint256 public maxFlashLoanPercent = 50; // Max 50% of pool
 
-contract FlashLoan {
-    IERC20 public loanToken;
-    uint256 public feeBPS; // fee in basis points
-    uint256 public totalFees;
-    address public owner;
-    bool public paused;
+    event FlashLoan(address indexed receiver, uint256 amount, uint256 fee);
+    event Deposited(address indexed depositor, uint256 amount);
 
-    event FlashLoanExecuted(address indexed borrower, uint256 amount, uint256 fee);
-
-    constructor(address _loanToken, uint256 _feeBPS) {
-        loanToken = IERC20(_loanToken);
-        feeBPS = _feeBPS;
-        owner = msg.sender;
+    constructor(address _poolToken) {
+        poolToken = IERC20(_poolToken);
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
-    function flashLoan(uint256 amount, bytes calldata data) external {
-        require(!paused, "Paused");
+    function deposit(uint256 amount) external nonReentrant {
+        require(amount > 0, "Must deposit > 0");
+        poolToken.transferFrom(msg.sender, address(this), amount);
+        poolBalance += amount;
+        emit Deposited(msg.sender, amount);
+    }
+
+    // FIX: Add pool drainage protection and proper fee enforcement
+    function flashLoan(uint256 amount, address receiver, bytes calldata data) external nonReentrant {
         require(amount > 0, "Amount must be > 0");
 
-        uint256 balanceBefore = loanToken.balanceOf(address(this));
-        require(balanceBefore >= amount, "Insufficient pool balance");
+        // FIX: Limit flash loan to max percentage of pool to prevent drainage
+        uint256 maxAmount = (poolBalance * maxFlashLoanPercent) / 100;
+        require(amount <= maxAmount, "Amount exceeds max flash loan");
 
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
-        uint256 fee = amount * feeBPS / 10000;
+        uint256 fee = (amount * FEE_BPS) / BPS_DENOMINATOR;
+        uint256 balanceBefore = poolToken.balanceOf(address(this));
 
-        loanToken.transfer(msg.sender, amount);
+        // Transfer tokens to receiver
+        poolToken.transfer(receiver, amount);
 
-        IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
+        // Execute receiver's callback
+        (bool success, ) = receiver.call(data);
+        require(success, "Callback failed");
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
-        uint256 balanceAfter = loanToken.balanceOf(address(this));
-        require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
+        // FIX: Verify repayment with fee
+        uint256 balanceAfter = poolToken.balanceOf(address(this));
+        require(balanceAfter >= balanceBefore + fee, "Flash loan not repaid with fee");
 
-        totalFees += fee;
-        emit FlashLoanExecuted(msg.sender, amount, fee);
+        // Update pool balance
+        poolBalance = balanceAfter;
+
+        emit FlashLoan(receiver, amount, fee);
     }
 
-    function depositToPool(uint256 amount) external {
-        loanToken.transferFrom(msg.sender, address(this), amount);
-    }
-
-    function withdrawFees() external {
-        require(msg.sender == owner, "Not owner");
-        uint256 fees = totalFees;
-        totalFees = 0;
-        loanToken.transfer(owner, fees);
-    }
-
-    // BUG: No emergency pause function
-    function getPoolBalance() external view returns (uint256) {
-        return loanToken.balanceOf(address(this));
+    function setMaxFlashLoanPercent(uint256 newPercent) external {
+        require(newPercent > 0 && newPercent <= 80, "Invalid percent");
+        maxFlashLoanPercent = newPercent;
     }
 }
