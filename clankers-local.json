@@ -918,6 +918,12 @@
     "last_pr": "2026-05-22T20:16:21.727Z"
   },
   {
+    "username": "bao0541",
+    "total_prs": 2,
+    "first_pr": "2026-05-23T10:30:28.707Z",
+    "last_pr": "2026-05-23T10:30:56.005Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -1312,11 +1318,5 @@
     "total_prs": 1,
     "first_pr": "2026-05-23T08:55:02.665Z",
     "last_pr": "2026-05-23T08:55:02.665Z"
-  },
-  {
-    "username": "bao0541",
-    "total_prs": 1,
-    "first_pr": "2026-05-23T10:30:28.707Z",
-    "last_pr": "2026-05-23T10:30:28.707Z"
   }
 ]
