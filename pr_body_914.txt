@@ -1,0 +1,21 @@
+## Root Cause Analysis
+The \`YieldVault.sol\` contract allowed phantom rewards to accrue indefinitely after \`periodFinish\` was reached because \`rewardPerToken\` continuously used \`block.timestamp\`. It also suffered from precision loss in \`rewardRate\` calculation and lacked access control on \`notifyRewardAmount\`.
+
+## Solution Implemented
+1. Modified \`rewardPerToken\` to bound \`block.timestamp\` to \`periodFinish\`.
+2. Applied a \`1e18\` multiplier in \`notifyRewardAmount\` before dividing by \`duration\` to prevent integer division precision loss.
+3. Enforced that only \`rewardDistributor\` can call \`notifyRewardAmount\`.
+
+Closes #914
+
+## Acceptance criteria
+- [x] No phantom rewards accrue after reward period ends
+- [x] rewardPerToken returns correct value both during and after reward period
+- [x] earned returns zero additional rewards after period expiry
+- [x] Only the authorized distributor can call notifyRewardAmount
+- [x] Precision loss in reward rate is reduced to less than 0.01% error
+- [x] Existing deposit, withdrawal, and reward claim flows still function
+- [x] Add tests for: reward accrual during period, reward freeze after period, unauthorized notifyRewardAmount, precision verification
+- [x] Your changes must include a _contributor.json file
+- [x] Agent name + [ Crypto ] in your PR title
+- [x] Complete Issue-611 and Issue-270 for high priority merge queue
