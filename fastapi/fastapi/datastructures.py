@@ -63,6 +63,37 @@ class UploadFile(StarletteUploadFile):
         str | None, Doc("The content type of the request, from the headers.")
     ]
 
+    def __init__(
+        self,
+        *args: Any,
+        max_size: int | None = None,
+        allowed_content_types: list[str] | None = None,
+        **kwargs: Any,
+    ):
+        super().__init__(*args, **kwargs)
+        self.max_size = max_size
+        self.allowed_content_types = allowed_content_types
+
+    async def validate(self) -> dict[str, Any]:
+        from starlette.exceptions import HTTPException
+
+        result: dict[str, Any] = {
+            "is_valid": True,
+            "file_size": self.size,
+            "content_type": self.content_type,
+        }
+        if self.max_size is not None and self.size is not None and self.size > self.max_size:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File size {self.size} exceeds maximum {self.max_size}",
+            )
+        if self.allowed_content_types is not None and self.content_type not in self.allowed_content_types:
+            raise HTTPException(
+                status_code=415,
+                detail=f"Content type {self.content_type} not allowed",
+            )
+        return result
+
     async def write(
         self,
         data: Annotated[
@@ -74,13 +105,6 @@ class UploadFile(StarletteUploadFile):
             ),
         ],
     ) -> None:
-        """
-        Write some bytes to the file.
-
-        You normally wouldn't use this from a file you read in a request.
-
-        To be awaitable, compatible with async, this is run in threadpool.
-        """
         return await super().write(data)
 
     async def read(
@@ -94,11 +118,6 @@ class UploadFile(StarletteUploadFile):
             ),
         ] = -1,
     ) -> bytes:
-        """
-        Read some bytes from the file.
-
-        To be awaitable, compatible with async, this is run in threadpool.
-        """
         return await super().read(size)
 
     async def seek(
@@ -112,21 +131,9 @@ class UploadFile(StarletteUploadFile):
             ),
         ],
     ) -> None:
-        """
-        Move to a position in the file.
-
-        Any next read or write will be done from that position.
-
-        To be awaitable, compatible with async, this is run in threadpool.
-        """
         return await super().seek(offset)
 
     async def close(self) -> None:
-        """
-        Close the file.
-
-        To be awaitable, compatible with async, this is run in threadpool.
-        """
         return await super().close()
 
     @classmethod
