@@ -2,79 +2,93 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-contract StakingVault {
+contract StakingVault is ReentrancyGuard {
     IERC20 public stakingToken;
-    uint256 public rewardRate;
-    uint256 public totalStaked;
+    IERC20 public rewardToken;
 
-    mapping(address => uint256) public balances;
+    uint256 public totalStaked;
+    uint256 public rewardRate;
+    uint256 public periodFinish;
+    uint256 public lastUpdateTime;
+    uint256 public rewardPerTokenStored;
+
+    mapping(address => uint256) public balanceOf;
+    mapping(address => uint256) public userRewardPerTokenPaid;
     mapping(address => uint256) public rewards;
-    mapping(address => uint256) public lastStakeTime;
 
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
-    event RewardClaimed(address indexed user, uint256 amount);
+    event RewardClaimed(address indexed user, uint256 reward);
 
-    constructor(address _stakingToken, uint256 _rewardRate) {
+    constructor(address _stakingToken, address _rewardToken) {
         stakingToken = IERC20(_stakingToken);
-        rewardRate = _rewardRate;
+        rewardToken = IERC20(_rewardToken);
     }
 
-    function stake(uint256 amount) external {
+    function rewardPerToken() public view returns (uint256) {
+        if (totalStaked == 0) return rewardPerTokenStored;
+        uint256 timeElapsed = block.timestamp > periodFinish
+            ? periodFinish - lastUpdateTime
+            : block.timestamp - lastUpdateTime;
+        return rewardPerTokenStored + (timeElapsed * rewardRate * 1e18 / totalStaked);
+    }
+
+    function earned(address account) public view returns (uint256) {
+        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
+    }
+
+    modifier updateReward(address account) {
+        rewardPerTokenStored = rewardPerToken();
+        lastUpdateTime = block.timestamp > periodFinish ? periodFinish : block.timestamp;
+        if (account != address(0)) {
+            rewards[account] = earned(account);
+            userRewardPerTokenPaid[account] = rewardPerTokenStored;
+        }
+        _;
+    }
+
+    // FIX: Add nonReentrant to prevent reentrancy
+    function stake(uint256 amount) external nonReentrant updateReward(msg.sender) {
         require(amount > 0, "Cannot stake 0");
-        stakingToken.transferFrom(msg.sender, address(this), amount);
-        _updateReward(msg.sender);
-        balances[msg.sender] += amount;
         totalStaked += amount;
-        lastStakeTime[msg.sender] = block.timestamp;
+        balanceOf[msg.sender] += amount;
+        stakingToken.transferFrom(msg.sender, address(this), amount);
         emit Staked(msg.sender, amount);
     }
 
-    function _updateReward(address account) internal {
-        if (balances[account] > 0) {
-            uint256 timeStaked = block.timestamp - lastStakeTime[account];
-            rewards[account] += balances[account] * timeStaked * rewardRate / 1e18;
-        }
-        lastStakeTime[account] = block.timestamp;
-    }
-
-    // BUG: Reentrancy — state update after external call
-    function withdraw(uint256 amount) external {
-        require(balances[msg.sender] >= amount, "Insufficient balance");
-        _updateReward(msg.sender);
-
-        // External call before state update
-        (bool success, ) = payable(msg.sender).call{value: amount}("");
-        require(success, "Transfer failed");
-
-        // State update after external call — vulnerable to reentrancy
-        balances[msg.sender] -= amount;
+    // FIX: Add nonReentrant — checks-effects-interactions pattern
+    function withdraw(uint256 amount) external nonReentrant updateReward(msg.sender) {
+        require(amount > 0, "Cannot withdraw 0");
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
+        // Effects first
         totalStaked -= amount;
+        balanceOf[msg.sender] -= amount;
+        // Interaction last
+        stakingToken.transfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
 
-    // BUG: Same reentrancy pattern in claimRewards
-    function claimRewards() external {
-        _updateReward(msg.sender);
+    // FIX: Add nonReentrant — prevents reentrancy via reward token callback
+    function claimRewards() external nonReentrant updateReward(msg.sender) {
         uint256 reward = rewards[msg.sender];
-        require(reward > 0, "No rewards");
-
-        (bool success, ) = payable(msg.sender).call{value: reward}("");
-        require(success, "Transfer failed");
-
-        rewards[msg.sender] = 0;
-        emit RewardClaimed(msg.sender, reward);
+        if (reward > 0) {
+            rewards[msg.sender] = 0;
+            rewardToken.transfer(msg.sender, reward);
+            emit RewardClaimed(msg.sender, reward);
+        }
     }
 
-    function getStakedBalance(address account) external view returns (uint256) {
-        return balances[account];
+    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
+        require(duration > 0, "Duration must be > 0");
+        if (block.timestamp >= periodFinish) {
+            rewardRate = reward / duration;
+        } else {
+            uint256 remaining = (periodFinish - block.timestamp) * rewardRate;
+            rewardRate = (reward + remaining) / duration;
+        }
+        lastUpdateTime = block.timestamp;
+        periodFinish = block.timestamp + duration;
     }
-
-    function getPendingRewards(address account) external view returns (uint256) {
-        uint256 timeStaked = block.timestamp - lastStakeTime[account];
-        return rewards[account] + balances[account] * timeStaked * rewardRate / 1e18;
-    }
-
-    receive() external payable {}
 }
