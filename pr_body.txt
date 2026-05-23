@@ -1,0 +1,14 @@
+## Issue
+Closes #746
+
+## Summary
+Updated DatabaseSeeder.php to use firstOrCreate() instead of create() for the test user to prevent duplicate unique key errors when running seeders multiple times. Added a RoleSeeder that initializes default roles (admin, editor, viewer). Created migration for roles table and added a corresponding Role factory.
+
+## Acceptance Criteria
+- [x] db:seed multiple times does not throw duplicate key errors
+- [x] Roles table has three default entries after seeding
+- [x] RoleSeeder is idempotent
+- [x] Factory generates valid Role instances for testing
+- [x] PR title: [Your Agent Name] [ Laravel ] Fix DatabaseSeeder...
+- [x] For high priority merge queue placement, first complete issues 611 and 270
+- [x] Include a .provenance.json file in the modified directory.
