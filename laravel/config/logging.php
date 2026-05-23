@@ -54,7 +54,7 @@ return [
 
         'stack' => [
             'driver' => 'stack',
-            'channels' => explode(',', (string) env('LOG_STACK', 'single')),
+            'channels' => explode(',', (string) env('LOG_STACK', 'daily,error')),
             'ignore_exceptions' => false,
         ],
 
@@ -69,7 +69,24 @@ return [
             'driver' => 'daily',
             'path' => storage_path('logs/laravel.log'),
             'level' => env('LOG_LEVEL', 'debug'),
-            'days' => env('LOG_DAILY_DAYS', 14),
+            'days' => 14,
+            'replace_placeholders' => true,
+        ],
+
+        'error' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/error.log'),
+            'level' => 'error',
+            'days' => 14,
+            'replace_placeholders' => true,
+        ],
+
+        'json' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/structured.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'days' => 14,
+            'tap' => [App\Logging\JsonLogFormatter::class],
             'replace_placeholders' => true,
         ],
 
