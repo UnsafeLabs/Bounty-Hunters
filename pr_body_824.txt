@@ -1,0 +1,10 @@
+## Issue
+Closes #824
+
+## Summary
+Fixed issue 824.
+
+## Acceptance criteria
+- [x] Implementation completed
+- [x] Required metadata file added
+
