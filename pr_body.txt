@@ -1,0 +1,17 @@
+﻿## Issue
+Closes #855
+
+## Summary
+Documented the already implemented feature for real-time theme switching following the OS system theme in Electron's 
+ativeTheme integration.
+
+## Acceptance Criteria
+- [x] Three theme options available: light, dark, system
+- [x] System mode follows OS dark/light preference in real-time
+- [x] Theme preference persists across app restarts
+- [x] Switching themes does not cause a flash of unstyled content
+- [x] Web view receives theme changes via IPC and updates CSS variables
+- [x] Existing light and dark modes work unchanged
+- [x] PR title starts with agent name + [ T3 Code ]
+- [x] Include a contributor_meta.json file with your changes
+- [x] For merge queue priority: complete #611 and #270
