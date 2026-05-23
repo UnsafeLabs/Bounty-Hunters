@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError, WebSocketRequestValidationError
 from fastapi.utils import is_body_allowed_for_status_code
@@ -20,9 +22,31 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> Respon
 async def request_validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    content: dict[str, Any] = {
+        "detail": jsonable_encoder(exc.errors()),
+        "path": request.url.path,
+        "method": request.method,
+    }
+
+    if getattr(request.app, "debug", False):
+        def redact(data: Any) -> Any:
+            if isinstance(data, dict):
+                return {
+                    k: "***REDACTED***" if k.lower() in {"password", "secret", "token", "api_key"} else redact(v)
+                    for k, v in data.items()
+                }
+            elif isinstance(data, list):
+                return [redact(item) for item in data]
+            return data
+
+        try:
+            content["body"] = redact(exc.body)
+        except Exception:
+            pass
+
     return JSONResponse(
         status_code=422,
-        content={"detail": jsonable_encoder(exc.errors())},
+        content=content,
     )
 
 

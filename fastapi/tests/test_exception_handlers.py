@@ -86,3 +86,48 @@ def test_traceback_for_dependency_with_yield():
     last_frame = exc_info.traceback[-1]
     assert str(last_frame.path) == __file__
     assert last_frame.lineno == raise_value_error.__code__.co_firstlineno
+
+def test_default_request_validation_exception_handler():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from pydantic import BaseModel
+
+    app = FastAPI(debug=True)
+    
+    class Item(BaseModel):
+        name: str
+        password: str
+        nested: dict
+
+    @app.post("/items/")
+    def create_item(item: Item):
+        return item
+
+    client = TestClient(app)
+    
+    # Invalid data to trigger validation error
+    response = client.post("/items/", json={"name": "test", "password": "supersecret", "nested": {"token": "123", "public": "ok"}})
+    assert response.status_code == 422
+    data = response.json()
+    assert data["path"] == "/items/"
+    assert data["method"] == "POST"
+    assert "body" in data
+    assert data["body"]["password"] == "***REDACTED***"
+    assert data["body"]["nested"]["token"] == "***REDACTED***"
+    assert data["body"]["nested"]["public"] == "ok"
+    assert data["body"]["name"] == "test"
+
+    # Now test without debug mode
+    app_no_debug = FastAPI(debug=False)
+    @app_no_debug.post("/items/")
+    def create_item_no_debug(item: Item):
+        return item
+        
+    client_no_debug = TestClient(app_no_debug)
+    response_no_debug = client_no_debug.post("/items/", json={"name": "test", "password": "supersecret", "nested": {"token": "123", "public": "ok"}})
+    assert response_no_debug.status_code == 422
+    data_no_debug = response_no_debug.json()
+    assert "body" not in data_no_debug
+    assert data_no_debug["path"] == "/items/"
+    assert data_no_debug["method"] == "POST"
+
