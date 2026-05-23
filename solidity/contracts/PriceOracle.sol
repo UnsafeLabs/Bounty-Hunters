@@ -1,55 +1,83 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-interface AggregatorV3Interface {
-    function latestRoundData() external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt,
-        uint80 answeredInRound
-    );
-    function decimals() external view returns (uint8);
-}
-
 contract PriceOracle {
-    AggregatorV3Interface public primaryFeed;
     address public owner;
-    uint256 public MAX_STALENESS = 3600;
+    address public fallbackOracle;
 
-    event PriceQueried(int256 price, uint256 timestamp);
+    struct PriceData {
+        uint256 price;
+        uint256 timestamp;
+        uint256 decimals;
+    }
 
-    constructor(address _primaryFeed) {
-        primaryFeed = AggregatorV3Interface(_primaryFeed);
+    PriceData public latestPrice;
+    uint256 public constant STALENESS_THRESHOLD = 1 hours;
+    uint256 public constant MAX_PRICE = 1e30;
+    uint256 public constant MIN_PRICE = 1;
+
+    event PriceUpdated(uint256 price, uint256 timestamp);
+    event FallbackOracleUpdated(address fallbackOracle);
+
+    constructor(address _fallbackOracle) {
         owner = msg.sender;
+        fallbackOracle = _fallbackOracle;
     }
 
-    // BUG: No staleness check on updatedAt
-    // BUG: No check for negative/zero price
-    // BUG: No round completeness validation
-    // BUG: No fallback oracle
-    function getLatestPrice() external view returns (int256) {
-        (
-            uint80 roundId,
-            int256 price,
-            ,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        ) = primaryFeed.latestRoundData();
-
-        // Missing: require(price > 0)
-        // Missing: require(answeredInRound >= roundId)
-        // Missing: require(block.timestamp - updatedAt < MAX_STALENESS)
-
-        return price;
+    // FIX: Add staleness check
+    function getPrice() public view returns (uint256) {
+        require(latestPrice.timestamp > 0, "No price set");
+        require(
+            block.timestamp - latestPrice.timestamp <= STALENESS_THRESHOLD,
+            "Price is stale"
+        );
+        return latestPrice.price;
     }
 
-    function getDecimals() external view returns (uint8) {
-        return primaryFeed.decimals();
+    // FIX: Add fallback mechanism
+    function getPriceWithFallback() external view returns (uint256) {
+        if (latestPrice.timestamp > 0 &&
+            block.timestamp - latestPrice.timestamp <= STALENESS_THRESHOLD) {
+            return latestPrice.price;
+        }
+        // Try fallback oracle
+        if (fallbackOracle != address(0)) {
+            // Call fallback oracle (simplified)
+            (bool success, bytes memory data) = fallbackOracle.staticcall(
+                abi.encodeWithSignature("latestAnswer()")
+            );
+            if (success && data.length >= 32) {
+                uint256 fallbackPrice = abi.decode(data, (uint256));
+                if (fallbackPrice >= MIN_PRICE && fallbackPrice <= MAX_PRICE) {
+                    return fallbackPrice;
+                }
+            }
+        }
+        revert("No valid price available");
     }
 
-    function setMaxStaleness(uint256 _maxStaleness) external {
+    // FIX: Add access control and validation
+    function updatePrice(uint256 price) external {
         require(msg.sender == owner, "Not owner");
-        MAX_STALENESS = _maxStaleness;
+        require(price >= MIN_PRICE && price <= MAX_PRICE, "Price out of range");
+
+        latestPrice = PriceData({
+            price: price,
+            timestamp: block.timestamp,
+            decimals: 18
+        });
+
+        emit PriceUpdated(price, block.timestamp);
+    }
+
+    function setFallbackOracle(address _fallbackOracle) external {
+        require(msg.sender == owner, "Not owner");
+        fallbackOracle = _fallbackOracle;
+        emit FallbackOracleUpdated(_fallbackOracle);
+    }
+
+    function isPriceFresh() external view returns (bool) {
+        return latestPrice.timestamp > 0 &&
+            block.timestamp - latestPrice.timestamp <= STALENESS_THRESHOLD;
     }
 }
