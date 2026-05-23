@@ -513,6 +513,11 @@ def get_fields_from_routes(
 
 def get_openapi(
     *,
+    servers: list[dict[str, str]] | None = None,
+    contact: dict[str, str] | None = None,
+    license_info: dict[str, str] | None = None,
+    
+    *,
     title: str,
     version: str,
     openapi_version: str = "3.1.0",
