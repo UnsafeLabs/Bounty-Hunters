@@ -11,6 +11,7 @@ contract SimpleSwap {
     uint256 public fee; // basis points, e.g. 30 = 0.3%
 
     event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event LiquidityAdded(address indexed user, uint256 amountA, uint256 amountB);
 
     constructor(address _tokenA, address _tokenB, uint256 _fee) {
         tokenA = IERC20(_tokenA);
@@ -23,12 +24,11 @@ contract SimpleSwap {
         tokenB.transferFrom(msg.sender, address(this), amountB);
         reserveA += amountA;
         reserveB += amountB;
+        emit LiquidityAdded(msg.sender, amountA, amountB);
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut, uint256 deadline) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Deadline expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
@@ -39,11 +39,12 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        uint256 amountInAfterFee = amountIn * (10000 - fee);
+        amountOut = (reserveOut * amountInAfterFee) / (reserveIn * 10000 + amountInAfterFee);
 
-        // constant product formula: x * y = k
-        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+        require(amountOut > 0, "Zero output");
+        require(amountOut <= reserveOut, "Insufficient liquidity");
 
         outputToken.transfer(msg.sender, amountOut);
 
@@ -62,8 +63,7 @@ contract SimpleSwap {
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-        return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        uint256 amountInAfterFee = amountIn * (10000 - fee);
+        return (reserveOut * amountInAfterFee) / (reserveIn * 10000 + amountInAfterFee);
     }
 }
