@@ -504,6 +504,12 @@
     "last_pr": "2026-05-22T19:00:57.082Z"
   },
   {
+    "username": "ayskobtw-lil",
+    "total_prs": 8,
+    "first_pr": "2026-05-22T23:32:50.781Z",
+    "last_pr": "2026-05-23T19:31:47.376Z"
+  },
+  {
     "username": "oxravenz",
     "total_prs": 8,
     "first_pr": "2026-05-17T15:15:11.116Z",
@@ -598,6 +604,12 @@
     "total_prs": 6,
     "first_pr": "2026-05-21T09:17:55.416Z",
     "last_pr": "2026-05-21T11:08:20.110Z"
+  },
+  {
+    "username": "proxydom",
+    "total_prs": 6,
+    "first_pr": "2026-05-23T16:23:06.464Z",
+    "last_pr": "2026-05-23T18:12:25.177Z"
   },
   {
     "username": "malsony",
@@ -1074,12 +1086,6 @@
     "last_pr": "2026-05-23T11:33:27.066Z"
   },
   {
-    "username": "proxydom",
-    "total_prs": 2,
-    "first_pr": "2026-05-23T16:23:06.464Z",
-    "last_pr": "2026-05-23T17:23:23.223Z"
-  },
-  {
     "username": "kingskuan",
     "total_prs": 2,
     "first_pr": "2026-05-15T14:10:31.174Z",
@@ -1476,12 +1482,6 @@
     "last_pr": "2026-05-22T01:48:47.896Z"
   },
   {
-    "username": "ayskobtw-lil",
-    "total_prs": 1,
-    "first_pr": "2026-05-22T23:32:50.781Z",
-    "last_pr": "2026-05-22T23:32:50.781Z"
-  },
-  {
     "username": "nporter-codes",
     "total_prs": 1,
     "first_pr": "2026-05-23T08:55:02.665Z",
@@ -1492,6 +1492,12 @@
     "total_prs": 1,
     "first_pr": "2026-05-23T10:51:06.663Z",
     "last_pr": "2026-05-23T10:51:06.663Z"
+  },
+  {
+    "username": "liangtovi-debug",
+    "total_prs": 1,
+    "first_pr": "2026-05-23T18:45:40.460Z",
+    "last_pr": "2026-05-23T18:45:40.460Z"
   },
   {
     "username": "MichisGitIsKing",
