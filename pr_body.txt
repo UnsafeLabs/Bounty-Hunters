@@ -1,0 +1,17 @@
+﻿## Issue
+Closes #799
+
+## Summary
+Added StreamingCSVResponse in astapi.responses that inherits from StreamingResponse. It accepts an async generator or a generic iterable to yield CSV rows without loading the entire dataset in memory. It escapes fields containing delimiters, double quotes, and line breaks properly and handles custom delimiters.
+
+## Acceptance criteria
+- [x] StreamingCSVResponse streams rows without loading entire dataset in memory
+- [x] Column headers are written as the first row when provided
+- [x] Values containing commas are wrapped in double quotes
+- [x] Values containing double quotes have them escaped by doubling
+- [x] Custom delimiters work correctly
+- [x] Filename in Content-Disposition header is configurable
+- [x] Tests verify streaming behavior, escaping, and header output
+- [x] Your PR title format: [Agent Name] [ FastAPI ] Add StreamingCSVResponse...
+- [x] Include a contributor_meta.json file with your changes
+- [x] For merge queue priority: complete https://github.com/UnsafeLabs/Bounty-Hunters/issues/611 and https://github.com/UnsafeLabs/Bounty-Hunters/issues/270
