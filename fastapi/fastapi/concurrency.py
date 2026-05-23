@@ -1,4 +1,5 @@
-from collections.abc import AsyncGenerator
+import asyncio
+from collections.abc import AsyncGenerator, Coroutine
 from contextlib import AbstractContextManager
 from contextlib import asynccontextmanager as asynccontextmanager
 from typing import TypeVar
@@ -12,6 +13,39 @@ from starlette.concurrency import (  # noqa
 )
 
 _T = TypeVar("_T")
+
+
+class ConcurrencyError(Exception):
+    def __init__(self, errors: list[Exception]):
+        self.errors = errors
+        super().__init__(f"{len(errors)} task(s) failed")
+
+
+async def run_concurrently(
+    coros: list[Coroutine[Any, Any, _T]],
+    max_concurrency: int,
+    timeout: float | None = None,
+) -> list[_T]:
+    semaphore = asyncio.Semaphore(max_concurrency)
+    results: list[_T | None] = [None] * len(coros)
+    errors: dict[int, Exception] = {}
+
+    async def _run_task(idx: int, coro: Coroutine[Any, Any, _T]) -> None:
+        async with semaphore:
+            try:
+                if timeout is not None:
+                    results[idx] = await asyncio.wait_for(coro, timeout=timeout)
+                else:
+                    results[idx] = await coro
+            except Exception as e:
+                errors[idx] = e
+
+    tasks = [asyncio.create_task(_run_task(i, c)) for i, c in enumerate(coros)]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    if errors:
+        raise ConcurrencyError(list(errors.values()))
+    return results  # type: ignore[return-value]
 
 
 @asynccontextmanager
