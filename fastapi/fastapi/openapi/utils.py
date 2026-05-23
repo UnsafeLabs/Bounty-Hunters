@@ -233,6 +233,17 @@ def generate_operation_summary(*, route: routing.APIRoute, method: str) -> str:
     return route.name.replace("_", " ").title()
 
 
+def get_unique_operation_id(operation_id: str, operation_ids: set[str]) -> str:
+    if operation_id not in operation_ids:
+        return operation_id
+    suffix = 2
+    unique_operation_id = f"{operation_id}_{suffix}"
+    while unique_operation_id in operation_ids:
+        suffix += 1
+        unique_operation_id = f"{operation_id}_{suffix}"
+    return unique_operation_id
+
+
 def get_openapi_operation_metadata(
     *, route: routing.APIRoute, method: str, operation_ids: set[str]
 ) -> dict[str, Any]:
@@ -243,15 +254,16 @@ def get_openapi_operation_metadata(
     if route.description:
         operation["description"] = route.description
     operation_id = route.operation_id or route.unique_id
-    if operation_id in operation_ids:
+    unique_operation_id = get_unique_operation_id(operation_id, operation_ids)
+    if unique_operation_id != operation_id:
         endpoint_name = getattr(route.endpoint, "__name__", "<unnamed_endpoint>")
         message = f"Duplicate Operation ID {operation_id} for function {endpoint_name}"
         file_name = getattr(route.endpoint, "__globals__", {}).get("__file__")
         if file_name:
             message += f" at {file_name}"
         warnings.warn(message, stacklevel=1)
-    operation_ids.add(operation_id)
-    operation["operationId"] = operation_id
+    operation_ids.add(unique_operation_id)
+    operation["operationId"] = unique_operation_id
     if route.deprecated:
         operation["deprecated"] = route.deprecated
     return operation
