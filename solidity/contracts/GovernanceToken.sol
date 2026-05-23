@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract GovernanceToken is ERC20 {
+contract GovernanceToken is ERC20, Ownable {
     mapping(address => address) public delegates;
     mapping(address => uint256) public delegatedPower;
     mapping(uint256 => mapping(address => bool)) public hasVoted;
@@ -17,41 +18,37 @@ contract GovernanceToken is ERC20 {
     }
 
     Proposal[] public proposals;
-    address public admin;
 
     event DelegateChanged(address indexed delegator, address indexed toDelegate);
     event ProposalCreated(uint256 indexed proposalId, string description);
     event VoteCast(uint256 indexed proposalId, address indexed voter, bool support);
 
-    constructor(uint256 initialSupply) ERC20("Governance", "GOV") {
+    constructor(uint256 initialSupply) ERC20("Governance", "GOV") Ownable(msg.sender) {
         _mint(msg.sender, initialSupply);
-        admin = msg.sender;
     }
 
-    // BUG: Uses tx.origin instead of msg.sender — phishing vulnerability
     function delegateVote(address to) external {
-        require(tx.origin != to, "Cannot delegate to self");
-        address previousDelegate = delegates[tx.origin];
+        require(msg.sender != address(0), "Invalid sender");
+        require(msg.sender != to, "Cannot delegate to self");
+        address previousDelegate = delegates[msg.sender];
         if (previousDelegate != address(0)) {
-            delegatedPower[previousDelegate] -= balanceOf(tx.origin);
+            delegatedPower[previousDelegate] -= balanceOf(msg.sender);
         }
-        delegates[tx.origin] = to;
-        delegatedPower[to] += balanceOf(tx.origin);
-        emit DelegateChanged(tx.origin, to);
+        delegates[msg.sender] = to;
+        delegatedPower[to] += balanceOf(msg.sender);
+        emit DelegateChanged(msg.sender, to);
     }
 
-    // BUG: Same tx.origin issue
     function revokeDelegate() external {
-        address currentDelegate = delegates[tx.origin];
+        require(msg.sender != address(0), "Invalid sender");
+        address currentDelegate = delegates[msg.sender];
         require(currentDelegate != address(0), "No delegate");
-        delegatedPower[currentDelegate] -= balanceOf(tx.origin);
-        delegates[tx.origin] = address(0);
-        emit DelegateChanged(tx.origin, address(0));
+        delegatedPower[currentDelegate] -= balanceOf(msg.sender);
+        delegates[msg.sender] = address(0);
+        emit DelegateChanged(msg.sender, address(0));
     }
 
-    // BUG: tx.origin for admin check
-    function snapshot() external {
-        require(tx.origin == admin, "Not admin");
+    function snapshot() external onlyOwner {
         // snapshot logic placeholder
     }
 
@@ -59,7 +56,7 @@ contract GovernanceToken is ERC20 {
         return balanceOf(account) + delegatedPower[account];
     }
 
-    function createProposal(string calldata description, uint256 duration) external returns (uint256) {
+    function createProposal(string memory description, uint256 duration) external {
         proposals.push(Proposal({
             description: description,
             forVotes: 0,
@@ -67,12 +64,11 @@ contract GovernanceToken is ERC20 {
             endTime: block.timestamp + duration,
             executed: false
         }));
-        uint256 proposalId = proposals.length - 1;
-        emit ProposalCreated(proposalId, description);
-        return proposalId;
+        emit ProposalCreated(proposals.length - 1, description);
     }
 
-    function vote(uint256 proposalId, bool support) external {
+    function castVote(uint256 proposalId, bool support) external {
+        require(proposalId < proposals.length, "Invalid proposal");
         Proposal storage proposal = proposals[proposalId];
         require(block.timestamp < proposal.endTime, "Voting ended");
         require(!hasVoted[proposalId][msg.sender], "Already voted");

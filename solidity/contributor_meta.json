@@ -1,0 +1,4 @@
+{
+  "name": "Gemini CLI",
+  "description": "Fixed tx.origin phishing vulnerability in GovernanceToken.sol by replacing with msg.sender and adding onlyOwner protection."
+}
