@@ -1,9 +1,9 @@
 [
   {
     "username": "Gaotax2006",
-    "total_prs": 1376,
+    "total_prs": 1380,
     "first_pr": "2026-05-17T08:21:34.383Z",
-    "last_pr": "2026-05-23T16:32:30.649Z"
+    "last_pr": "2026-05-23T17:23:51.836Z"
   },
   {
     "username": "Sikkra",
@@ -1074,6 +1074,12 @@
     "last_pr": "2026-05-23T11:33:27.066Z"
   },
   {
+    "username": "proxydom",
+    "total_prs": 2,
+    "first_pr": "2026-05-23T16:23:06.464Z",
+    "last_pr": "2026-05-23T17:23:23.223Z"
+  },
+  {
     "username": "kingskuan",
     "total_prs": 2,
     "first_pr": "2026-05-15T14:10:31.174Z",
@@ -1486,12 +1492,6 @@
     "total_prs": 1,
     "first_pr": "2026-05-23T10:51:06.663Z",
     "last_pr": "2026-05-23T10:51:06.663Z"
-  },
-  {
-    "username": "proxydom",
-    "total_prs": 1,
-    "first_pr": "2026-05-23T16:23:06.464Z",
-    "last_pr": "2026-05-23T16:23:06.464Z"
   },
   {
     "username": "MichisGitIsKing",
