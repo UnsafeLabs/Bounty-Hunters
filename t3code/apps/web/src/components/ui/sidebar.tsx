@@ -26,6 +26,7 @@ const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
 const SIDEBAR_WIDTH_ICON = "3rem";
+const SIDEBAR_RESIZE_DEFAULT_WIDTH = 280;
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
 
 type SidebarContextProps = {
@@ -39,6 +40,7 @@ type SidebarContextProps = {
 };
 
 type SidebarResizableOptions = {
+  defaultWidth?: number;
   maxWidth?: number;
   minWidth?: number;
   onResize?: (width: number) => void;
@@ -54,6 +56,7 @@ type SidebarResizableOptions = {
 };
 
 type SidebarResolvedResizableOptions = {
+  defaultWidth: number;
   maxWidth: number;
   minWidth: number;
   onResize?: (width: number) => void;
@@ -192,6 +195,7 @@ function Sidebar({
 
     const options = typeof resizable === "boolean" ? {} : resizable;
     return {
+      defaultWidth: options.defaultWidth ?? SIDEBAR_RESIZE_DEFAULT_WIDTH,
       maxWidth: options.maxWidth ?? Number.POSITIVE_INFINITY,
       minWidth: options.minWidth ?? SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH,
       storageKey: options.storageKey ?? null,
@@ -338,6 +342,7 @@ function clampSidebarWidth(width: number, options: SidebarResolvedResizableOptio
 function SidebarRail({
   className,
   onClick,
+  onDoubleClick,
   onPointerCancel,
   onPointerDown,
   onPointerMove,
@@ -543,6 +548,48 @@ function SidebarRail({
     [onClick, open, resolvedResizable, toggleSidebar],
   );
 
+  const handleDoubleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      onDoubleClick?.(event);
+      if (event.defaultPrevented || !resolvedResizable || !open) return;
+
+      const wrapper = event.currentTarget.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
+      const sidebarRoot = event.currentTarget.closest<HTMLElement>("[data-slot='sidebar']");
+      const sidebarContainer = sidebarRoot?.querySelector<HTMLElement>(
+        "[data-slot='sidebar-container']",
+      );
+      if (!wrapper || !sidebarRoot || !sidebarContainer) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      suppressClickRef.current = true;
+
+      const nextWidth = clampSidebarWidth(resolvedResizable.defaultWidth, resolvedResizable);
+      const currentWidth = sidebarContainer.getBoundingClientRect().width;
+      const accepted =
+        resolvedResizable.shouldAcceptWidth?.({
+          currentWidth,
+          nextWidth,
+          rail: event.currentTarget,
+          side: sidebarInstance?.side ?? "left",
+          sidebarRoot,
+          wrapper,
+        }) ?? true;
+      if (!accepted) {
+        return;
+      }
+
+      wrapper.style.setProperty("--sidebar-width", `${nextWidth}px`);
+      if (resolvedResizable.storageKey && typeof window !== "undefined") {
+        setLocalStorageItem(resolvedResizable.storageKey, nextWidth, Schema.Finite);
+      }
+      resolvedResizable.onResize?.(nextWidth);
+    },
+    [onDoubleClick, open, resolvedResizable, sidebarInstance?.side],
+  );
+
   React.useEffect(() => {
     if (!resolvedResizable?.storageKey || typeof window === "undefined") return;
     const rail = railRef.current;
@@ -587,6 +634,7 @@ function SidebarRail({
       data-sidebar="rail"
       data-slot="sidebar-rail"
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       onPointerCancel={handlePointerCancel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
