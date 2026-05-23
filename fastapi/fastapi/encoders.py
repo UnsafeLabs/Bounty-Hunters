@@ -17,6 +17,7 @@ from re import Pattern
 from types import GeneratorType
 from typing import Annotated, Any
 from uuid import UUID
+import base64
 
 from annotated_doc import Doc
 from fastapi.exceptions import PydanticV1NotSupportedError
@@ -82,7 +83,8 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
+    bytes: lambda o: base64.b64encode(o).decode(),
+    memoryview: lambda o: base64.b64encode(bytes(o)).decode(),
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
