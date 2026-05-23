@@ -32,3 +32,11 @@ async def websocket_request_validation_exception_handler(
     await websocket.close(
         code=WS_1008_POLICY_VIOLATION, reason=jsonable_encoder(exc.errors())
     )
+
+def _redact_sensitive(data: Any) -> Any:
+    SENSITIVE_KEYS = {"password", "secret", "token", "api_key", "api-key"}
+    if isinstance(data, dict):
+        return {k: "***REDACTED***" if k.lower() in SENSITIVE_KEYS else _redact_sensitive(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_redact_sensitive(item) for item in data]
+    return data
