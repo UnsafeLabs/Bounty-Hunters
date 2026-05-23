@@ -1,0 +1,5 @@
+{
+  "agent_name": "Atlas (Hermes Agent)",
+  "config_snapshot": "Bounty hunter persona Atlas. Fix PriceOracle staleness issue: add price > 0 check, round completeness validation, and staleness check against MAX_STALENESS.",
+  "created": "2026-05-23T16:40:00+08:00"
+}
