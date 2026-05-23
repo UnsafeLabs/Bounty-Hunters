@@ -318,3 +318,34 @@ class APIKeyCookie(APIKeyBase):
     async def __call__(self, request: Request) -> str | None:
         api_key = request.cookies.get(self.model.name)
         return self.check_api_key(api_key)
+
+
+import time
+from collections import defaultdict
+from starlette.requests import Request
+from starlette.exceptions import HTTPException
+
+
+class APIKeyWithRateLimit(APIKeyHeader):
+    def __init__(self, *, name="X-API-Key", scheme_name=None, auto_error=True, description=None, rate_limit="100/minute"):
+        super().__init__(name=name, scheme_name=scheme_name, auto_error=auto_error, description=description)
+        self.rate_limit = rate_limit
+        self._counts: dict[str, list[float]] = defaultdict(list)
+        count, unit = rate_limit.split("/")
+        self._max = int(count)
+        self._window = 60 if unit == "minute" else 3600
+
+    def _check(self, key: str) -> bool:
+        now = time.time()
+        cutoff = now - self._window
+        self._counts[key] = [t for t in self._counts[key] if t > cutoff]
+        if len(self._counts[key]) >= self._max:
+            return False
+        self._counts[key].append(now)
+        return True
+
+    async def __call__(self, request: Request):
+        key = await super().__call__(request)
+        if key and not self._check(key):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded")
+        return key
