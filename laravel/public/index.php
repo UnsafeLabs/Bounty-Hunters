@@ -10,6 +10,10 @@ if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php'))
     require $maintenance;
 }
 
+// Security and performance optimizations
+ini_set('display_errors', '0');
+ini_set('expose_php', '0');
+
 // Register the Composer autoloader...
 require __DIR__.'/../vendor/autoload.php';
 
