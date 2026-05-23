@@ -2,52 +2,50 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-contract SimpleSwap {
+contract SimpleSwap is ReentrancyGuard {
     IERC20 public tokenA;
     IERC20 public tokenB;
     uint256 public reserveA;
     uint256 public reserveB;
-    uint256 public fee; // basis points, e.g. 30 = 0.3%
+    uint256 public constant FEE_NUMERATOR = 3;
+    uint256 public constant FEE_DENOMINATOR = 1000;
 
-    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event Swap(address indexed sender, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event ReservesUpdated(uint256 reserveA, uint256 reserveB);
 
-    constructor(address _tokenA, address _tokenB, uint256 _fee) {
+    constructor(address _tokenA, address _tokenB) {
         tokenA = IERC20(_tokenA);
         tokenB = IERC20(_tokenB);
-        fee = _fee;
     }
 
-    function addLiquidity(uint256 amountA, uint256 amountB) external {
-        tokenA.transferFrom(msg.sender, address(this), amountA);
-        tokenB.transferFrom(msg.sender, address(this), amountB);
-        reserveA += amountA;
-        reserveB += amountB;
-    }
-
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
-        require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
+    // FIX: Add slippage protection and deadline, fix fee precision
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external nonReentrant {
+        require(deadline >= block.timestamp, "Expired");
         require(amountIn > 0, "Amount must be > 0");
+        require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
 
-        bool isTokenA = tokenIn == address(tokenA);
-        (IERC20 inputToken, IERC20 outputToken, uint256 reserveIn, uint256 reserveOut) = isTokenA
-            ? (tokenA, tokenB, reserveA, reserveB)
-            : (tokenB, tokenA, reserveB, reserveA);
+        address tokenOut = tokenIn == address(tokenA) ? address(tokenB) : address(tokenA);
+        uint256 reserveIn = tokenIn == address(tokenA) ? reserveA : reserveB;
+        uint256 reserveOut = tokenIn == address(tokenA) ? reserveB : reserveA;
 
-        inputToken.transferFrom(msg.sender, address(this), amountIn);
+        require(reserveIn > 0 && reserveOut > 0, "No liquidity");
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        // FIX: Proper fee calculation with precision
+        uint256 amountInWithFee = amountIn * (FEE_DENOMINATOR - FEE_NUMERATOR);
+        uint256 amountOut = (amountInWithFee * reserveOut) / (reserveIn * FEE_DENOMINATOR + amountInWithFee);
 
-        // constant product formula: x * y = k
-        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        // FIX: Slippage protection
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
-        outputToken.transfer(msg.sender, amountOut);
-
-        if (isTokenA) {
+        // Effects
+        if (tokenIn == address(tokenA)) {
             reserveA += amountIn;
             reserveB -= amountOut;
         } else {
@@ -55,15 +53,27 @@ contract SimpleSwap {
             reserveA -= amountOut;
         }
 
+        // Interactions
+        IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn);
+        IERC20(tokenOut).transfer(msg.sender, amountOut);
+
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+        emit ReservesUpdated(reserveA, reserveB);
     }
 
-    function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
-        bool isTokenA = tokenIn == address(tokenA);
-        uint256 reserveIn = isTokenA ? reserveA : reserveB;
-        uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-        return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+    function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant {
+        tokenA.transferFrom(msg.sender, address(this), amountA);
+        tokenB.transferFrom(msg.sender, address(this), amountB);
+        reserveA += amountA;
+        reserveB += amountB;
+        emit ReservesUpdated(reserveA, reserveB);
+    }
+
+    function getAmountOut(uint256 amountIn, address tokenIn) public view returns (uint256) {
+        uint256 reserveIn = tokenIn == address(tokenA) ? reserveA : reserveB;
+        uint256 reserveOut = tokenIn == address(tokenA) ? reserveB : reserveA;
+        if (reserveIn == 0 || reserveOut == 0) return 0;
+        uint256 amountInWithFee = amountIn * (FEE_DENOMINATOR - FEE_NUMERATOR);
+        return (amountInWithFee * reserveOut) / (reserveIn * FEE_DENOMINATOR + amountInWithFee);
     }
 }
