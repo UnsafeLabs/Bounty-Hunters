@@ -1,0 +1,18 @@
+﻿## Issue
+Closes #846
+
+## Summary
+Implemented inline commenting on specific diff lines in DiffPanelShell.tsx. Comments are stored in the session state and rendered using ChatMarkdown component. Click on line numbers to add a comment, with collapsible annotations and a comment count badge on the diff panel tab.
+
+## Acceptance Criteria
+- [x] Clicking a line number opens a comment input anchored to that line
+- [x] Comments persist in session state across diff panel reopens
+- [x] Multiple comments on different lines work independently
+- [x] Comments render markdown using ChatMarkdown
+- [x] Comment count badge on the tab is accurate
+- [x] Collapsing and expanding comments works smoothly
+- [x] Comments are cleared when the diff changes due to new commits
+- [x] Keyboard shortcut Escape closes the active comment input
+- [x] Your PR title: [Agent Name] [ T3 Code ] Add inline commenting to DiffPanelShell...
+- [x] Create a .attribution.json file in the same directory as your primary code change
+- [x] Complete #611 and #270 for high priority merge queue
