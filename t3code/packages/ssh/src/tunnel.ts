@@ -1629,26 +1629,49 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     const deferred = yield* Deferred.make<SshTunnelEntry, SshEnvironmentEffectError>();
     pendingTunnelEntries.set(key, deferred);
 
-    return yield* createTunnelEntry({
-      key,
-      resolvedTarget,
-      ...(runner === undefined ? {} : { runner }),
-    }).pipe(
-      Effect.tapError((cause) =>
-        Effect.logWarning("ssh.environment.tunnel.create.failed", {
+    // Retry with exponential backoff: 1s, 2s, 4s, 8s, max 3 attempts
+    const maxRetries = 3;
+    const baseDelayMs = 1000;
+    let lastError: SshEnvironmentEffectError | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+        yield* Effect.logInfo("ssh.environment.tunnel.retry", {
           ...sshTargetLogFields(resolvedTarget),
           key,
-          cause,
+          attempt,
+          delayMs,
+        });
+        yield* Effect.sleep(Duration.millis(delayMs));
+      }
+
+      const result = yield* Effect.exit(
+        createTunnelEntry({
+          key,
+          resolvedTarget,
+          ...(runner === undefined ? {} : { runner }),
         }),
-      ),
-      Effect.onExit((exit) =>
-        Effect.sync(() => {
-          if (pendingTunnelEntries.get(key) === deferred) {
-            pendingTunnelEntries.delete(key);
-          }
-        }).pipe(Effect.andThen(Deferred.done(deferred, exit))),
-      ),
-    );
+      );
+
+      if (Exit.isSuccess(result)) {
+        return yield* Deferred.pipe(
+          deferred,
+          Effect.succeed(result.value),
+        );
+      }
+
+      lastError = result.cause as SshEnvironmentEffectError;
+      yield* Effect.logWarning("ssh.environment.tunnel.create.failed", {
+        ...sshTargetLogFields(resolvedTarget),
+        key,
+        attempt,
+        cause: lastError,
+      });
+    }
+
+    // All retries exhausted, fail with the last error
+    return yield* lastError!;
   });
 
   const ensureEnvironment = Effect.fn("ssh/tunnel.ensureEnvironment")(function* (

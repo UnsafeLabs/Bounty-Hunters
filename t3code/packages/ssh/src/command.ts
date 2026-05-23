@@ -86,13 +86,24 @@ export const buildSshHostSpecEffect = (
 
 export function baseSshArgs(
   target: DesktopSshEnvironmentTarget,
-  input?: { readonly batchMode?: "yes" | "no" },
+  input?: { readonly batchMode?: "yes" | "no"; readonly keepalive?: boolean },
 ): string[] {
   return [
     "-o",
     `BatchMode=${input?.batchMode ?? "no"}`,
     "-o",
     "ConnectTimeout=10",
+    // SSH keepalive: send keepalive messages every 15s, max 3 missed before disconnect
+    ...(input?.keepalive !== false
+      ? [
+          "-o",
+          "ServerAliveInterval=15",
+          "-o",
+          "ServerAliveCountMax=3",
+          "-o",
+          "TCPKeepAlive=yes",
+        ]
+      : []),
     ...(target.port !== null ? ["-p", String(target.port)] : []),
   ];
 }
