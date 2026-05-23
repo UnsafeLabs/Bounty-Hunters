@@ -415,3 +415,52 @@ class HTTPDigest(HTTPBase):
             else:
                 return None
         return HTTPAuthorizationCredentials(scheme=scheme, credentials=credentials)
+
+
+import time
+from collections import defaultdict
+from starlette.status import HTTP_429_TOO_MANY_REQUESTS
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    def __init__(
+        self, *, max_attempts: int = 5, window_seconds: int = 300,
+        scheme_name: str | None = None, realm: str | None = None,
+        description: str | None = None, auto_error: bool = True,
+    ):
+        super().__init__(scheme_name=scheme_name, realm=realm, description=description, auto_error=auto_error)
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self._attempts: dict[str, list[float]] = defaultdict(list)
+
+    def _get_client_ip(self, request: Request) -> str:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
+
+    def _is_rate_limited(self, ip: str) -> bool:
+        now = time.time()
+        self._attempts[ip] = [t for t in self._attempts[ip] if now - t < self.window_seconds]
+        return len(self._attempts[ip]) >= self.max_attempts
+
+    async def __call__(self, request: Request) -> HTTPBasicCredentials | None:
+        ip = self._get_client_ip(request)
+        if self._is_rate_limited(ip):
+            retry_after = int(self._attempts[ip][0] + self.window_seconds - time.time())
+            raise HTTPException(status_code=HTTP_429_TOO_MANY_REQUESTS, detail="Too many authentication attempts", headers={"Retry-After": str(max(retry_after, 1))})
+        try:
+            result = await super().__call__(request)
+            if result is not None:
+                self._attempts[ip].clear()
+            else:
+                self._attempts[ip].append(time.time())
+            return result
+        except HTTPException:
+            self._attempts[ip].append(time.time())
+            raise
+
+    @staticmethod
+    def verify_password(password: str, hashed: str) -> bool:
+        import hmac
+        return hmac.compare_digest(password, hashed)
