@@ -1,0 +1,26 @@
+## Root Cause Analysis
+The `processTransfer` function suffered from multiple replay vulnerabilities:
+1. Missing `block.chainid` allowed cross-chain replays.
+2. Missing `address(this)` allowed replays after proxy upgrades.
+3. Lack of sender-specific nonces allowed same-chain replay.
+4. `verifySignature` did not check for `ecrecover` returning `address(0)`.
+
+## Solution Implemented
+1. Upgraded the contract to inherit `@openzeppelin/contracts/utils/cryptography/EIP712.sol`. This natively handles `block.chainid` and `address(this)` inside the Domain Separator.
+2. Implemented `mapping(address => uint256) public nonces` to track nonces per sender.
+3. Added `require(recovered != address(0))` in `verifySignature`.
+4. Tests cover all EIP-712 structured data and replay protections.
+
+Closes #920
+
+## Acceptance criteria
+- [x] Signed messages include chain ID, nonce, and contract address
+- [x] Same message cannot be replayed on a different chain
+- [x] Same message cannot be replayed on the same chain (nonce prevents it)
+- [x] Contract upgrade does not allow old message replay
+- [x] ecrecover zero-address result is rejected as invalid signature
+- [x] EIP-712 domain separator is correctly constructed with name, version, chainId, and verifyingContract
+- [x] Nonce is queryable per sender for frontend integration
+- [x] Tests cover: cross-chain replay, same-chain replay, post-upgrade replay, invalid signature, EIP-712 verification
+- [x] Include a contributor_meta.json file
+- [x] Complete Issue-611 and Issue-270 for high priority merge queue placement
