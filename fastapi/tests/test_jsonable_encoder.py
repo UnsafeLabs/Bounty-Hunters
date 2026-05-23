@@ -137,6 +137,27 @@ def test_encode_unsupported():
         jsonable_encoder(unserializable)
 
 
+def test_encode_bytes_defaults_to_base64():
+    assert jsonable_encoder(b"hello") == "aGVsbG8="
+    assert jsonable_encoder({"payload": b"\x00\xff"}) == {"payload": "AP8="}
+
+
+def test_encode_memoryview_defaults_to_base64():
+    assert jsonable_encoder(memoryview(b"hello")) == "aGVsbG8="
+
+
+def test_encode_bytes_as_hex():
+    assert jsonable_encoder(b"\x00\xff", bytes_encoding="hex") == "00ff"
+    assert jsonable_encoder({"payload": memoryview(b"abc")}, bytes_encoding="hex") == {
+        "payload": "616263"
+    }
+
+
+def test_encode_bytes_rejects_unsupported_encoding():
+    with pytest.raises(ValueError, match="bytes_encoding"):
+        jsonable_encoder(b"hello", bytes_encoding="utf-8")
+
+
 def test_encode_custom_json_encoders_model_pydanticv2():
     from pydantic import field_serializer
 
