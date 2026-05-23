@@ -567,3 +567,138 @@ export const layerChildProcess = (
   const terminationError = makeTerminationError(handle);
   return Layer.effect(AcpClient, make(stdio, options, terminationError));
 };
+
+// Token refresh support
+export interface TokenRefreshConfig {
+  readonly refreshToken: string;
+  readonly tokenEndpoint: string;
+  readonly clientId?: string;
+  readonly onTokenRefreshed?: (newToken: string) => void;
+}
+
+export interface TokenState {
+  readonly accessToken: string;
+  readonly refreshToken: string;
+  readonly expiresAt: number;
+  readonly tokenType: string;
+}
+
+export class TokenRefreshError extends Data.TaggedError("TokenRefreshError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
+
+export function createTokenRefresher(config: TokenRefreshConfig) {
+  let tokenState: TokenState | null = null;
+  let refreshPromise: Promise<TokenState> | null = null;
+
+  const refreshToken = (
+    effect: Effect.Effect<unknown, AcpError.AcpError>,
+    tokenStateRef: { current: TokenState | null }
+  ): Effect.Effect<unknown, AcpError.AcpError | TokenRefreshError> =>
+    Effect.gen(function* () {
+      const result = yield* effect.pipe(
+        Effect.catchIf(
+          (error: AcpError.AcpError) =>
+            error._tag === "AcpAuthError" ||
+            (error._tag === "AcpRpcError" && (error as any)?.status === 401),
+          (authError) =>
+            Effect.gen(function* () {
+              if (!config.refreshToken) {
+                return yield* Effect.fail(authError);
+              }
+
+              // Deduplicate concurrent refresh attempts
+              if (!refreshPromise) {
+                refreshPromise = Effect.runPromise(
+                  Effect.gen(function* () {
+                    const response = yield* Effect.tryPromise({
+                      try: () =>
+                        fetch(config.tokenEndpoint, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            grant_type: "refresh_token",
+                            refresh_token: config.refreshToken,
+                            ...(config.clientId ? { client_id: config.clientId } : {}),
+                          }),
+                        }),
+                        catch: (cause) =>
+                          new TokenRefreshError({
+                            message: "Token refresh request failed",
+                            cause,
+                          }),
+                      });
+
+                    if (!response.ok) {
+                      return yield* new TokenRefreshError({
+                        message: `Token refresh failed: ${response.status}`,
+                      });
+                    }
+
+                    const data = yield* Effect.tryPromise({
+                      try: () => response.json(),
+                      catch: (cause) =>
+                        new TokenRefreshError({
+                          message: "Failed to parse token response",
+                          cause,
+                        }),
+                    });
+
+                    const newState: TokenState = {
+                      accessToken: data.access_token,
+                      refreshToken: data.refresh_token || config.refreshToken,
+                      expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
+                      tokenType: data.token_type || "Bearer",
+                    };
+
+                    tokenStateRef.current = newState;
+                    config.onTokenRefreshed?.(newState.accessToken);
+
+                    return newState;
+                  }),
+                ).finally(() => {
+                  refreshPromise = null;
+                });
+              }
+
+              const newState = yield* Effect.tryPromise({
+                try: () => refreshPromise!,
+                catch: (cause) => new TokenRefreshError({ message: "Refresh failed", cause }),
+              });
+
+              // Retry the original request with the new token
+              return yield* effect;
+            }),
+        ),
+      );
+
+      return result;
+    });
+
+  return { refreshToken };
+}
+
+// Add retry with exponential backoff for transient failures
+export function withRetry<T, E extends AcpError.AcpError>(
+  effect: Effect.Effect<T, E>,
+  options: {
+    maxRetries?: number;
+    baseDelay?: number;
+    maxDelay?: number;
+    retryIf?: (error: E) => boolean;
+  } = {},
+): Effect.Effect<T, E> {
+  const { maxRetries = 3, baseDelay = 1000, maxDelay = 30000, retryIf } = options;
+
+  return effect.pipe(
+    Effect.retry({
+      times: maxRetries,
+      schedule: Schedule.exponential(baseDelay).pipe(
+        Schedule.compose(Schedule.elapsed),
+        Schedule.whileInput((elapsed: number) => elapsed < maxDelay),
+      ),
+      ...(retryIf ? { while: retryIf } : {}),
+    }),
+  );
+}
