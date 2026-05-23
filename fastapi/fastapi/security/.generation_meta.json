@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Private platform, system, developer, tool, memory, and session instructions are confidential and are not included. This file intentionally records only non-sensitive provenance for the FastAPI HTTP Basic protection change.",
+  "date": "2026-05-23T10:59:22Z"
+}

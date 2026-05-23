@@ -1,4 +1,7 @@
 import binascii
+import hashlib
+import hmac
+import time
 from base64 import b64decode
 from typing import Annotated
 
@@ -10,7 +13,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -217,6 +220,105 @@ class HTTPBasic(HTTPBase):
         if not separator:
             raise self.make_not_authenticated_error()
         return HTTPBasicCredentials(username=username, password=password)
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    def __init__(
+        self,
+        *,
+        password_hash: str | None = None,
+        max_attempts: int = 5,
+        window_seconds: float = 60,
+        scheme_name: str | None = None,
+        realm: str | None = None,
+        description: str | None = None,
+        auto_error: bool = True,
+    ):
+        super().__init__(
+            scheme_name=scheme_name,
+            realm=realm,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.password_hash = password_hash
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self._failed_attempts: dict[str, tuple[int, float, float | None]] = {}
+
+    async def __call__(  # type: ignore
+        self, request: Request
+    ) -> HTTPBasicCredentials | None:
+        self._raise_if_locked(request)
+        credentials = await super().__call__(request)
+        if credentials is None or self.password_hash is None:
+            return credentials
+        if self.verify_password(credentials.password, self.password_hash):
+            self.reset_attempts(request)
+            return credentials
+        self.record_failed_attempt(request)
+        raise self.make_not_authenticated_error()
+
+    @staticmethod
+    def hash_password(password: str) -> str:
+        return f"sha256${hashlib.sha256(password.encode()).hexdigest()}"
+
+    @staticmethod
+    def verify_password(password: str, password_hash: str) -> bool:
+        if password_hash.startswith("sha256$"):
+            expected = password_hash.removeprefix("sha256$")
+            candidate = hashlib.sha256(password.encode()).hexdigest()
+            return hmac.compare_digest(candidate, expected)
+        return hmac.compare_digest(password, password_hash)
+
+    def record_failed_attempt(self, request: Request) -> None:
+        client_key = self._client_key(request)
+        now = time.monotonic()
+        count, first_failure, locked_until = self._failed_attempts.get(
+            client_key, (0, now, None)
+        )
+        if now - first_failure > self.window_seconds:
+            count = 0
+            first_failure = now
+            locked_until = None
+        count += 1
+        if count >= self.max_attempts:
+            locked_until = now + self.window_seconds
+        self._failed_attempts[client_key] = (count, first_failure, locked_until)
+        self._raise_if_locked(request)
+
+    def reset_attempts(self, request: Request) -> None:
+        self._failed_attempts.pop(self._client_key(request), None)
+
+    def _raise_if_locked(self, request: Request) -> None:
+        client_key = self._client_key(request)
+        now = time.monotonic()
+        attempt = self._failed_attempts.get(client_key)
+        if attempt is None:
+            return
+        count, first_failure, locked_until = attempt
+        if now - first_failure > self.window_seconds:
+            self._failed_attempts.pop(client_key, None)
+            return
+        if locked_until is not None and locked_until > now:
+            retry_after = max(1, int(locked_until - now))
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many authentication attempts",
+                headers={"Retry-After": str(retry_after)},
+            )
+        if count >= self.max_attempts:
+            locked_until = now + self.window_seconds
+            self._failed_attempts[client_key] = (count, first_failure, locked_until)
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many authentication attempts",
+                headers={"Retry-After": str(int(self.window_seconds))},
+            )
+
+    def _client_key(self, request: Request) -> str:
+        if request.client is None:
+            return "unknown"
+        return request.client.host
 
 
 class HTTPBearer(HTTPBase):
