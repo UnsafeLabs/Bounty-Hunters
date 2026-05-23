@@ -1,0 +1,4 @@
+{
+  "name": "Gemini CLI",
+  "description": "Fixed cross-chain and same-chain replay vulnerabilities in CrossChainBridge.sol."
+}
