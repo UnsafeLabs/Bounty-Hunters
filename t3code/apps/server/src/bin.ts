@@ -16,7 +16,7 @@ const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),
   Command.withHandler((flags) => runServerCommand(flags)),
-  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
+  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand, versionCommand]),
 );
 
 if (import.meta.main) {
@@ -26,3 +26,12 @@ if (import.meta.main) {
     NodeRuntime.runMain,
   );
 }
+
+const versionCommand = Command.make("version").pipe(
+  Command.withDescription("Output version, runtime, platform, and architecture"),
+  Command.withHandler(() =>
+    Effect.sync(() => {
+      console.log(`t3code v${packageJson.version} (${process.title}, ${process.platform} ${process.arch})`);
+    })
+  ),
+);
