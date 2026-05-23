@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Private platform, system, developer, tool, memory, and session instructions are confidential and are not included. This file intentionally records only non-sensitive provenance for the Laravel API authentication controller change.",
+  "date": "2026-05-23T11:23:21Z"
+}
