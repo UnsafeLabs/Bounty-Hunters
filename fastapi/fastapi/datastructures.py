@@ -184,3 +184,24 @@ def Default(value: DefaultType) -> DefaultType:
 # Sentinel for "parameter not provided" in Param/FieldInfo.
 # Typed as None to satisfy ty
 _Unset = Default(None)
+
+
+from starlette.datastructures import UploadFile as _UploadFile
+from fastapi.exceptions import HTTPException
+
+
+class UploadFile(_UploadFile):
+    def __init__(self, *args, max_size: int | None = None, allowed_content_types: list[str] | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.max_size = max_size
+        self.allowed_content_types = allowed_content_types
+
+    async def validate(self) -> None:
+        if self.allowed_content_types and self.content_type:
+            if self.content_type not in self.allowed_content_types:
+                raise HTTPException(415, detail=f"Content type {self.content_type} not allowed")
+        if self.max_size:
+            contents = await self.read()
+            if len(contents) > self.max_size:
+                raise HTTPException(413, detail=f"File size exceeds {self.max_size} bytes")
+            await self.seek(0)
