@@ -612,6 +612,12 @@
     "last_pr": "2026-05-23T07:24:41.068Z"
   },
   {
+    "username": "proxydom",
+    "total_prs": 5,
+    "first_pr": "2026-05-23T16:23:06.464Z",
+    "last_pr": "2026-05-23T18:11:19.571Z"
+  },
+  {
     "username": "spqrcode",
     "total_prs": 4,
     "first_pr": "2026-05-14T12:12:04.319Z",
@@ -670,12 +676,6 @@
     "total_prs": 4,
     "first_pr": "2026-05-21T07:17:18.505Z",
     "last_pr": "2026-05-21T23:52:04.823Z"
-  },
-  {
-    "username": "proxydom",
-    "total_prs": 4,
-    "first_pr": "2026-05-23T16:23:06.464Z",
-    "last_pr": "2026-05-23T18:10:39.449Z"
   },
   {
     "username": "AidenPeerce",
