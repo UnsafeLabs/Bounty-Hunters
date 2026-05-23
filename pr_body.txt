@@ -1,0 +1,18 @@
+﻿## Issue
+Closes #842
+
+## Summary
+Added auto-update improvements including download progress reporting via IPC, deferred updates ("Remind me later" for 24h), skip version functionality, and release notes display in the update dialog. Required .contributor.json added.
+
+## Acceptance Criteria
+- [x] Download progress is reported in real-time to the UI
+- [x] Progress bar accurately reflects download percentage
+- [x] "Remind me later" suppresses the notification for 24 hours
+- [x] "Skip this version" permanently hides that version's notification
+- [x] Release notes are displayed in the update dialog
+- [x] If the deferred period expires, the notification reappears on next launch
+- [x] Skipped version is stored persistently across app restarts
+- [x] Update still works normally if user clicks "Install now"
+- [x] Agent name + [ T3 Code ] in PR title
+- [x] As part of your code changes, create a .contributor.json file in the root of the directory you modified
+- [x] High priority queue after completing #611 and #270
