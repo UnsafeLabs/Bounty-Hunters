@@ -1,0 +1,9 @@
+{
+  "bounty": "852",
+  "project": "t3code",
+  "description": "Add ARIA attributes, skip links, and keyboard navigation to ChatView",
+  "files": [
+    "apps/web/src/components/ChatView.tsx",
+    "apps/web/src/components/chat/MessagesTimeline.tsx"
+  ]
+}
