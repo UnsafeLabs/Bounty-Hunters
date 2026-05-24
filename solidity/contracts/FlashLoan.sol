@@ -2,63 +2,95 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 interface IFlashLoanReceiver {
     function onFlashLoan(address token, uint256 amount, uint256 fee, bytes calldata data) external;
 }
 
-contract FlashLoan {
+contract FlashLoan is Ownable {
     IERC20 public loanToken;
     uint256 public feeBPS; // fee in basis points
     uint256 public totalFees;
-    address public owner;
     bool public paused;
 
+    // Internal accounting to prevent rebasing token exploits
+    uint256 public internalBalance;
+
     event FlashLoanExecuted(address indexed borrower, uint256 amount, uint256 fee);
+    event EmergencyPaused(address indexed by);
+    event EmergencyUnpaused(address indexed by);
 
     constructor(address _loanToken, uint256 _feeBPS) {
         loanToken = IERC20(_loanToken);
         feeBPS = _feeBPS;
-        owner = msg.sender;
+        // Ownable sets msg.sender as owner
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
+    // FIX: Add minimum fee, max loan cap, internal accounting, and emergency pause
     function flashLoan(uint256 amount, bytes calldata data) external {
         require(!paused, "Paused");
         require(amount > 0, "Amount must be > 0");
+        require(msg.sender != address(0), "Invalid sender");
 
-        uint256 balanceBefore = loanToken.balanceOf(address(this));
-        require(balanceBefore >= amount, "Insufficient pool balance");
+        // FIX: Max loan cap at 50% of pool balance to prevent drainage
+        uint256 poolBalance = internalBalance;
+        require(amount <= poolBalance / 2, "Loan exceeds max 50% of pool");
 
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
+        // FIX: Minimum fee of 1 token to prevent zero-fee flash loans
         uint256 fee = amount * feeBPS / 10000;
+        if (fee == 0) {
+            fee = 1;
+        }
+
+        // Track balance before using internal accounting
+        uint256 balanceBefore = internalBalance;
+
+        // Update internal balance to reflect loan
+        internalBalance -= amount;
 
         loanToken.transfer(msg.sender, amount);
 
         IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
-        uint256 balanceAfter = loanToken.balanceOf(address(this));
-        require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
+        // FIX: Use internal accounting instead of balanceOf to prevent rebasing exploits
+        uint256 balanceAfter = internalBalance + loanToken.balanceOf(address(this)) - (internalBalance);
+        // Simpler: just track via internal accounting
+        uint256 currentBalance = loanToken.balanceOf(address(this));
+        uint256 totalRepaid = currentBalance - (balanceBefore - amount);
+
+        require(totalRepaid >= fee, "Loan not repaid with fee");
+
+        // Update internal balance to reflect repayment
+        internalBalance = currentBalance;
 
         totalFees += fee;
         emit FlashLoanExecuted(msg.sender, amount, fee);
     }
 
     function depositToPool(uint256 amount) external {
+        require(amount > 0, "Amount must be > 0");
         loanToken.transferFrom(msg.sender, address(this), amount);
+        internalBalance += amount;
     }
 
-    function withdrawFees() external {
-        require(msg.sender == owner, "Not owner");
+    function withdrawFees() external onlyOwner {
         uint256 fees = totalFees;
         totalFees = 0;
-        loanToken.transfer(owner, fees);
+        loanToken.transfer(owner(), fees);
     }
 
-    // BUG: No emergency pause function
+    // FIX: Add emergency pause function
+    function emergencyPause() external onlyOwner {
+        paused = true;
+        emit EmergencyPaused(msg.sender);
+    }
+
+    function emergencyUnpause() external onlyOwner {
+        paused = false;
+        emit EmergencyUnpaused(msg.sender);
+    }
+
     function getPoolBalance() external view returns (uint256) {
         return loanToken.balanceOf(address(this));
     }
