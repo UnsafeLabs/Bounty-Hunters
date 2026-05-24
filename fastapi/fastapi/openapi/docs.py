@@ -1,5 +1,5 @@
 import json
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 
 from annotated_doc import Doc
 from fastapi.encoders import jsonable_encoder
@@ -65,7 +65,7 @@ def get_swagger_ui_html(
         ),
     ],
     swagger_js_url: Annotated[
-        str,
+        Optional[str],
         Doc(
             """
             The URL to use to load the Swagger UI JavaScript.
@@ -76,9 +76,9 @@ def get_swagger_ui_html(
             [FastAPI docs for Custom Docs UI Static Assets](https://fastapi.tiangolo.com/how-to/custom-docs-ui-assets/)
             """
         ),
-    ] = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+    ] = None,
     swagger_css_url: Annotated[
-        str,
+        Optional[str],
         Doc(
             """
             The URL to use to load the Swagger UI CSS.
@@ -89,7 +89,7 @@ def get_swagger_ui_html(
             [FastAPI docs for Custom Docs UI Static Assets](https://fastapi.tiangolo.com/how-to/custom-docs-ui-assets/)
             """
         ),
-    ] = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+    ] = None,
     swagger_favicon_url: Annotated[
         str,
         Doc(
@@ -149,19 +149,30 @@ def get_swagger_ui_html(
     if swagger_ui_parameters:
         current_swagger_ui_parameters.update(swagger_ui_parameters)
 
+    current_swagger_js_url = (
+        swagger_js_url
+        if swagger_js_url is not None
+        else "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"
+    )
+    current_swagger_css_url = (
+        swagger_css_url
+        if swagger_css_url is not None
+        else "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css"
+    )
+
     html = f"""
     <!DOCTYPE html>
     <html>
     <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link type="text/css" rel="stylesheet" href="{swagger_css_url}">
+    <link type="text/css" rel="stylesheet" href="{current_swagger_css_url}">
     <link rel="shortcut icon" href="{swagger_favicon_url}">
     <title>{title}</title>
     </head>
     <body>
     <div id="swagger-ui">
     </div>
-    <script src="{swagger_js_url}"></script>
+    <script src="{current_swagger_js_url}"></script>
     <!-- `SwaggerUIBundle` is now available on the page -->
     <script>
     const ui = SwaggerUIBundle({{
@@ -222,7 +233,7 @@ def get_redoc_html(
         ),
     ],
     redoc_js_url: Annotated[
-        str,
+        Optional[str],
         Doc(
             """
             The URL to use to load the ReDoc JavaScript.
@@ -233,7 +244,7 @@ def get_redoc_html(
             [FastAPI docs for Custom Docs UI Static Assets](https://fastapi.tiangolo.com/how-to/custom-docs-ui-assets/)
             """
         ),
-    ] = "https://cdn.jsdelivr.net/npm/redoc@2/bundles/redoc.standalone.js",
+    ] = None,
     redoc_favicon_url: Annotated[
         str,
         Doc(
@@ -261,6 +272,12 @@ def get_redoc_html(
     Read more about it in the
     [FastAPI docs for Custom Docs UI Static Assets (Self-Hosting)](https://fastapi.tiangolo.com/how-to/custom-docs-ui-assets/).
     """
+    current_redoc_js_url = (
+        redoc_js_url
+        if redoc_js_url is not None
+        else "https://cdn.jsdelivr.net/npm/redoc@2/bundles/redoc.standalone.js"
+    )
+
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -291,7 +308,7 @@ def get_redoc_html(
         ReDoc requires Javascript to function. Please enable it to browse the documentation.
     </noscript>
     <redoc spec-url="{openapi_url}"></redoc>
-    <script src="{redoc_js_url}"> </script>
+    <script src="{current_redoc_js_url}"> </script>
     </body>
     </html>
     """

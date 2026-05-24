@@ -5,13 +5,13 @@ from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 
 def test_strings_in_generated_swagger():
     sig = inspect.signature(get_swagger_ui_html)
-    swagger_js_url = sig.parameters.get("swagger_js_url").default  # type: ignore
-    swagger_css_url = sig.parameters.get("swagger_css_url").default  # type: ignore
+    assert sig.parameters.get("swagger_js_url").default is None
+    assert sig.parameters.get("swagger_css_url").default is None
     swagger_favicon_url = sig.parameters.get("swagger_favicon_url").default  # type: ignore
     html = get_swagger_ui_html(openapi_url="/docs", title="title")
     body_content = html.body.decode()
-    assert swagger_js_url in body_content
-    assert swagger_css_url in body_content
+    assert "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js" in body_content
+    assert "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css" in body_content
     assert swagger_favicon_url in body_content
 
 
@@ -34,11 +34,11 @@ def test_strings_in_custom_swagger():
 
 def test_strings_in_generated_redoc():
     sig = inspect.signature(get_redoc_html)
-    redoc_js_url = sig.parameters.get("redoc_js_url").default  # type: ignore
+    assert sig.parameters.get("redoc_js_url").default is None
     redoc_favicon_url = sig.parameters.get("redoc_favicon_url").default  # type: ignore
     html = get_redoc_html(openapi_url="/docs", title="title")
     body_content = html.body.decode()
-    assert redoc_js_url in body_content
+    assert "https://cdn.jsdelivr.net/npm/redoc@2/bundles/redoc.standalone.js" in body_content
     assert redoc_favicon_url in body_content
 
 
