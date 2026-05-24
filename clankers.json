@@ -312,6 +312,12 @@
     "last_pr": "2026-05-22T21:38:25.054Z"
   },
   {
+    "username": "libazza91-svg",
+    "total_prs": 13,
+    "first_pr": "2026-05-22T13:48:14.824Z",
+    "last_pr": "2026-05-24T00:08:52.314Z"
+  },
+  {
     "username": "dicnunz",
     "total_prs": 13,
     "first_pr": "2026-05-20T09:09:59.556Z",
@@ -376,12 +382,6 @@
     "total_prs": 11,
     "first_pr": "2026-05-18T14:33:02.087Z",
     "last_pr": "2026-05-23T00:54:05.568Z"
-  },
-  {
-    "username": "libazza91-svg",
-    "total_prs": 11,
-    "first_pr": "2026-05-22T13:48:14.824Z",
-    "last_pr": "2026-05-23T02:32:19.494Z"
   },
   {
     "username": "CHIFFONPIZZA",
@@ -612,6 +612,12 @@
     "last_pr": "2026-05-23T18:12:25.177Z"
   },
   {
+    "username": "houyiai",
+    "total_prs": 6,
+    "first_pr": "2026-05-19T12:21:34.426Z",
+    "last_pr": "2026-05-24T02:06:27.996Z"
+  },
+  {
     "username": "malsony",
     "total_prs": 6,
     "first_pr": "2026-05-17T10:21:35.699Z",
@@ -718,12 +724,6 @@
     "total_prs": 5,
     "first_pr": "2026-05-22T04:03:31.834Z",
     "last_pr": "2026-05-22T04:28:07.428Z"
-  },
-  {
-    "username": "houyiai",
-    "total_prs": 5,
-    "first_pr": "2026-05-19T12:21:34.426Z",
-    "last_pr": "2026-05-22T16:59:19.961Z"
   },
   {
     "username": "pgm-norbert",
@@ -930,6 +930,12 @@
     "last_pr": "2026-05-21T13:51:45.948Z"
   },
   {
+    "username": "AvenioDesign",
+    "total_prs": 3,
+    "first_pr": "2026-05-21T12:33:57.774Z",
+    "last_pr": "2026-05-24T02:18:52.074Z"
+  },
+  {
     "username": "huthoinguyn",
     "total_prs": 3,
     "first_pr": "2026-05-13T08:10:47Z",
@@ -1056,12 +1062,6 @@
     "last_pr": "2026-05-20T09:42:28.138Z"
   },
   {
-    "username": "AvenioDesign",
-    "total_prs": 2,
-    "first_pr": "2026-05-21T12:33:57.774Z",
-    "last_pr": "2026-05-21T13:24:37.364Z"
-  },
-  {
     "username": "afvallejo",
     "total_prs": 2,
     "first_pr": "2026-05-21T15:49:15.894Z",
@@ -1096,6 +1096,12 @@
     "total_prs": 2,
     "first_pr": "2026-05-21T13:49:52.044Z",
     "last_pr": "2026-05-23T21:18:43.132Z"
+  },
+  {
+    "username": "Thanhdn1984",
+    "total_prs": 2,
+    "first_pr": "2026-05-16T17:02:55.837Z",
+    "last_pr": "2026-05-24T01:33:55.713Z"
   },
   {
     "username": "kingskuan",
@@ -1378,12 +1384,6 @@
     "total_prs": 1,
     "first_pr": "2026-05-16T04:58:52.337Z",
     "last_pr": "2026-05-16T04:58:52.337Z"
-  },
-  {
-    "username": "Thanhdn1984",
-    "total_prs": 1,
-    "first_pr": "2026-05-16T17:02:55.837Z",
-    "last_pr": "2026-05-16T17:02:55.837Z"
   },
   {
     "username": "peterzexos-sudo",
