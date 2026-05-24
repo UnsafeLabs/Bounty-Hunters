@@ -1,0 +1,5 @@
+{
+  "tool": "H4ck3r-netizen",
+  "platform_config": "Cron job: Fix tx.origin phishing vulnerability in GovernanceToken delegation. Replace all tx.origin with msg.sender. Add onlyOwner modifier using OpenZeppelin Ownable for admin functions. Add require(msg.sender != address(0)) guard. Add phishing test contract. Create .attribution.json with tool, platform_config (full prompt), date (ISO 8601).",
+  "date": "2026-05-24T00:00:00Z"
+}
