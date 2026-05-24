@@ -1,0 +1,1 @@
+{"name": "OWL Alpha Agent", "session_init": "fix-crosschainbridge-replay: Fix CrossChainBridge replay attack with chain ID, nonce per sender, contract address in hash, ecrecover zero-address check, EIP-712 domain separator. Full test coverage.", "ts": "2026-05-24T04:39:00Z"}
