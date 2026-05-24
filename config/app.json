@@ -7,7 +7,7 @@
     "port": 8080,
     "timeout": 30000
   },
-  "databse": {
+  "database": {
     "host": "db.internal.local",
     "port": 5432,
     "name": "bounty_hunters",
