@@ -178,6 +178,7 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
+import { NotificationHistoryPanel } from "./NotificationToast";
 import { useServerKeybindings } from "../rpc/serverState";
 import {
   derivePhysicalProjectKey,
@@ -2501,6 +2502,7 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
       <SidebarMenu>
+        <NotificationHistoryPanel />
         <SidebarMenuItem>
           <SidebarMenuButton
             size="sm"
