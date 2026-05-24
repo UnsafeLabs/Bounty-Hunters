@@ -95,6 +95,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
   const authSessions = yield* AuthSessionRepository;
   const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
   const connectedSessionsRef = yield* Ref.make(new Map<string, number>());
+  const lastActivityWriteRef = yield* Ref.make(new Map<string, number>());
   const changesPubSub = yield* PubSub.unbounded<SessionCredentialChange>();
   const cookieName = resolveSessionCookieName({
     mode: serverConfig.mode,
@@ -142,6 +143,8 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       );
     });
 
+  const DEBOUNCE_INTERVAL_MS = Duration.toMillis(Duration.minutes(5));
+
   const markConnected: SessionCredentialServiceShape["markConnected"] = (sessionId) =>
     Ref.modify(connectedSessionsRef, (current) => {
       const next = new Map(current);
@@ -151,14 +154,23 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     }).pipe(
       Effect.flatMap((wasDisconnected) =>
         wasDisconnected
-          ? DateTime.now.pipe(
-              Effect.flatMap((lastConnectedAt) =>
-                authSessions.setLastConnectedAt({
-                  sessionId,
-                  lastConnectedAt,
-                }),
-              ),
-            )
+          ? Effect.gen(function* () {
+              const now = yield* Clock.currentTimeMillis;
+              const lastWrites = yield* Ref.get(lastActivityWriteRef);
+              const lastWrite = lastWrites.get(sessionId) ?? 0;
+              if (now - lastWrite < DEBOUNCE_INTERVAL_MS) {
+                return;
+              }
+              const lastConnectedAt = yield* DateTime.now;
+              yield* authSessions.setLastConnectedAt({
+                sessionId,
+                lastConnectedAt,
+              });
+              yield* Ref.set(
+                lastActivityWriteRef,
+                new Map(lastWrites).set(sessionId, now),
+              );
+            })
           : Effect.void,
       ),
       Effect.flatMap(() => loadActiveSession(sessionId)),

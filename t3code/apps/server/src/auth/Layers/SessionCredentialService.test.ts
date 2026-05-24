@@ -186,8 +186,75 @@ it.layer(NodeServices.layer)("SessionCredentialServiceLive", (it) => {
       const afterReconnect = yield* sessions.listActive();
 
       expect(afterReconnect[0]?.connected).toBe(true);
-      expect(afterReconnect[0]?.lastConnectedAt).not.toBeNull();
-      expect(afterReconnect[0]?.lastConnectedAt?.toString()).not.toBe(firstConnectedAt?.toString());
+  it.effect("debounces lastConnectedAt writes within 5 minute window", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const issued = yield* sessions.issue({
+        subject: "debounce-test",
+        method: "bearer-session-token",
+      });
+
+      // First connect sets lastConnectedAt
+      yield* sessions.markConnected(issued.sessionId);
+      const first = yield* sessions.listActive();
+      const firstConnectedAt = first[0]?.lastConnectedAt;
+      expect(firstConnectedAt).not.toBeNull();
+
+      // Disconnect and reconnect within 5 minutes - should NOT update lastConnectedAt
+      yield* sessions.markDisconnected(issued.sessionId);
+      yield* TestClock.adjust(Duration.seconds(10));
+      yield* sessions.markConnected(issued.sessionId);
+      const second = yield* sessions.listActive();
+      expect(second[0]?.lastConnectedAt?.toString()).toBe(firstConnectedAt?.toString());
+
+      // Disconnect and reconnect after 5+ minutes - SHOULD update
+      yield* sessions.markDisconnected(issued.sessionId);
+      yield* TestClock.adjust(Duration.minutes(6));
+      yield* sessions.markConnected(issued.sessionId);
+      const third = yield* sessions.listActive();
+      expect(third[0]?.lastConnectedAt).not.toBeNull();
+      expect(third[0]?.lastConnectedAt?.toString()).not.toBe(firstConnectedAt?.toString());
+    }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
+  );
+
+  it.effect("listActive sorts by lastConnectedAt descending", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const s1 = yield* sessions.issue({
+        subject: "sort-test-1",
+        method: "bearer-session-token",
+      });
+      const s2 = yield* sessions.issue({
+        subject: "sort-test-2",
+        method: "bearer-session-token",
+      });
+      const s3 = yield* sessions.issue({
+        subject: "sort-test-3",
+        method: "bearer-session-token",
+      });
+
+      // All 3 start with null lastConnectedAt, sorted by issued_at desc
+      const initial = yield* sessions.listActive();
+      expect(initial).toHaveLength(3);
+      expect(initial[0]?.subject).toBe("sort-test-3");
+      expect(initial[1]?.subject).toBe("sort-test-2");
+      expect(initial[2]?.subject).toBe("sort-test-1");
+
+      // Connect session 1 first (most recently active)
+      yield* sessions.markConnected(s1.sessionId);
+      yield* sessions.markDisconnected(s1.sessionId);
+      yield* TestClock.adjust(Duration.seconds(1));
+
+      // Connect session 3 next
+      yield* sessions.markConnected(s3.sessionId);
+      yield* sessions.markDisconnected(s3.sessionId);
+
+      // Now s3 should be first (most recent lastConnectedAt), s1 second, s2 third (null lastConnectedAt)
+      const afterConnects = yield* sessions.listActive();
+      expect(afterConnects).toHaveLength(3);
+      expect(afterConnects[0]?.subject).toBe("sort-test-3");
+      expect(afterConnects[1]?.subject).toBe("sort-test-1");
+      expect(afterConnects[2]?.subject).toBe("sort-test-2");
     }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
   );
 });
