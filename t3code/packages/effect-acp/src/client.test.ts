@@ -446,4 +446,248 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
       yield* Scope.close(scope, Exit.void);
     }),
   );
+
+  it.effect("triggers onSessionExpired callback before re-authentication on 401", () =>
+    Effect.gen(function* () {
+      const expiredSessionIds = yield* Ref.make<Array<string>>([]);
+      const reauthAttempts = yield* Ref.make(0);
+
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      const acp = yield* AcpClient.make(stdio, {
+        onSessionExpired: (sessionId: string) =>
+          Ref.update(expiredSessionIds, (ids) => [...ids, sessionId]),
+        authMethodId: "test_auth_method",
+      }).pipe(Effect.provideService(Scope.Scope, scope));
+
+      // Initialize
+      const initFiber = yield* acp.agent
+        .initialize({
+          protocolVersion: 1,
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+          clientInfo: { name: "test", version: "0.0.0" },
+        })
+        .pipe(Effect.forkScoped);
+
+      const initMsg = yield* Queue.take(output);
+      const decodedInit = Schema.decodeEffect(Schema.fromJsonString(InitializeRequest));
+      const initReq = yield* decodedInit(initMsg);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(InitializeResponse, {
+          jsonrpc: "2.0",
+          id: initReq.id,
+          result: {
+            protocolVersion: 1,
+            agentCapabilities: {},
+            agentInfo: { name: "mock", version: "0.0.0" },
+          },
+        }),
+      );
+      yield* Fiber.join(initFiber);
+
+      // Authenticate
+      const authFiber = yield* acp.agent.authenticate({ methodId: "test_auth_method" }).pipe(Effect.forkScoped);
+      const authMsg = yield* Queue.take(output);
+      const decodedAuthReq = Schema.decodeEffect(
+        Schema.fromJsonString(jsonRpcRequest("authenticate", AcpSchema.AuthenticateRequest)),
+      );
+      const authReq = yield* decodedAuthReq(authMsg);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(jsonRpcResponse(AcpSchema.AuthenticateResponse), {
+          jsonrpc: "2.0",
+          id: authReq.id,
+          result: {},
+        }),
+      );
+      yield* Fiber.join(authFiber);
+
+      // Create session
+      const createFiber = yield* acp.agent.createSession({ cwd: "/tmp", mcpServers: [] }).pipe(Effect.forkScoped);
+      const createMsg = yield* Queue.take(output);
+      const decodedCreate = Schema.decodeEffect(
+        Schema.fromJsonString(jsonRpcRequest("session/new", AcpSchema.NewSessionRequest)),
+      );
+      const createReq = yield* decodedCreate(createMsg);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(jsonRpcResponse(AcpSchema.NewSessionResponse), {
+          jsonrpc: "2.0",
+          id: createReq.id,
+          result: { sessionId: "test-session-1" },
+        }),
+      );
+      yield* Fiber.join(createFiber);
+
+      // Prompt that returns 401 (auth required)
+      const promptFiber = yield* acp.agent
+        .prompt({ sessionId: "test-session-1", prompt: [{ type: "text", text: "hello" }] })
+        .pipe(Effect.forkScoped);
+
+      const promptMsg1 = yield* Queue.take(output);
+      const decodedPrompt = Schema.decodeEffect(
+        Schema.fromJsonString(jsonRpcRequest("session/prompt", AcpSchema.PromptRequest)),
+      );
+      const promptReq1 = yield* decodedPrompt(promptMsg1);
+
+      // Send 401 unauthorized error
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(jsonRpcResponse(AcpSchema.PromptResponse), {
+          jsonrpc: "2.0",
+          id: promptReq1.id,
+          error: { code: -32000, message: "Unauthorized" },
+        }),
+      );
+
+      // Now the client should re-authenticate
+      const reauthMsg = yield* Queue.take(output);
+      const decodedReauth = Schema.decodeEffect(
+        Schema.fromJsonString(jsonRpcRequest("authenticate", AcpSchema.AuthenticateRequest)),
+      );
+      const reauthReq = yield* decodedReauth(reauthMsg);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(jsonRpcResponse(AcpSchema.AuthenticateResponse), {
+          jsonrpc: "2.0",
+          id: reauthReq.id,
+          result: {},
+        }),
+      );
+
+      // Then retry the prompt
+      const promptMsg2 = yield* Queue.take(output);
+      const promptReq2 = yield* decodedPrompt(promptMsg2);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(jsonRpcResponse(AcpSchema.PromptResponse), {
+          jsonrpc: "2.0",
+          id: promptReq2.id,
+          result: { stopReason: "end_turn" },
+        }),
+      );
+
+      const result = yield* Fiber.join(promptFiber);
+      assert.equal(result.stopReason, "end_turn");
+
+      const expired = yield* Ref.get(expiredSessionIds);
+      assert.deepEqual(expired, ["test-session-1"]);
+
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
+  it.effect("fails with AcpAuthenticationError when re-authentication fails", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      const acp = yield* AcpClient.make(stdio, {
+        authMethodId: "failing_auth_method",
+      }).pipe(Effect.provideService(Scope.Scope, scope));
+
+      // Initialize
+      const initFiber = yield* acp.agent
+        .initialize({
+          protocolVersion: 1,
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+          clientInfo: { name: "test", version: "0.0.0" },
+        })
+        .pipe(Effect.forkScoped);
+
+      const initMsg = yield* Queue.take(output);
+      const decodedInit = Schema.decodeEffect(Schema.fromJsonString(InitializeRequest));
+      const initReq = yield* decodedInit(initMsg);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(InitializeResponse, {
+          jsonrpc: "2.0",
+          id: initReq.id,
+          result: {
+            protocolVersion: 1,
+            agentCapabilities: {},
+            agentInfo: { name: "mock", version: "0.0.0" },
+          },
+        }),
+      );
+      yield* Fiber.join(initFiber);
+
+      // Authenticate
+      const authFiber = yield* acp.agent.authenticate({ methodId: "failing_auth_method" }).pipe(Effect.forkScoped);
+      const authMsg = yield* Queue.take(output);
+      const decodedAuthReq = Schema.decodeEffect(
+        Schema.fromJsonString(jsonRpcRequest("authenticate", AcpSchema.AuthenticateRequest)),
+      );
+      const authReq = yield* decodedAuthReq(authMsg);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(jsonRpcResponse(AcpSchema.AuthenticateResponse), {
+          jsonrpc: "2.0",
+          id: authReq.id,
+          result: {},
+        }),
+      );
+      yield* Fiber.join(authFiber);
+
+      // Create session
+      const createFiber = yield* acp.agent.createSession({ cwd: "/tmp", mcpServers: [] }).pipe(Effect.forkScoped);
+      const createMsg = yield* Queue.take(output);
+      const decodedCreate = Schema.decodeEffect(
+        Schema.fromJsonString(jsonRpcRequest("session/new", AcpSchema.NewSessionRequest)),
+      );
+      const createReq = yield* decodedCreate(createMsg);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(jsonRpcResponse(AcpSchema.NewSessionResponse), {
+          jsonrpc: "2.0",
+          id: createReq.id,
+          result: { sessionId: "test-session-2" },
+        }),
+      );
+      yield* Fiber.join(createFiber);
+
+      // Prompt that returns 401, then re-auth fails
+      const promptResult = yield* Effect.exit(
+        acp.agent.prompt({ sessionId: "test-session-2", prompt: [{ type: "text", text: "hello" }] }),
+      );
+
+      // First get the prompt message
+      const promptMsg1 = yield* Queue.take(output);
+      const decodedPrompt = Schema.decodeEffect(
+        Schema.fromJsonString(jsonRpcRequest("session/prompt", AcpSchema.PromptRequest)),
+      );
+      const promptReq1 = yield* decodedPrompt(promptMsg1);
+
+      // Send 401
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(jsonRpcResponse(AcpSchema.PromptResponse), {
+          jsonrpc: "2.0",
+          id: promptReq1.id,
+          error: { code: -32000, message: "Unauthorized" },
+        }),
+      );
+
+      // Re-auth request
+      const reauthMsg = yield* Queue.take(output);
+      const decodedReauth = Schema.decodeEffect(
+        Schema.fromJsonString(jsonRpcRequest("authenticate", AcpSchema.AuthenticateRequest)),
+      );
+      const reauthReq = yield* decodedReauth(reauthMsg);
+
+      // Send re-auth failure (no refreshToken, so it should fail with AcpAuthenticationError)
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(jsonRpcResponse(AcpSchema.AuthenticateResponse), {
+          jsonrpc: "2.0",
+          id: reauthReq.id,
+          error: { code: -32000, message: "Auth failed" },
+        }),
+      );
+
+      assert.equal(promptResult._tag, "Failure");
+
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
 });

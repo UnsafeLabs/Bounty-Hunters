@@ -26,6 +26,15 @@ export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  readonly onSessionExpired?: (sessionId: string) => void;
+  readonly refreshToken?: string;
+  readonly authMethodId?: string;
+}
+
+interface AcpAuthState {
+  readonly sessionId: string | null;
+  readonly refreshToken: string | null;
+  readonly authMethodId: string | null;
 }
 
 type AcpClientRaw = {
@@ -331,6 +340,31 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     | ((method: string, params: unknown) => Effect.Effect<void, AcpError.AcpError>)
     | undefined;
 
+  const authState: AcpAuthState = {
+    sessionId: null,
+    refreshToken: options.refreshToken ?? null,
+    authMethodId: options.authMethodId ?? null,
+  };
+
+  const isUnauthorizedError = (error: AcpError.AcpError): boolean => {
+    if (error._tag === "AcpRequestError") {
+      return error.code === -32000 || error.errorMessage.toLowerCase().includes("unauthorized");
+    }
+    return false;
+  };
+
+  const reauthenticate = Effect.gen(function* () {
+    if (!authState.refreshToken || !authState.authMethodId) {
+      return yield* new AcpError.AcpAuthenticationError({
+        sessionId: authState.sessionId ?? undefined,
+      });
+    }
+    if (options.onSessionExpired && authState.sessionId) {
+      options.onSessionExpired(authState.sessionId);
+    }
+    yield* callRpc(rpc[AGENT_METHODS.authenticate]({ methodId: authState.authMethodId }));
+  });
+
   const runNotificationHandlers = <A>(
     registration: BufferedNotificationHandler<A>,
     notification: A,
@@ -464,9 +498,21 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     },
     agent: {
       initialize: (payload) => callRpc(rpc[AGENT_METHODS.initialize](payload)),
-      authenticate: (payload) => callRpc(rpc[AGENT_METHODS.authenticate](payload)),
+      authenticate: (payload) =>
+        callRpc(rpc[AGENT_METHODS.authenticate](payload)).pipe(
+          Effect.tap(() => {
+            if (payload.methodId) {
+              authState.authMethodId = payload.methodId;
+            }
+          }),
+        ),
       logout: (payload) => callRpc(rpc[AGENT_METHODS.logout](payload)),
-      createSession: (payload) => callRpc(rpc[AGENT_METHODS.session_new](payload)),
+      createSession: (payload) =>
+        callRpc(rpc[AGENT_METHODS.session_new](payload)).pipe(
+          Effect.tap((response) => {
+            authState.sessionId = response.sessionId;
+          }),
+        ),
       loadSession: (payload) => callRpc(rpc[AGENT_METHODS.session_load](payload)),
       listSessions: (payload) => callRpc(rpc[AGENT_METHODS.session_list](payload)),
       forkSession: (payload) => callRpc(rpc[AGENT_METHODS.session_fork](payload)),
@@ -475,7 +521,24 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
       setSessionModel: (payload) => callRpc(rpc[AGENT_METHODS.session_set_model](payload)),
       setSessionConfigOption: (payload) =>
         callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)),
-      prompt: (payload) => callRpc(rpc[AGENT_METHODS.session_prompt](payload)),
+      prompt: (payload) =>
+        callRpc(rpc[AGENT_METHODS.session_prompt](payload)).pipe(
+          Effect.catchIf(isUnauthorizedError, (error) =>
+            Effect.gen(function* () {
+              yield* reauthenticate;
+              return yield* callRpc(rpc[AGENT_METHODS.session_prompt](payload));
+            }).pipe(
+              Effect.catchAll((reauthError) =>
+                Effect.fail(
+                  new AcpError.AcpAuthenticationError({
+                    sessionId: authState.sessionId ?? undefined,
+                    cause: reauthError as Error,
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
       cancel: (payload) => transport.notify(AGENT_METHODS.session_cancel, payload),
     },
     handleRequestPermission: (handler) =>
