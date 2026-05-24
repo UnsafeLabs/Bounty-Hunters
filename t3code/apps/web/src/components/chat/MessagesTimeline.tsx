@@ -246,7 +246,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div
+        className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip"
+        data-timeline-root="true"
+        role="listitem"
+      >
         <TimelineRowContent row={item} />
       </div>
     ),
@@ -278,6 +282,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           maintainVisibleContentPosition
           onScroll={handleScroll}
           className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+          role="log"
+          aria-live="polite"
+          aria-label="Conversation messages"
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
         />
@@ -400,6 +407,7 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
       disabled={activity.isRevertingCheckpoint || activity.isWorking}
       onClick={() => ctx.onRevertUserMessage(messageId)}
       title="Revert to this message"
+      aria-label="Revert to this message"
     >
       <Undo2Icon className="size-3" />
     </Button>
@@ -621,6 +629,8 @@ const WorkGroupSection = memo(function WorkGroupSection({
             <button
               type="button"
               className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? "Collapse work log" : `Show ${hiddenCount} more work log entries`}
               onClick={() => setIsExpanded((v) => !v)}
             >
               {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
@@ -709,6 +719,8 @@ function AssistantChangedFilesSectionInner({
             size="xs"
             variant="outline"
             data-scroll-anchor-ignore
+            aria-expanded={allDirectoriesExpanded}
+            aria-label={allDirectoriesExpanded ? "Collapse all changed files" : "Expand all changed files"}
             onClick={() => setExpanded(routeThreadKey, turnSummary.turnId, !allDirectoriesExpanded)}
           >
             {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
@@ -717,6 +729,7 @@ function AssistantChangedFilesSectionInner({
             type="button"
             size="xs"
             variant="outline"
+            aria-label="View diff"
             onClick={() => onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)}
           >
             View diff
@@ -816,6 +829,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
               size="xs"
               variant="ghost"
               aria-expanded={expanded}
+              aria-label={expanded ? "Collapse user message" : "Show full user message"}
               data-scroll-anchor-ignore
               onClick={() => setExpanded((value) => !value)}
               className="-ml-1 h-6 rounded-md px-1.5 text-xs text-muted-foreground/72 hover:bg-muted/55 hover:text-foreground/85"
