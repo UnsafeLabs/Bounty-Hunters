@@ -48,7 +48,7 @@ Returns a paginated list of all available bounties.
 ### Create Bounty
 
 ```
-GET /bounties
+POST /bounties
 ```
 
 Creates a new bounty listing.
