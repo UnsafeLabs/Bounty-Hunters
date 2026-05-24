@@ -1104,6 +1104,12 @@
     "last_pr": "2026-05-24T01:33:55.713Z"
   },
   {
+    "username": "deniginsb",
+    "total_prs": 2,
+    "first_pr": "2026-05-24T16:10:14.125Z",
+    "last_pr": "2026-05-24T22:51:10.859Z"
+  },
+  {
     "username": "kingskuan",
     "total_prs": 2,
     "first_pr": "2026-05-15T14:10:31.174Z",
@@ -1510,12 +1516,6 @@
     "total_prs": 1,
     "first_pr": "2026-05-24T04:59:23.296Z",
     "last_pr": "2026-05-24T04:59:23.296Z"
-  },
-  {
-    "username": "deniginsb",
-    "total_prs": 1,
-    "first_pr": "2026-05-24T16:10:14.125Z",
-    "last_pr": "2026-05-24T16:10:14.125Z"
   },
   {
     "username": "jiangxiao642-spec",
