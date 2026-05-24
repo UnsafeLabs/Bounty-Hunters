@@ -128,6 +128,7 @@ const PlanSidebar = memo(function PlanSidebar({
 
   return (
     <div
+      id="chat-sidebar"
       className={cn(
         "flex min-h-0 flex-col bg-card/50",
         mode === "sidebar"

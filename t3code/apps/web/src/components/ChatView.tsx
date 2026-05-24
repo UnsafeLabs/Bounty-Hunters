@@ -3491,6 +3491,62 @@ export default function ChatView(props: ChatViewProps) {
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
 
+  // Keyboard navigation for chat messages — Arrow Up/Down to move between
+  // messages, Enter to expand details, Escape to return to composer.
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      )
+        return;
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const focusable = document.querySelectorAll<HTMLElement>(
+          '[data-message-focusable="true"]',
+        );
+        if (focusable.length === 0) return;
+        const current = document.activeElement as HTMLElement | null;
+        const currentIdx = current ? Array.from(focusable).indexOf(current) : -1;
+        const nextIdx =
+          event.key === "ArrowDown"
+            ? currentIdx < 0
+              ? 0
+              : Math.min(currentIdx + 1, focusable.length - 1)
+            : currentIdx < 0
+              ? focusable.length - 1
+              : Math.max(currentIdx - 1, 0);
+        focusable[nextIdx]?.focus();
+        return;
+      }
+
+      const activeEl = document.activeElement as HTMLElement | null;
+      const isInMessage =
+        activeEl?.closest('[data-message-focusable="true"]') !== null;
+
+      if (event.key === "Enter" && isInMessage && activeEl) {
+        event.preventDefault();
+        const expandBtn = activeEl.querySelector<HTMLElement>(
+          "button[aria-expanded]",
+        );
+        if (expandBtn) expandBtn.click();
+        return;
+      }
+
+      if (event.key === "Escape" && isInMessage) {
+        event.preventDefault();
+        composerRef.current?.focusAtEnd();
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -3498,6 +3554,30 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      {/* Skip links for keyboard navigation */}
+      <div
+        className="sr-only focus-within:not-sr-only focus-within:absolute focus-within:left-4 focus-within:top-4 focus-within:z-50 focus-within:flex focus-within:gap-2 focus-within:rounded-lg focus-within:border focus-within:border-border focus-within:bg-card focus-within:p-3 focus-within:shadow-lg"
+      >
+        <a
+          href="#chat-sidebar"
+          className="rounded-md px-3 py-1.5 text-sm font-medium text-foreground underline decoration-1 underline-offset-2 transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          Skip to sidebar
+        </a>
+        <a
+          href="#chat-messages"
+          className="rounded-md px-3 py-1.5 text-sm font-medium text-foreground underline decoration-1 underline-offset-2 transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          Skip to messages
+        </a>
+        <a
+          href="#chat-composer"
+          className="rounded-md px-3 py-1.5 text-sm font-medium text-foreground underline decoration-1 underline-offset-2 transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          Skip to composer
+        </a>
+      </div>
+
       {/* Top bar */}
       <header
         className={cn(
@@ -3551,7 +3631,7 @@ export default function ChatView(props: ChatViewProps) {
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div id="chat-messages" className="relative flex min-h-0 flex-1 flex-col" role="log" aria-live="polite" aria-label="Chat messages">
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}
@@ -3603,7 +3683,7 @@ export default function ChatView(props: ChatViewProps) {
                 : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
             )}
           >
-            <div className="relative isolate">
+            <div id="chat-composer" className="relative isolate">
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
               <div className="relative z-10">
                 <ChatComposer

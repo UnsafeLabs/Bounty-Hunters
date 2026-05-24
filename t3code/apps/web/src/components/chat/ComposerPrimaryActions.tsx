@@ -95,6 +95,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
               {...pointerFocusProps}
               onClick={onPreviousPendingQuestion}
               disabled={pendingAction.isResponding}
+              aria-label="Previous question"
             >
               Previous
             </Button>
@@ -110,6 +111,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             pendingAction.isResponding ||
             (pendingAction.isLastQuestion ? !pendingAction.isComplete : !pendingAction.canAdvance)
           }
+          aria-label={formatPendingPrimaryActionLabel({
+            compact,
+            isLastQuestion: pendingAction.isLastQuestion,
+            isResponding: pendingAction.isResponding,
+            questionIndex: pendingAction.questionIndex,
+          })}
         >
           {formatPendingPrimaryActionLabel({
             compact,
@@ -147,6 +154,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           className={cn("rounded-full", compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8")}
           {...pointerFocusProps}
           disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
+          aria-label="Refine plan"
         >
           {isConnecting || isSendBusy ? "Sending..." : "Refine"}
         </Button>
@@ -161,6 +169,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
           {...pointerFocusProps}
           disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
+          aria-label="Implement plan"
         >
           {isConnecting || isSendBusy ? "Sending..." : "Implement"}
         </Button>

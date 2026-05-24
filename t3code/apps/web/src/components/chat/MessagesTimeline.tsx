@@ -302,8 +302,11 @@ type TimelineRow = MessagesTimelineRow;
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
+      role="listitem"
+      tabIndex={-1}
+      data-message-focusable="true"
       className={cn(
-        "pb-4",
+        "pb-4 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring rounded-md",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
       data-timeline-row-id={row.id}
