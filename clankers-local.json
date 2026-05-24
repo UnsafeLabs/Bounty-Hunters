@@ -624,6 +624,12 @@
     "last_pr": "2026-05-23T07:24:41.068Z"
   },
   {
+    "username": "AvenioDesign",
+    "total_prs": 5,
+    "first_pr": "2026-05-21T12:33:57.774Z",
+    "last_pr": "2026-05-24T21:07:13.820Z"
+  },
+  {
     "username": "spqrcode",
     "total_prs": 4,
     "first_pr": "2026-05-14T12:12:04.319Z",
@@ -688,12 +694,6 @@
     "total_prs": 4,
     "first_pr": "2026-05-23T22:02:45.889Z",
     "last_pr": "2026-05-23T22:03:18.841Z"
-  },
-  {
-    "username": "AvenioDesign",
-    "total_prs": 4,
-    "first_pr": "2026-05-21T12:33:57.774Z",
-    "last_pr": "2026-05-24T20:13:17.945Z"
   },
   {
     "username": "AidenPeerce",
