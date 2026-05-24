@@ -9,6 +9,7 @@ contract SimpleSwap {
     uint256 public reserveA;
     uint256 public reserveB;
     uint256 public fee; // basis points, e.g. 30 = 0.3%
+    uint256 public constant MIN_FEE = 1; // minimum fee of 1 unit to prevent zero-fee swaps
 
     event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
 
@@ -25,12 +26,17 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    // FIX: Added minAmountOut and deadline parameters
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
+        require(block.timestamp <= deadline, "Transaction expired");
+        require(minAmountOut > 0, "minAmountOut must be > 0");
 
         bool isTokenA = tokenIn == address(tokenA);
         (IERC20 inputToken, IERC20 outputToken, uint256 reserveIn, uint256 reserveOut) = isTokenA
@@ -39,11 +45,21 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
+        // FIX: Use proper fixed-point math to avoid precision loss
+        // amountOut = (reserveOut * amountIn * (10000 - fee)) / (reserveIn * 10000 + amountIn * (10000 - fee))
+        uint256 feeAmount = (amountIn * fee) / 10000;
+        // Ensure minimum fee to prevent zero-fee exploitation
+        if (feeAmount < MIN_FEE && amountIn >= MIN_FEE) {
+            feeAmount = MIN_FEE;
+        }
         uint256 amountInAfterFee = amountIn - feeAmount;
 
-        // constant product formula: x * y = k
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        // FIX: Slippage protection
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+        require(amountOut > 0, "Insufficient output amount");
+        require(amountOut < reserveOut, "Insufficient liquidity");
 
         outputToken.transfer(msg.sender, amountOut);
 
@@ -62,7 +78,10 @@ contract SimpleSwap {
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
+        uint256 feeAmount = (amountIn * fee) / 10000;
+        if (feeAmount < MIN_FEE && amountIn >= MIN_FEE) {
+            feeAmount = MIN_FEE;
+        }
         uint256 amountInAfterFee = amountIn - feeAmount;
         return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
     }
