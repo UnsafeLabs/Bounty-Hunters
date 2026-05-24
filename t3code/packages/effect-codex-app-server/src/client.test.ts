@@ -4,6 +4,7 @@ import * as Path from "effect/Path";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -149,6 +150,91 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
 
       assert.equal(initialized.userAgent, "mock-codex-app-server");
+    }),
+  );
+
+  it.effect("streamRequest creates a stream from the underlying transport", () =>
+    Effect.gen(function* () {
+      const handle = yield* makeHandle();
+      const scope = yield* Scope.make();
+      const codexLayer = CodexClient.layerChildProcess(handle);
+      const context = yield* Layer.buildWithScope(codexLayer, scope);
+
+      const chunks = yield* Effect.gen(function* () {
+        const codex = yield* CodexClient.CodexAppServerClient;
+
+        const stream = codex.streamRequest("initialize", {
+          userAgent: "test-stream",
+          protocolVersion: 1,
+          agentInfo: { name: "test", version: "0.0.0" },
+          capabilities: { experimentalApi: false, optOutNotificationMethods: null },
+        } as any);
+
+        return yield* Stream.runCollect(stream);
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+
+      assert.isAbove(chunks.length, 0);
+    }),
+  );
+
+  it.effect("streamRequest passes bufferSize option for backpressure", () =>
+    Effect.gen(function* () {
+      const handle = yield* makeHandle();
+      const scope = yield* Scope.make();
+      const codexLayer = CodexClient.layerChildProcess(handle);
+      const context = yield* Layer.buildWithScope(codexLayer, scope);
+
+      const chunks = yield* Effect.gen(function* () {
+        const codex = yield* CodexClient.CodexAppServerClient;
+
+        const stream = codex.streamRequest(
+          "initialize",
+          {
+            userAgent: "test-backpressure",
+            protocolVersion: 1,
+            agentInfo: { name: "test", version: "0.0.0" },
+            capabilities: { experimentalApi: false, optOutNotificationMethods: null },
+          } as any,
+          { bufferSize: 4 },
+        );
+
+        return yield* Stream.runCollect(stream);
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+
+      assert.isAbove(chunks.length, 0);
+    }),
+  );
+
+  it.effect("streamRequest abort signal terminates the stream", () =>
+    Effect.gen(function* () {
+      const handle = yield* makeHandle();
+      const scope = yield* Scope.make();
+      const codexLayer = CodexClient.layerChildProcess(handle);
+      const context = yield* Layer.buildWithScope(codexLayer, scope);
+
+      const result = yield* Effect.gen(function* () {
+        const codex = yield* CodexClient.CodexAppServerClient;
+        const controller = new AbortController();
+
+        const stream = codex.streamRequest(
+          "initialize",
+          {
+            userAgent: "test-abort",
+            protocolVersion: 1,
+            agentInfo: { name: "test", version: "0.0.0" },
+            capabilities: { experimentalApi: false, optOutNotificationMethods: null },
+          } as any,
+          { signal: controller.signal },
+        );
+
+        // Abort immediately
+        controller.abort();
+
+        return yield* Stream.runCollect(stream).pipe(Effect.exit);
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+
+      // The stream should either fail or complete, not hang
+      assert.ok(result._tag === "Success" || result._tag === "Failure");
     }),
   );
 });

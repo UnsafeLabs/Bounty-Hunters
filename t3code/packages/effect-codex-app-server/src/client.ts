@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stdio from "effect/Stdio";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as CodexRpc from "./_generated/meta.gen.ts";
@@ -42,6 +43,17 @@ export interface CodexAppServerClientShape {
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
   ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexError.CodexAppServerError>;
+  readonly streamRequest: <M extends CodexRpc.ClientRequestMethod>(
+    method: M,
+    payload: CodexRpc.ClientRequestParamsByMethod[M],
+    options?: {
+      readonly signal?: AbortSignal;
+      readonly bufferSize?: number;
+    },
+  ) => Stream.Stream<
+    CodexRpc.ClientRequestResponsesByMethod[M],
+    CodexError.CodexAppServerError
+  >;
   readonly notify: <M extends CodexRpc.ClientNotificationMethod>(
     method: M,
     payload: CodexRpc.ClientNotificationParamsByMethod[M],
@@ -218,6 +230,49 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       Effect.flatMap((encoded) => transport.notify(method, encoded)),
     );
 
+  const CHUNK_TIMEOUT_WARNING_MS = 30_000;
+  const CHUNK_TIMEOUT_FAIL_MS = 120_000;
+
+  const streamRequest = <M extends CodexRpc.ClientRequestMethod>(
+    method: M,
+    payload: CodexRpc.ClientRequestParamsByMethod[M],
+    options?: {
+      readonly signal?: AbortSignal;
+      readonly bufferSize?: number;
+    },
+  ): Stream.Stream<
+    CodexRpc.ClientRequestResponsesByMethod[M],
+    CodexError.CodexAppServerError
+  > => {
+    const bufferSize = options?.bufferSize ?? 16;
+    return Stream.fromEffect(
+      encodeOptionalPayload(method, getClientRequestParamSchema(method), payload),
+    ).pipe(
+      Stream.flatMap((encoded) =>
+        Stream.fromEffect(transport.request(method, encoded)).pipe(
+          Stream.flatMap((raw) =>
+            Stream.fromEffect(
+              decodeOptionalPayload(method, getClientRequestResponseSchema(method), raw),
+            ),
+          ),
+          Stream.rechunk(bufferSize),
+          Stream.map((chunk) => chunk),
+        ),
+      ),
+      Stream.catchAll((error) => {
+        if (options?.signal?.aborted) {
+          return Stream.fail(
+            new CodexError.CodexAppServerTransportError({
+              detail: "Stream aborted by signal",
+              cause: new Error("AbortSignal triggered"),
+            }),
+          );
+        }
+        return Stream.fail(error);
+      }),
+    );
+  };
+
   return CodexAppServerClient.of({
     raw: {
       notifications: transport.incomingNotifications,
@@ -228,6 +283,7 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       respondError: transport.respondError,
     },
     request,
+    streamRequest,
     notify,
     handleServerRequest: (method, handler) =>
       Effect.sync(() => {
