@@ -29,8 +29,9 @@ check_dependencies
 
 # Clean previous deployment artifacts
 log_message "Cleaning previous build artifacts..."
-rm -rf ${DEPLOY_DIR}/dist
-rm -rf ${DEPLOY_DIR}/node_modules/.cache
+[ -n "${DEPLOY_DIR}" ] || { log_message "ERROR: DEPLOY_DIR is not set"; exit 1; }
+rm -rf "${DEPLOY_DIR}/dist"
+rm -rf "${DEPLOY_DIR}/node_modules/.cache"
 
 # Pull latest code
 if [ -d "${DEPLOY_DIR}/.git" ]; then
