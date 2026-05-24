@@ -1,0 +1,5 @@
+{
+  "agent": "Maestro",
+  "pre_task_context": "Telegram session with Deni. Task assignment: rework UnsafeLabs/Bounty-Hunters issue #918 after prior PR #4097 was closed by stale cleanup bot. Follow issue acceptance criteria for LiquidityPool first-depositor price manipulation fix, internal reserve accounting, sync recovery, tests, and PR metadata.",
+  "timestamp": "2026-05-24T23:05:00Z"
+}
