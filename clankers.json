@@ -1,9 +1,9 @@
 [
   {
     "username": "Gaotax2006",
-    "total_prs": 1380,
+    "total_prs": 1553,
     "first_pr": "2026-05-17T08:21:34.383Z",
-    "last_pr": "2026-05-23T17:23:51.836Z"
+    "last_pr": "2026-05-24T05:46:49.600Z"
   },
   {
     "username": "Sikkra",
@@ -96,6 +96,12 @@
     "last_pr": "2026-05-18T07:58:37.187Z"
   },
   {
+    "username": "H4ck3r-netizen",
+    "total_prs": 38,
+    "first_pr": "2026-05-18T05:55:49.424Z",
+    "last_pr": "2026-05-24T06:05:10.627Z"
+  },
+  {
     "username": "JeremyZeng77",
     "total_prs": 37,
     "first_pr": "2026-05-14T05:09:29Z",
@@ -118,12 +124,6 @@
     "total_prs": 32,
     "first_pr": "2026-05-16T08:23:14.852Z",
     "last_pr": "2026-05-21T14:20:05.845Z"
-  },
-  {
-    "username": "H4ck3r-netizen",
-    "total_prs": 31,
-    "first_pr": "2026-05-18T05:55:49.424Z",
-    "last_pr": "2026-05-23T21:39:08.533Z"
   },
   {
     "username": "kpoxo6op",
@@ -402,6 +402,12 @@
     "last_pr": "2026-05-19T15:39:48.445Z"
   },
   {
+    "username": "mvmax-dev",
+    "total_prs": 10,
+    "first_pr": "2026-05-19T07:08:24.325Z",
+    "last_pr": "2026-05-24T03:53:58.352Z"
+  },
+  {
     "username": "digzrow-coder",
     "total_prs": 9,
     "first_pr": "2026-05-13T08:07:00Z",
@@ -442,12 +448,6 @@
     "total_prs": 9,
     "first_pr": "2026-05-18T10:48:12.821Z",
     "last_pr": "2026-05-21T18:47:15.620Z"
-  },
-  {
-    "username": "mvmax-dev",
-    "total_prs": 9,
-    "first_pr": "2026-05-19T07:08:24.325Z",
-    "last_pr": "2026-05-23T14:11:32.836Z"
   },
   {
     "username": "ChienNguyen23",
@@ -1504,6 +1504,12 @@
     "total_prs": 1,
     "first_pr": "2026-05-23T18:45:40.460Z",
     "last_pr": "2026-05-23T18:45:40.460Z"
+  },
+  {
+    "username": "tolga-tom-nook",
+    "total_prs": 1,
+    "first_pr": "2026-05-24T04:59:23.296Z",
+    "last_pr": "2026-05-24T04:59:23.296Z"
   },
   {
     "username": "MichisGitIsKing",
