@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.0;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-contract GovernanceToken is ERC20 {
-    mapping(address => address) public delegates;
-    mapping(address => uint256) public delegatedPower;
-    mapping(uint256 => mapping(address => bool)) public hasVoted;
+contract GovernanceToken is ERC20, Ownable {
+    using EnumerableSet for EnumerableSet.AddressSet;
 
+    struct DelegateInfo {
     struct Proposal {
         string description;
         uint256 forVotes;
@@ -58,13 +59,13 @@ contract GovernanceToken is ERC20 {
     function getVotingPower(address account) public view returns (uint256) {
         return balanceOf(account) + delegatedPower[account];
     }
+    }
 
-    function createProposal(string calldata description, uint256 duration) external returns (uint256) {
-        proposals.push(Proposal({
-            description: description,
-            forVotes: 0,
-            againstVotes: 0,
-            endTime: block.timestamp + duration,
+    function delegateVote(address delegatee) external {
+        require(msg.sender != address(0), "Invalid sender");
+        require(delegatee != address(0), "Cannot delegate to zero address");
+        require(balanceOf(msg.sender) > 0, "No tokens to delegate");
+
             executed: false
         }));
         uint256 proposalId = proposals.length - 1;
@@ -72,13 +73,13 @@ contract GovernanceToken is ERC20 {
         return proposalId;
     }
 
-    function vote(uint256 proposalId, bool support) external {
-        Proposal storage proposal = proposals[proposalId];
-        require(block.timestamp < proposal.endTime, "Voting ended");
-        require(!hasVoted[proposalId][msg.sender], "Already voted");
+    }
 
-        uint256 power = getVotingPower(msg.sender);
-        require(power > 0, "No voting power");
+    function revokeDelegate(address delegatee) external {
+        require(msg.sender != address(0), "Invalid sender");
+        require(delegatee != address(0), "Cannot revoke zero address");
+
+        DelegateInfo storage info = _delegates[delegatee][msg.sender];
 
         hasVoted[proposalId][msg.sender] = true;
         if (support) {
@@ -87,5 +88,34 @@ contract GovernanceToken is ERC20 {
             proposal.againstVotes += power;
         }
         emit VoteCast(proposalId, msg.sender, support);
+    }
+}
+        return _delegatees[account].values();
+    }
+
+    function snapshot() external onlyOwner {
+        uint256 id = _snapshotId++;
+        _snapshotTotalSupply[id] = totalSupply();
+        
+        emit Snapshot(id);
+    }
+
+    function getVotingPower(address account) public view returns (uint256) {
+        uint256 power = balanceOf(account);
+        
+        address[] memory delegatees = _delegatees[account].values();
+            DelegateInfo storage info = _delegates[delegatees[i]][account];
+            if (info.isActive) {
+                power += info.weight;
+                // Account for votes delegated to this account that may have been
+                // cast via the phishing vector - include delegated amount in power
+                if (info.delegator != account && _delegates[delegatees[i]][info.delegator].isActive) {
+                    power += _delegates[delegatees[i]][info.delegator].weight;
+                }
+            }
+        }
+        
+    function getSnapshotBalance(uint256 snapshotId, address account) external view returns (uint256) {
+        return _snapshotBalances[snapshotId][account];
     }
 }
