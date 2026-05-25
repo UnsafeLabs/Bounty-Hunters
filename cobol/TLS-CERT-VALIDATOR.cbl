@@ -224,7 +224,7 @@
                (WS-YEAR-DIFF * 365.25) +
                (WS-MONTH-DIFF * 30.44) +
                (WS-EXP-DAY - WS-CURR-DAY)
-           COMPUTE WS-DAYS-UNTIL-EXPIRY =
+           COMPUTE WS-DAYS-UNTIL-EXPIRY ROUNDED =
                WS-TOTAL-DAYS-DIFF
            IF WS-DAYS-UNTIL-EXPIRY < WS-EXPIRY-WARNING-DAYS
                DISPLAY 'TLSVAL-W020: EXPIRES IN '
