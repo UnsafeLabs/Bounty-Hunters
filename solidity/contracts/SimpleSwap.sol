@@ -1,7 +1,7 @@
-   // Add deadline check
-   require(block.timestamp <= deadline, "Transaction deadline exceeded");
-   
-   // ... existing swap implementation ...
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract SimpleSwap {
     IERC20 public tokenA;
@@ -46,13 +46,15 @@ contract SimpleSwap {
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
 
         outputToken.transfer(msg.sender, amountOut);
+    }
 
-        if (isTokenA) {
-            reserveA += amountIn;
-            reserveB -= amountOut;
-        } else {
-            reserveB += amountIn;
-            reserveA -= amountOut;
+    function swap(address tokenIn, uint amountIn, address tokenOut, uint minAmountOut, uint deadline) public {
+        require(block.timestamp <= deadline, "Transaction deadline exceeded");
+        uint256 amountOut = getAmountOut(tokenIn, tokenOut, amountIn);
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+        require(amountOut > 0, "Amount out must be greater than zero");
+        require(IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn), "Transfer failed");
+        require(IERC20(tokenOut).transfer(msg.sender, amountOut), "Transfer failed");
         }
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
