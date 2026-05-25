@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+   // Add deadline check
+   require(block.timestamp <= deadline, "Transaction deadline exceeded");
+   
+   // ... existing swap implementation ...
 
 contract SimpleSwap {
     IERC20 public tokenA;
@@ -39,36 +39,31 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 minAmountOut,
-        uint256 deadline
-    ) external returns (uint256 amountOut) {
-        require(block.timestamp <= deadline, "Transaction expired");
-        
-        // Calculate output amount using constant product formula
-        amountOut = getAmountOut(tokenIn, tokenOut, amountIn);
-        
-        require(amountOut >= minAmountOut, "Slippage exceeded");
-        
-        // Apply fee
-        uint256 feeAmount = (amountIn * fee) / 10000;
-        uint256 reserveIn = IERC20(tokenIn).balanceOf(address(this));
-        uint256 reserveOut = IERC20(tokenOut).balanceOf(address(this));
-        
-        uint256 amountInWithFee = (amountIn * (10000 - fee)) / 10000;
-        amountOut = (amountInWithFee * reserveOut) / (reserveIn + amountInWithFee);
-    }
-    
+        uint256 feeAmount = amountIn * fee / 10000;
+        uint256 amountInAfterFee = amountIn - feeAmount;
+
+        // constant product formula: x * y = k
+        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        outputToken.transfer(msg.sender, amountOut);
+
+        if (isTokenA) {
+            reserveA += amountIn;
+            reserveB -= amountOut;
+        } else {
+            reserveB += amountIn;
+            reserveA -= amountOut;
+        }
+
+        emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
 
     function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
-        uint256 reserveIn,
-        uint256 reserveOut
-    ) internal pure returns (uint256 amountOut) {
-        uint256 amountInWithFee = (amountIn * (10000 - fee)) / 10000;
-        amountOut = (amountInWithFee * reserveOut) / (reserveIn + amountInWithFee);
+        bool isTokenA = tokenIn == address(tokenA);
+        uint256 reserveIn = isTokenA ? reserveA : reserveB;
+        uint256 reserveOut = isTokenA ? reserveB : reserveA;
+        uint256 feeAmount = amountIn * fee / 10000;
+        uint256 amountInAfterFee = amountIn - feeAmount;
+        return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
     }
-}
 }
