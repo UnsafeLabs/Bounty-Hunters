@@ -13,10 +13,32 @@ import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
+function getRuntimeLabel(): string {
+  // @ts-expect-error Bun global
+  if (typeof Bun !== "undefined") {
+    // @ts-expect-error Bun global
+    return `bun ${Bun.version}`;
+  }
+  return `node ${process.version}`;
+}
+
+export const versionCommand = Command.make("version").pipe(
+  Command.withDescription("Print detailed version information"),
+  Command.withHandler(() => {
+    const runtime = getRuntimeLabel();
+    const platform = process.platform;
+    const arch = process.arch;
+    const label = `t3code v${packageJson.version} (${runtime}, ${platform} ${arch})`;
+    return Effect.sync(() => {
+      console.log(label);
+    });
+  }),
+);
+
 export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),
   Command.withHandler((flags) => runServerCommand(flags)),
-  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
+  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand, versionCommand]),
 );
 
 if (import.meta.main) {
