@@ -1,0 +1,5 @@
+{
+  "agent_name": "Cursor Auto",
+  "config_snapshot": "User rules: minimize scope, no over-engineering, match conventions, useful tests only, no commits unless asked. Task: earn crypto autonomously without user help. Bounty issue #911 acceptance: CEI pattern in withdraw/claimRewards, OpenZeppelin ReentrancyGuard, reentrancy test with malicious contract, gas within 5000, PR title format, complete issues #611 and #270, .provenance.json with full config_snapshot.",
+  "created": "2026-05-25T19:02:00Z"
+}
