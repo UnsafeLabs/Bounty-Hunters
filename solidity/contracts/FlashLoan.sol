@@ -13,53 +13,83 @@ contract FlashLoan {
     uint256 public totalFees;
     address public owner;
     bool public paused;
+    uint256 internal poolBalance;
 
     event FlashLoanExecuted(address indexed borrower, uint256 amount, uint256 fee);
+    event PoolDeposit(address indexed depositor, uint256 amount);
+    event FeesWithdrawn(address indexed owner, uint256 amount);
+    event Paused(address indexed owner);
+    event Unpaused(address indexed owner);
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
 
     constructor(address _loanToken, uint256 _feeBPS) {
+        require(_loanToken != address(0), "Invalid token");
+        require(_feeBPS <= 10000, "Fee too high");
         loanToken = IERC20(_loanToken);
         feeBPS = _feeBPS;
         owner = msg.sender;
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
     function flashLoan(uint256 amount, bytes calldata data) external {
         require(!paused, "Paused");
         require(amount > 0, "Amount must be > 0");
+        require(amount <= poolBalance / 2, "Loan exceeds 50% of pool");
 
-        uint256 balanceBefore = loanToken.balanceOf(address(this));
-        require(balanceBefore >= amount, "Insufficient pool balance");
-
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
         uint256 fee = amount * feeBPS / 10000;
+        if (fee == 0) {
+            fee = 1;
+        }
 
-        loanToken.transfer(msg.sender, amount);
+        uint256 previousPoolBalance = poolBalance;
+        poolBalance = previousPoolBalance - amount;
+
+        require(loanToken.transfer(msg.sender, amount), "Loan transfer failed");
 
         IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
-        uint256 balanceAfter = loanToken.balanceOf(address(this));
-        require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
+        require(
+            loanToken.transferFrom(msg.sender, address(this), amount + fee),
+            "Loan not repaid"
+        );
 
+        poolBalance = previousPoolBalance;
         totalFees += fee;
+        require(
+            loanToken.balanceOf(address(this)) >= poolBalance + totalFees,
+            "Accounting invariant failed"
+        );
         emit FlashLoanExecuted(msg.sender, amount, fee);
     }
 
     function depositToPool(uint256 amount) external {
-        loanToken.transferFrom(msg.sender, address(this), amount);
+        require(amount > 0, "Amount must be > 0");
+        require(loanToken.transferFrom(msg.sender, address(this), amount), "Deposit failed");
+        poolBalance += amount;
+        emit PoolDeposit(msg.sender, amount);
     }
 
-    function withdrawFees() external {
-        require(msg.sender == owner, "Not owner");
+    function withdrawFees() external onlyOwner {
         uint256 fees = totalFees;
         totalFees = 0;
-        loanToken.transfer(owner, fees);
+        require(loanToken.transfer(owner, fees), "Fee transfer failed");
+        emit FeesWithdrawn(owner, fees);
     }
 
-    // BUG: No emergency pause function
+    function pause() external onlyOwner {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    function unpause() external onlyOwner {
+        paused = false;
+        emit Unpaused(msg.sender);
+    }
+
     function getPoolBalance() external view returns (uint256) {
-        return loanToken.balanceOf(address(this));
+        return poolBalance;
     }
 }

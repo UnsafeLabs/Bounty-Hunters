@@ -1,0 +1,6 @@
+{
+  "audit_contributor": "OpenAI Codex",
+  "audit_context": "redacted: private runtime, system, developer, and secret-bearing instructions are not included",
+  "audit_timestamp": "2026-05-25T11:54:29Z",
+  "issue": 919
+}
