@@ -244,8 +244,12 @@ def get_openapi_operation_metadata(
         operation["description"] = route.description
     operation_id = route.operation_id or route.unique_id
     if operation_id in operation_ids:
+        suffix = 2
+        while f"{operation_id}_{suffix}" in operation_ids:
+            suffix += 1
+        operation_id = f"{operation_id}_{suffix}"
         endpoint_name = getattr(route.endpoint, "__name__", "<unnamed_endpoint>")
-        message = f"Duplicate Operation ID {operation_id} for function {endpoint_name}"
+        message = f"Duplicate Operation ID generated for function {endpoint_name}, appending suffix"
         file_name = getattr(route.endpoint, "__globals__", {}).get("__file__")
         if file_name:
             message += f" at {file_name}"
