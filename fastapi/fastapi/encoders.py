@@ -2,6 +2,7 @@ import dataclasses
 import datetime
 from collections import defaultdict, deque
 from collections.abc import Callable
+import base64
 from decimal import Decimal
 from enum import Enum
 from ipaddress import (
@@ -82,7 +83,6 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
@@ -331,6 +331,12 @@ def jsonable_encoder(
             )
         return encoded_list
 
+    if isinstance(obj, memoryview):
+        obj = bytes(obj)
+    if isinstance(obj, bytes):
+        if bytes_encoding == "hex":
+            return obj.hex()
+        return base64.b64encode(obj).decode()
     if type(obj) in ENCODERS_BY_TYPE:
         return ENCODERS_BY_TYPE[type(obj)](obj)
     for encoder, classes_tuple in encoders_by_class_tuples.items():
