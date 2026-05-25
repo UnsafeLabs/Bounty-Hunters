@@ -1,39 +1,37 @@
+const SSH_ASKPASS_DIR_NAME = "t3code-ssh-askpass";
+
+function joinSshAskpassPath(
+  directory: string,
+  fileName: string,
+  platform: NodeJS.Platform,
+): string {
+  const trimmed = directory.replace(/[\\\/]+$/u, "");
+  return path.join(trimmed, fileName);
+}
+
+export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
+tmpfile=""
+trap 'rm -f "$tmpfile" 2>/dev/null || true' EXIT INT TERM
+tmpfile=$(mktemp)
+chmod 600 "$tmpfile"
+printf "%s" "$T3_SSH_AUTH_SECRET" > "$tmpfile"
+cat "$tmpfile"
+exit 0
+`;
+
+export const ASKPASS_WINDOWS_LAUNCHER_SCRIPT = `@echo off
+`;
+
+export const ASKPASS_WINDOWS_SCRIPT = `#requires -version 2.0
 param($null)
 $secret = $env:T3_SSH_AUTH_SECRET
 if ($null -ne $secret) {
   [Console]::Out.WriteLine($secret)
   exit 0
 }
-$ErrorActionPreference = "Stop"
 [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")
 exit 1
-  readonly username: string | null;
-  readonly prompt: string;
-  readonly attempt: number;
-}
-
-export interface SshAskpassFile {
-  readonly path: string;
-  readonly contents: string;
-  readonly mode?: number;
-}
-
-export interface SshAskpassHelperDescriptor {
-  readonly launcherPath: string;
-  readonly files: ReadonlyArray<SshAskpassFile>;
-}
-
-export interface SshAuthOptions {
-  readonly authSecret?: string | null;
-  readonly batchMode?: "yes" | "no";
-  readonly interactiveAuth?: boolean;
-}
-
-export interface SshPasswordPromptShape {
-  readonly isAvailable: boolean;
-  readonly request: (
-    request: SshPasswordRequest,
-  ) => Effect.Effect<string | null, SshPasswordPromptError>;
+`;
 }
 
 export class SshPasswordPrompt extends Context.Service<SshPasswordPrompt, SshPasswordPromptShape>()(
