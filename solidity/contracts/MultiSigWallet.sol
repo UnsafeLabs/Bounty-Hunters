@@ -86,5 +86,4 @@ contract MultiSigWallet {
     }
 
     receive() external payable {}
-// SPDX-License-Identifier
 }
