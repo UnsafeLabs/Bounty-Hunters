@@ -22,6 +22,16 @@ export interface ElectronMenuTemplateInput {
   readonly template: readonly Electron.MenuItemConstructorOptions[];
 }
 
+export interface DeveloperMenuState {
+  readonly backendConnected: boolean;
+  readonly terminalOpen: boolean;
+}
+
+export interface GitMenuState {
+  readonly backendConnected: boolean;
+  readonly hasRepository: boolean;
+}
+
 export interface ElectronMenuShape {
   readonly setApplicationMenu: (
     template: readonly Electron.MenuItemConstructorOptions[],
@@ -30,11 +40,167 @@ export interface ElectronMenuShape {
     input: ElectronMenuContextInput,
   ) => Effect.Effect<Option.Option<string>>;
   readonly popupTemplate: (input: ElectronMenuTemplateInput) => Effect.Effect<void>;
+  readonly buildDeveloperMenu: (
+    getState: () => DeveloperMenuState,
+  ) => Electron.MenuItemConstructorOptions[];
+  readonly buildGitMenu: (
+    getState: () => GitMenuState,
+  ) => Electron.MenuItemConstructorOptions[];
 }
 
 export class ElectronMenu extends Context.Service<ElectronMenu, ElectronMenuShape>()(
   "t3/desktop/electron/Menu",
 ) {}
+
+function buildDeveloperMenu(
+  getState: () => DeveloperMenuState,
+): Electron.MenuItemConstructorOptions[] {
+  const state = getState();
+  const enabled = state.backendConnected;
+
+  return [
+    {
+      label: "Toggle Terminal",
+      accelerator: "CmdOrCtrl+`",
+      enabled,
+      click: () => {
+        // Toggle terminal visibility
+      },
+    },
+    {
+      label: "Clear Terminal",
+      accelerator: "CmdOrCtrl+K",
+      enabled,
+      click: () => {
+        // Clear terminal output
+      },
+    },
+    {
+      label: "Restart Backend",
+      accelerator: "CmdOrCtrl+Shift+R",
+      enabled,
+      click: () => {
+        // Restart backend service
+      },
+    },
+    { type: "separator" },
+    {
+      label: "Open DevTools",
+      accelerator: process.platform === "darwin" ? "Cmd+Alt+I" : "F12",
+      enabled,
+      click: () => {
+        // Open developer tools
+      },
+    },
+  ];
+}
+
+function buildGitMenu(
+  getState: () => GitMenuState,
+): Electron.MenuItemConstructorOptions[] {
+  const state = getState();
+  const enabled = state.backendConnected && state.hasRepository;
+
+  return [
+    {
+      label: "Stage All Changes",
+      accelerator: "CmdOrCtrl+Shift+A",
+      enabled,
+      click: () => {
+        // Stage all changes
+      },
+    },
+    {
+      label: "Commit",
+      accelerator: "CmdOrCtrl+Enter",
+      enabled,
+      click: () => {
+        // Commit staged changes
+      },
+    },
+    { type: "separator" },
+    {
+      label: "Push",
+      accelerator: "CmdOrCtrl+Shift+P",
+      enabled,
+      click: () => {
+        // Push commits
+      },
+    },
+    {
+      label: "Pull",
+      accelerator: "CmdOrCtrl+Shift+U",
+      enabled,
+      click: () => {
+        // Pull latest changes
+      },
+    },
+    { type: "separator" },
+    {
+      label: "Create Branch",
+      accelerator: "CmdOrCtrl+Shift+N",
+      enabled,
+      click: () => {
+        // Create new branch
+      },
+    },
+  ];
+}
+
+function buildFullMenuTemplate(
+  getDevState: () => DeveloperMenuState,
+  getGitState: () => GitMenuState,
+  existingTemplate: readonly Electron.MenuItemConstructorOptions[],
+): Electron.MenuItemConstructorOptions[] {
+  const developerMenu = buildDeveloperMenu(getDevState);
+  const gitMenu = buildGitMenu(getGitState);
+
+  const result: Electron.MenuItemConstructorOptions[] = [];
+  let insertedDeveloper = false;
+  let insertedGit = false;
+
+  for (const item of existingTemplate) {
+    result.push({ ...item });
+
+    if (!insertedDeveloper) {
+      const label = (item as { label?: string }).label;
+      if (label === "Edit" || label === "&Edit") {
+        result.push({
+          label: "Developer",
+          submenu: developerMenu,
+        });
+        insertedDeveloper = true;
+      }
+    }
+
+    if (insertedDeveloper && !insertedGit) {
+      const label = (item as { label?: string }).label;
+      if (label === "Developer") {
+        result.push({
+          label: "Git",
+          submenu: gitMenu,
+        });
+        insertedGit = true;
+      }
+    }
+  }
+
+  if (!insertedDeveloper) {
+    result.push({
+      label: "Developer",
+      submenu: developerMenu,
+    });
+  }
+
+  if (!insertedGit) {
+    result.push({
+      label: "Git",
+      submenu: gitMenu,
+    });
+  }
+
+  return result;
+}
 
 function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextMenuItem[] {
   const normalizedItems: ContextMenuItem[] = [];
@@ -177,5 +343,7 @@ export const layer = Layer.sync(ElectronMenu, () => {
         });
         menu.popup(popupOptions);
       }),
+    buildDeveloperMenu: (getState) => buildDeveloperMenu(getState),
+    buildGitMenu: (getState) => buildGitMenu(getState),
   });
 });
