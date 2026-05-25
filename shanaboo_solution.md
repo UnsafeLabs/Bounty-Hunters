@@ -1,139 +1,130 @@
-Looking at the issue description, I need to fix the first-depositor price manipulation vulnerability in the LiquidityPool contract. However, I notice that the actual contract file isn't provided in the context. I'll need to create the fix based on the issue description.
-
-The main changes required are:
-1. Implement minimum liquidity lock for first deposits
-2. Fix the removeLiquidity function to use internal accounting
-3. Add a sync function
-4. Use internal reserve tracking instead of balanceOf
-
-Let me create the LiquidityPool.sol file with the required fixes:
-
 ```diff
---- /dev/null
+--- a/solidity/contracts/LiquidityPool.sol
 +++ b/solidity/contracts/LiquidityPool.sol
-@@ -0,0 +1,200 @@
-+// SPDX-License-Identifier: MIT
-+pragma solidity ^0.8.0;
-+
+@@ -1,6 +1,8 @@
+ // SPDX-License-Identifier: MIT
+ pragma solidity ^0.8.0;
+ 
 +import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 +
-+contract LiquidityPool is ReentrancyGuard {
-+    using SafeERC20 for IERC20;
-+
-+    // Events
-+    event Deposit(address indexed depositor, uint256 amountA, uint256 amountB, uint256 liquidity);
-+    event Withdraw(address indexed to, uint256 amountA, uint256 amountB, uint256 liquidity);
-+    event Sync(uint256 reserveA, uint256 reserveB);
-+    event Approval(address indexed owner, address indexed spender, uint256 value);
-+
-+    // State variables
-+    IERC20 public tokenA;
-+    IERC20 public tokenB;
-+    uint256 public reserveA;
-+    uint256 public reserveB;
-+    uint256 private _totalSupply;
-+    string public name;
-+    string public symbol;
-+    uint8 private _decimals;
-+    address public factory;
-+    
-+    // Constants
+ contract LiquidityPool {
+     // Token addresses
+     address public tokenA;
+@@ -15,6 +17,12 @@ contract LiquidityPool {
+     uint256 public totalSupply;
+     mapping(address => uint256) public balanceOf;
+ 
++    // Minimum liquidity locked on first deposit (Uniswap V2 pattern)
 +    uint256 public constant MINIMUM_LIQUIDITY = 1000;
 +
-+    constructor(
-+        address _tokenA,
-+        address _tokenB,
-+        string memory _name,
-+        string memory _symbol,
-+        uint8 decimals
-+    ) {
-+        tokenA = IERC20(address(tokenA));
-+        tokenB = IERC20(address(tokenB));
-+        name = _name;
-+        symbol = _symbol;
-+        _decimals = decimals;
-+        factory = msg.sender;
++    // Internal reserves for manipulation-resistant accounting
++    uint256 internal _reserveA;
++    uint256 internal _reserveB;
++
+     // Events
+     event Mint(address indexed sender, uint256 amountA, uint256 amountB);
+     event Burn(address indexed sender, uint256 amountA, uint256 amountB, address indexed to);
+@@ -22,6 +30,7 @@ contract LiquidityPool {
+     event Swap(address indexed sender, uint256 amountAIn, uint256 amountBIn, uint256 amountAOut, uint256 amountBOut, address indexed to);
+     event Transfer(address indexed from, address indexed to, uint256 value);
+     event Approval(address indexed owner, address indexed spender, uint256 value);
++    event Sync(uint256 reserveA, uint256 reserveB);
+ 
+     constructor(address _tokenA, address _tokenB) {
+         tokenA = _tokenA;
+@@ -40,6 +49,11 @@ contract LiquidityPool {
+         _;
+     }
+ 
++    modifier nonZeroAmount(uint256 amount) {
++        require(amount > 0, "LiquidityPool: INSUFFICIENT_AMOUNT");
++        _;
 +    }
 +
-+    function() public payable {
-+        factory = msg.sender;
-+    }
-+
-+    // Add liquidity to the pool
-+    function addLiquidity(
-+        address to,
-+        uint256 amountA,
-+        uint256 amountB
-+    ) external nonReentrant returns (uint256) {
-+        require(amountA > 0 && amountB > 0, "Invalid amounts");
-+        
-+        uint256 liquidity;
-+        
-+        if (_totalSupply == 0) {
-+            // First deposit - lock minimum liquidity
-+            require(tokenA.transferFrom(msg.sender, address(this), amountA), "Transfer failed");
-+            require(tokenB.transferFrom(msg.sender, address(this), amountB), "Transfer failed");
-+            
-+            _totalSupply += MINIMUM_LIQUIDITY;
-+            _mint(address(this), MINIMUM_LIQUIDITY);
-+            liquidity = _totalSupply;
-+        } else {
-+            // Regular deposit logic
-+            uint256 amountAIn = amountA;
-+            uint256 amountBIn = amountB;
-+            require(tokenA.transferFrom(msg.sender, address(this), amountAIn), "TokenA transfer failed");
-+            require(tokenB.transferFrom(msg.sender, address(this), amountBIn), "TokenB transfer failed");
-+            
-+            liquidity = _totalSupply;
-+        }
-+        
-+        return liquidity;
-+    }
-+
-+    // Remove liquidity from the pool
-+    function removeLiquidity(
-+        address to,
-+        uint256 liquidity,
-+        uint256 amountA,
-+        uint256 amountB
-+    ) external nonReentrant returns (uint256, uint256) {
-+        require(liquidity > 0, "Invalid liquidity");
-+        
-+        // Use internal reserves instead of balanceOf to prevent manipulation
-+        uint256 reserve0 = reserveA;
-+        uint256 reserve1 = reserveB;
-+        
-+        // Calculate amounts based on internal accounting
-+        uint256 amountAOptimal = (amountA * _totalSupply) / reserve0;
-+        uint256 amountBOptimal = (amountB * _totalSupply) / reserve1;
-+        
-+        return (amountA, amountB);
-+    }
-+
-+    // Sync function to update reserves
+     // Internal transfer helper
+     function _transfer(address from, address to, uint256 value) internal {
+         require(balanceOf[from] >= value, "LiquidityPool: INSUFFICIENT_BALANCE");
+@@ -56,6 +70,12 @@ contract LiquidityPool {
+         balanceOf[to] += value;
+     }
+ 
++    // Update internal reserves to match actual balances (recovery from donation attacks)
 +    function sync() external {
-+        // Update internal reserves to match actual balances
-+        reserveA = tokenA.balanceOf(address(this));
-+        reserveB = tokenB.balanceOf(address(this));
-+        emit Sync(reserveA, reserveB);
++        _reserveA = IERC20(tokenA).balanceOf(address(this));
++        _reserveB = IERC20(tokenB).balanceOf(address(this));
++        emit Sync(_reserveA, _reserveB);
 +    }
 +
-+    function getReserves() public view returns (uint256, uint256, uint256);
-+    
-+    function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) internal pure returns (uint256 amountOut) {
-+        return (amountIn * 1000) * (reserveOut * 997) / ((reserveIn * 1000) + (amountIn * 1000));
-+    }
-+    
-+    function getAmountIn(uint256 amountOut, uint256 reserveIn, uint256 reserveOut) internal pure returns (uint256 amountIn) {
-+        return (amountOut * 1000) * (reserveIn * 997) / ((reserveOut * 1000) + (amountOut * 1000));
-+    }
-+    
-+    function getAmountsOut(uint256 amountIn, address[] memory path) public view returns (uint256[] memory amounts) {
-+        return (amountIn * 1000) * 997 / ((reserveIn * 1000) + (amountIn * 1000));
-+    }
-+    
-+    function getAmountsIn(uint256 amountOut, address[] memory path) public view returns (uint256[] memory amounts) {
-+        return (amountOut * 1000) * (reserveIn * 997) / ((reserveOut * 1000) + (amountOut * 1000));
-+   
+     // Add liquidity to the pool
+     function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 liquidity) {
+         require(amountA > 0 && amountB > 0, "LiquidityPool: ZERO_AMOUNT");
+@@ -63,14 +83,27 @@ contract LiquidityPool {
+         // Transfer tokens from sender
+         require(IERC20(tokenA).transferFrom(msg.sender, address(this), amountA), "LiquidityPool: TRANSFER_A_FAILED");
+         require(IERC20(tokenB).transferFrom(msg.sender, address(this), amountB), "LiquidityPool: TRANSFER_B_FAILED");
+ 
+-        uint256 _totalSupply = totalSupply;
+-        if (_totalSupply == 0) {
+-            // First deposit: liquidity is geometric mean
+-            liquidity = sqrt(amountA * amountB);
++        uint256 _totalSupply = totalSupply;
++        if (_totalSupply == 0) {
++            // First deposit: liquidity is geometric mean, minus minimum liquidity lock
++            liquidity = sqrt(amountA * amountB);
++            require(liquidity > MINIMUM_LIQUIDITY, "LiquidityPool: INSUFFICIENT_INITIAL_LIQUIDITY");
++            liquidity -= MINIMUM_LIQUIDITY;
++            
++            // Lock minimum liquidity permanently by minting to address(0)
++            totalSupply = MINIMUM_LIQUIDITY;
++            balanceOf[address(0)] = MINIMUM_LIQUIDITY;
++            emit Transfer(address(0), address(0), MINIMUM_LIQUIDITY);
++            
++            // Mint remaining liquidity to sender
++            totalSupply += liquidity;
++            balanceOf[msg.sender] += liquidity;
++            emit Mint(msg.sender, amountA, amountB);
++            emit Transfer(address(0), msg.sender, liquidity);
+         } else {
+             // Subsequent deposits: proportional to existing liquidity
+-            liquidity = min((amountA * _totalSupply) / IERC20(tokenA).balanceOf(address(this)), (amountB * _totalSupply) / IERC20(tokenB).balanceOf(address(this)));
++            uint256 liquidityA = (amountA * _totalSupply) / _reserveA;
++            uint256 liquidityB = (amountB * _totalSupply) / _reserveB;
++            liquidity = liquidityA < liquidityB ? liquidityA : liquidityB;
++            
++            totalSupply += liquidity;
++            balanceOf[msg.sender] += liquidity;
++            emit Mint(msg.sender, amountA, amountB);
++            emit Transfer(address(0), msg.sender, liquidity);
+         }
+ 
+-        require(liquidity > 0, "LiquidityPool: INSUFFICIENT_LIQUIDITY_MINTED");
+-        balanceOf[msg.sender] += liquidity;
+-        totalSupply += liquidity;
+-        emit Mint(msg.sender, amountA, amountB);
++        // Update internal reserves
++        _reserveA = IERC20(tokenA).balanceOf(address(this));
++        _reserveB = IERC20(tokenB).balanceOf(address(this));
+     }
+ 
+     // Remove liquidity from the pool
+-    function removeLiquidity(uint256 liquidity) external returns (uint256 amountA, uint256 amountB) {
++    function removeLiquidity(uint256 liquidity) external nonZeroAmount(liquidity) returns (uint256 amountA, uint256 amountB) {
+         require(balanceOf[msg.sender] >= liquidity, "LiquidityPool: INSUFFICIENT_LIQUIDITY");
+ 
+-        uint256 _totalSupply = totalSupply;
+-        amountA = (liquidity * IERC20(tokenA).balanceOf(address(this))) / _totalSupply;
+-        amountB = (liquidity * IERC20(tokenB).balanceOf(address(this))) / _totalSupply;
++        uint256 _totalSupply = totalSupply;
++        
++        // Use internal reserves instead of balanceOf to prevent manipulation via direct transfers
++        amountA = (liquidity * _reserveA) / _totalSupply;
++        amountB = (liquidity * _reserveB) / _totalSupply;
+ 
+         balanceOf[msg.sender] -= liquidity;
+-        totalSupply -= liquidity;
++        totalSupply = _totalSupply - liquidity;
+ 
+         require(IERC20(tokenA).transfer(msg.sender, amountA), "LiquidityPool: TRANSFER_A_FAILED");
+         require(IERC20(tokenB).transfer(msg.sender, amountB), "LiquidityPool: TRANSFER_B_FAILED");
+ 
+         emit Burn(msg.sender, amountA, amountB, msg.sender
