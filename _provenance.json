@@ -1,0 +1,5 @@
+{
+  "tool_name": "OpenCode (DeepSeek V4 Flash Free)",
+  "boot_context": "AI coding orchestrator with specialist agents (@explorer, @librarian, @oracle, @designer, @fixer). Workflow: Understand, Path Selection, Delegation Check, Split and Parallelize, Execute, Verify. Platform: Windows (win32), PowerShell (pwsh) shell. Key constraint: bash tool permanently broken with H.loadWebAssemblyModule error. Available tools: Read, Write, Edit, Glob, Grep, webfetch, websearch, Task, Subtask. CLAUDE.md: Bounty Rewards monorepo combining claude-builders-bounty (archived git repo) and bounty-912 (Solidity Foundry project). AGENTS.md: AI agent guide with delegation rules. Repository root: C:\\Users\\amitw\\Personal Projects\\Bounty Rewards.",
+  "timestamp": "2026-05-25T09:00:00Z"
+}
