@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "pre_task_context": "Public task context for GitHub issue #753 in UnsafeLabs/Bounty-Hunters: add a Laravel console closure command that clears storage/logs files older than seven days by default, supports a --days override, reports deleted file count and freed space in human-readable form, schedules the cleanup daily at midnight, and keep private system, developer, runtime, memory, credential, or hidden session instructions out of repository files and PR text.",
+  "timestamp": "2026-05-25T06:42:51Z"
+}
