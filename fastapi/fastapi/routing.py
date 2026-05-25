@@ -1,18 +1,21 @@
-import contextlib
-import email.message
-import functools
+from typing import List, Union, Callable, Optional, Dict, Any
+from starlette.middleware import Middleware
+from fastapi import routing
+import inspect
+import json
 import inspect
 import json
 import types
 from collections.abc import (
     AsyncIterator,
     Awaitable,
-    Callable,
-    Collection,
-    Coroutine,
-    Generator,
-    Iterator,
-    Mapping,
+class APIRouter:
+    def __init__(
+        self,
+        *,
+        routes: List[BaseRoute] = None,
+        redirect_slashes: bool = True,
+        default: ASGIApp = None,
     Sequence,
 )
 from contextlib import (
@@ -22,18 +25,33 @@ from contextlib import (
     asynccontextmanager,
 )
 from enum import Enum, IntEnum
-from typing import (
-    Annotated,
-    Any,
+        self.serialize_handlers = serialize_handlers
+        self.include_in_schema = include_in_schema
+        self._internal_routes = []
+        self.middleware = middleware or []
+        self.router_level_middleware = []
+
+    def add_middleware(self, middleware_class: Union[type, Callable], **options: Dict[str, Any]) -> None:
+        """
+        Add middleware to this router.
+        """
+        self.router_level_middleware.append(
+            Middleware(middleware_class, **options)
+        )
+
+
+    def add_api_route(
+        self,
     TypeVar,
     cast,
 )
 
-import anyio
-from annotated_doc import Doc
-from anyio.abc import ObjectReceiveStream
-from fastapi import params
-from fastapi._compat import (
+        path: str,
+        *,
+        response_model: Type[BaseModel] = None,
+        middleware: List[Middleware] = None,
+        name: str = None,
+        ,
     ModelField,
     Undefined,
     lenient_issubclass,
@@ -42,10 +60,11 @@ from fastapi.datastructures import Default, DefaultPlaceholder
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import (
     _should_embed_body_fields,
-    get_body_field,
-    get_dependant,
-    get_flat_dependant,
-    get_parameterless_sub_dependant,
+        methods: List[str] = None,
+        operation_id: str = None,
+        response_class: Type[Response] = None,
+        middleware: List[Middleware] = None,
+        ,
     get_stream_item_type,
     get_typed_return_annotation,
     solve_dependencies,
@@ -55,10 +74,11 @@ from fastapi.exceptions import (
     EndpointContext,
     FastAPIError,
     RequestValidationError,
-    ResponseValidationError,
-    WebSocketRequestValidationError,
-)
-from fastapi.sse import (
+        include_in_schema: bool = True,
+        response_class: Type[Response] = None,
+        middleware: List[Middleware] = None,
+        middleware: List[Middleware] = None,
+        ,
     _PING_INTERVAL,
     KEEPALIVE_COMMENT,
     EventSourceResponse,
@@ -69,9 +89,10 @@ from fastapi.types import DecoratedCallable, IncEx
 from fastapi.utils import (
     create_model_field,
     generate_unique_id,
-    get_value_or_default,
-    is_body_allowed_for_status_code,
-)
+        include_in_schema: bool = True,
+        response_class: Type[Response] = None,
+        middleware: List[Middleware] = None,
+        ,
 from starlette import routing
 from starlette._exception_handler import wrap_app_handling_exceptions
 from starlette._utils import is_async_callable
@@ -83,10 +104,11 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import (
     BaseRoute,
     Match,
-    compile_path,
-    get_name,
-)
-from starlette.routing import Mount as Mount  # noqa
+        include_in_schema: bool = True,
+        response_class: Type[Response] = None,
+        middleware: List[Middleware] = None,
+        middleware: List[Middleware] = None,
+        ,
 from starlette.types import AppType, ASGIApp, Lifespan, Receive, Scope, Send
 from starlette.websockets import WebSocket
 from typing_extensions import deprecated
