@@ -84,6 +84,21 @@ export interface GitManagerShape {
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
   ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
+  readonly rebase: (
+    input: { cwd: string; onto: string },
+  ) => Effect.Effect<
+    { status: "completed" } | { status: "conflicts"; files: ReadonlyArray<string> },
+    GitManagerServiceError
+  >;
+  readonly getConflictFiles: (
+    input: { cwd: string },
+  ) => Effect.Effect<ReadonlyArray<string>, GitManagerServiceError>;
+  readonly abortRebase: (
+    input: { cwd: string },
+  ) => Effect.Effect<void, GitManagerServiceError>;
+  readonly continueRebase: (
+    input: { cwd: string },
+  ) => Effect.Effect<void, GitManagerServiceError>;
 }
 
 export class GitManager extends Context.Service<GitManager, GitManagerShape>()(
@@ -1768,6 +1783,136 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     },
   );
 
+  const getConflictFiles: GitManagerShape["getConflictFiles"] = Effect.fn("getConflictFiles")(
+    function* ({ cwd }) {
+      const result = yield* gitCore
+        .execute({
+          operation: "GitManager.getConflictFiles",
+          cwd,
+          args: ["diff", "--name-only", "--diff-filter=U"],
+          allowNonZeroExit: true,
+          timeoutMs: 10_000,
+          maxOutputBytes: 64 * 1024,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              gitManagerError(
+                "getConflictFiles",
+                "Failed to list conflicted files.",
+                cause,
+              ),
+          ),
+        );
+
+      return result.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+    },
+  );
+
+  const isRebaseActive = Effect.fn("isRebaseActive")(function* ({ cwd }) {
+    const gitRoot = yield* gitCore
+      .execute({
+        operation: "GitManager.isRebaseActive.root",
+        cwd,
+        args: ["rev-parse", "--git-dir"],
+        timeoutMs: 5_000,
+        maxOutputBytes: 4_096,
+      })
+      .pipe(Effect.mapError(() => null));
+
+    if (!gitRoot) return false;
+
+    const gitDir = gitRoot.stdout.trim();
+    const rebaseHeadPath = yield* path.isAbsolute(gitDir)
+      ? Effect.succeed(`${gitDir}/REBASE_HEAD`)
+      : Effect.succeed(`${cwd}/${gitDir}/REBASE_HEAD`);
+
+    const exists = yield* fileSystem
+      .exists(rebaseHeadPath)
+      .pipe(Effect.catch(() => Effect.succeed(false)));
+
+    return exists;
+  });
+
+  const rebase: GitManagerShape["rebase"] = Effect.fn("rebase")(function* ({ cwd, onto }) {
+    yield* gitCore
+      .execute({
+        operation: "GitManager.rebase",
+        cwd,
+        args: ["rebase", onto],
+        timeoutMs: 60_000,
+        maxOutputBytes: 256 * 1024,
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            gitManagerError(
+              "rebase",
+              `Failed to rebase onto '${onto}'.`,
+              cause,
+            ),
+        ),
+      );
+
+    const active = yield* isRebaseActive({ cwd });
+    if (active) {
+      const files = yield* getConflictFiles({ cwd });
+      return { status: "conflicts" as const, files };
+    }
+
+    return { status: "completed" as const };
+  });
+
+  const abortRebase: GitManagerShape["abortRebase"] = Effect.fn("abortRebase")(
+    function* ({ cwd }) {
+      yield* gitCore
+        .execute({
+          operation: "GitManager.abortRebase",
+          cwd,
+          args: ["rebase", "--abort"],
+          allowNonZeroExit: true,
+          timeoutMs: 10_000,
+          maxOutputBytes: 64 * 1024,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              gitManagerError(
+                "abortRebase",
+                "Failed to abort rebase.",
+                cause,
+              ),
+          ),
+        );
+    },
+  );
+
+  const continueRebase: GitManagerShape["continueRebase"] = Effect.fn("continueRebase")(
+    function* ({ cwd }) {
+      yield* gitCore
+        .execute({
+          operation: "GitManager.continueRebase",
+          cwd,
+          args: ["rebase", "--continue"],
+          timeoutMs: 60_000,
+          maxOutputBytes: 256 * 1024,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              gitManagerError(
+                "continueRebase",
+                "Failed to continue rebase.",
+                cause,
+              ),
+          ),
+        );
+    },
+  );
+
   return {
     localStatus,
     remoteStatus,
@@ -1778,6 +1923,10 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     resolvePullRequest,
     preparePullRequestThread,
     runStackedAction,
+    rebase,
+    getConflictFiles,
+    abortRebase,
+    continueRebase,
   } satisfies GitManagerShape;
 });
 
