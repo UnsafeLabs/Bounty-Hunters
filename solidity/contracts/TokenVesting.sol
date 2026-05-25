@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
     IERC20 public token;
-    address public beneficiary;
-    address public owner;
- * @dev A token vesting contract that releases tokens linearly over time.
+ * @title TokenVesting
  */
 contract TokenVesting is Ownable {
     using SafeMath for uint256;
 
-    IERC20 public token;
-    
     struct VestingSchedule {
+        uint256 totalAllocation;
+        uint256 start;
+    uint256 public duration;
+    uint256 public claimed;
     bool public revoked;
 
     event TokensClaimed(address indexed beneficiary, uint256 amount);
@@ -53,22 +53,21 @@ contract TokenVesting is Ownable {
     }
 
     function claim() external {
+        if (block.timestamp >= schedule.start + schedule.duration) {
+            return schedule.totalAllocation - schedule.claimed;
         }
-        
-        uint256 elapsed = block.timestamp - schedule.start;
-        
         // Divide before multiply to prevent intermediate overflow
+        uint256 elapsed = block.timestamp - schedule.start;
+        uint256 quotient = schedule.totalAllocation.div(schedule.duration);
+        uint256 remainder = schedule.totalAllocation.mod(schedule.duration);
+        uint256 vested = quotient.mul(elapsed);
         // Handle remainder to avoid losing tokens due to integer truncation
-        uint256 allocationPerDuration = schedule.totalAllocation / schedule.duration;
-        uint256 remainder = schedule.totalAllocation % schedule.duration;
-        
-        uint256 vested = allocationPerDuration.mul(elapsed);
-        
-        // Add proportional remainder to maintain accuracy
-        vested = vested.add(remainder.mul(elapsed).div(schedule.duration));
-        
-        if (vested > schedule.totalAllocation) {
-            vested = schedule.totalAllocation;
+        // remainder/duration < 1, so remainder * elapsed / duration gives additional vested tokens
+        uint256 remainderVested = remainder.mul(elapsed).div(schedule.duration);
+        vested = vested.add(remainderVested);
+        return vested - schedule.claimed;
+    }
+
 
     // BUG: Incorrect unvested calculation during cliff period
     function revoke() external {
@@ -88,22 +87,15 @@ contract TokenVesting is Ownable {
         emit VestingRevoked(beneficiary, unvested);
     }
 }
-        require(!schedule.revoked, "Vesting already revoked");
-        
-        uint256 vestedAmount = vestedAmount(beneficiary);
-        
-        // During cliff period, vestedAmount is 0, so unvested should be totalAllocation minus already claimed
-        uint256 unvested = schedule.totalAllocation.sub(vestedAmount);
-        
-        // Subtract already claimed tokens to get truly unvested tokens
-        unvested = unvested.sub(schedule.claimed);
-        
-        schedule.revoked = true;
-        
-        
-        // Return unvested tokens to owner
-        if (unvested > 0) {
-            require(token.transfer(owner(), unvested), "Token transfer failed");
-        }
-        
-        emit VestingRevoked(beneficiary, unvested);
+        require(schedule.revokable, "Not revokable");
+        uint256 unvested;
+        if (block.timestamp < schedule.start + schedule.cliff) {
+            // During cliff period, nothing is vested, so all unclaimed tokens are unvested
+            unvested = schedule.totalAllocation.sub(schedule.claimed);
+        } else if (block.timestamp >= schedule.start + schedule.duration) {
+            // After full vesting, everything is vested, so nothing is unvested
+            // (unless some was already claimed)
+            unvested = 0;
+        } else {
+            uint256 vested = vestedAmount(beneficiary);
+            unvested = schedule.totalAllocation - schedule.claimed - vested;
