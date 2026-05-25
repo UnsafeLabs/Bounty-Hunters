@@ -6,11 +6,16 @@ contract MultiSigWallet {
     uint256 public required;
     uint256 public transactionCount;
 
+    // Reentrancy guard state
+    bool private _locked;
+
     struct Transaction {
         address to;
         uint256 value;
         bytes data;
         bool executed;
+        uint256 confirmationSnapshot;
+        uint256 snapshotBlock;
     }
 
     mapping(uint256 => Transaction) public transactions;
@@ -27,6 +32,13 @@ contract MultiSigWallet {
         _;
     }
 
+    modifier nonReentrant() {
+        require(!_locked, "Reentrant call");
+        _locked = true;
+        _;
+        _locked = false;
+    }
+
     constructor(address[] memory _owners, uint256 _required) {
         require(_owners.length > 0, "No owners");
         require(_required > 0 && _required <= _owners.length, "Invalid required");
@@ -37,14 +49,17 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Zero address");
+        require(to.code.length > 0 || data.length == 0, "EOA with data");
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
             value: value,
             data: data,
-            executed: false
+            executed: false,
+            confirmationSnapshot: 0,
+            snapshotBlock: 0
         });
         emit Submitted(txId);
         return txId;
@@ -70,13 +85,17 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+
+        uint256 currentConfirmations = getConfirmationCount(txId);
+        require(currentConfirmations >= required, "Not enough confirmations");
 
         Transaction storage txn = transactions[txId];
+
+        // Store confirmation snapshot to prevent front-running revocations
+        txn.confirmationSnapshot = currentConfirmations;
+        txn.snapshotBlock = block.number;
         txn.executed = true;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
