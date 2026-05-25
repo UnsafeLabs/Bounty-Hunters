@@ -972,6 +972,12 @@
     "last_pr": "2026-05-24T01:33:55.713Z"
   },
   {
+    "username": "lry3069-afk",
+    "total_prs": 2,
+    "first_pr": "2026-05-25T03:45:15.005Z",
+    "last_pr": "2026-05-25T03:52:48.811Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -1372,11 +1378,5 @@
     "total_prs": 1,
     "first_pr": "2026-05-24T23:08:44.664Z",
     "last_pr": "2026-05-24T23:08:44.664Z"
-  },
-  {
-    "username": "lry3069-afk",
-    "total_prs": 1,
-    "first_pr": "2026-05-25T03:45:15.005Z",
-    "last_pr": "2026-05-25T03:45:15.005Z"
   }
 ]
