@@ -1,36 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract GovernanceToken is ERC20("Governance", "GOV"), ERC20Votes, Ownable {
-    mapping(address => address) private _delegates;
-    mapping(address => uint256) private _votingPower;
-    
-    constructor() {}
-
-    function delegateVote(address delegatee) public {
-        require(msg.sender != address(0), "GovernanceToken: delegatee cannot be zero address");
-        require(msg.sender != delegatee, "GovernanceToken: cannot delegate to self");
-        _delegates[msg.sender] = delegatee;
-        _votingPower[delegatee] += 1; // track voting power
-    }
-
-    function revokeDelegate() public {
-        require(msg.sender != address(0), "GovernanceToken: must be sender");
-        _delegates[msg.sender] = address(0);
-    }
-
-    function snapshot() public onlyOwner {
-        // Admin function using onlyOwner modifier
-    }
-
-    function getVotingPower(address account) public view returns (uint256) {
-        return _votingPower[account];
-    }
-}
 contract GovernanceToken is ERC20 {
     mapping(address => address) public delegates;
     mapping(address => uint256) public delegatedPower;
