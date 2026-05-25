@@ -12,10 +12,22 @@
             <directory>tests/Feature</directory>
         </testsuite>
     </testsuites>
+    <groups>
+        <include>
+            <group>unit</group>
+        </include>
+        <include>
+            <group>feature</group>
+        </include>
+    </groups>
     <source>
         <include>
             <directory>app</directory>
         </include>
+        <exclude>
+            <directory>app/Providers</directory>
+            <directory>app/Console</directory>
+        </exclude>
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
