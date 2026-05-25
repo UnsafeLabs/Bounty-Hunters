@@ -282,7 +282,7 @@ class TLSHandshake:
             return True
 
         # BUG 4: bare except with pass silently swallows all errors
-        except:
+        except (ValueError, struct.error):
             pass
         return False
 
