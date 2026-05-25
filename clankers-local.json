@@ -144,6 +144,12 @@
     "last_pr": "2026-05-13T16:14:26Z"
   },
   {
+    "username": "genesisrevelationinc-debug",
+    "total_prs": 22,
+    "first_pr": "2026-05-22T14:02:27.948Z",
+    "last_pr": "2026-05-25T10:48:00.693Z"
+  },
+  {
     "username": "absalonCRC",
     "total_prs": 21,
     "first_pr": "2026-05-15T07:18:19.262Z",
@@ -160,12 +166,6 @@
     "total_prs": 21,
     "first_pr": "2026-05-20T13:22:23.550Z",
     "last_pr": "2026-05-22T18:47:29.993Z"
-  },
-  {
-    "username": "genesisrevelationinc-debug",
-    "total_prs": 21,
-    "first_pr": "2026-05-22T14:02:27.948Z",
-    "last_pr": "2026-05-25T10:40:56.787Z"
   },
   {
     "username": "MizuCiaossu",
