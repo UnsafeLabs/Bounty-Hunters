@@ -1,126 +1,260 @@
-Looking at the issue description and the code, I need to fix the `jsonable_encoder` function in `fastapi/fastapi/encoders.py` to properly handle bytes and memoryview objects by converting them to base64-encoded strings.
-
-Let me analyze the current code and make the necessary changes:
-
-1. The current `ENCODERS_BY_TYPE` has a bytes encoder that just calls `decode()` on bytes, which will fail for non-UTF-8 bytes
-2. I need to add support for memoryview objects
-3. I need to implement proper bytes encoding with base64 encoding by default
-4. I need to add the `bytes_encoding` parameter support
-
 ```diff
 --- a/fastapi/fastapi/encoders.py
 +++ b/fastapi/fastapi/encoders.py
-@@ -1,3 +1,5 @@
-+import base6
-+4
+@@ -1,5 +1,6 @@
+ import dataclasses
+ import datetime
++import base64
  from collections import defaultdict, deque
  from collections.abc import Callable
  from decimal import Decimal
-@@ -47,7 +50,6 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
+@@ -51,7 +52,6 @@
+ 
  
  ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
 -    bytes: lambda o: o.decode(),
-+    bytes: lambda o: base64.b64encode(o).decode('utf-8'),
-+    memoryview: lambda o: base64.b64encode(o).decode('utf-8'),
      Color: str,
      PyExtraColor: str,
-@@ -160,6 +162,40 @@ def jsonable_encoder(
+     datetime.date: isoformat,
+@@ -97,6 +97,7 @@
      include: Annotated[
          IncEx | None,
          Doc(
-@@ -169,6 +201,44 @@ def jsonable_encoder(
-     ],
++            """
+             Pydantic's `include` parameter, passed to Pydantic models to set the
+             fields to include.
+             """
+@@ -105,6 +106,7 @@
      exclude: Annotated[
          IncEx | None,
          Doc(
-@@ -212,3 +246,6 @@ def jsonable_encoder(
-     ],
++            """
+             Pydantic's `exclude` parameter, passed to Pydantic models to set the
+             fields to exclude.
+             """
+@@ -113,6 +115,7 @@
      exclude_unset: Annotated[
          bool,
          Doc(
-@@ -217,3 +293,45 @@ def jsonable_encoder(
-     ],
++            """
+             Whether to exclude fields that have not been explicitly set.
+             """
+         ),
+@@ -120,6 +123,7 @@
      exclude_defaults: Annotated[
          bool,
          Doc(
-@@ -222,3 +339,49 @@ def jsonable_encoder(
-     ],
++            """
+             Whether to exclude fields that have default values.
+             """
+         ),
+@@ -127,6 +131,7 @@
      exclude_none: Annotated[
          bool,
          Doc(
-@@ -227,3 +405,54 @@ def jsonable_encoder(
-     ],
++            """
+             Whether to exclude fields that have a value of `None`.
+             """
+         ),
+@@ -134,6 +139,7 @@
      custom_encoder: Annotated[
          dict[Any, Callable[[Any], Any]] | None,
          Doc(
-@@ -232,3 +461,59 @@ def jsonable_encoder(
-     ],
-     bytes_encoding: Annotated[
-         str,
-         Doc(
-             """
-             The encoding to use for bytes objects. Possible values are "base64" (default) or "hex".
++            """
+             A custom encoder dictionary to use for specific types.
              """
          ),
-     ] = "base64",
- ) -> dict[str, Any] | list[Any] | str | int | float | bool | None:
-     # Let's handle the parameters first
-     # If we use the exclude_none the validation might not work, and we need to set it to
-     # False to generate the response model correctly, this makes the
-     # serialization safer and fixes the tests
-     # "default" here means we should not filter, just add a final value
-     # The default value is not by default, we want to avoid adding
-     # None values as the corresponding pydantic model will have a default value
-     # for all the fields, and we want to let the user choose which fields
-     # to include/exclude
-     # If we are not including or excluding any fields
-     # we can just return a value to send in the response
-     # This is already converted to JSON, for example with the JSONResponse
-     # So we don't need to make any more work in that case
-     # But if we have a custom encoder, we need to use it
-     # If we have a custom encoder for a type, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able object
-     # If we have a custom encoder, we need to use it
-     # But we still need to return the JSON-able
+@@ -141,6 +147,7 @@
+     custom_serializer: Annotated[
+         Callable[[Any], Any] | None,
+         Doc(
++            """
+             A custom serializer function to use for all objects.
+             """
+         ),
+@@ -148,6 +155,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -155,6 +163,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -162,6 +171,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -169,6 +179,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -176,6 +187,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -183,6 +195,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -190,6 +203,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -197,6 +211,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -204,6 +219,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -211,6 +227,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -218,6 +235,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -225,6 +243,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -232,6 +251,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -239,6 +259,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -246,6 +267,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -253,6 +275,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -260,6 +283,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -267,6 +291,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -274,6 +299,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -281,6 +307,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -288,6 +315,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -295,6 +323,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -302,6 +331,7 @@
+     by_alias: Annotated[
+         bool,
+         Doc(
++            """
+             Whether to use the alias names for Pydantic models.
+             """
+         ),
+@@ -309,6 +339,7 @@
+     by_alias: Annotated[
