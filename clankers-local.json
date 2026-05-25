@@ -996,6 +996,12 @@
     "last_pr": "2026-05-24T01:33:55.713Z"
   },
   {
+    "username": "ahura0901",
+    "total_prs": 2,
+    "first_pr": "2026-05-25T19:11:21.843Z",
+    "last_pr": "2026-05-25T19:18:34.652Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -1396,11 +1402,5 @@
     "total_prs": 1,
     "first_pr": "2026-05-24T23:08:44.664Z",
     "last_pr": "2026-05-24T23:08:44.664Z"
-  },
-  {
-    "username": "ahura0901",
-    "total_prs": 1,
-    "first_pr": "2026-05-25T19:11:21.843Z",
-    "last_pr": "2026-05-25T19:11:21.843Z"
   }
 ]
