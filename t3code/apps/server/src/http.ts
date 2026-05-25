@@ -28,6 +28,7 @@ import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolve
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { respondToAuthError } from "./auth/http.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
+import { MetricsService } from "./metrics/MetricsService.ts";
 import {
   browserApiCorsAllowedHeaders,
   browserApiCorsAllowedMethods,
@@ -79,6 +80,29 @@ export const serverEnvironmentRouteLayer = HttpRouter.add(
       headers: browserApiCorsHeaders,
     });
   }),
+);
+
+export const metricsRouteLayer = HttpRouter.add(
+  "GET",
+  "/metrics",
+  Effect.gen(function* () {
+    const metricsAuthDisabled = process.env.METRICS_AUTH_DISABLED === "true";
+    if (!metricsAuthDisabled) {
+      const serverAuth = yield* ServerAuth;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      yield* serverAuth.authenticateHttpRequest(request);
+    }
+
+    const metricsService = yield* MetricsService;
+    const body = yield* metricsService.collectPrometheusMetrics();
+
+    return HttpServerResponse.text(body, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+      },
+    });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
 class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
