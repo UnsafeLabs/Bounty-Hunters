@@ -1,0 +1,5 @@
+{
+  "tool": "OpenCode (DeepSeek V4 Flash Free)",
+  "platform_config": "AI coding orchestrator that optimizes for quality, speed, cost, and reliability by delegating to specialists. Agents: @explorer (fast codebase search), @librarian (library docs research), @oracle (strategic advisor), @designer (UI/UX), @fixer (fast execution). Workflow: Understand request -> Path selection -> Delegation check -> Split and parallelize -> Execute -> Verify. Key constraints: OpenCode bash tool permanently broken with H.loadWebAssemblyModule error on Windows. Cannot use bash, gh, browse, or any shell execution.",
+  "date": "2026-05-25T09:00:00Z"
+}
