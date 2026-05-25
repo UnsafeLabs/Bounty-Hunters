@@ -3,9 +3,9 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, RotateCcwIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -19,6 +19,59 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+
+const STORAGE_KEY_PROVIDER = "t3code:provider";
+const STORAGE_KEY_MODEL = "t3code:model";
+
+function readPersistedProviderId(): ProviderInstanceId | null {
+  try {
+    const value = localStorage.getItem(STORAGE_KEY_PROVIDER);
+    return value as ProviderInstanceId | null;
+  } catch {
+    return null;
+  }
+}
+
+function readPersistedModelId(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_KEY_MODEL);
+  } catch {
+    return null;
+  }
+}
+
+function persistSelection(instanceId: ProviderInstanceId, model: string) {
+  try {
+    localStorage.setItem(STORAGE_KEY_PROVIDER, instanceId);
+    localStorage.setItem(STORAGE_KEY_MODEL, model);
+  } catch {
+    // Ignore storage errors (e.g. quota exceeded, private browsing)
+  }
+}
+
+function clearPersistedSelection() {
+  try {
+    localStorage.removeItem(STORAGE_KEY_PROVIDER);
+    localStorage.removeItem(STORAGE_KEY_MODEL);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/** Find a valid model slug for the given instance, falling back to the first option. */
+function resolveModelForInstance(
+  instanceId: ProviderInstanceId,
+  modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>,
+  preferredModel?: string | null,
+): string {
+  const options = modelOptionsByInstance.get(instanceId);
+  if (!options || options.length === 0) return "";
+  if (preferredModel) {
+    const match = options.find((o) => o.slug === preferredModel);
+    if (match) return match.slug;
+  }
+  return options[0].slug;
+}
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -86,11 +139,104 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
-  const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
-    if (props.disabled) return;
-    props.onInstanceModelChange(instanceId, model);
-    setIsMenuOpen(false);
-  };
+  // Persist selection to localStorage whenever the user makes a new choice.
+  const handleInstanceModelChange = useCallback(
+    (instanceId: ProviderInstanceId, model: string) => {
+      if (props.disabled) return;
+      persistSelection(instanceId, model);
+      props.onInstanceModelChange(instanceId, model);
+      setIsMenuOpen(false);
+    },
+    [props.disabled, props.onInstanceModelChange],
+  );
+
+  // On mount, read persisted values from localStorage and restore the
+  // selection by calling the parent callback with the stored values.
+  // If the persisted provider is unavailable, fall back to the first available.
+  useEffect(() => {
+    const persistedProviderId = readPersistedProviderId();
+    const persistedModelId = readPersistedModelId();
+    if (!persistedProviderId) return;
+
+    const availableIds = new Set(
+      props.instanceEntries.map((entry) => entry.instanceId),
+    );
+    const validProviderId = availableIds.has(persistedProviderId)
+      ? persistedProviderId
+      : props.instanceEntries[0]?.instanceId;
+    if (!validProviderId) return;
+
+    const resolvedModel = resolveModelForInstance(
+      validProviderId,
+      props.modelOptionsByInstance,
+      persistedModelId,
+    );
+    if (!resolvedModel) return;
+
+    // Only call parent if the persisted values differ from current props
+    // to avoid unnecessary re-renders.
+    if (
+      validProviderId !== props.activeInstanceId ||
+      resolvedModel !== resolveModelForInstance(
+        props.activeInstanceId,
+        props.modelOptionsByInstance,
+        props.model,
+      )
+    ) {
+      props.onInstanceModelChange(validProviderId, resolvedModel);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cross-tab sync: listen for storage events from other tabs and apply
+  // the persisted selection from localStorage.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (
+        event.key !== STORAGE_KEY_PROVIDER &&
+        event.key !== STORAGE_KEY_MODEL
+      ) {
+        return;
+      }
+      const providerId = readPersistedProviderId();
+      const modelId = readPersistedModelId();
+      if (!providerId) return;
+
+      const availableIds = new Set(
+        props.instanceEntries.map((entry) => entry.instanceId),
+      );
+      const validProviderId = availableIds.has(providerId)
+        ? providerId
+        : props.instanceEntries[0]?.instanceId;
+      if (!validProviderId) return;
+
+      const resolvedModel = resolveModelForInstance(
+        validProviderId,
+        props.modelOptionsByInstance,
+        modelId,
+      );
+      if (!resolvedModel) return;
+
+      props.onInstanceModelChange(validProviderId, resolvedModel);
+    };
+
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [props.instanceEntries, props.modelOptionsByInstance, props.onInstanceModelChange]);
+
+  // Reset to default: clear localStorage and revert to the first available
+  // provider and its first model option.
+  const handleResetToDefault = useCallback(() => {
+    clearPersistedSelection();
+    const firstEntry = props.instanceEntries[0];
+    if (!firstEntry) return;
+    const firstModel = resolveModelForInstance(
+      firstEntry.instanceId,
+      props.modelOptionsByInstance,
+    );
+    if (firstModel) {
+      props.onInstanceModelChange(firstEntry.instanceId, firstModel);
+    }
+  }, [props.instanceEntries, props.modelOptionsByInstance, props.onInstanceModelChange]);
 
   return (
     <Popover
@@ -169,18 +315,31 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         align="start"
         className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] *:data-[slot=popover-viewport]:p-0"
       >
-        <ModelPickerContent
-          activeInstanceId={activeInstanceId}
-          model={props.model}
-          lockedProvider={props.lockedProvider}
-          lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
-          instanceEntries={props.instanceEntries}
-          {...(props.keybindings ? { keybindings: props.keybindings } : {})}
-          modelOptionsByInstance={props.modelOptionsByInstance}
-          terminalOpen={props.terminalOpen ?? false}
-          onRequestClose={() => setIsMenuOpen(false)}
-          onInstanceModelChange={handleInstanceModelChange}
-        />
+        <div className="flex flex-col gap-2">
+          <ModelPickerContent
+            activeInstanceId={activeInstanceId}
+            model={props.model}
+            lockedProvider={props.lockedProvider}
+            lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
+            instanceEntries={props.instanceEntries}
+            {...(props.keybindings ? { keybindings: props.keybindings } : {})}
+            modelOptionsByInstance={props.modelOptionsByInstance}
+            terminalOpen={props.terminalOpen ?? false}
+            onRequestClose={() => setIsMenuOpen(false)}
+            onInstanceModelChange={handleInstanceModelChange}
+          />
+          <div className="flex items-center justify-end border-t border-border/50 px-2 pt-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              onClick={handleResetToDefault}
+            >
+              <RotateCcwIcon className="size-3" />
+              Reset to default
+            </Button>
+          </div>
+        </div>
       </PopoverPopup>
     </Popover>
   );
