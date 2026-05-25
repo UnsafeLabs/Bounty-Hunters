@@ -54,7 +54,7 @@ return [
 
         'stack' => [
             'driver' => 'stack',
-            'channels' => explode(',', (string) env('LOG_STACK', 'single')),
+            'channels' => explode(',', (string) env('LOG_STACK', 'daily')),
             'ignore_exceptions' => false,
         ],
 
@@ -114,6 +114,21 @@ return [
 
         'errorlog' => [
             'driver' => 'errorlog',
+            'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+        ],
+
+        'error' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/error.log'),
+            'level' => env('LOG_ERROR_LEVEL', 'error'),
+            'replace_placeholders' => true,
+        ],
+
+        'json' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/laravel.json'),
+            'formatter' => Monolog\Formatter\JsonFormatter::class,
             'level' => env('LOG_LEVEL', 'debug'),
             'replace_placeholders' => true,
         ],
