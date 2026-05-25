@@ -49,9 +49,9 @@
   },
   {
     "username": "H4ck3r-netizen",
-    "total_prs": 64,
+    "total_prs": 65,
     "first_pr": "2026-05-18T05:55:49.424Z",
-    "last_pr": "2026-05-25T18:27:48.437Z"
+    "last_pr": "2026-05-25T20:44:15.210Z"
   },
   {
     "username": "arthurus36-alt",
@@ -414,6 +414,12 @@
     "last_pr": "2026-05-21T15:32:01.106Z"
   },
   {
+    "username": "lry3069-afk",
+    "total_prs": 10,
+    "first_pr": "2026-05-25T03:45:15.005Z",
+    "last_pr": "2026-05-25T19:48:11.824Z"
+  },
+  {
     "username": "gacorpoll-ui",
     "total_prs": 10,
     "first_pr": "2026-05-19T03:34:40.600Z",
@@ -448,12 +454,6 @@
     "total_prs": 9,
     "first_pr": "2026-05-21T02:53:24.037Z",
     "last_pr": "2026-05-21T03:30:06.032Z"
-  },
-  {
-    "username": "lry3069-afk",
-    "total_prs": 9,
-    "first_pr": "2026-05-25T03:45:15.005Z",
-    "last_pr": "2026-05-25T12:22:18.789Z"
   },
   {
     "username": "hamademon168-bot",
@@ -982,6 +982,12 @@
     "total_prs": 3,
     "first_pr": "2026-05-24T18:22:17.935Z",
     "last_pr": "2026-05-25T03:38:49.015Z"
+  },
+  {
+    "username": "ahura0901",
+    "total_prs": 3,
+    "first_pr": "2026-05-25T19:11:21.843Z",
+    "last_pr": "2026-05-25T19:18:48.169Z"
   },
   {
     "username": "huthoinguyn",
@@ -1558,12 +1564,6 @@
     "total_prs": 1,
     "first_pr": "2026-05-24T23:08:44.664Z",
     "last_pr": "2026-05-24T23:08:44.664Z"
-  },
-  {
-    "username": "ahura0901",
-    "total_prs": 1,
-    "first_pr": "2026-05-25T19:11:21.843Z",
-    "last_pr": "2026-05-25T19:11:21.843Z"
   },
   {
     "username": "MichisGitIsKing",
