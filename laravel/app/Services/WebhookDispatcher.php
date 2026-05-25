@@ -9,48 +9,69 @@ use Illuminate\Support\Facades\Log;
 
 class WebhookDispatcher
 {
-    public function dispatch(Webhook $webhook, string $event, array $payload): bool
+    public function dispatch(Webhook $webhook, string $event, array $payload): WebhookDelivery
     {
-        $signature = hash_hmac('sha256', json_encode($payload), $webhook->secret);
-        $headers = [
-            'X-Webhook-Signature' => $signature,
-            'Content-Type' => 'application/json',
+        $delivery = WebhookDelivery::create([
+            'webhook_id' => $webhook->id,
+            'event' => $event,
+            'payload' => $payload,
+            'attempts' => 0,
+        ]);
+
+        $this->send($webhook, $delivery);
+
+        return $delivery;
+    }
+
+    public function send(Webhook $webhook, WebhookDelivery $delivery): bool
+    {
+        $delivery->increment('attempts');
+
+        $payload = [
+            'event' => $delivery->event,
+            'data' => $delivery->payload,
+            'timestamp' => now()->toIso8601String(),
         ];
 
+        $jsonPayload = json_encode($payload);
+        $signature = $this->generateSignature($webhook->secret, $jsonPayload);
+
         try {
-            $response = Http::withHeaders($headers)
-                ->post($webhook->url, $payload);
+            $response = Http::withHeaders([
+                'X-Webhook-Signature' => $signature,
+                'Content-Type' => 'application/json',
+                'User-Agent' => 'BountyHunters-Webhook/1.0',
+            ])->timeout(30)->post($webhook->url, $payload);
 
-            $delivery = new WebhookDelivery();
-            $delivery->webhook_id = $webhook->id;
-            $delivery->event = $event;
-            $delivery->payload = $payload;
-            $delivery->response_code = $response->status();
-            $delivery->attempts = 1;
-            $delivery->delivered_at = now();
-            $delivery->save();
+            $delivery->update([
+                'response_code' => $response->status(),
+            ]);
 
-            return $response->successful();
+            if ($response->successful()) {
+                $delivery->update([
+                    'delivered_at' => now(),
+                    'next_retry_at' => null,
+                ]);
+                return true;
+            }
         } catch (\Exception $e) {
-            Log::error("Webhook delivery failed: " . $e->getMessage());
-            return false;
+            Log::error('Webhook delivery failed', [
+                'webhook_id' => $webhook->id,
+                'delivery_id' => $delivery->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            $delivery->update([
+                'response_code' => 0,
+            ]);
         }
+
+        return false;
     }
 
-    public function calculateHmacSignature(string $payload, string $secret): string
+    public function generateSignature(string $secret, string $payload): string
     {
-        return hash_hmac('sha256', $payload, $secret);
-    }
-
-    public function shouldRetryDelivery(WebhookDelivery $delivery): bool
-    {
-        return $delivery->attempts < 5;
-    }
-
-    public function calculateNextRetryDelay(int $attempt): int
-    {
-        return pow(2, $attempt - 1) * 60; // Exponential backoff in seconds
+        $hash = hash_hmac('sha256', $payload, $secret);
+        return 'sha256=' . $hash;
     }
 }
-
-?>
