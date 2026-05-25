@@ -204,6 +204,11 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             size="sm"
             type="button"
             onClick={props.onToggleInteractionMode}
+            aria-label={
+              props.interactionMode === "plan"
+                ? "Switch to Build mode"
+                : "Switch to Plan mode"
+            }
             title={
               props.interactionMode === "plan"
                 ? "Plan mode — click to return to normal build mode"
@@ -269,6 +274,11 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             size="sm"
             type="button"
             onClick={props.onTogglePlanSidebar}
+            aria-label={
+              props.planSidebarOpen
+                ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
+                : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
+            }
             title={
               props.planSidebarOpen
                 ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
