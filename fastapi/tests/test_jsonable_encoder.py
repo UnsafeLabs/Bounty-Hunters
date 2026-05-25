@@ -313,6 +313,31 @@ def test_encode_pydantic_undefined():
     assert jsonable_encoder(data) == {"value": None}
 
 
+def test_encode_bytes_defaults_to_base64():
+    assert jsonable_encoder(b"\x00\xffhello") == "AP9oZWxsbw=="
+
+
+def test_encode_memoryview_defaults_to_base64():
+    assert jsonable_encoder(memoryview(b"\x00\xffhello")) == "AP9oZWxsbw=="
+
+
+def test_encode_bytes_as_hex():
+    assert jsonable_encoder(b"\x00\xffhello", bytes_encoding="hex") == "00ff68656c6c6f"
+
+
+def test_encode_nested_bytes_uses_selected_encoding():
+    data = {"payload": [b"\x0f", memoryview(b"\xff")]}
+
+    assert jsonable_encoder(data, bytes_encoding="hex") == {
+        "payload": ["0f", "ff"],
+    }
+
+
+def test_encode_bytes_rejects_unknown_encoding():
+    with pytest.raises(ValueError, match="bytes_encoding"):
+        jsonable_encoder(b"payload", bytes_encoding="utf-8")
+
+
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
 @pytest.mark.parametrize(
     "module_path",
