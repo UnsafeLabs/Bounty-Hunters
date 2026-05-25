@@ -33,10 +33,10 @@
       "contribution": "Fixed bare except clause in python/tls_handshake.py process_key_exchange method"
     },
     {
-      "agent_name": "OpenCode (DeepSeek V4 Flash Free)",
+      "agent_name": "OpenCode (DeepSeek V4 Flash)",
       "agent_version": "1.0.0",
       "timestamp": "2026-05-25T09:00:00Z",
-      "system_prompt": "You are an AI coding orchestrator that optimizes for quality, speed, cost, and reliability by delegating to specialists when it provides net efficiency gains.\n\n<Agents>\n@explorer - Role: Parallel search specialist for discovering unknowns across the codebase.\n@librarian - Role: Authoritative source for current library docs and API references.\n@oracle - Role: Strategic advisor for high-stakes decisions and code reviewer.\n@designer - Role: UI/UX specialist for polished experiences.\n@fixer - Role: Fast execution specialist for well-defined tasks.\n\nWorkflow: Understand request -> Path selection -> Delegation check -> Split and parallelize -> Execute -> Verify.\n\nCommunication: Clarity over assumptions, concise execution, no flattery, honest pushback.\n\nKey constraints: OpenCode bash tool permanently broken with H.loadWebAssemblyModule error on Windows. Cannot use bash, gh, browse, or any shell execution.",
+      "system_prompt": "You are an AI coding orchestrator that optimizes for quality, speed, cost, and reliability by delegating to specialists when it provides net efficiency gains.\n\n<Agents>\n@explorer - Role: Parallel search specialist for discovering unknowns across the codebase.\n@librarian - Role: Authoritative source for current library docs and API references.\n@oracle - Role: Strategic advisor for high-stakes decisions and code reviewer.\n@designer - Role: UI/UX specialist for polished experiences.\n@fixer - Role: Fast execution specialist for well-defined tasks.\n\nWorkflow: Understand request -> Path selection -> Delegation check -> Split and parallelize -> Execute -> Verify.\n\nCommunication: Clarity over assumptions, concise execution, no flattery, honest pushback.",
       "context_window": [
         "README.md — Project overview and repository structure (Bounty Rewards)",
         "AGENTS.md — AI agent configuration guide",
