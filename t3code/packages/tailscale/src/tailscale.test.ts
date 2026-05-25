@@ -7,11 +7,15 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   buildTailscaleHttpsBaseUrl,
+  diagnosePeer,
   disableTailscaleServe,
   ensureTailscaleServe,
   isTailscaleIpv4Address,
+  LatencyTracker,
   parseTailscaleMagicDnsName,
+  parseTailscalePingOutput,
   parseTailscaleStatus,
+  PeerDiagnostics,
   readTailscaleStatus,
 } from "./tailscale.ts";
 
@@ -140,5 +144,147 @@ describe("tailscale", () => {
         { command: "tailscale", args: ["serve", "--https=8443", "off"] },
       ]);
     });
+  });
+
+  describe("peer diagnostics", () => {
+    it.effect("parses direct pong output", () =>
+      Effect.sync(() => {
+        const result = parseTailscalePingOutput(
+          "pong from desktop (100.100.100.100) in 35ms",
+          "desktop",
+        );
+        assert.equal(result.connectionType, "direct");
+        assert.equal(result.latencyMs, 35);
+        assert.equal(result.peerIp, "100.100.100.100");
+        assert.equal(result.relayServer, null);
+        assert.equal(result.peerName, "desktop");
+      }),
+    );
+
+    it.effect("parses relayed pong output with DERP server", () =>
+      Effect.sync(() => {
+        const result = parseTailscalePingOutput(
+          "pong from desktop (100.100.100.100) via DERP(tor) in 120ms",
+          "desktop",
+        );
+        assert.equal(result.connectionType, "relayed");
+        assert.equal(result.latencyMs, 120);
+        assert.equal(result.peerIp, "100.100.100.100");
+        assert.equal(result.relayServer, "tor");
+      }),
+    );
+
+    it.effect("returns unreachable for empty output", () =>
+      Effect.sync(() => {
+        const result = parseTailscalePingOutput("", "desktop");
+        assert.equal(result.connectionType, "unreachable");
+        assert.equal(result.latencyMs, null);
+        assert.equal(result.peerIp, null);
+        assert.equal(result.relayServer, null);
+        assert.equal(result.lastSeen, null);
+      }),
+    );
+
+    it.effect("returns unreachable for timeout output", () =>
+      Effect.sync(() => {
+        const result = parseTailscalePingOutput(
+          "posting magicsock peer lookup\n\n\"timeout waiting for initial pong\"",
+          "desktop",
+        );
+        assert.equal(result.connectionType, "unreachable");
+      }),
+    );
+
+    it.effect("runs diagnosePeer through the process spawner", () => {
+      const layer = mockSpawnerLayer((command, args) => {
+        assert.equal(command, "tailscale");
+        assert.deepEqual(args, ["ping", "--c", "1", "laptop"]);
+        return {
+          stdout: "pong from laptop (100.64.0.5) via DERP(nyc) in 82ms",
+        };
+      });
+
+      return Effect.gen(function* () {
+        const diag = yield* diagnosePeer("laptop").pipe(Effect.provide(layer));
+        assert.equal(diag.connectionType, "relayed");
+        assert.equal(diag.latencyMs, 82);
+        assert.equal(diag.peerIp, "100.64.0.5");
+        assert.equal(diag.relayServer, "nyc");
+        assert.equal(diag.peerName, "laptop");
+      });
+    });
+
+    it.effect("returns unreachable when tailscale ping times out", () => {
+      const layer = mockSpawnerLayer(() => ({ stdout: "" }));
+
+      return Effect.gen(function* () {
+        const diag = yield* diagnosePeer("unknown-host").pipe(Effect.provide(layer));
+        assert.equal(diag.connectionType, "unreachable");
+      });
+    });
+  });
+
+  describe("LatencyTracker", () => {
+    it.effect("keeps last 10 results", () =>
+      Effect.sync(() => {
+        const tracker = new LatencyTracker();
+        for (let i = 0; i < 15; i++) {
+          tracker.addLatency(
+            new PeerDiagnostics({
+              peerName: "desktop",
+              connectionType: "direct",
+              latencyMs: i * 10,
+              peerIp: "100.64.0.1",
+              relayServer: null,
+              lastSeen: new Date().toISOString(),
+            }),
+          );
+        }
+        const latencies = tracker.getLatencies();
+        assert.equal(latencies.length, 10);
+        // Oldest should be latency 50 (first 5 were evicted)
+        assert.equal(latencies[0].latencyMs, 50);
+        // Most recent should be latency 140
+        assert.equal(latencies[9].latencyMs, 140);
+      }),
+    );
+
+    it.effect("clear removes all entries", () =>
+      Effect.sync(() => {
+        const tracker = new LatencyTracker();
+        tracker.addLatency(
+          new PeerDiagnostics({
+            peerName: "desktop",
+            connectionType: "direct",
+            latencyMs: 35,
+            peerIp: "100.64.0.1",
+            relayServer: null,
+            lastSeen: new Date().toISOString(),
+          }),
+        );
+        assert.equal(tracker.getLatencies().length, 1);
+        tracker.clear();
+        assert.equal(tracker.getLatencies().length, 0);
+      }),
+    );
+
+    it.effect("returns null latencyMs for unreachable pings", () =>
+      Effect.sync(() => {
+        const tracker = new LatencyTracker();
+        tracker.addLatency(
+          new PeerDiagnostics({
+            peerName: "desktop",
+            connectionType: "unreachable",
+            latencyMs: null,
+            peerIp: null,
+            relayServer: null,
+            lastSeen: null,
+          }),
+        );
+        const latencies = tracker.getLatencies();
+        assert.equal(latencies.length, 1);
+        assert.equal(latencies[0].latencyMs, null);
+      }),
+    );
   });
 });

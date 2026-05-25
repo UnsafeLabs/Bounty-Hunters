@@ -322,3 +322,172 @@ export const resolveTailscaleHttpsBaseUrl = (
         : null,
     ),
   );
+
+// ---------------------------------------------------------------------------
+// Peer diagnostics
+// ---------------------------------------------------------------------------
+
+export const ConnectionType = Schema.Literal("direct", "relayed", "unreachable");
+
+export class PeerDiagnostics extends Schema.Class<PeerDiagnostics>("PeerDiagnostics")({
+  peerName: Schema.String,
+  connectionType: ConnectionType,
+  latencyMs: Schema.NullOr(Schema.Number),
+  peerIp: Schema.NullOr(Schema.String),
+  relayServer: Schema.NullOr(Schema.String),
+  lastSeen: Schema.NullOr(Schema.String),
+}) {}
+
+export type PeerDiagnosticsType = typeof PeerDiagnostics.Type;
+
+const DIRECT_PONG_RE =
+  /^pong from\s+(?<peer>[^ ]+)\s+\((?<ip>[^)]+)\)\s+in\s+(?<latency>\d+)ms\s*$/;
+const RELAYED_PONG_RE =
+  /^pong from\s+(?<peer>[^ ]+)\s+\((?<ip>[^)]+)\)\s+via\s+DERP\((?<relay>[^)]+)\)\s+in\s+(?<latency>\d+)ms\s*$/;
+
+export function parseTailscalePingOutput(
+  rawOutput: string,
+  peerName: string,
+): PeerDiagnosticsType {
+  const trimmed = rawOutput.trim();
+
+  // Try relayed pattern first (more specific)
+  const relayedMatch = RELAYED_PONG_RE.exec(trimmed);
+  if (relayedMatch?.groups) {
+    return new PeerDiagnostics({
+      peerName,
+      connectionType: "relayed",
+      latencyMs: Number(relayedMatch.groups.latency),
+      peerIp: relayedMatch.groups.ip,
+      relayServer: relayedMatch.groups.relay,
+      lastSeen: new Date().toISOString(),
+    });
+  }
+
+  // Try direct pattern
+  const directMatch = DIRECT_PONG_RE.exec(trimmed);
+  if (directMatch?.groups) {
+    return new PeerDiagnostics({
+      peerName,
+      connectionType: "direct",
+      latencyMs: Number(directMatch.groups.latency),
+      peerIp: directMatch.groups.ip,
+      relayServer: null,
+      lastSeen: new Date().toISOString(),
+    });
+  }
+
+  // Unreachable / timeout
+  return new PeerDiagnostics({
+    peerName,
+    connectionType: "unreachable",
+    latencyMs: null,
+    peerIp: null,
+    relayServer: null,
+    lastSeen: null,
+  });
+}
+
+export const TAILSCALE_PING_TIMEOUT_MS = 5_000;
+
+export const diagnosePeer = (
+  peerName: string,
+): Effect.Effect<
+  PeerDiagnosticsType,
+  TailscaleCommandError,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
+  Effect.gen(function* () {
+    const args = ["ping", "--c", "1", peerName];
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const child = yield* spawner
+      .spawn(
+        ChildProcess.make("tailscale", args, {
+          shell: process.platform === "win32",
+        }),
+      )
+      .pipe(
+        Effect.mapError((cause) =>
+          tailscaleCommandError(
+            args,
+            cause instanceof Error ? cause.message : "Failed to spawn tailscale ping.",
+            null,
+          ),
+        ),
+      );
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [
+        collectStdout(child.stdout),
+        collectStderr(child.stderr),
+        child.exitCode.pipe(Effect.map(Number)),
+      ],
+      { concurrency: "unbounded" },
+    ).pipe(
+      Effect.mapError((cause) =>
+        tailscaleCommandError(
+          args,
+          cause instanceof Error ? cause.message : "Failed to run tailscale ping.",
+          null,
+        ),
+      ),
+    );
+
+    // tailscale ping returns non-zero for unreachable peers; we still parse stdout
+    const output = stdout || stderr;
+    return parseTailscalePingOutput(output, peerName);
+  }).pipe(
+    Effect.scoped,
+    Effect.timeoutOption(TAILSCALE_PING_TIMEOUT_MS),
+    Effect.flatMap((result) =>
+      Option.match(result, {
+        onNone: () =>
+          Effect.succeed(
+            new PeerDiagnostics({
+              peerName,
+              connectionType: "unreachable",
+              latencyMs: null,
+              peerIp: null,
+              relayServer: null,
+              lastSeen: null,
+            }),
+          ),
+        onSome: Effect.succeed,
+      }),
+    ),
+  );
+
+// ---------------------------------------------------------------------------
+// LatencyTracker
+// ---------------------------------------------------------------------------
+
+export interface LatencyEntry {
+  readonly timestamp: string;
+  readonly latencyMs: number | null;
+}
+
+export class LatencyTracker {
+  private readonly entries: LatencyEntry[] = [];
+  private readonly maxSize: number;
+
+  constructor(maxSize = 10) {
+    this.maxSize = maxSize;
+  }
+
+  addLatency(result: PeerDiagnosticsType): void {
+    this.entries.push({
+      timestamp: new Date().toISOString(),
+      latencyMs: result.latencyMs,
+    });
+    if (this.entries.length > this.maxSize) {
+      this.entries.shift();
+    }
+  }
+
+  getLatencies(): ReadonlyArray<LatencyEntry> {
+    return [...this.entries];
+  }
+
+  clear(): void {
+    this.entries.length = 0;
+  }
+}
