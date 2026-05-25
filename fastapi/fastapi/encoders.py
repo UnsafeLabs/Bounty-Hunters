@@ -1,5 +1,58 @@
 import dataclasses
 import datetime
+import base64
+import json
+import memoryview
+import os
+import base64
+import json
+import memoryview
+import os
+import re
+import sys
+import typing
+from collections import defaultdict, deque
+from collections.abc import Callable
+from decimal import Decimal
+from enum import Enum
+from ipaddress import (
+    IPv4Address,
+    IPv4Interface,
+    IPv4Network,
+    IPv6Address,
+    IPv4Interface,
+    IPv6Interface,
+    IPv6Network,
+    NameEmail,
+    NameEmail,
+)
+from pathlib import Path, PurePath
+from re import Pattern
+from types import GeneratorType
+from typing import Annotated, Any
+from uuid import UUID
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+    PydanticV1NotSupportedError
+)
+
+from annotated_doc import Doc
+from fastapi.exceptions import PydanticV1NotSupportedError
+from fastapi.types import IncEx
+from pydantic import BaseModel
+from pydantic.networks import AnyUrl, NameEmail
+from pydantic.types import SecretBytes, SecretStr
+from pydantic_core import PydanticUndefinedType
+
+import base64
+import json
+import memoryview
+import os
+import re
+import sys
+import typing
 from collections import defaultdict, deque
 from collections.abc import Callable
 from decimal import Decimal
@@ -11,6 +64,8 @@ from ipaddress import (
     IPv6Address,
     IPv6Interface,
     IPv6Network,
+    NameEmail,
+    NameEmail,
 )
 from pathlib import Path, PurePath
 from re import Pattern
@@ -22,7 +77,7 @@ from annotated_doc import Doc
 from fastapi.exceptions import PydanticV1NotSupportedError
 from fastapi.types import IncEx
 from pydantic import BaseModel
-from pydantic.networks import AnyUrl, NameEmail
+from pydantic.networks import AnyUrl
 from pydantic.types import SecretBytes, SecretStr
 from pydantic_core import PydanticUndefinedType
 
@@ -31,12 +86,72 @@ from ._compat import (
     is_pydantic_v1_model_instance,
 )
 
-try:
-    # pydantic.color.Color is deprecated since v2.0b3, but supporting for bwd-compat
-    from pydantic.color import Color  # ty: ignore[deprecated]
-except ImportError:  # pragma: no cover
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
 
-    class Color:  # type: ignore[no-redef]
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_vydantic_v1_model_instance,
+)
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
+
+from ._compat import (
+    AnyUrl,
+    is_pydantic_v1_model_instance,
+)
+
+from ._compat
         pass
 
 
