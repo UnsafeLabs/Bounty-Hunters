@@ -49,9 +49,9 @@
   },
   {
     "username": "H4ck3r-netizen",
-    "total_prs": 57,
+    "total_prs": 58,
     "first_pr": "2026-05-18T05:55:49.424Z",
-    "last_pr": "2026-05-25T06:50:13.134Z"
+    "last_pr": "2026-05-25T09:13:05.309Z"
   },
   {
     "username": "arthurus36-alt",
@@ -156,6 +156,18 @@
     "last_pr": "2026-05-13T15:45:54Z"
   },
   {
+    "username": "genesisrevelationinc-debug",
+    "total_prs": 26,
+    "first_pr": "2026-05-22T14:02:27.948Z",
+    "last_pr": "2026-05-25T11:22:35.775Z"
+  },
+  {
+    "username": "TUPM96",
+    "total_prs": 26,
+    "first_pr": "2026-05-25T09:43:25.394Z",
+    "last_pr": "2026-05-25T11:41:04.218Z"
+  },
+  {
     "username": "liangqiang2025-stack",
     "total_prs": 25,
     "first_pr": "2026-05-21T03:57:29.019Z",
@@ -228,12 +240,6 @@
     "last_pr": "2026-05-19T09:58:25.671Z"
   },
   {
-    "username": "genesisrevelationinc-debug",
-    "total_prs": 17,
-    "first_pr": "2026-05-22T14:02:27.948Z",
-    "last_pr": "2026-05-25T06:59:33.998Z"
-  },
-  {
     "username": "s2530786-cell",
     "total_prs": 17,
     "first_pr": "2026-05-19T20:57:07.348Z",
@@ -250,6 +256,12 @@
     "total_prs": 16,
     "first_pr": "2026-05-21T13:24:23.540Z",
     "last_pr": "2026-05-21T22:20:05.506Z"
+  },
+  {
+    "username": "justusaugust",
+    "total_prs": 15,
+    "first_pr": "2026-05-25T06:26:55.284Z",
+    "last_pr": "2026-05-25T11:43:59.173Z"
   },
   {
     "username": "callmekidz",
@@ -510,6 +522,12 @@
     "last_pr": "2026-05-23T19:31:47.376Z"
   },
   {
+    "username": "lry3069-afk",
+    "total_prs": 8,
+    "first_pr": "2026-05-25T03:45:15.005Z",
+    "last_pr": "2026-05-25T10:54:50.641Z"
+  },
+  {
     "username": "oxravenz",
     "total_prs": 8,
     "first_pr": "2026-05-17T15:15:11.116Z",
@@ -616,12 +634,6 @@
     "total_prs": 6,
     "first_pr": "2026-05-19T12:21:34.426Z",
     "last_pr": "2026-05-24T02:06:27.996Z"
-  },
-  {
-    "username": "justusaugust",
-    "total_prs": 6,
-    "first_pr": "2026-05-25T06:26:55.284Z",
-    "last_pr": "2026-05-25T06:44:12.724Z"
   },
   {
     "username": "CuboYe",
@@ -748,12 +760,6 @@
     "total_prs": 5,
     "first_pr": "2026-05-21T12:33:57.774Z",
     "last_pr": "2026-05-24T21:07:13.820Z"
-  },
-  {
-    "username": "lry3069-afk",
-    "total_prs": 5,
-    "first_pr": "2026-05-25T03:45:15.005Z",
-    "last_pr": "2026-05-25T06:29:51.982Z"
   },
   {
     "username": "Alex-2Code",
