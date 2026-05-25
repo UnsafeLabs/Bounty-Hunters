@@ -33,7 +33,9 @@
  *
  * @module providerInstance
  */
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Either from "effect/Either";
 import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -147,3 +149,151 @@ export type ProviderInstanceConfigMap = typeof ProviderInstanceConfigMap.Type;
  */
 export const defaultInstanceIdForDriver = (driver: ProviderDriverKind): ProviderInstanceId =>
   ProviderInstanceId.make(driver);
+
+// ---------------------------------------------------------------------------
+// Runtime validation for provider configuration schemas
+// ---------------------------------------------------------------------------
+
+/**
+ * Tagged error carrying structured information about a single field-level
+ * validation failure inside a provider instance configuration.
+ */
+export class ProviderConfigError extends Data.TaggedError("ProviderConfigError")<{
+  readonly field: string;
+  readonly invalidValue: string;
+  readonly expectedFormat: string;
+}> {}
+
+/**
+ * Schema refinement for API key fields.
+ *
+ * Rules:
+ *  - must be a non-empty string (after trimming)
+ *  - must be at least 10 characters long
+ */
+const ApiKeySchema = TrimmedNonEmptyString.check(
+  Schema.isMinLength(10),
+);
+
+const HTTPS_HOSTNAME_PATTERN = /^https:\/\/[a-zA-Z0-9][a-zA-Z0-9.-]+/;
+
+/**
+ * Schema refinement for endpoint URL fields.
+ *
+ * Rules:
+ *  - must start with `https://`
+ *  - must contain a valid hostname
+ *  - `http://` is explicitly rejected with a message steering the user to HTTPS
+ */
+const HttpsUrlSchema = TrimmedNonEmptyString.check(
+  Schema.isPattern(HTTPS_HOSTNAME_PATTERN),
+);
+
+/**
+ * Input shape accepted by `validateProviderConfig`. Mirrors the fields of
+ * `ProviderInstanceConfig` plus the driver-specific config keys we validate
+ * (apiKey, endpointUrl).
+ */
+export const ProviderConfigValidationInput = Schema.Struct({
+  driver: ProviderDriverKind,
+  displayName: Schema.optional(TrimmedNonEmptyString),
+  accentColor: Schema.optional(TrimmedNonEmptyString),
+  environment: Schema.optionalKey(ProviderInstanceEnvironment),
+  enabled: Schema.optionalKey(Schema.Boolean),
+  config: Schema.optionalKey(Schema.Struct({
+    apiKey: Schema.optional(Schema.String),
+    endpointUrl: Schema.optional(Schema.String),
+    homePath: Schema.optional(Schema.String),
+    binaryPath: Schema.optional(Schema.String),
+    model: Schema.optional(Schema.String),
+  })),
+});
+export type ProviderConfigValidationInput = typeof ProviderConfigValidationInput.Type;
+
+/**
+ * Validates a provider-instance configuration envelope at runtime.
+ *
+ * Checks performed:
+ *  - `config.apiKey`: if present, must be a non-empty string >= 10 characters
+ *  - `config.endpointUrl`: if present, must be a valid HTTPS URL
+ *
+ * Returns **all** validation errors at once (never short-circuits on the
+ * first failure). When the input is valid the right side carries the
+ * original input cast to `ProviderConfigValidationInput`.
+ */
+export const validateProviderConfig = (
+  input: unknown,
+): Either.Either<ReadonlyArray<ProviderConfigError>, ProviderConfigValidationInput> => {
+  const errors: ProviderConfigError[] = [];
+
+  // First, decode the outer envelope so we can inspect inner fields.
+  let decoded: ProviderConfigValidationInput;
+  try {
+    decoded = Schema.decodeUnknownSync(ProviderConfigValidationInput)(input as any);
+  } catch {
+    // The envelope itself is structurally invalid — return a single
+    // top-level error so the caller still gets a useful message.
+    return Either.left([
+      new ProviderConfigError({
+        field: "(root)",
+        invalidValue: String(input),
+        expectedFormat: "A valid provider instance configuration object",
+      }),
+    ]);
+  }
+
+  const config = decoded.config;
+
+  if (config !== undefined) {
+    // --- API key validation ---
+    if (config.apiKey !== undefined) {
+      try {
+        Schema.decodeUnknownSync(ApiKeySchema)(config.apiKey);
+      } catch {
+        errors.push(
+          new ProviderConfigError({
+            field: "config.apiKey",
+            invalidValue: String(config.apiKey),
+            expectedFormat:
+              "Non-empty string, at least 10 characters (after trimming whitespace)",
+          }),
+        );
+      }
+    }
+
+    // --- Endpoint URL validation ---
+    if (config.endpointUrl !== undefined) {
+      try {
+        Schema.decodeUnknownSync(HttpsUrlSchema)(config.endpointUrl);
+      } catch {
+        const raw = config.endpointUrl as string;
+        let expectedFormat: string;
+
+        if (/^http:\/\//.test(raw)) {
+          expectedFormat =
+            "HTTPS URL required — http:// is not allowed. Use https:// for secure connections.";
+        } else if (!/^https:\/\//.test(raw)) {
+          expectedFormat =
+            "URL must start with https:// and include a valid hostname (e.g. https://api.example.com)";
+        } else {
+          expectedFormat =
+            "HTTPS URL with a valid hostname (e.g. https://api.example.com)";
+        }
+
+        errors.push(
+          new ProviderConfigError({
+            field: "config.endpointUrl",
+            invalidValue: raw,
+            expectedFormat,
+          }),
+        );
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    return Either.left(errors);
+  }
+
+  return Either.right(decoded);
+};
