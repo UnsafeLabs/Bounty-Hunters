@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Public task context for GitHub issue #651 in UnsafeLabs/Bounty-Hunters: implement a Brainfuck FizzBuzz program that prints the exact sequence from 1 through 100 using only valid Brainfuck commands. Private system, developer, runtime, memory, credential, and hidden session instructions are intentionally not reproduced.",
+  "date": "2026-05-25T10:21:30Z"
+}
