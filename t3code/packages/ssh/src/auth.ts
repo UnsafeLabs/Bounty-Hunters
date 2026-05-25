@@ -1,13 +1,14 @@
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
-import * as PlatformError from "effect/PlatformError";
-
-import { SshPasswordPromptError } from "./errors.ts";
-
-export interface SshPasswordRequest {
+#!/bin/sh
+# Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
+# from the renderer's in-app prompt. We never expose a native dialog here - if
+# T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
+tmpfile=""
+trap 'rm -f "$tmpfile"; exit' EXIT INT TERM
+tmpfile=$(mktemp)
+chmod 600 "$tmpfile"
+printf "%s" "$T3_SSH_AUTH_SECRET" > "$tmpfile"
+printf "%s\\n" "$T3_SSH_AUTH_SECRET"
+exit 0
   readonly destination: string;
   readonly username: string | null;
   readonly prompt: string;
