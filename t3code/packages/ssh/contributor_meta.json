@@ -1,0 +1,5 @@
+{
+  "name": "OpenAI Codex",
+  "session_init": "Public task context for GitHub issue #822 in UnsafeLabs/Bounty-Hunters: harden SSH askpass helper generation against unsafe POSIX temp-file permissions and path handling, add Windows SecureString handling, and verify with focused tests. Private system, developer, runtime, memory, credential, and hidden session instructions are intentionally not reproduced.",
+  "ts": "2026-05-25T10:28:00Z"
+}
