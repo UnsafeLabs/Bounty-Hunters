@@ -3,7 +3,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -19,6 +19,8 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+
+const LAST_SELECTION_KEY = "t3code:last-model-picker-selection:v1";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -45,6 +47,54 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+
+  // Restore persisted selection on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(LAST_SELECTION_KEY);
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as { instanceId: string; model: string };
+      const instanceId = parsed.instanceId as ProviderInstanceId;
+      if (!instanceId || !parsed.model) return;
+      const entry = props.instanceEntries.find((e) => e.instanceId === instanceId && e.enabled);
+      if (!entry) {
+        localStorage.removeItem(LAST_SELECTION_KEY);
+        return;
+      }
+      const options = props.modelOptionsByInstance.get(instanceId);
+      if (!options?.some((o) => o.slug === parsed.model)) return;
+      if (instanceId !== props.activeInstanceId || parsed.model !== props.model) {
+        props.onInstanceModelChange(instanceId, parsed.model);
+      }
+    } catch {
+      localStorage.removeItem(LAST_SELECTION_KEY);
+    }
+    // Only on mount — deps intentionally empty
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Cross-tab sync via storage event
+  useEffect(() => {
+    const handler = (e: StorageEvent) => {
+      if (e.key !== LAST_SELECTION_KEY || !e.newValue) return;
+      try {
+        const parsed = JSON.parse(e.newValue) as { instanceId: string; model: string };
+        const instanceId = parsed.instanceId as ProviderInstanceId;
+        if (!instanceId || !parsed.model) return;
+        const entry = props.instanceEntries.find((e) => e.instanceId === instanceId && e.enabled);
+        if (!entry) return;
+        const options = props.modelOptionsByInstance.get(instanceId);
+        if (!options?.some((o) => o.slug === parsed.model)) return;
+        if (instanceId !== props.activeInstanceId || parsed.model !== props.model) {
+          props.onInstanceModelChange(instanceId, parsed.model);
+        }
+      } catch {
+        // Ignore parse errors from other tabs
+      }
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, [props.activeInstanceId, props.model, props.instanceEntries, props.modelOptionsByInstance, props.onInstanceModelChange]);
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -88,9 +138,26 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
+    try {
+      localStorage.setItem(LAST_SELECTION_KEY, JSON.stringify({ instanceId, model }));
+    } catch {
+      // Ignore storage quota errors
+    }
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
   };
+
+  const handleResetToDefault = useCallback(() => {
+    localStorage.removeItem(LAST_SELECTION_KEY);
+    const firstEntry = props.instanceEntries[0];
+    if (firstEntry) {
+      const options = props.modelOptionsByInstance.get(firstEntry.instanceId);
+      if (options?.[0]) {
+        props.onInstanceModelChange(firstEntry.instanceId, options[0].slug);
+      }
+    }
+    setIsMenuOpen(false);
+  }, [props.instanceEntries, props.modelOptionsByInstance, props.onInstanceModelChange]);
 
   return (
     <Popover
@@ -180,6 +247,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           terminalOpen={props.terminalOpen ?? false}
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
+          onResetToDefault={handleResetToDefault}
         />
       </PopoverPopup>
     </Popover>

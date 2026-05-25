@@ -1,0 +1,5 @@
+{
+  "agent": "Claude Code (Claude Opus 4.7 via DeepSeek V4 Pro backend)",
+  "pre_task_context": "Session start: Read CLAUDE.md, session_handoff.md, agent_safety_rules.md. Previous task: PR #4098 (ARIA + keyboard nav for ChatView, #852) submitted and still open. User (鹿潇) selected next bounty #834: Fix ProviderModelPicker not persisting selection across reloads ($40). Acceptance criteria: persist provider/model to localStorage, restore on mount, fallback gracefully if persisted provider unavailable, reset to default option, cross-tab sync via storage event, localStorage keys namespaced.",
+  "timestamp": "2026-05-25T03:15:00+08:00"
+}

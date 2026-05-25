@@ -82,6 +82,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   terminalOpen: boolean;
   onRequestClose?: () => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  onResetToDefault?: () => void;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -605,6 +606,19 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 size="sm"
               />
             </div>
+
+            {/* Reset to default */}
+            {props.onResetToDefault && (
+              <div className="border-b px-3 py-1">
+                <button
+                  type="button"
+                  onClick={props.onResetToDefault}
+                  className="text-[11px] text-muted-foreground/50 hover:text-muted-foreground/80 transition-colors"
+                >
+                  Reset to default
+                </button>
+              </div>
+            )}
 
             {/* Model list */}
             <div
