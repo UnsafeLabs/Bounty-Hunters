@@ -2,8 +2,9 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class WebhookDelivery extends Model
 {
@@ -21,15 +22,18 @@ class WebhookDelivery extends Model
 
     protected $casts = [
         'payload' => 'array',
+        'attempts' => 'integer',
         'next_retry_at' => 'datetime',
         'delivered_at' => 'datetime',
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
     ];
 
-    public function webhook()
+    public function webhook(): BelongsTo
     {
         return $this->belongsTo(Webhook::class);
     }
+
+    public function isDelivered(): bool
+    {
+        return $this->delivered_at !== null;
+    }
 }
-?>
