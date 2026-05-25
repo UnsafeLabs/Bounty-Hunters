@@ -1,147 +1,118 @@
-from typing import TypeVar, Generic, Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field
-from pydantic.generics import GenericModel
+from typing import TypeVar, Generic, Optional, Type
 from fastapi import Query
-from base64 import urlsafe_b64encode, urlsafe_b64decode
-import json
+from pydantic import BaseModel
+from pydantic.generics import GenericModel
+from pydantic.fields import Field
+import math
 
 
-# Type variables for generics
-T = TypeVar("T")
+T = TypeVar('T')
 
 
 class PaginatedResponse(GenericModel, Generic[T]):
-    items: List[T]
+    items: list[T] = Field(...)
+    total: int = Field(...)
+    page: int = Field(...)
+    page_size: int = Field(...)
+    total_pages: int = Field(...)
+    has_next: bool = Field(...)
+    has_previous: bool = Field(...)
+
+
+class OffsetPagination:
+    def __init__(self, page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100)):
+        self.page = page
+        self.page_size = page_size
+        self.offset = (page - 1) * page_size
+
+    def get_paginated_response(self, items: list[T], total: int) -> PaginatedResponse[T]:
+        total_pages = math.ceil(total / self.page_size) if total > 0 else 0
+        return PaginatedResponse(
+            items=items,
+            total=total,
+            page=self.page,
+            page_size=self.page_size,
+            total_pages=total_pages,
+            has_next=self.page < total_pages,
+            has_previous=self.page > 1
+        )
+
+
+class CursorPagination:
+    def __init__(self, cursor: str = Query(None), limit: int = Query(50, ge=1, le=100)):
+        self.cursor = cursor
+        self.limit = limit
+
+    def get_paginated_response(self, items: list[T], total: int, next_cursor: str = None, previous_cursor: str = None) -> dict:
+        return {
+            "items": items,
+            "total": total,
+            "next_cursor": next_cursor,
+            "previous_cursor": previous_cursor
+        }
+
+
+def get_offset_skip_limit(page: int, page_size: int):
+    return (page - 1) * page (1) * page_size
+
+
+def paginate(page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100)):
+    return OffsetPagination(page, page_size)
+
+
+T = TypeVar('T', bound=BaseModel)
+
+
+class PaginatedResponse(GenericModel, Generic[T]):
+    items: list[T]
     total: int
     page: int
     page_size: int
     total_pages: int
     has_next: bool
     has_previous: bool
-    next_cursor: Optional[str] = None
-    previous_cursor: Optional[str] = None
 
 
-class OffsetPaginationResult(BaseModel):
-    items: List[Any] = Field(default_factory=list)
-    total: int = 0
-    page: int = 1
-    page_size: int = 10
-    total_pages: int = 0
-    has_next: bool = False
-    has_previous: bool = False
+    class Config:
+        orm_mode = True
 
 
-class Cursor:
-    def __init__(self, cursor_value: str = None):
-        self.cursor_value = cursor_value
-    
-    def encode(self, data: Dict[str, Any]) -> str:
-        """Encode cursor data to base64 string"""
-        if not data:
-            return None
-        json_str = json.dumps(data)
-        return urlsafe_b64encode(json_str.encode()).decode()
-    
-    def decode(self, cursor: str) -> Dict[str, Any]:
-        """Decode base64 cursor string to dict"""
-        if not cursor:
-            return {}
-        try:
-            json_str = urlsafe_b64decode(cursor).decode()
-            return json.loads(json_str)
-        except:
-            return {}
+def paginate(page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100)):
+    return OffsetPagination(page, page_size)
 
 
-def paginate(
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(10, ge=1, le=100, description="Page size (max 100)")
-) -> OffsetPaginationResult:
-    """
-    FastAPI dependency for pagination.
-    
-    This dependency provides both offset and cursor-based pagination
-    depending on whether a cursor parameter is provided.
-    """
-    # For offset-based pagination
-    if page and page_size:
-        return OffsetPaginationResult(
-            items=[],
-            total=0,
-            page=page,
-            page_size=page_size,
-            total_pages=0,
-            has_next=False,
-            has_previous=False
-        )
-    
-    # For cursor-based pagination
-    # This would be implemented in a real scenario with proper cursor handling
-    return OffsetPaginationResult(
-        items=[],
-        total=0,
-        page=1,
-        page_size=10,
-        total_pages=0,
-        has_next=False,
-        has_previous=False
-    )
+class OffsetPagination:
+    def __init__(self, page: int, page_size: int):
+        self.page = page
+        self.page_size = page_size
+        self.offset = (page - 1) * page_size
+
+    def get_paginated_response(self, items: list, total: int):
+        total_pages = (total + self.page_size - 1) // self.page
+        return {
+            "items": items,
+            "total": total,
+            "page": self.page,
+            "page_size": self.page_size,
+            "total_pages": total_pages,
+            "has_next": self.page < total_pages,
+            "has_previous": self.page > 1
+        }
 
 
-def get_pagination_info(
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(10, ge=1, le=100, description="Page size (max 100)"))
-    -> OffsetPaginationResult:
-    """
-    Get pagination information for offset-based pagination.
-    """
-    return OffsetPaginationResult(
-        items=[],
-        total=0,
-        page=page,
-        page_size=page_size,
-        total_pages=0,
-        has_next=False,
-        has_previous=False
-    )
+def paginate_cursor(cursor: str = Query(None), limit: int = Query(50, ge=1, le=100)):
+    return CursorPagination(cursor, limit)
 
 
-def get_cursor_pagination_info(
-    cursor: str = Query(None, description="Cursor for pagination"))
-    -> OffsetPaginationResult:
-    """
-    Get pagination information for cursor-based pagination.
-    """
-    # Decode cursor if provided
-    cursor_data = {}
-    if cursor:
-        try:
-            cursor_data = Cursor().decode(cursor)
-        except:
-            pass
-    
-    return OffsetPaginationResult(
-        items=[],
-        total=0,
-        page=1,
-        page_size=10,
-        total_pages=0,
-        has_next=False,
-        has_previous=False
-    )
+class CursorPagination:
+    def __init__(self, cursor, limit):
+        self.cursor = cursor
+        self.limit = limit
 
-
-def get_pagination(
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(10, ge=1, le=100, description="Page size (max 100)"))
-    -> OffsetPaginationResult:
-    """
-    Get pagination information for both offset and cursor-based pagination.
-    """
-    # Handle offset-based pagination
-    if page and page_size:
-        return get_pagination_info(page=page, page_size=page_size)
-    
-    # Handle cursor-based pagination
-    return get_cursor_pagination_info()
+    def get_paginated_response(self, items: list, total: int, next_cursor: str = None, previous_cursor: str = None):
+        return {
+            "items": items,
+            "total": total,
+            "next_cursor": next_cursor,
+            "previous_cursor": previous_cursor
+        }
