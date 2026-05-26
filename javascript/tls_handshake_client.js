@@ -2,10 +2,6 @@
 
 const crypto = require('crypto');
 
-// ============================================================================
-// Constants
-// ============================================================================
-
 const TLS_VERSION = {
   TLS_1_2: 0x0303,
   TLS_1_3: 0x0304,
@@ -26,6 +22,8 @@ const EXTENSION_TYPE = {
   SIGNATURE_ALGORITHMS: 0x000d,
   SUPPORTED_VERSIONS: 0x002b,
   KEY_SHARE: 0x0033,
+  PSK_KEY_EXCHANGE_MODES: 0x002d,
+  PRE_SHARED_KEY: 0x0029,
 };
 
 const CIPHER_SUITES = {
@@ -45,10 +43,6 @@ const NAMED_GROUP = {
   SECP256R1: 0x0017,
 };
 
-// ============================================================================
-// Custom Error
-// ============================================================================
-
 class TLSError extends Error {
   constructor(message, alertCode = 80) {
     super(message);
@@ -56,10 +50,6 @@ class TLSError extends Error {
     this.alertCode = alertCode;
   }
 }
-
-// ============================================================================
-// TLSHandshakeClient
-// ============================================================================
 
 class TLSHandshakeClient {
   constructor(options = {}) {
@@ -77,10 +67,6 @@ class TLSHandshakeClient {
     this.transcript = [];
   }
 
-  // --------------------------------------------------------------------------
-  // ClientHello
-  // --------------------------------------------------------------------------
-
   generateClientHello() {
     const sessionId = crypto.randomBytes(32);
     const cipherSuiteBytes = Buffer.alloc(this.offeredCipherSuites.length * 2);
@@ -97,13 +83,13 @@ class TLSHandshakeClient {
     ]);
 
     const body = Buffer.concat([
-      this._uint16(TLS_VERSION.TLS_1_2), // legacy version for compatibility
+      this._uint16(TLS_VERSION.TLS_1_2),
       this.clientRandom,
       Buffer.from([sessionId.length]),
       sessionId,
       this._uint16(cipherSuiteBytes.length),
       cipherSuiteBytes,
-      Buffer.from([0x01, 0x00]),          // compression methods: null
+      Buffer.from([0x01, 0x00]),
       this._uint16(extensions.length),
       extensions,
     ]);
@@ -118,10 +104,6 @@ class TLSHandshakeClient {
     return handshakeMsg;
   }
 
-  // --------------------------------------------------------------------------
-  // ServerHello parsing
-  // --------------------------------------------------------------------------
-
   parseServerHello(buffer) {
     if (!Buffer.isBuffer(buffer) || buffer.length < 6) {
       throw new TLSError('ServerHello message too short', 50);
@@ -129,13 +111,10 @@ class TLSHandshakeClient {
 
     const handshakeType = buffer.readUInt8(0);
     if (handshakeType !== HANDSHAKE_TYPE.SERVER_HELLO) {
-      throw new TLSError(
-        `Expected ServerHello (0x02), got 0x${handshakeType.toString(16)}`,
-        10,
-      );
+      throw new TLSError('Expected ServerHello (0x02), got 0x' + handshakeType.toString(16), 10);
     }
 
-    let offset = 4; // skip type (1) + length (3)
+    let offset = 4;
 
     const legacyVersion = buffer.readUInt16BE(offset);
     offset += 2;
@@ -152,12 +131,8 @@ class TLSHandshakeClient {
     const serverCipherSuite = buffer.readUInt16BE(offset);
     offset += 2;
 
-    // Validate that the server picked a cipher suite we actually offered
     if (!this.offeredCipherSuites.includes(serverCipherSuite)) {
-      throw new TLSError(
-        `Server selected cipher suite 0x${serverCipherSuite.toString(16)} not in offered list`,
-        47,
-      );
+      throw new TLSError('Server selected cipher suite 0x' + serverCipherSuite.toString(16) + ' not in offered list', 47);
     }
 
     this.negotiatedCipherSuite = serverCipherSuite;
@@ -175,46 +150,27 @@ class TLSHandshakeClient {
 
     this.transcript.push(buffer);
 
-    return {
-      serverRandom,
-      cipherSuite: serverCipherSuite,
-      hash: this.negotiatedHash,
-    };
+    return { serverRandom, cipherSuite: serverCipherSuite, hash: this.negotiatedHash };
   }
-
-  // --------------------------------------------------------------------------
-  // Key derivation (HKDF-based)
-  // --------------------------------------------------------------------------
 
   deriveHandshakeKeys(sharedSecret) {
     if (!this.negotiatedHash) {
       throw new TLSError('Cipher suite not yet negotiated');
     }
 
-    const hash = this.negotiatedHash; // uses the negotiated hash, not hardcoded
+    const hash = this.negotiatedHash;
     const hashLen = hash === 'sha384' ? 48 : 32;
     const zeroes = Buffer.alloc(hashLen);
 
-    // Early secret
     const earlySecret = this._hkdfExtract(hash, Buffer.alloc(hashLen), zeroes);
-
-    // Derive secret for handshake
     const derivedSecret = this._deriveSecret(hash, earlySecret, 'derived', Buffer.alloc(0));
-
-    // Handshake secret
     const handshakeSecret = this._hkdfExtract(hash, derivedSecret, sharedSecret);
 
-    // Transcript hash
     const transcriptData = Buffer.concat(this.transcript);
     const transcriptHash = crypto.createHash(hash).update(transcriptData).digest();
 
-    // Client and server handshake traffic secrets
-    const clientSecret = this._deriveSecret(
-      hash, handshakeSecret, 'c hs traffic', transcriptHash,
-    );
-    const serverSecret = this._deriveSecret(
-      hash, handshakeSecret, 's hs traffic', transcriptHash,
-    );
+    const clientSecret = this._deriveSecret(hash, handshakeSecret, 'c hs traffic', transcriptHash);
+    const serverSecret = this._deriveSecret(hash, handshakeSecret, 's hs traffic', transcriptHash);
 
     const keyLen = CIPHER_SUITE_INFO[this.negotiatedCipherSuite].keyLen;
 
@@ -227,10 +183,6 @@ class TLSHandshakeClient {
     };
   }
 
-  // --------------------------------------------------------------------------
-  // Certificate verification
-  // --------------------------------------------------------------------------
-
   verifyServerCertificate(certChain) {
     if (!Array.isArray(certChain) || certChain.length === 0) {
       throw new TLSError('Empty certificate chain', 42);
@@ -238,149 +190,93 @@ class TLSHandshakeClient {
 
     for (let i = 0; i < certChain.length; i++) {
       const cert = certChain[i];
-
       if (!cert || !cert.subject || !cert.issuer) {
-        throw new TLSError(`Malformed certificate at index ${i}`, 43);
+        throw new TLSError('Malformed certificate at index ' + i, 43);
       }
-
-      // Check certificate expiry — both notBefore and notAfter
       const now = new Date();
       if (cert.notBefore && now < new Date(cert.notBefore)) {
-        throw new TLSError(`Certificate at index ${i} is not yet valid`, 45);
+        throw new TLSError('Certificate at index ' + i + ' is not yet valid', 45);
       }
       if (cert.notAfter && now > new Date(cert.notAfter)) {
-        throw new TLSError(`Certificate at index ${i} has expired`, 45);
+        throw new TLSError('Certificate at index ' + i + ' has expired', 45);
       }
-
-      // Verify hostname on leaf certificate
       if (i === 0) {
         const validForHost = this._matchHostname(cert, this.hostname);
         if (!validForHost) {
-          throw new TLSError(
-            `Certificate not valid for hostname "${this.hostname}"`,
-            42,
-          );
+          throw new TLSError('Certificate not valid for hostname "' + this.hostname + '"', 42);
         }
       }
-
-      // Verify chain linkage (issuer of current == subject of next)
       if (i < certChain.length - 1) {
         const issuerCert = certChain[i + 1];
         if (cert.issuer !== issuerCert.subject) {
-          throw new TLSError(
-            `Certificate chain broken at index ${i}: issuer mismatch`,
-            42,
-          );
+          throw new TLSError('Certificate chain broken at index ' + i + ': issuer mismatch', 42);
         }
       }
     }
-
     return true;
   }
-
-  // --------------------------------------------------------------------------
-  // Finished hash computation
-  // --------------------------------------------------------------------------
 
   computeFinishedHash(baseKey, transcript) {
     if (!this.negotiatedHash) {
       throw new TLSError('Hash algorithm not negotiated');
     }
-
-    // Use the negotiated hash algorithm, not a hardcoded one
     const hash = this.negotiatedHash;
     const hashLen = hash === 'sha384' ? 48 : 32;
-
-    const finishedKey = this._hkdfExpandLabel(
-      hash, baseKey, 'finished', Buffer.alloc(0), hashLen,
-    );
-
-    const transcriptData = Buffer.isBuffer(transcript)
-      ? transcript
-      : Buffer.concat(transcript);
-
+    const finishedKey = this._hkdfExpandLabel(hash, baseKey, 'finished', Buffer.alloc(0), hashLen);
+    const transcriptData = Buffer.isBuffer(transcript) ? transcript : Buffer.concat(transcript);
     const transcriptHash = crypto.createHash(hash).update(transcriptData).digest();
-
-    const verifyData = crypto.createHmac(hash, finishedKey)
-      .update(transcriptHash)
-      .digest();
-
+    const verifyData = crypto.createHmac(hash, finishedKey).update(transcriptHash).digest();
     return verifyData;
   }
-
-  // --------------------------------------------------------------------------
-  // ECDH key exchange
-  // --------------------------------------------------------------------------
 
   performKeyExchange(serverPublicKey) {
     if (!Buffer.isBuffer(serverPublicKey) || serverPublicKey.length === 0) {
       throw new TLSError('Invalid server public key', 47);
     }
-
     try {
-      const sharedSecret = this.ecdh.computeSecret(serverPublicKey);
-      return sharedSecret;
+      return this.ecdh.computeSecret(serverPublicKey);
     } catch (err) {
-      throw new TLSError(`Key exchange failed: ${err.message}`, 40);
+      throw new TLSError('Key exchange failed: ' + err.message, 40);
     }
   }
 
-  // ==========================================================================
-  // Private helpers
-  // ==========================================================================
-
   _buildSNIExtension(hostname) {
     const nameBytes = Buffer.from(hostname, 'ascii');
-    const nameEntry = Buffer.concat([
-      Buffer.from([0x00]),             // host_name type
-      this._uint16(nameBytes.length),
-      nameBytes,
-    ]);
+    const nameEntry = Buffer.concat([Buffer.from([0x00]), this._uint16(nameBytes.length), nameBytes]);
     const nameList = Buffer.concat([this._uint16(nameEntry.length), nameEntry]);
     return this._wrapExtension(EXTENSION_TYPE.SERVER_NAME, nameList);
   }
 
   _buildSupportedVersionsExtension() {
-    const versions = Buffer.alloc(3);
-    versions.writeUInt8(2, 0);                         // 2 bytes of version data
-    versions.writeUInt16BE(TLS_VERSION.TLS_1_3, 1);    // TLS 1.3
+    const versions = Buffer.alloc(5);
+    versions.writeUInt8(4, 0);
+    versions.writeUInt16BE(TLS_VERSION.TLS_1_3, 1);
+    versions.writeUInt16BE(TLS_VERSION.TLS_1_2, 3);
     return this._wrapExtension(EXTENSION_TYPE.SUPPORTED_VERSIONS, versions);
   }
 
   _buildSupportedGroupsExtension() {
     const groups = Buffer.alloc(6);
-    groups.writeUInt16BE(4, 0);                   // 4 bytes follow
+    groups.writeUInt16BE(4, 0);
     groups.writeUInt16BE(NAMED_GROUP.X25519, 2);
     groups.writeUInt16BE(NAMED_GROUP.SECP256R1, 4);
     return this._wrapExtension(EXTENSION_TYPE.SUPPORTED_GROUPS, groups);
   }
 
   _buildSignatureAlgorithmsExtension() {
-    const algos = Buffer.from([
-      0x00, 0x04,       // length: 4 bytes (2 algorithms)
-      0x04, 0x03,       // ecdsa_secp256r1_sha256
-      0x08, 0x04,       // rsa_pss_rsae_sha256
-    ]);
+    const algos = Buffer.from([0x00, 0x04, 0x04, 0x03, 0x08, 0x04]);
     return this._wrapExtension(EXTENSION_TYPE.SIGNATURE_ALGORITHMS, algos);
   }
 
   _buildKeyShareExtension() {
     const publicKey = this.ecdh.getPublicKey();
-    const entry = Buffer.concat([
-      this._uint16(NAMED_GROUP.SECP256R1),
-      this._uint16(publicKey.length),
-      publicKey,
-    ]);
+    const entry = Buffer.concat([this._uint16(NAMED_GROUP.SECP256R1), this._uint16(publicKey.length), publicKey]);
     const payload = Buffer.concat([this._uint16(entry.length), entry]);
     return this._wrapExtension(EXTENSION_TYPE.KEY_SHARE, payload);
   }
 
   _wrapExtension(type, data) {
-    return Buffer.concat([
-      this._uint16(type),
-      this._uint16(data.length),
-      data,
-    ]);
+    return Buffer.concat([this._uint16(type), this._uint16(data.length), data]);
   }
 
   _hkdfExtract(hash, salt, ikm) {
@@ -388,7 +284,7 @@ class TLSHandshakeClient {
   }
 
   _hkdfExpandLabel(hash, secret, label, context, length) {
-    const tlsLabel = `tls13 ${label}`;
+    const tlsLabel = 'tls13 ' + label;
     const info = Buffer.concat([
       this._uint16(length),
       Buffer.from([tlsLabel.length]),
@@ -396,37 +292,28 @@ class TLSHandshakeClient {
       Buffer.from([context.length]),
       context,
     ]);
-
-    // HKDF-Expand using HMAC iteration
     const hashLen = hash === 'sha384' ? 48 : 32;
     const n = Math.ceil(length / hashLen);
     const okm = [];
     let prev = Buffer.alloc(0);
-
     for (let i = 1; i <= n; i++) {
-      prev = crypto.createHmac(hash, secret)
-        .update(Buffer.concat([prev, info, Buffer.from([i])]))
-        .digest();
+      prev = crypto.createHmac(hash, secret).update(Buffer.concat([prev, info, Buffer.from([i])])).digest();
       okm.push(prev);
     }
-
     return Buffer.concat(okm).slice(0, length);
   }
 
   _deriveSecret(hash, secret, label, messages) {
-    const msgHash = Buffer.isBuffer(messages) && messages.length > 0
-      ? messages
-      : crypto.createHash(hash).update(messages).digest();
-
+    const msgHash = (Buffer.isBuffer(messages) && messages.length > 0) ? messages : crypto.createHash(hash).update(messages).digest();
     return this._hkdfExpandLabel(hash, secret, label, msgHash, msgHash.length);
   }
 
   _matchHostname(cert, hostname) {
     if (cert.subjectAltNames && Array.isArray(cert.subjectAltNames)) {
-      return cert.subjectAltNames.some((san) => {
+      return cert.subjectAltNames.some(function(san) {
         if (san.startsWith('*.')) {
-          const wildcard = san.slice(2);
-          const domainPart = hostname.slice(hostname.indexOf('.') + 1);
+          var wildcard = san.slice(2);
+          var domainPart = hostname.slice(hostname.indexOf('.') + 1);
           return domainPart === wildcard;
         }
         return san === hostname;
@@ -436,13 +323,13 @@ class TLSHandshakeClient {
   }
 
   _uint16(value) {
-    const buf = Buffer.alloc(2);
+    var buf = Buffer.alloc(2);
     buf.writeUInt16BE(value, 0);
     return buf;
   }
 
   _uint24(value) {
-    const buf = Buffer.alloc(3);
+    var buf = Buffer.alloc(3);
     buf.writeUInt8((value >> 16) & 0xff, 0);
     buf.writeUInt8((value >> 8) & 0xff, 1);
     buf.writeUInt8(value & 0xff, 2);
