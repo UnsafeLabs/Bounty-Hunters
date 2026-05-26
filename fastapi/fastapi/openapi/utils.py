@@ -242,7 +242,8 @@ def get_openapi_operation_metadata(
     operation["summary"] = generate_operation_summary(route=route, method=method)
     if route.description:
         operation["description"] = route.description
-    operation_id = route.operation_id or route.unique_id
+    base_operation_id = route.operation_id or route.unique_id
+    operation_id = base_operation_id
     if operation_id in operation_ids:
         endpoint_name = getattr(route.endpoint, "__name__", "<unnamed_endpoint>")
         message = f"Duplicate Operation ID {operation_id} for function {endpoint_name}"
@@ -250,6 +251,12 @@ def get_openapi_operation_metadata(
         if file_name:
             message += f" at {file_name}"
         warnings.warn(message, stacklevel=1)
+        if route.operation_id is None:
+            suffix = 2
+            operation_id = f"{base_operation_id}_{suffix}"
+            while operation_id in operation_ids:
+                suffix += 1
+                operation_id = f"{base_operation_id}_{suffix}"
     operation_ids.add(operation_id)
     operation["operationId"] = operation_id
     if route.deprecated:
