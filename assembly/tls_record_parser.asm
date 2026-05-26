@@ -229,7 +229,14 @@ parse_tls_record:
     call print_string
     pop rdi
     ; Application data is encrypted, just report the length
-    ; No TLS 1.3 inner content type detection is performed
+    ; Detect TLS 1.3 inner content type from the first payload byte
+    cmp ecx, 1
+    jl .parse_done
+    movzx eax, byte [rdi]
+    cmp eax, 0x15
+    je .handle_alert
+    cmp eax, 0x16
+    je .handle_handshake
     jmp .parse_done
 
 .handle_heartbeat:
