@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Maximum number of cached sessions before eviction kicks in.
@@ -68,7 +68,7 @@ pub struct SessionCache {
     /// Thread-safe reference to the inner cache map.
     // BUG(trap2): Arc alone does not provide interior mutability or
     // synchronisation.  Concurrent callers can race on the HashMap.
-    cache: Arc<HashMap<String, SessionTicket>>,
+    cache: Arc<RwLock<HashMap<String, SessionTicket>>>,
     encryption_key: EncryptionKey,
     max_size: usize,
 }
