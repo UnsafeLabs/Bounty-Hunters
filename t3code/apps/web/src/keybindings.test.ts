@@ -16,7 +16,9 @@ import {
   isOpenFavoriteEditorShortcut,
   isTerminalClearShortcut,
   isTerminalCloseShortcut,
+  isTerminalCopyShortcut,
   isTerminalNewShortcut,
+  isTerminalPasteShortcut,
   isTerminalSplitShortcut,
   isTerminalToggleShortcut,
   resolveShortcutCommand,
@@ -627,6 +629,47 @@ describe("isTerminalClearShortcut", () => {
     assert.isFalse(
       isTerminalClearShortcut(event({ type: "keyup", key: "l", ctrlKey: true }), "Linux"),
     );
+  });
+});
+
+describe("isTerminalCopyShortcut", () => {
+  it("matches Ctrl+Shift+C on non-macOS platforms", () => {
+    assert.isTrue(
+      isTerminalCopyShortcut(event({ key: "c", ctrlKey: true, shiftKey: true }), "Linux"),
+    );
+  });
+
+  it("matches Cmd+C on macOS", () => {
+    assert.isTrue(isTerminalCopyShortcut(event({ key: "c", metaKey: true }), "MacIntel"));
+  });
+
+  it("does not treat Ctrl+C as terminal copy on non-macOS platforms", () => {
+    assert.isFalse(isTerminalCopyShortcut(event({ key: "c", ctrlKey: true }), "Linux"));
+  });
+
+  it("ignores non-keydown events", () => {
+    assert.isFalse(
+      isTerminalCopyShortcut(
+        event({ type: "keyup", key: "c", ctrlKey: true, shiftKey: true }),
+        "Linux",
+      ),
+    );
+  });
+});
+
+describe("isTerminalPasteShortcut", () => {
+  it("matches Ctrl+Shift+V on non-macOS platforms", () => {
+    assert.isTrue(
+      isTerminalPasteShortcut(event({ key: "v", ctrlKey: true, shiftKey: true }), "Win32"),
+    );
+  });
+
+  it("matches Cmd+V on macOS", () => {
+    assert.isTrue(isTerminalPasteShortcut(event({ key: "v", metaKey: true }), "MacIntel"));
+  });
+
+  it("ignores Ctrl+V on non-macOS platforms", () => {
+    assert.isFalse(isTerminalPasteShortcut(event({ key: "v", ctrlKey: true }), "Linux"));
   });
 });
 

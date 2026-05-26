@@ -19,6 +19,7 @@ import {
   useState,
 } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
+import { toastManager } from "~/components/ui/toast";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
 import { openInPreferredEditor } from "../editorPreferences";
 import {
@@ -33,7 +34,9 @@ import {
   isDiffToggleShortcut,
   isTerminalClearShortcut,
   isTerminalCloseShortcut,
+  isTerminalCopyShortcut,
   isTerminalNewShortcut,
+  isTerminalPasteShortcut,
   isTerminalSplitShortcut,
   isTerminalToggleShortcut,
   terminalDeleteShortcutData,
@@ -415,6 +418,57 @@ export function TerminalViewport({
       }
     };
 
+    const copyTerminalSelection = async () => {
+      const activeTerminal = terminalRef.current;
+      if (!activeTerminal?.hasSelection()) return;
+      const selectedText = activeTerminal.getSelection();
+      if (selectedText.length === 0) return;
+
+      if (!navigator.clipboard?.writeText) {
+        toastManager.add({
+          type: "error",
+          title: "Terminal clipboard unavailable",
+        });
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(selectedText);
+        toastManager.add({
+          type: "success",
+          title: "Terminal selection copied",
+        });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Failed to copy terminal selection",
+          description: error instanceof Error ? error.message : "Clipboard write failed.",
+        });
+      }
+    };
+
+    const pasteClipboardText = async () => {
+      if (!navigator.clipboard?.readText) {
+        toastManager.add({
+          type: "error",
+          title: "Terminal clipboard unavailable",
+        });
+        return;
+      }
+
+      try {
+        const clipboardText = await navigator.clipboard.readText();
+        if (clipboardText.length === 0) return;
+        await sendTerminalInput(clipboardText, "Failed to paste terminal input");
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Failed to paste terminal input",
+          description: error instanceof Error ? error.message : "Clipboard read failed.",
+        });
+      }
+    };
+
     terminal.attachCustomKeyEventHandler((event) => {
       const currentKeybindings = keybindingsRef.current;
       const options = { context: { terminalFocus: true, terminalOpen: true } };
@@ -425,6 +479,23 @@ export function TerminalViewport({
         isTerminalCloseShortcut(event, currentKeybindings, options) ||
         isDiffToggleShortcut(event, currentKeybindings, options)
       ) {
+        return false;
+      }
+
+      if (isTerminalCopyShortcut(event)) {
+        if (!terminal.hasSelection()) {
+          return true;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        void copyTerminalSelection();
+        return false;
+      }
+
+      if (isTerminalPasteShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        void pasteClipboardText();
         return false;
       }
 
