@@ -50,7 +50,7 @@ cd "${DEPLOY_DIR}" && npm run build
 
 # Copy nginx configuration
 log_message "Updating nginx configuration..."
-cp /Users/stacylia/projects/webapp/nginx.conf "${NGINX_CONF}"
+cp "${DEPLOY_DIR}/nginx.conf" "${NGINX_CONF}"
 nginx -t
 if [ $? -ne 0 ]; then
     log_message "ERROR: Nginx configuration test failed"
