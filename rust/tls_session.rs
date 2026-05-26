@@ -234,7 +234,14 @@ impl SessionCache {
         // BUG(trap5): uses the constant ENCRYPTION_NONCE for every call
         // instead of generating a fresh random nonce.  Nonce reuse with
         // the same key breaks AEAD confidentiality guarantees.
-        let nonce = ENCRYPTION_NONCE;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_nanos();
+        let mut nonce = [0u8; 12];
+        nonce[..8].copy_from_slice(&now.to_le_bytes()[..8]);
+        // Mix in remaining bytes
+        nonce[8..12].copy_from_slice(&now.to_le_bytes()[..4]);
 
         let key = &self.encryption_key.key_material;
         let mut ciphertext = Vec::with_capacity(nonce.len() + plaintext.len());
