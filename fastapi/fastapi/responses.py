@@ -1,8 +1,12 @@
+import csv
 import importlib
+import io
+from collections.abc import AsyncIterable, Mapping, Sequence
 from typing import Any, Protocol, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
 from fastapi.sse import EventSourceResponse as EventSourceResponse  # noqa
+from starlette.background import BackgroundTask
 from starlette.responses import FileResponse as FileResponse  # noqa
 from starlette.responses import HTMLResponse as HTMLResponse  # noqa
 from starlette.responses import JSONResponse as JSONResponse  # noqa
@@ -24,6 +28,46 @@ class _OrjsonModule(Protocol):
     def dumps(self, __obj: Any, *, option: int = ...) -> bytes: ...
 
 
+CSVRow = Mapping[str, Any] | Sequence[Any]
+
+
+def _render_csv_row(row: Sequence[Any], delimiter: str) -> str:
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, delimiter=delimiter, lineterminator="\r\n")
+    writer.writerow(row)
+    return output.getvalue()
+
+
+def _csv_values(row: CSVRow, headers: Sequence[str] | None) -> Sequence[Any]:
+    if isinstance(row, Mapping):
+        if headers is not None:
+            return [row.get(header, "") for header in headers]
+        return list(row.values())
+    return row
+
+
+async def _stream_csv_rows(
+    rows: AsyncIterable[CSVRow],
+    *,
+    headers: Sequence[str] | None,
+    delimiter: str,
+) -> AsyncIterable[str]:
+    if headers is not None:
+        yield _render_csv_row(headers, delimiter)
+    async for row in rows:
+        yield _render_csv_row(_csv_values(row, headers), delimiter)
+
+
+def _sanitize_csv_filename(filename: str) -> str:
+    return (
+        filename.replace("\\", "_")
+        .replace("/", "_")
+        .replace("\r", "")
+        .replace("\n", "")
+        .replace('"', "")
+    )
+
+
 try:
     ujson = cast(_UjsonModule, importlib.import_module("ujson"))
 except ModuleNotFoundError:  # pragma: nocover
@@ -34,6 +78,39 @@ try:
     orjson = cast(_OrjsonModule, importlib.import_module("orjson"))
 except ModuleNotFoundError:  # pragma: nocover
     orjson = None  # type: ignore[assignment]
+
+
+class StreamingCSVResponse(StreamingResponse):
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        rows: AsyncIterable[CSVRow],
+        *,
+        headers: Sequence[str] | None = None,
+        filename: str = "export.csv",
+        delimiter: str = ",",
+        status_code: int = 200,
+        http_headers: Mapping[str, str] | None = None,
+        background: BackgroundTask | None = None,
+    ) -> None:
+        if len(delimiter) != 1:
+            raise ValueError("delimiter must be a single character")
+
+        safe_filename = _sanitize_csv_filename(filename)
+        response_headers = {
+            "Content-Disposition": f'attachment; filename="{safe_filename}"'
+        }
+        if http_headers is not None:
+            response_headers.update(http_headers)
+
+        super().__init__(
+            _stream_csv_rows(rows, headers=headers, delimiter=delimiter),
+            status_code=status_code,
+            headers=response_headers,
+            media_type=self.media_type,
+            background=background,
+        )
 
 
 @deprecated(
