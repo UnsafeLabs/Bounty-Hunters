@@ -84,6 +84,29 @@ export function resolveAssistantMessageCopyState({
   };
 }
 
+export function resolveTimelineKeyboardNavigationIndex(input: {
+  rowCount: number;
+  currentIndex: number;
+  key: string;
+}): number | null {
+  if (input.rowCount <= 0 || input.currentIndex < 0 || input.currentIndex >= input.rowCount) {
+    return null;
+  }
+
+  switch (input.key) {
+    case "ArrowDown":
+      return Math.min(input.rowCount - 1, input.currentIndex + 1);
+    case "ArrowUp":
+      return Math.max(0, input.currentIndex - 1);
+    case "Home":
+      return 0;
+    case "End":
+      return input.rowCount - 1;
+    default:
+      return null;
+  }
+}
+
 function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {
   const lastAssistantMessageIdByResponseKey = new Map<string, string>();
   let nullTurnResponseIndex = 0;

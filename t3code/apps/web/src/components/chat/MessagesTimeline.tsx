@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -45,6 +46,7 @@ import {
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
+  resolveTimelineKeyboardNavigationIndex,
   resolveAssistantMessageCopyState,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
@@ -98,6 +100,7 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const TIMELINE_KEYBOARD_ROW_SELECTOR = '[data-timeline-keyboard-row="true"]';
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -278,6 +281,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           maintainVisibleContentPosition
           onScroll={handleScroll}
           className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-label="Conversation messages"
+          aria-busy={isWorking}
+          data-timeline-keyboard-root="true"
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
         />
@@ -310,6 +319,11 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
+      data-timeline-keyboard-row="true"
+      tabIndex={0}
+      role="article"
+      aria-label={buildTimelineRowAriaLabel(row)}
+      onKeyDown={handleTimelineRowKeyDown}
     >
       {row.kind === "work" ? <WorkGroupSection groupedEntries={row.groupedEntries} /> : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
@@ -321,6 +335,41 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
     </div>
   );
 });
+
+function buildTimelineRowAriaLabel(row: TimelineRow): string {
+  if (row.kind === "message") {
+    return `${row.message.role} message`;
+  }
+  if (row.kind === "work") {
+    return "work log group";
+  }
+  if (row.kind === "proposed-plan") {
+    return "proposed plan";
+  }
+  return "assistant working";
+}
+
+function handleTimelineRowKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+  const root = event.currentTarget.closest('[data-timeline-keyboard-root="true"]');
+  if (!root) {
+    return;
+  }
+
+  const rows = Array.from(root.querySelectorAll<HTMLElement>(TIMELINE_KEYBOARD_ROW_SELECTOR));
+  const currentIndex = rows.indexOf(event.currentTarget);
+  const nextIndex = resolveTimelineKeyboardNavigationIndex({
+    rowCount: rows.length,
+    currentIndex,
+    key: event.key,
+  });
+
+  if (nextIndex === null) {
+    return;
+  }
+
+  event.preventDefault();
+  rows[nextIndex]?.focus();
+}
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);

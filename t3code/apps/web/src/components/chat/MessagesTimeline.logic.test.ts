@@ -5,6 +5,7 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveTimelineKeyboardNavigationIndex,
 } from "./MessagesTimeline.logic";
 
 describe("computeMessageDurationStart", () => {
@@ -201,6 +202,76 @@ describe("resolveAssistantMessageCopyState", () => {
       text: "Interim thought",
       visible: false,
     });
+  });
+});
+
+describe("resolveTimelineKeyboardNavigationIndex", () => {
+  it("moves through timeline rows with arrow keys", () => {
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        rowCount: 4,
+        currentIndex: 1,
+        key: "ArrowDown",
+      }),
+    ).toBe(2);
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        rowCount: 4,
+        currentIndex: 1,
+        key: "ArrowUp",
+      }),
+    ).toBe(0);
+  });
+
+  it("clamps navigation at timeline boundaries", () => {
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        rowCount: 3,
+        currentIndex: 0,
+        key: "ArrowUp",
+      }),
+    ).toBe(0);
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        rowCount: 3,
+        currentIndex: 2,
+        key: "ArrowDown",
+      }),
+    ).toBe(2);
+  });
+
+  it("supports Home and End shortcuts", () => {
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        rowCount: 5,
+        currentIndex: 2,
+        key: "Home",
+      }),
+    ).toBe(0);
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        rowCount: 5,
+        currentIndex: 2,
+        key: "End",
+      }),
+    ).toBe(4);
+  });
+
+  it("ignores unsupported keys or invalid indexes", () => {
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        rowCount: 3,
+        currentIndex: 1,
+        key: "Enter",
+      }),
+    ).toBeNull();
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        rowCount: 3,
+        currentIndex: -1,
+        key: "ArrowDown",
+      }),
+    ).toBeNull();
   });
 });
 
