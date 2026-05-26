@@ -13,13 +13,16 @@ A whispered prayer dissolving in the cloud.
 
 The moon ascends her throne of silver light,
 And casts her gaze upon the sleeping earth,
-[TODO: write lines 7-8 — must rhyme with "light" and "earth", ~10 syllables each, iambic pentameter]
+And wonders at the silence of the night,
+Each constellation marking her own berth.
 
 The rivers carry secrets to the sea,
 And mountains hold the memories of rain,
-[TODO: write lines 11-12 — must rhyme with "sea" and "rain", ~10 syllables each]
+The wind is but a whisper, wild and free,
+That echoes where the sunlight cannot stain.
 
-[TODO: write closing couplet (lines 13-14) — must rhyme with each other, provide resolution to the theme of cosmic solitude]
+Yet still I stand, a speck of dust, and find
+A universe reflected in my mind.
 
 ---
 
