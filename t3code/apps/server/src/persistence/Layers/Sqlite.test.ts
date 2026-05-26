@@ -1,14 +1,21 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { SqlitePersistenceMemory } from "./Sqlite.ts";
+import { makeSqlitePersistenceLive, SqlitePersistenceMemory } from "./Sqlite.ts";
 import { vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Layer from "effect/Layer";
 
-const layer = it.layer(SqlitePersistenceMemory);
+// Test Suite 1: In-Memory (Bypasses connection pooling)
+const memoryLayer = it.layer(
+  SqlitePersistenceMemory.pipe(Layer.provideMerge(NodeServices.layer))
+);
 
-layer("SqlitePool", (it) => {
-  it.effect("performs queries and supports healthCheck", () =>
+memoryLayer("SqlitePool - InMemory Database Path", (it) => {
+  it.effect("performs queries and supports healthCheck without pooling issues", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
 
@@ -25,16 +32,39 @@ layer("SqlitePool", (it) => {
       assert.equal(health.details, "ok");
     })
   );
+});
 
-  it.effect("applies PRAGMA reset on connection release", () =>
+// Test Suite 2: File-Based Database (Supports connection pooling & PRAGMA reset)
+const tempDbPath = path.join(__dirname, `test-${Math.random().toString(36).substring(7)}.db`);
+const fileLayer = it.layer(
+  makeSqlitePersistenceLive(tempDbPath).pipe(Layer.provideMerge(NodeServices.layer))
+);
+
+fileLayer("SqlitePool - File-Based Database Path", (it) => {
+  it.effect("applies connection pooling and runs PRAGMA reset on release", () =>
     Effect.gen(function* () {
+      // Setup cleanup finalizer inside the test block
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (fs.existsSync(tempDbPath)) {
+            try {
+              fs.unlinkSync(tempDbPath);
+            } catch (e) {
+              // Ignore cleanup issues
+            }
+          }
+        })
+      );
+
       const prepareSpy = vi.spyOn(DatabaseSync.prototype, "prepare");
       const sql = yield* SqlClient.SqlClient;
 
-      // Perform a basic query, which will acquire and release a connection
-      yield* sql`SELECT 1`;
+      // Perform queries to trigger connection checkout and return
+      const rows = yield* sql`SELECT 1 as val`;
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]?.val, 1);
 
-      // Verify that PRAGMA reset was prepared
+      // Verify PRAGMA reset was prepared and called when the connection checkout scope is closed
       const calls = prepareSpy.mock.calls.map((c) => c[0]);
       assert.deepInclude(calls, "PRAGMA reset;");
 
@@ -42,4 +72,3 @@ layer("SqlitePool", (it) => {
     })
   );
 });
-

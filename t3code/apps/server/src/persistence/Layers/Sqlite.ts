@@ -3,7 +3,6 @@ import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type * as Connection from "effect/unstable/sql/SqlConnection";
 import * as Pool from "effect/Pool";
 import * as Duration from "effect/Duration";
 import * as Scope from "effect/Scope";
@@ -39,13 +38,13 @@ const acquireConnection = (config: RuntimeSqliteLayerConfig) =>
   Effect.gen(function* () {
     const context = yield* Layer.build(makeRuntimeSqliteLayer(config));
     const client = Context.get(context, SqlClient.SqlClient);
-
-    yield* client`PRAGMA journal_mode = WAL;`;
-    yield* client`PRAGMA busy_timeout = 5000;`;
-    yield* client`PRAGMA synchronous = NORMAL;`;
-    yield* client`PRAGMA foreign_keys = ON;`;
-
     const connection = yield* client.reserve;
+
+    yield* connection.executeUnprepared("PRAGMA journal_mode = WAL;", [], undefined);
+    yield* connection.executeUnprepared("PRAGMA busy_timeout = 5000;", [], undefined);
+    yield* connection.executeUnprepared("PRAGMA synchronous = NORMAL;", [], undefined);
+    yield* connection.executeUnprepared("PRAGMA foreign_keys = ON;", [], undefined);
+
     return connection;
   });
 
@@ -73,7 +72,7 @@ export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(
         acquire: acquireConnection(config),
         min: dbPath === ":memory:" ? 1 : 1,
         max: dbPath === ":memory:" ? 1 : 5,
-        timeToLive: Duration.seconds(10),
+        timeToLive: Duration.seconds(60),
       });
 
       const baseContext = yield* Layer.build(makeRuntimeSqliteLayer(config));
@@ -104,10 +103,6 @@ export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(
         transformRows,
       });
 
-      // Run migrations on the pooled client!
-      const context = Context.make(SqlClient.SqlClient, client);
-      yield* runMigrations().pipe(Effect.provide(context));
-
       const healthCheck = () =>
         Effect.gen(function* () {
           const result = yield* client.unsafe("PRAGMA integrity_check;");
@@ -117,7 +112,13 @@ export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(
           return { status, details };
         });
 
-      return Object.assign(client, { healthCheck });
+      const sqlClient = Object.assign(client, { healthCheck });
+
+      // Run migrations on the pooled client!
+      const context = Context.make(SqlClient.SqlClient, sqlClient);
+      yield* runMigrations().pipe(Effect.provide(context));
+
+      return sqlClient;
     }),
   ).pipe(Layer.provide(Reactivity.layer));
 }, Layer.unwrap);
