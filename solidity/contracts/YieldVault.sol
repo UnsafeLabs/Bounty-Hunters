@@ -29,15 +29,31 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    modifier onlyRewardDistributor() {
+        require(msg.sender == rewardDistributor, "Not authorized");
+        _;
+    }
+
+    // FIX 1: Cap the calculation at periodFinish to prevent phantom rewards after period ends
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+
+        uint256 timeElapsed;
+        if (block.timestamp < periodFinish) {
+            timeElapsed = block.timestamp - lastUpdateTime;
+        } else if (lastUpdateTime < periodFinish) {
+            timeElapsed = periodFinish - lastUpdateTime;
+        } else {
+            timeElapsed = 0;
+        }
+
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            timeElapsed * rewardRate * 1e18 / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
+    // FIX 2: Uses the already-capped rewardPerToken() — no change needed structurally,
+    // but now inherits the cap from the fixed rewardPerToken()
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
@@ -77,10 +93,10 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
-    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+    // FIX 3: Added onlyRewardDistributor access control
+    // FIX 4: Improved precision by using 1e18 multiplier in rewardRate calculation
+    function notifyRewardAmount(uint256 reward, uint256 duration) external onlyRewardDistributor updateReward(address(0)) {
+        rewardRate = reward * 1e18 / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
     }

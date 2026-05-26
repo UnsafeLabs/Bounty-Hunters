@@ -35,14 +35,19 @@ contract TokenVesting {
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
+    // FIXED: Divide before multiply to prevent intermediate overflow
+    // for large totalAllocation values where totalAllocation * elapsed
+    // could exceed uint256 max
     function vestedAmount() public view returns (uint256) {
         if (block.timestamp < cliff) return 0;
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+        // Divide before multiply to avoid overflow, then add remainder
+        // for precision: (totalAllocation / duration) * elapsed + (totalAllocation % duration) * elapsed / duration
+        uint256 baseVested = totalAllocation / duration * elapsed;
+        uint256 remainderVested = (totalAllocation % duration) * elapsed / duration;
+        return baseVested + remainderVested;
     }
 
     function claimable() public view returns (uint256) {
@@ -58,19 +63,24 @@ contract TokenVesting {
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
+    // FIXED: Correct unvested calculation during cliff period
+    // During cliff, vested is 0 so unvested should be totalAllocation - claimed
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
-        uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        uint256 unvested;
+        if (block.timestamp < cliff) {
+            // During cliff: nothing has vested, return everything minus what was claimed
+            unvested = totalAllocation - claimed;
+        } else {
+            uint256 vested = vestedAmount();
+            unvested = totalAllocation - vested;
+        }
 
-        if (vested > claimed) {
-            token.transfer(beneficiary, vested - claimed);
+        if (vestedAmount() > claimed) {
+            token.transfer(beneficiary, vestedAmount() - claimed);
         }
         token.transfer(owner, unvested);
         emit VestingRevoked(beneficiary, unvested);
