@@ -151,4 +151,104 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       assert.equal(initialized.userAgent, "mock-codex-app-server");
     }),
   );
+
+  it.effect("requestStream yields chunks via Effect.Stream with timeout", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const scope = yield* Scope.make();
+      const clientLayer = CodexClient.layerCommand({
+        command: "bun",
+        args: ["run", yield* mockPeerPath],
+        cwd: path.join(import.meta.dirname, ".."),
+      });
+      const context = yield* Layer.buildWithScope(clientLayer, scope);
+
+      const chunks = yield* Effect.gen(function* () {
+        const client = yield* CodexClient.CodexAppServerClient;
+
+        yield* client.handleServerRequest("item/tool/requestUserInput", () =>
+          Effect.succeed({
+            answers: { approved: { answers: ["yes"] } },
+          }),
+        );
+        yield* client.handleServerNotification("item/agentMessage/delta", () => Effect.void);
+
+        yield* client.request("initialize", {
+          clientInfo: {
+            name: "effect-codex-app-server-test",
+            title: "Effect Codex App Server Test",
+            version: "0.0.0",
+          },
+          capabilities: {
+            experimentalApi: true,
+            optOutNotificationMethods: null,
+          },
+        });
+        yield* client.notify("initialized", undefined);
+
+        // Use requestStream for account/read
+        const stream = client.requestStream("account/read", {});
+        const collected = yield* Stream.runCollect(stream);
+        return Array.from(collected);
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+
+      // The stream should yield at least one result
+      assert.ok(chunks.length >= 1, "Stream should yield at least one chunk");
+      assert.equal(chunks[0]?.requiresOpenaiAuth, false);
+    }),
+  );
+
+  it.effect("requestStream and request produce equivalent results", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const scope = yield* Scope.make();
+      const clientLayer = CodexClient.layerCommand({
+        command: "bun",
+        args: ["run", yield* mockPeerPath],
+        cwd: path.join(import.meta.dirname, ".."),
+      });
+      const context = yield* Layer.buildWithScope(clientLayer, scope);
+
+      const [streamResult, requestResult] = yield* Effect.gen(function* () {
+        const client = yield* CodexClient.CodexAppServerClient;
+
+        yield* client.handleServerRequest("item/tool/requestUserInput", () =>
+          Effect.succeed({
+            answers: { approved: { answers: ["yes"] } },
+          }),
+        );
+        yield* client.handleServerNotification("item/agentMessage/delta", () => Effect.void);
+
+        yield* client.request("initialize", {
+          clientInfo: {
+            name: "effect-codex-app-server-test",
+            title: "Effect Codex App Server Test",
+            version: "0.0.0",
+          },
+          capabilities: {
+            experimentalApi: true,
+            optOutNotificationMethods: null,
+          },
+        });
+        yield* client.notify("initialized", undefined);
+
+        // Get result via request
+        const reqResult = yield* client.request("skills/list", {
+          cwds: [process.cwd()],
+        });
+
+        // Get result via requestStream
+        const streamResult = yield* Stream.runCollect(
+          client.requestStream("skills/list", { cwds: [process.cwd()] }),
+        );
+
+        return [Array.from(streamResult), reqResult] as const;
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+
+      // Both should produce the same data
+      assert.equal(streamResult.length, 1);
+      assert.equal(streamResult[0]?.data.length, requestResult.data.length);
+      assert.equal(streamResult[0]?.data[0]?.cwd, requestResult.data[0]?.cwd);
+    }),
+  );
 });

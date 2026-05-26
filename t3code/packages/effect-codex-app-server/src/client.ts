@@ -1,9 +1,12 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stdio from "effect/Stdio";
+import * as Stream from "effect/Stream";
+import * as Duration from "effect/Duration";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as CodexRpc from "./_generated/meta.gen.ts";
@@ -18,6 +21,8 @@ import {
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
 
 const DEFAULT_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
+const CHUNK_WARNING_TIMEOUT = Duration.seconds(30);
+const CHUNK_FAIL_TIMEOUT = Duration.seconds(120);
 
 export interface CodexAppServerClientOptions {
   readonly logIncoming?: boolean;
@@ -42,6 +47,10 @@ export interface CodexAppServerClientShape {
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
   ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexError.CodexAppServerError>;
+  readonly requestStream: <M extends CodexRpc.ClientRequestMethod>(
+    method: M,
+    payload: CodexRpc.ClientRequestParamsByMethod[M],
+  ) => Stream.Stream<CodexRpc.ClientRequestResponsesByMethod[M], CodexError.CodexAppServerError>;
   readonly notify: <M extends CodexRpc.ClientNotificationMethod>(
     method: M,
     payload: CodexRpc.ClientNotificationParamsByMethod[M],
@@ -218,6 +227,42 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       Effect.flatMap((encoded) => transport.notify(method, encoded)),
     );
 
+  const requestStream = <M extends CodexRpc.ClientRequestMethod>(
+    method: M,
+    payload: CodexRpc.ClientRequestParamsByMethod[M],
+  ): Stream.Stream<
+    CodexRpc.ClientRequestResponsesByMethod[M],
+    CodexError.CodexAppServerError
+  > => {
+    const responseSchema = getClientRequestResponseSchema(method);
+
+    return Stream.acquireRelease(
+      Effect.gen(function* () {
+        const encoded = yield* encodeOptionalPayload(
+          method,
+          getClientRequestParamSchema(method),
+          payload,
+        );
+        const raw = yield* transport.request(method, encoded);
+        return raw;
+      }),
+      () => Effect.void,
+    ).pipe(
+      Stream.flatMap((raw) =>
+        decodeOptionalPayload(method, responseSchema, raw).pipe(
+          Stream.fromEffect,
+        ),
+      ),
+      Stream.timeoutFail(
+        () => new CodexError.CodexAppServerTransportError({ detail: "Stream chunk timeout" }),
+        CHUNK_FAIL_TIMEOUT,
+      ),
+      Stream.tap(() =>
+        Effect.logDebug("Stream chunk received within timeout"),
+      ),
+    );
+  };
+
   return CodexAppServerClient.of({
     raw: {
       notifications: transport.incomingNotifications,
@@ -228,6 +273,7 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       respondError: transport.respondError,
     },
     request,
+    requestStream,
     notify,
     handleServerRequest: (method, handler) =>
       Effect.sync(() => {

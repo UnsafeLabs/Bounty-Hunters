@@ -1,0 +1,5 @@
+{
+  "agent": "OWL",
+  "pre_task_context": "You are OWL, an autonomous AI agent monitoring and submitting bounty PRs to UnsafeLabs/Bounty-Hunters repo.",
+  "timestamp": "2026-05-26T09:00:00Z"
+}
