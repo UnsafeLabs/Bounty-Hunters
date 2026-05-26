@@ -16,6 +16,7 @@ import * as CliError from "effect/unstable/cli/CliError";
 import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/unstable/cli";
 
+import packageJson from "../package.json" with { type: "json" };
 import { cli } from "./bin.ts";
 import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "./config.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -48,6 +49,14 @@ const captureStdout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       "";
     return { result, output };
   }).pipe(Effect.provide(Layer.mergeAll(CliRuntimeLayer, TestConsole.layer)));
+
+const currentRuntimeInfo = () => {
+  const bunRuntime = (globalThis as { readonly Bun?: { readonly version?: string } }).Bun;
+  return {
+    name: bunRuntime ? "bun" : "node",
+    version: bunRuntime?.version ?? process.versions.node,
+  };
+};
 
 const makeCliTestServerConfig = (baseDir: string) =>
   Effect.gen(function* () {
@@ -150,6 +159,18 @@ const withLiveProjectCliServer = <A, E, R>(baseDir: string, run: () => Effect.Ef
   });
 
 it.layer(NodeServices.layer)("bin cli parsing", (it) => {
+  it.effect("prints detailed version information from the version subcommand", () =>
+    Effect.gen(function* () {
+      const { output } = yield* captureStdout(runCliWithRuntime(["version"]));
+      const runtime = currentRuntimeInfo();
+
+      assert.equal(
+        output,
+        `t3code v${packageJson.version} (${runtime.name} ${runtime.version}, ${process.platform} ${process.arch})`,
+      );
+    }),
+  );
+
   it.effect("accepts the built-in lowercase log-level flag values", () =>
     runCliWithRuntime(["--log-level", "debug", "--version"]),
   );
