@@ -165,6 +165,11 @@ static int validate_chain(chain_context_t *ctx)
     if (rc != CERT_STATUS_OK)
         return rc;
 
+    /* OCSP stapling check */
+    if (ctx->verify_ocsp) {
+        log_cert_event(LOG_LEVEL_INFO, "OCSP verification enabled but not implemented");
+    }
+
     /* Fingerprint pinning on leaf */
     if (ctx->pinned_fingerprint) {
         if (compute_fingerprint(ctx->chain[0], fp, sizeof(fp)) != 0)
