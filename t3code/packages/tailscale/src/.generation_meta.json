@@ -1,0 +1,5 @@
+{
+  "agent": "OWL",
+  "initial_directives": "[ T3 Code ] Add Tailscale peer diagnostics with latency graph - Issue #844",
+  "date": "2026-05-26T00:00:00Z"
+}
