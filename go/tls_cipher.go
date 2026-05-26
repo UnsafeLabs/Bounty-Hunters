@@ -219,6 +219,16 @@ func (r *SuiteRegistry) SortByPreference(suites []*CipherSuite) []*CipherSuite {
 			return !si.IsAEAD && sj.IsAEAD
 		}
 
+		// On ARM64 prefer ChaCha20-Poly1305 over AES-GCM
+		if runtime.GOARCH == "arm64" {
+			if strings.Contains(si.Name, "CHACHA20") && !strings.Contains(sj.Name, "CHACHA20") {
+				return true
+			}
+			if strings.Contains(sj.Name, "CHACHA20") && !strings.Contains(si.Name, "CHACHA20") {
+				return false
+			}
+		}
+
 		// Higher strength first
 		if si.Strength != sj.Strength {
 			return si.Strength > sj.Strength
