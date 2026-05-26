@@ -23,10 +23,12 @@ import * as Schema from "effect/Schema";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
-const SIDEBAR_WIDTH = "16rem";
+const SIDEBAR_WIDTH = "280px";
 const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
 const SIDEBAR_WIDTH_ICON = "3rem";
-const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
+const SIDEBAR_RESIZE_DEFAULT_WIDTH = 280;
+const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 200;
+const SIDEBAR_RESIZE_DEFAULT_MAX_WIDTH = 500;
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed";
@@ -39,6 +41,7 @@ type SidebarContextProps = {
 };
 
 type SidebarResizableOptions = {
+  defaultWidth?: number;
   maxWidth?: number;
   minWidth?: number;
   onResize?: (width: number) => void;
@@ -54,6 +57,7 @@ type SidebarResizableOptions = {
 };
 
 type SidebarResolvedResizableOptions = {
+  defaultWidth: number;
   maxWidth: number;
   minWidth: number;
   onResize?: (width: number) => void;
@@ -192,7 +196,8 @@ function Sidebar({
 
     const options = typeof resizable === "boolean" ? {} : resizable;
     return {
-      maxWidth: options.maxWidth ?? Number.POSITIVE_INFINITY,
+      defaultWidth: options.defaultWidth ?? SIDEBAR_RESIZE_DEFAULT_WIDTH,
+      maxWidth: options.maxWidth ?? SIDEBAR_RESIZE_DEFAULT_MAX_WIDTH,
       minWidth: options.minWidth ?? SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH,
       storageKey: options.storageKey ?? null,
       ...(options.onResize ? { onResize: options.onResize } : {}),
@@ -338,6 +343,7 @@ function clampSidebarWidth(width: number, options: SidebarResolvedResizableOptio
 function SidebarRail({
   className,
   onClick,
+  onDoubleClick,
   onPointerCancel,
   onPointerDown,
   onPointerMove,
@@ -365,7 +371,7 @@ function SidebarRail({
   const resolvedResizable = sidebarInstance?.resizable ?? null;
   const canResize = resolvedResizable !== null && open;
   const railLabel = canResize ? "Resize Sidebar" : "Toggle Sidebar";
-  const railTitle = canResize ? "Drag to resize sidebar" : "Toggle Sidebar";
+  const railTitle = canResize ? "Drag to resize sidebar. Double-click to reset." : "Toggle Sidebar";
 
   const stopResize = React.useCallback(
     (pointerId: number) => {
@@ -543,6 +549,26 @@ function SidebarRail({
     [onClick, open, resolvedResizable, toggleSidebar],
   );
 
+  const handleDoubleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      onDoubleClick?.(event);
+      if (event.defaultPrevented || !resolvedResizable || !open) return;
+
+      const wrapper = event.currentTarget.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
+      if (!wrapper) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      const defaultWidth = clampSidebarWidth(resolvedResizable.defaultWidth, resolvedResizable);
+      wrapper.style.setProperty("--sidebar-width", `${defaultWidth}px`);
+      if (resolvedResizable.storageKey && typeof window !== "undefined") {
+        setLocalStorageItem(resolvedResizable.storageKey, defaultWidth, Schema.Finite);
+      }
+      resolvedResizable.onResize?.(defaultWidth);
+    },
+    [onDoubleClick, open, resolvedResizable],
+  );
+
   React.useEffect(() => {
     if (!resolvedResizable?.storageKey || typeof window === "undefined") return;
     const rail = railRef.current;
@@ -582,11 +608,13 @@ function SidebarRail({
         "group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:left-full",
         "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
         "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",
+        "hover:after:bg-sidebar-ring/60 focus-visible:after:bg-sidebar-ring/60",
         className,
       )}
       data-sidebar="rail"
       data-slot="sidebar-rail"
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       onPointerCancel={handlePointerCancel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
