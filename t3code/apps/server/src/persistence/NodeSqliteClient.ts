@@ -86,6 +86,12 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
   const makeConnection = Effect.gen(function* () {
     const scope = yield* Effect.scope;
     const db = openDatabase();
+
+    // Configure WAL mode and pragmas for concurrent access
+    db.exec("PRAGMA journal_mode=WAL");
+    db.exec("PRAGMA busy_timeout=5000");
+    db.exec("PRAGMA synchronous=NORMAL");
+
     yield* Scope.addFinalizer(
       scope,
       Effect.sync(() => db.close()),
