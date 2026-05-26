@@ -85,6 +85,11 @@ export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(
       const transformRows = tempStatement.transformRows;
 
       const pooledAcquirer = Pool.get(pool).pipe(
+        Effect.tap((connection) =>
+          Effect.addFinalizer(() =>
+            connection.executeUnprepared("PRAGMA reset;", [], undefined).pipe(Effect.orDie)
+          )
+        ),
         Effect.timeoutOrElse({
           duration: Duration.seconds(10),
           orElse: () => Effect.fail(new Error("Database connection acquisition timeout (10s)")),

@@ -2,6 +2,8 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
+import { vi } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 
 const layer = it.layer(SqlitePersistenceMemory);
 
@@ -23,4 +25,21 @@ layer("SqlitePool", (it) => {
       assert.equal(health.details, "ok");
     })
   );
+
+  it.effect("applies PRAGMA reset on connection release", () =>
+    Effect.gen(function* () {
+      const prepareSpy = vi.spyOn(DatabaseSync.prototype, "prepare");
+      const sql = yield* SqlClient.SqlClient;
+
+      // Perform a basic query, which will acquire and release a connection
+      yield* sql`SELECT 1`;
+
+      // Verify that PRAGMA reset was prepared
+      const calls = prepareSpy.mock.calls.map((c) => c[0]);
+      assert.deepInclude(calls, "PRAGMA reset;");
+
+      prepareSpy.mockRestore();
+    })
+  );
 });
+
