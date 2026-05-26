@@ -1,5 +1,10 @@
 import binascii
+import hashlib
+import math
+import secrets
+import time
 from base64 import b64decode
+from collections.abc import Callable
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -10,7 +15,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -217,6 +222,157 @@ class HTTPBasic(HTTPBase):
         if not separator:
             raise self.make_not_authenticated_error()
         return HTTPBasicCredentials(username=username, password=password)
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    def __init__(
+        self,
+        *,
+        max_attempts: int = 5,
+        window_seconds: int = 60,
+        verify_credentials: Callable[[HTTPBasicCredentials], bool] | None = None,
+        scheme_name: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme name.
+
+                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
+                """
+            ),
+        ] = None,
+        realm: Annotated[
+            str | None,
+            Doc(
+                """
+                HTTP Basic authentication realm.
+                """
+            ),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme description.
+
+                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
+                """
+            ),
+        ] = None,
+        auto_error: Annotated[
+            bool,
+            Doc(
+                """
+                By default, missing or invalid HTTP Basic authentication will
+                automatically cancel the request and send the client an error.
+                """
+            ),
+        ] = True,
+    ):
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be greater than 0")
+        if window_seconds < 1:
+            raise ValueError("window_seconds must be greater than 0")
+        super().__init__(
+            scheme_name=scheme_name,
+            realm=realm,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self.verify_credentials = verify_credentials
+        self._failed_attempts: dict[str, list[float]] = {}
+
+    @staticmethod
+    def hash_password(
+        password: str,
+        *,
+        salt: str | None = None,
+        iterations: int = 260000,
+    ) -> str:
+        if salt is None:
+            salt = secrets.token_hex(16)
+        derived = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), bytes.fromhex(salt), iterations
+        )
+        return f"pbkdf2_sha256${iterations}${salt}${derived.hex()}"
+
+    @staticmethod
+    def verify_password(password: str, password_hash: str) -> bool:
+        try:
+            algorithm, iterations, salt, expected = password_hash.split("$", 3)
+            if algorithm != "pbkdf2_sha256":
+                return False
+            derived = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                bytes.fromhex(salt),
+                int(iterations),
+            )
+        except (TypeError, ValueError):
+            return False
+        return secrets.compare_digest(derived.hex(), expected)
+
+    def _client_key(self, request: Request) -> str:
+        if request.client is None:
+            return "unknown"
+        return request.client.host
+
+    def _prune_attempts(self, client_key: str, now: float) -> list[float]:
+        attempts = [
+            attempt
+            for attempt in self._failed_attempts.get(client_key, [])
+            if now - attempt < self.window_seconds
+        ]
+        if attempts:
+            self._failed_attempts[client_key] = attempts
+        else:
+            self._failed_attempts.pop(client_key, None)
+        return attempts
+
+    def _retry_after(self, attempts: list[float], now: float) -> int:
+        if not attempts:
+            return self.window_seconds
+        return max(1, math.ceil(self.window_seconds - (now - attempts[0])))
+
+    def _lockout_error(self, attempts: list[float], now: float) -> HTTPException:
+        return HTTPException(
+            status_code=HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed authentication attempts",
+            headers={"Retry-After": str(self._retry_after(attempts, now))},
+        )
+
+    def _record_failure(self, client_key: str) -> None:
+        now = time.monotonic()
+        attempts = self._prune_attempts(client_key, now)
+        attempts.append(now)
+        self._failed_attempts[client_key] = attempts
+
+    def _reset_attempts(self, client_key: str) -> None:
+        self._failed_attempts.pop(client_key, None)
+
+    async def __call__(  # type: ignore
+        self, request: Request
+    ) -> HTTPBasicCredentials | None:
+        client_key = self._client_key(request)
+        now = time.monotonic()
+        attempts = self._prune_attempts(client_key, now)
+        if len(attempts) >= self.max_attempts:
+            raise self._lockout_error(attempts, now)
+
+        credentials = await super().__call__(request)
+        if credentials is None or self.verify_credentials is None:
+            return credentials
+        if self.verify_credentials(credentials):
+            self._reset_attempts(client_key)
+            return credentials
+
+        self._record_failure(client_key)
+        attempts = self._prune_attempts(client_key, time.monotonic())
+        if len(attempts) >= self.max_attempts:
+            raise self._lockout_error(attempts, time.monotonic())
+        raise self.make_not_authenticated_error()
 
 
 class HTTPBearer(HTTPBase):
