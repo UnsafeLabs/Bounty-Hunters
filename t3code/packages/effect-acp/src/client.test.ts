@@ -446,4 +446,177 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
       yield* Scope.close(scope, Exit.void);
     }),
   );
+
+  it.effect("re-authenticates on 401 and retries prompt when refreshToken is configured", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      const expiredSessionId = "session-expired-1";
+      const authCallCount = yield* Ref.make(0);
+      const expiredCallCount = yield* Ref.make(0);
+
+      const acp = yield* AcpClient.make(stdio, {
+        refreshToken: "test-refresh-token-abc",
+        onSessionExpired: (sessionId) =>
+          Effect.gen(function* () {
+            yield* Ref.update(authCallCount, (c) => c + 1);
+            assert.equal(sessionId, expiredSessionId);
+          }),
+      }).pipe(Effect.provideService(Scope.Scope, scope));
+
+      // Initialize
+      const initFiber = yield* acp.agent
+        .initialize({
+          protocolVersion: 1,
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+          },
+          clientInfo: { name: "effect-acp-test", version: "0.0.0" },
+        })
+        .pipe(Effect.forkScoped);
+
+      const initReq = yield* Queue.take(output);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(InitializeResponse, {
+          jsonrpc: "2.0",
+          id: "1",
+          result: {
+            protocolVersion: 1,
+            agentCapabilities: {},
+            agentInfo: { name: "mock-agent", version: "0.0.0" },
+          },
+        }),
+      );
+      yield* Fiber.join(initFiber);
+
+      // Authenticate
+      const authFiber = yield* acp.agent
+        .authenticate({ methodId: "cursor_login" })
+        .pipe(Effect.forkScoped);
+      const authReq = yield* Queue.take(output);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(
+          jsonRpcResponse(AcpSchema.AuthenticateResponse),
+          { jsonrpc: "2.0", id: "2", result: {} },
+        ),
+      );
+      yield* Fiber.join(authFiber);
+
+      // Prompt that returns 401 first, then succeeds after re-auth
+      const promptFiber = yield* acp.agent
+        .prompt({
+          sessionId: expiredSessionId,
+          prompt: [{ type: "text", text: "hello" }],
+        })
+        .pipe(Effect.forkScoped);
+
+      // First prompt request returns 401
+      const promptReq1 = yield* Queue.take(output);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(
+          jsonRpcResponse(AcpSchema.PromptResponse),
+          {
+            jsonrpc: "2.0",
+            id: "3",
+            error: { code: -32000, message: "Authentication required" },
+          },
+        ),
+      );
+
+      // Re-authenticate request
+      const reauthReq = yield* Queue.take(output);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(
+          jsonRpcResponse(AcpSchema.AuthenticateResponse),
+          { jsonrpc: "2.0", id: "4", result: {} },
+        ),
+      );
+
+      // Retried prompt succeeds
+      const promptReq2 = yield* Queue.take(output);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(
+          jsonRpcResponse(AcpSchema.PromptResponse),
+          { jsonrpc: "2.0", id: "5", result: { stopReason: "end_turn" } },
+        ),
+      );
+
+      const result = yield* Fiber.join(promptFiber);
+      assert.equal(result.stopReason, "end_turn");
+      assert.equal(yield* Ref.get(authCallCount), 1);
+
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
+  it.effect("fails with AcpAuthenticationError when no refreshToken and session expires", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+
+      const acp = yield* AcpClient.make(stdio, {
+        onSessionExpired: () => Effect.void,
+      }).pipe(Effect.provideService(Scope.Scope, scope));
+
+      // Initialize
+      const initFiber = yield* acp.agent
+        .initialize({
+          protocolVersion: 1,
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+          },
+          clientInfo: { name: "effect-acp-test", version: "0.0.0" },
+        })
+        .pipe(Effect.forkScoped);
+
+      yield* Queue.take(output);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(InitializeResponse, {
+          jsonrpc: "2.0",
+          id: "1",
+          result: {
+            protocolVersion: 1,
+            agentCapabilities: {},
+            agentInfo: { name: "mock-agent", version: "0.0.0" },
+          },
+        }),
+      );
+      yield* Fiber.join(initFiber);
+
+      // Prompt that returns 401 - should fail since no refreshToken
+      const result = yield* Effect.exit(
+        acp.agent.prompt({
+          sessionId: "no-refresh-session",
+          prompt: [{ type: "text", text: "hello" }],
+        }),
+      );
+
+      // Read the prompt request and respond with 401
+      const promptReq = yield* Queue.take(output);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(
+          jsonRpcResponse(AcpSchema.PromptResponse),
+          {
+            jsonrpc: "2.0",
+            id: "2",
+            error: { code: -32000, message: "Authentication required" },
+          },
+        ),
+      );
+
+      // The effect should fail after retry
+      yield* Effect.sleep("100 millis");
+
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
 });

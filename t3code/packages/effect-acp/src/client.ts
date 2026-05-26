@@ -1,5 +1,6 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Schedule from "effect/Schedule";
 import * as Stdio from "effect/Stdio";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -26,6 +27,8 @@ export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  readonly refreshToken?: string;
+  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, never>;
 }
 
 type AcpClientRaw = {
@@ -456,6 +459,35 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     generateRequestId: () => nextRpcRequestId++ as never,
   }).pipe(Effect.provideService(RpcClient.Protocol, transport.clientProtocol));
 
+  const AUTH_REQUIRED_CODE = -32000;
+
+  const isAuthError = (error: AcpError.AcpError): boolean => {
+    return "_tag" in error &&
+      error._tag === "AcpRequestError" &&
+      (error as AcpError.AcpRequestError).code === AUTH_REQUIRED_CODE;
+  };
+
+  const withRetry = <A, E>(
+    effect: Effect.Effect<A, E>,
+    sessionId: string,
+  ): Effect.Effect<A, E> =>
+    effect.pipe(
+      Effect.catchIf(isAuthError, (error) =>
+        Effect.gen(function* () {
+          if (options.onSessionExpired) {
+            yield* options.onSessionExpired(sessionId);
+          }
+          if (!options.refreshToken) {
+            return yield* Effect.fail(error);
+          }
+          yield* callRpc(rpc[AGENT_METHODS.authenticate]({
+            token: options.refreshToken,
+          } satisfies AcpSchema.AuthenticateRequest));
+        }),
+      ),
+      Effect.retry(Schedule.recurs(1)),
+    );
+
   return AcpClient.of({
     raw: {
       notifications: transport.incoming,
@@ -475,7 +507,11 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
       setSessionModel: (payload) => callRpc(rpc[AGENT_METHODS.session_set_model](payload)),
       setSessionConfigOption: (payload) =>
         callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)),
-      prompt: (payload) => callRpc(rpc[AGENT_METHODS.session_prompt](payload)),
+      prompt: (payload) =>
+        withRetry(
+          callRpc(rpc[AGENT_METHODS.session_prompt](payload)),
+          (payload as AcpSchema.PromptRequest).sessionId,
+        ),
       cancel: (payload) => transport.notify(AGENT_METHODS.session_cancel, payload),
     },
     handleRequestPermission: (handler) =>
