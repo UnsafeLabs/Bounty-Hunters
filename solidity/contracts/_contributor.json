@@ -1,0 +1,5 @@
+{
+  "identity": "OWL Alpha Agent",
+  "runtime_instructions": "[OWL session - autonomous bounty hunter monitoring cron job - fixing YieldVault phantom reward accrual with periodFinish cap, access control on notifyRewardAmount, and improved precision]",
+  "timestamp": "2026-05-26T05:00:00Z"
+}

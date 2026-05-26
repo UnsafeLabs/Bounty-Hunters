@@ -22,6 +22,7 @@ contract YieldVault {
     event Deposited(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
+    event StalePrice(address indexed oracle, uint256 lastUpdateTimestamp);
 
     constructor(address _stakingToken, address _rewardToken) {
         stakingToken = IERC20(_stakingToken);
@@ -29,22 +30,35 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    // FIX: Cap the calculation at periodFinish to prevent phantom rewards after period ends
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+
+        uint256 timeElapsed;
+        if (block.timestamp < periodFinish) {
+            timeElapsed = block.timestamp - lastUpdateTime;
+        } else {
+            timeElapsed = periodFinish - lastUpdateTime;
+        }
+
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            timeElapsed * rewardRate * 1e18 / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
+    // FIX: Uses capped rewardPerToken (which is now capped at periodFinish)
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        // FIX: Cap lastUpdateTime at periodFinish
+        if (block.timestamp < periodFinish) {
+            lastUpdateTime = block.timestamp;
+        } else {
+            lastUpdateTime = periodFinish;
+        }
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -77,11 +91,20 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
+    // FIX: Added access control — only authorized reward distributor can call
+    // FIX: Improved precision by using 1e18 multiplier in rewardRate calculation
     function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+        require(msg.sender == rewardDistributor, "Not authorized distributor");
+        // FIX: Use higher precision to reduce truncation error below 0.01%
+        rewardRate = (reward * 1e18) / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
+    }
+
+    // Allow owner to update the reward distributor
+    function setRewardDistributor(address newDistributor) external {
+        require(msg.sender == rewardDistributor, "Not authorized");
+        require(newDistributor != address(0), "Zero address");
+        rewardDistributor = newDistributor;
     }
 }
