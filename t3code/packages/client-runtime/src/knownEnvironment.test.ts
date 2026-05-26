@@ -1,7 +1,11 @@
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { createKnownEnvironment, getKnownEnvironmentHttpBaseUrl } from "./knownEnvironment.ts";
+import {
+  createKnownEnvironment,
+  detectEnvironmentInfo,
+  getKnownEnvironmentHttpBaseUrl,
+} from "./knownEnvironment.ts";
 import {
   parseScopedProjectKey,
   parseScopedThreadKey,
@@ -57,6 +61,92 @@ describe("known environment bootstrap helpers", () => {
         }),
       ),
     ).toBe("https://remote.example.com/api");
+  });
+});
+
+describe("environment info detection", () => {
+  it("detects Docker from dockerenv", () => {
+    expect(
+      detectEnvironmentInfo({
+        env: {},
+        runtime: "node",
+        platform: "linux",
+        arch: "x64",
+        fileExists: (path) => path === "/.dockerenv",
+      }),
+    ).toMatchObject({
+      runtime: "node",
+      platform: "linux",
+      arch: "x64",
+      isContainer: true,
+      isCI: false,
+      ciProvider: null,
+      isWSL: false,
+    });
+  });
+
+  it("detects containers from cgroup entries", () => {
+    expect(
+      detectEnvironmentInfo({
+        env: {},
+        platform: "linux",
+        readFile: (path) =>
+          path === "/proc/self/cgroup" ? "0::/system.slice/docker/test.scope" : null,
+      }).isContainer,
+    ).toBe(true);
+  });
+
+  it.each([
+    ["GITHUB_ACTIONS", "github-actions"],
+    ["GITLAB_CI", "gitlab"],
+    ["JENKINS_URL", "jenkins"],
+    ["CIRCLECI", "circleci"],
+    ["TRAVIS", "travis"],
+  ] as const)("detects %s as %s", (variableName, provider) => {
+    expect(
+      detectEnvironmentInfo({
+        env: { [variableName]: "true" },
+      }),
+    ).toMatchObject({
+      isCI: true,
+      ciProvider: provider,
+    });
+  });
+
+  it("detects generic CI without a provider name", () => {
+    expect(detectEnvironmentInfo({ env: { CI: "true" } })).toMatchObject({
+      isCI: true,
+      ciProvider: null,
+    });
+  });
+
+  it("detects WSL from proc version", () => {
+    expect(
+      detectEnvironmentInfo({
+        env: {},
+        platform: "linux",
+        readFile: (path) => (path === "/proc/version" ? "Linux version Microsoft WSL2" : null),
+      }).isWSL,
+    ).toBe(true);
+  });
+
+  it("returns false flags when no container or CI signals exist", () => {
+    expect(
+      detectEnvironmentInfo({
+        env: {},
+        runtime: "browser",
+        platform: "win32",
+        arch: "x64",
+      }),
+    ).toMatchObject({
+      runtime: "browser",
+      platform: "win32",
+      arch: "x64",
+      isContainer: false,
+      isCI: false,
+      ciProvider: null,
+      isWSL: false,
+    });
   });
 });
 
