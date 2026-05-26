@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Non-sensitive public provenance only: OpenAI Codex was asked to address UnsafeLabs/Bounty-Hunters issue #762 by adding configurable FastAPI docs asset URLs, preserving backward compatibility, and validating the change with tests. Private system, developer, account, runtime, and credential-bearing instructions are intentionally not disclosed.",
+  "date": "2026-05-26T07:51:45Z"
+}
