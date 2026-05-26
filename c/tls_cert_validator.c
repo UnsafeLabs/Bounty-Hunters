@@ -164,6 +164,7 @@ static int validate_chain(chain_context_t *ctx)
     rc = verify_signature(ctx->chain[ctx->chain_len - 1], trusted_issuer->cert);
     if (rc != CERT_STATUS_OK)
         return rc;
+    (void)i;
 
     /* Fingerprint pinning on leaf */
     if (ctx->pinned_fingerprint) {
