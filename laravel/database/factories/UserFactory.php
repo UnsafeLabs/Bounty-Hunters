@@ -15,7 +15,7 @@ class UserFactory extends Factory
     /**
      * The current password being used by the factory.
      */
-    protected static ?string $password;
+    protected static array $passwords = [];
 
     /**
      * Define the model's default state.
@@ -28,7 +28,9 @@ class UserFactory extends Factory
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
-            'password' => static::$password ??= Hash::make('password'),
+            'password' => static::$passwords[config('hashing.bcrypt.rounds')] ??= Hash::make('password', [
+                'rounds' => config('hashing.bcrypt.rounds'),
+            ]),
             'remember_token' => Str::random(10),
         ];
     }
