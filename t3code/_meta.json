@@ -1,0 +1,5 @@
+{
+  "contributor": "CharlieLZ via Codex",
+  "generation_context": "Task #828 requested updating t3code/turbo.json so the T3 Code monorepo declares explicit Turbo build dependency edges: web depends on contracts and client-runtime; server depends on contracts, shared, effect-acp, and effect-codex-app-server; desktop depends on web and server; package build outputs should be cacheable; existing build commands must keep working. Private system, developer, account, credential, and hidden policy instructions are intentionally not included.",
+  "completed_at": "2026-05-26T08:07:56Z"
+}
