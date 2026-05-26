@@ -1002,6 +1002,12 @@
     "last_pr": "2026-05-24T01:33:55.713Z"
   },
   {
+    "username": "Karry2019web",
+    "total_prs": 2,
+    "first_pr": "2026-05-26T00:04:31.647Z",
+    "last_pr": "2026-05-26T00:07:56.108Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -1408,11 +1414,5 @@
     "total_prs": 1,
     "first_pr": "2026-05-25T23:47:51.160Z",
     "last_pr": "2026-05-25T23:47:51.160Z"
-  },
-  {
-    "username": "Karry2019web",
-    "total_prs": 1,
-    "first_pr": "2026-05-26T00:04:31.647Z",
-    "last_pr": "2026-05-26T00:04:31.647Z"
   }
 ]
