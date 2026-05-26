@@ -14,6 +14,7 @@ export interface CommandPaletteItem {
   readonly value: string;
   readonly searchTerms: ReadonlyArray<string>;
   readonly title: ReactNode;
+  readonly titleMatchIndices?: ReadonlyArray<number>;
   readonly description?: string;
   readonly timestamp?: string;
   readonly icon: ReactNode;
@@ -86,6 +87,89 @@ export function filterBrowseEntries(input: {
 
 export function normalizeSearchText(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export interface CommandPaletteFuzzyMatch {
+  readonly score: number;
+  readonly indices: ReadonlyArray<number>;
+}
+
+function isWordBoundary(value: string, index: number): boolean {
+  if (index === 0) {
+    return true;
+  }
+
+  const previous = value[index - 1] ?? "";
+  const current = value[index] ?? "";
+
+  return (
+    /[\s/_\-.:]/.test(previous) ||
+    (previous.toLowerCase() === previous &&
+      previous.toUpperCase() !== previous &&
+      current.toUpperCase() === current &&
+      current.toLowerCase() !== current)
+  );
+}
+
+export function fuzzyMatchCommandPaletteText(
+  field: string,
+  query: string,
+): CommandPaletteFuzzyMatch | null {
+  const normalizedField = normalizeSearchText(field);
+  const normalizedQuery = normalizeSearchText(query);
+  const queryCharacters = normalizedQuery.replace(/\s+/g, "");
+
+  if (queryCharacters.length === 0) {
+    return { score: 0, indices: [] };
+  }
+  if (normalizedField.length === 0) {
+    return null;
+  }
+
+  const indices: number[] = [];
+  let queryIndex = 0;
+  let score = 1_000;
+  let previousMatchIndex = -1;
+
+  for (
+    let fieldIndex = 0;
+    fieldIndex < field.length && queryIndex < queryCharacters.length;
+    fieldIndex += 1
+  ) {
+    if (field[fieldIndex]?.toLowerCase() !== queryCharacters[queryIndex]) {
+      continue;
+    }
+
+    indices.push(fieldIndex);
+    score += 40;
+
+    if (previousMatchIndex === fieldIndex - 1) {
+      score += 30;
+    } else if (isWordBoundary(field, fieldIndex)) {
+      score += 20;
+    }
+
+    previousMatchIndex = fieldIndex;
+    queryIndex += 1;
+  }
+
+  if (queryIndex !== queryCharacters.length) {
+    return null;
+  }
+
+  if (normalizedField === normalizedQuery) {
+    score += 500;
+  } else if (normalizedField.startsWith(normalizedQuery)) {
+    score += 250;
+  } else if (normalizedField.includes(normalizedQuery)) {
+    score += 100;
+  }
+
+  const compactnessGap = indices.at(-1)! - indices[0]! + 1 - indices.length;
+  score -= compactnessGap * 2;
+  score -= field.length * 0.01;
+
+  return { score, indices };
 }
 
 export function buildProjectActionItems(input: {
@@ -175,37 +259,51 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   });
 }
 
-function rankSearchFieldMatch(field: string, normalizedQuery: string): number {
-  const normalizedField = normalizeSearchText(field);
-  if (normalizedField.length === 0 || !normalizedField.includes(normalizedQuery)) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  if (normalizedField === normalizedQuery) {
-    return 3;
-  }
-  if (normalizedField.startsWith(normalizedQuery)) {
-    return 2;
-  }
-  return 1;
+interface CommandPaletteItemMatch {
+  readonly rank: number;
+  readonly titleMatchIndices?: ReadonlyArray<number>;
 }
 
 function rankCommandPaletteItemMatch(
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem,
   normalizedQuery: string,
-): number {
+): CommandPaletteItemMatch | null {
   const terms = item.searchTerms.filter((term) => term.length > 0);
   if (terms.length === 0) {
-    return 0;
+    return null;
   }
 
+  let bestMatch: CommandPaletteItemMatch | null = null;
+  const titleMatch =
+    typeof item.title === "string"
+      ? fuzzyMatchCommandPaletteText(item.title, normalizedQuery)
+      : null;
+
   for (const [index, field] of terms.entries()) {
-    const fieldRank = rankSearchFieldMatch(field, normalizedQuery);
-    if (fieldRank !== Number.NEGATIVE_INFINITY) {
-      return 1_000 - index * 100 + fieldRank;
+    const fieldMatch = fuzzyMatchCommandPaletteText(field, normalizedQuery);
+    if (!fieldMatch) {
+      continue;
+    }
+
+    const isTitleField =
+      typeof item.title === "string" &&
+      normalizeSearchText(field) === normalizeSearchText(item.title);
+    const rank = 10_000 - index * 500 + fieldMatch.score + (isTitleField ? 250 : 0);
+    const candidate: CommandPaletteItemMatch = {
+      rank,
+      ...(isTitleField
+        ? { titleMatchIndices: fieldMatch.indices }
+        : titleMatch
+          ? { titleMatchIndices: titleMatch.indices }
+          : {}),
+    };
+
+    if (!bestMatch || candidate.rank > bestMatch.rank) {
+      bestMatch = candidate;
     }
   }
 
-  return 0;
+  return bestMatch;
 }
 
 export function filterCommandPaletteGroups(input: {
@@ -254,15 +352,18 @@ export function filterCommandPaletteGroups(input: {
   return searchableGroups.flatMap((group) => {
     const items = group.items
       .map((item, index) => {
-        const haystack = normalizeSearchText(item.searchTerms.join(" "));
-        if (!haystack.includes(normalizedQuery)) {
+        const match = rankCommandPaletteItemMatch(item, normalizedQuery);
+        if (!match) {
           return null;
         }
 
         return {
-          item,
+          item:
+            match.titleMatchIndices && match.titleMatchIndices.length > 0
+              ? { ...item, titleMatchIndices: match.titleMatchIndices }
+              : item,
           index,
-          rank: rankCommandPaletteItemMatch(item, normalizedQuery),
+          rank: match.rank,
         };
       })
       .filter(

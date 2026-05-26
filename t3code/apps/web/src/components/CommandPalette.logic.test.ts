@@ -4,6 +4,7 @@ import type { Thread } from "../types";
 import {
   buildThreadActionItems,
   filterCommandPaletteGroups,
+  fuzzyMatchCommandPaletteText,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
 
@@ -162,5 +163,154 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+  });
+});
+
+describe("filterCommandPaletteGroups fuzzy search", () => {
+  it("matches command titles across gaps and exposes title highlight indices", () => {
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [
+        {
+          value: "actions",
+          label: "Actions",
+          items: [
+            {
+              kind: "action",
+              value: "open-file",
+              searchTerms: ["Open File"],
+              title: "Open File",
+              icon: null,
+              run: async () => undefined,
+            },
+          ],
+        },
+      ],
+      query: "ofl",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.items[0]?.value).toBe("open-file");
+    expect(groups[0]?.items[0]?.titleMatchIndices).toEqual([0, 5, 7]);
+  });
+
+  it("ranks consecutive matches ahead of looser word-boundary matches", () => {
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [
+        {
+          value: "actions",
+          label: "Actions",
+          items: [
+            {
+              kind: "action",
+              value: "other-project",
+              searchTerms: ["Other Project"],
+              title: "Other Project",
+              icon: null,
+              run: async () => undefined,
+            },
+            {
+              kind: "action",
+              value: "open-file",
+              searchTerms: ["Open File"],
+              title: "Open File",
+              icon: null,
+              run: async () => undefined,
+            },
+          ],
+        },
+      ],
+      query: "op",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(["open-file", "other-project"]);
+  });
+
+  it("keeps empty queries in their original order", () => {
+    const group: CommandPaletteGroup = {
+      value: "actions",
+      label: "Actions",
+      items: [
+        {
+          kind: "action",
+          value: "second",
+          searchTerms: ["Second Action"],
+          title: "Second Action",
+          icon: null,
+          run: async () => undefined,
+        },
+        {
+          kind: "action",
+          value: "first",
+          searchTerms: ["First Action"],
+          title: "First Action",
+          icon: null,
+          run: async () => undefined,
+        },
+      ],
+    };
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [group],
+      query: "",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(["second", "first"]);
+  });
+
+  it("filters single-character queries", () => {
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [
+        {
+          value: "actions",
+          label: "Actions",
+          items: [
+            {
+              kind: "action",
+              value: "save",
+              searchTerms: ["Save File"],
+              title: "Save File",
+              icon: null,
+              run: async () => undefined,
+            },
+            {
+              kind: "action",
+              value: "open",
+              searchTerms: ["Open File"],
+              title: "Open File",
+              icon: null,
+              run: async () => undefined,
+            },
+          ],
+        },
+      ],
+      query: "s",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(["save"]);
+  });
+});
+
+describe("fuzzyMatchCommandPaletteText", () => {
+  it("returns matched indices for gapped query characters", () => {
+    expect(fuzzyMatchCommandPaletteText("Open File", "ofl")?.indices).toEqual([0, 5, 7]);
+  });
+
+  it("scores compact consecutive matches above wider matches", () => {
+    const consecutive = fuzzyMatchCommandPaletteText("Open File", "op");
+    const loose = fuzzyMatchCommandPaletteText("Other Project", "op");
+
+    expect(consecutive?.score).toBeGreaterThan(loose?.score ?? 0);
   });
 });
