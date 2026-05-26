@@ -75,7 +75,11 @@ static int compute_fingerprint(X509 *cert, unsigned char *out, size_t out_len)
 
 static int match_fingerprint(const unsigned char *fp1, const unsigned char *fp2)
 {
-    return memcmp(fp1, fp2, FINGERPRINT_LEN) == 0;
+    int result = 0;
+    int i;
+    for (i = 0; i < FINGERPRINT_LEN; i++)
+        result |= fp1[i] ^ fp2[i];
+    return result == 0;
 }
 
 static int check_expiry(X509 *cert)
