@@ -55,6 +55,7 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
+import { DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES, REQUEST_BODY_SIZE_LIMIT_HEADER } from "./http.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
@@ -1092,6 +1093,40 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "bearer-session-token",
       ]);
       assert.isTrue(body.auth.sessionCookieName.startsWith("t3_session_"));
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects request bodies larger than the default limit before route parsing", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const url = yield* getHttpServerUrl("/api/auth/bootstrap");
+      const received = DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES + 1;
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: "x".repeat(received),
+        }),
+      );
+      const body = (yield* Effect.promise(() => response.json())) as {
+        readonly error: string;
+        readonly limit: number;
+        readonly received: number;
+      };
+
+      assert.equal(response.status, 413);
+      assert.equal(
+        response.headers.get(REQUEST_BODY_SIZE_LIMIT_HEADER),
+        String(DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES),
+      );
+      assert.deepEqual(body, {
+        error: "Payload Too Large",
+        limit: DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES,
+        received,
+      });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

@@ -38,12 +38,140 @@ const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+export const DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES = 10 * 1024 * 1024;
+export const FILE_UPLOAD_REQUEST_BODY_SIZE_LIMIT_BYTES = 50 * 1024 * 1024;
+export const REQUEST_BODY_SIZE_LIMIT_HEADER = "X-Max-Body-Size";
+
+const REQUEST_METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const FILE_UPLOAD_ROUTE_PREFIXES = [
+  "/api/upload",
+  "/api/uploads",
+  "/api/attachments",
+  "/attachments",
+];
+
+export interface RequestBodySizeLimitOverride {
+  readonly method?: string;
+  readonly pathPrefix: `/${string}`;
+  readonly maxBytes: number;
+}
 
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: [...browserApiCorsAllowedMethods],
   allowedHeaders: [...browserApiCorsAllowedHeaders],
   maxAge: 600,
 });
+
+export function parseContentLengthHeader(value: string | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
+export function resolveRequestBodySizeLimit(input: {
+  readonly method: string;
+  readonly pathname: string;
+  readonly overrides?: ReadonlyArray<RequestBodySizeLimitOverride>;
+}): number {
+  const normalizedMethod = input.method.toUpperCase();
+  const matchingOverride = input.overrides
+    ?.filter(
+      (override) =>
+        input.pathname.startsWith(override.pathPrefix) &&
+        (!override.method || override.method.toUpperCase() === normalizedMethod),
+    )
+    .toSorted((left, right) => right.pathPrefix.length - left.pathPrefix.length)[0];
+
+  if (matchingOverride) {
+    return matchingOverride.maxBytes;
+  }
+
+  if (FILE_UPLOAD_ROUTE_PREFIXES.some((prefix) => input.pathname.startsWith(prefix))) {
+    return FILE_UPLOAD_REQUEST_BODY_SIZE_LIMIT_BYTES;
+  }
+
+  return DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES;
+}
+
+export function evaluateRequestBodySizeLimit(input: {
+  readonly method: string;
+  readonly pathname: string;
+  readonly contentLengthHeader?: string | undefined;
+  readonly overrides?: ReadonlyArray<RequestBodySizeLimitOverride>;
+}):
+  | {
+      readonly ok: true;
+      readonly limit: number;
+      readonly received: number | null;
+    }
+  | {
+      readonly ok: false;
+      readonly limit: number;
+      readonly received: number;
+    } {
+  const limit = resolveRequestBodySizeLimit(input);
+  const received = parseContentLengthHeader(input.contentLengthHeader);
+
+  if (!REQUEST_METHODS_WITH_BODY.has(input.method.toUpperCase())) {
+    return { ok: true, limit, received };
+  }
+
+  if (received !== null && received > limit) {
+    return { ok: false, limit, received };
+  }
+
+  return { ok: true, limit, received };
+}
+
+function payloadTooLargeResponse(input: { readonly limit: number; readonly received: number }) {
+  return HttpServerResponse.jsonUnsafe(
+    {
+      error: "Payload Too Large",
+      limit: input.limit,
+      received: input.received,
+    },
+    {
+      status: 413,
+      headers: {
+        [REQUEST_BODY_SIZE_LIMIT_HEADER]: String(input.limit),
+      },
+    },
+  );
+}
+
+export const makeRequestBodySizeLimitLayer = (
+  overrides: ReadonlyArray<RequestBodySizeLimitOverride> = [],
+) =>
+  HttpRouter.middleware(
+    (next) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const url = HttpServerRequest.toURL(request);
+        const pathname = Option.isSome(url) ? url.value.pathname : request.url;
+        const result = evaluateRequestBodySizeLimit({
+          method: request.method,
+          pathname,
+          contentLengthHeader: request.headers["content-length"],
+          overrides,
+        });
+
+        if (!result.ok) {
+          return payloadTooLargeResponse(result);
+        }
+
+        return yield* next;
+      }),
+    { global: true },
+  );
+
+export const requestBodySizeLimitLayer = makeRequestBodySizeLimitLayer();
 
 export function isLoopbackHostname(hostname: string): boolean {
   const normalizedHostname = hostname
