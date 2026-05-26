@@ -33,10 +33,23 @@ const setup = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA journal_mode = WAL;`;
+    yield* sql`PRAGMA busy_timeout = 5000;`;
+    yield* sql`PRAGMA synchronous = NORMAL;`;
     yield* sql`PRAGMA foreign_keys = ON;`;
     yield* runMigrations();
   }),
 );
+
+export const checkSqliteHealth = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ readonly integrity_check: string }>`PRAGMA integrity_check;`;
+  const details = rows.map((row) => row.integrity_check);
+
+  return {
+    ok: details.length > 0 && details.every((detail) => detail === "ok"),
+    details,
+  };
+});
 
 export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(function* (
   dbPath: string,
