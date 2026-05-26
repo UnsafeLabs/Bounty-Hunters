@@ -435,6 +435,50 @@ label:has(> select#reasoning-effort) select {
   padding-right: calc(0.9rem + var(--chat-markdown-codeblock-copy-button-space));
 }
 
+.chat-markdown .chat-markdown-codeblock-body {
+  position: relative;
+}
+
+.chat-markdown .chat-markdown-codeblock-body[data-collapsed="true"] {
+  max-height: 18rem;
+  overflow: hidden;
+}
+
+.chat-markdown .chat-markdown-codeblock-body[data-collapsed="true"]::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3rem;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--muted) 78%, var(--background))
+  );
+}
+
+.chat-markdown .chat-markdown-codeblock-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 0.5rem 0.5rem;
+  background: color-mix(in srgb, var(--muted) 72%, var(--background));
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  padding: 0.4rem 0.65rem;
+  cursor: pointer;
+}
+
+.chat-markdown .chat-markdown-codeblock-toggle:hover {
+  color: var(--foreground);
+}
+
 .chat-markdown .chat-markdown-copy-button {
   position: absolute;
   top: 0.5rem;

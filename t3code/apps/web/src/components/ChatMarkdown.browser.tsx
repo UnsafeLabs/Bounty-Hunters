@@ -138,4 +138,27 @@ describe("ChatMarkdown", () => {
       await screen.unmount();
     }
   });
+
+  it("collapses long code blocks and lets users expand them", async () => {
+    const longCode = Array.from({ length: 24 }, (_, index) => `console.log(${index + 1});`).join(
+      "\n",
+    );
+    const screen = await render(
+      <ChatMarkdown text={`\`\`\`ts\n${longCode}\n\`\`\``} cwd="/repo/project" />,
+    );
+
+    try {
+      const expandButton = page.getByRole("button", { name: "Show full code (24 lines)" });
+      await expect.element(expandButton).toBeInTheDocument();
+      await expect.element(expandButton).toHaveAttribute("aria-expanded", "false");
+
+      await expandButton.click();
+
+      const collapseButton = page.getByRole("button", { name: "Collapse code" });
+      await expect.element(collapseButton).toBeInTheDocument();
+      await expect.element(collapseButton).toHaveAttribute("aria-expanded", "true");
+    } finally {
+      await screen.unmount();
+    }
+  });
 });

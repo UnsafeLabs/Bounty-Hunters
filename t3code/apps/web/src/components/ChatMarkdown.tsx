@@ -10,6 +10,7 @@ import React, {
   useCallback,
   memo,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -67,6 +68,7 @@ interface ChatMarkdownProps {
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
+const COLLAPSIBLE_CODE_BLOCK_LINE_THRESHOLD = 18;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
 const highlightedCodeCache = new LRUCache<string>(
@@ -125,6 +127,13 @@ function estimateHighlightedSize(html: string, code: string): number {
   return Math.max(html.length * 2, code.length * 3);
 }
 
+function countCodeLines(code: string): number {
+  if (code.length === 0) {
+    return 0;
+  }
+  return code.replace(/\n$/, "").split("\n").length;
+}
+
 function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   const cached = highlighterPromiseCache.get(language);
   if (cached) return cached;
@@ -148,6 +157,10 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
 
 function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
   const [copied, setCopied] = useState(false);
+  const lineCount = countCodeLines(code);
+  const isCollapsible = lineCount > COLLAPSIBLE_CODE_BLOCK_LINE_THRESHOLD;
+  const [expanded, setExpanded] = useState(!isCollapsible);
+  const bodyId = useId();
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopy = useCallback(() => {
     if (typeof navigator === "undefined" || navigator.clipboard == null) {
@@ -178,8 +191,16 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
     [],
   );
 
+  useEffect(() => {
+    setExpanded(!isCollapsible);
+  }, [code, isCollapsible]);
+
   return (
-    <div className="chat-markdown-codeblock leading-snug">
+    <div
+      className="chat-markdown-codeblock leading-snug"
+      data-collapsible={isCollapsible ? "true" : undefined}
+      data-expanded={expanded ? "true" : "false"}
+    >
       <button
         type="button"
         className="chat-markdown-copy-button"
@@ -189,7 +210,24 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
       >
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </button>
-      {children}
+      <div
+        id={bodyId}
+        className="chat-markdown-codeblock-body"
+        data-collapsed={isCollapsible && !expanded ? "true" : undefined}
+      >
+        {children}
+      </div>
+      {isCollapsible && (
+        <button
+          type="button"
+          className="chat-markdown-codeblock-toggle"
+          aria-controls={bodyId}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "Collapse code" : `Show full code (${lineCount} lines)`}
+        </button>
+      )}
     </div>
   );
 }
