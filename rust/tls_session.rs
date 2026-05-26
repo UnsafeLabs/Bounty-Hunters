@@ -71,6 +71,8 @@ pub struct SessionCache {
     cache: Arc<HashMap<String, SessionTicket>>,
     encryption_key: EncryptionKey,
     max_size: usize,
+    key_rotation_interval: u64,
+    last_key_rotation: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -111,6 +113,8 @@ impl SessionCache {
             cache: Arc::new(HashMap::new()),
             encryption_key: key,
             max_size: MAX_CACHE_SIZE,
+            key_rotation_interval: DEFAULT_TICKET_LIFETIME_SECS,
+            last_key_rotation: 0,
         }
     }
 
