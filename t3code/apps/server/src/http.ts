@@ -3,6 +3,7 @@ import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { cast } from "effect/Function";
@@ -24,6 +25,10 @@ import {
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
+import {
+  formatPrometheusMetricSnapshots,
+  PROMETHEUS_METRICS_CONTENT_TYPE,
+} from "./observability/PrometheusMetrics.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { respondToAuthError } from "./auth/http.ts";
@@ -132,6 +137,19 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
           Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
         ),
       );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const metricsRouteLayer = HttpRouter.add(
+  "GET",
+  "/metrics",
+  Effect.gen(function* () {
+    yield* requireAuthenticatedRequest;
+    const snapshots = yield* Metric.snapshot;
+    return HttpServerResponse.text(formatPrometheusMetricSnapshots(snapshots), {
+      status: 200,
+      contentType: PROMETHEUS_METRICS_CONTENT_TYPE,
+    });
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
