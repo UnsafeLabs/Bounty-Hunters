@@ -3,6 +3,12 @@ import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as Connection from "effect/unstable/sql/SqlConnection";
+import * as Pool from "effect/Pool";
+import * as Duration from "effect/Duration";
+import * as Scope from "effect/Scope";
+import * as Context from "effect/Context";
+import * as Reactivity from "effect/unstable/reactivity/Reactivity";
 
 import { runMigrations } from "../Migrations.ts";
 import { ServerConfig } from "../../config.ts";
@@ -29,37 +35,90 @@ const makeRuntimeSqliteLayer = Effect.fn("makeRuntimeSqliteLayer")(function* (
   return clientModule.layer(config);
 }, Layer.unwrap);
 
-const setup = Layer.effectDiscard(
+const acquireConnection = (config: RuntimeSqliteLayerConfig) =>
   Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql`PRAGMA journal_mode = WAL;`;
-    yield* sql`PRAGMA foreign_keys = ON;`;
-    yield* runMigrations();
-  }),
-);
+    const context = yield* Layer.build(makeRuntimeSqliteLayer(config));
+    const client = Context.get(context, SqlClient.SqlClient);
+
+    yield* client`PRAGMA journal_mode = WAL;`;
+    yield* client`PRAGMA busy_timeout = 5000;`;
+    yield* client`PRAGMA synchronous = NORMAL;`;
+    yield* client`PRAGMA foreign_keys = ON;`;
+
+    const connection = yield* client.reserve;
+    return connection;
+  });
 
 export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(function* (
   dbPath: string,
 ) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
+  if (dbPath !== ":memory:") {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
+  }
 
-  return Layer.provideMerge(
-    setup,
-    makeRuntimeSqliteLayer({
-      filename: dbPath,
-      spanAttributes: {
-        "db.name": path.basename(dbPath),
-        "service.name": "t3-server",
-      },
+  const config: RuntimeSqliteLayerConfig = {
+    filename: dbPath,
+    spanAttributes: {
+      "db.name": dbPath === ":memory:" ? ":memory:" : "t3-server",
+      "service.name": "t3-server",
+    },
+  };
+
+  return Layer.effect(
+    SqlClient.SqlClient,
+    Effect.gen(function* () {
+      const pool = yield* Pool.makeWithTTL({
+        acquire: acquireConnection(config),
+        min: dbPath === ":memory:" ? 1 : 1,
+        max: dbPath === ":memory:" ? 1 : 5,
+        timeToLive: Duration.seconds(10),
+      });
+
+      const baseContext = yield* Layer.build(makeRuntimeSqliteLayer(config));
+      const baseClient = Context.get(baseContext, SqlClient.SqlClient);
+
+      const tempStatement = baseClient`SELECT 1`;
+      const compiler = tempStatement.compiler;
+      const spanAttributes = tempStatement.spanAttributes;
+      const transformRows = tempStatement.transformRows;
+
+      const pooledAcquirer = Pool.get(pool).pipe(
+        Effect.timeoutOrElse({
+          duration: Duration.seconds(10),
+          orElse: () => Effect.fail(new Error("Database connection acquisition timeout (10s)")),
+        }),
+      );
+
+      const client = yield* SqlClient.make({
+        acquirer: pooledAcquirer,
+        compiler,
+        transactionAcquirer: pooledAcquirer,
+        spanAttributes,
+        transformRows,
+      });
+
+      // Run migrations on the pooled client!
+      const context = Context.make(SqlClient.SqlClient, client);
+      yield* runMigrations().pipe(Effect.provide(context));
+
+      const healthCheck = () =>
+        Effect.gen(function* () {
+          const result = yield* client.unsafe("PRAGMA integrity_check;");
+          const firstRow = result[0];
+          const details = firstRow ? (Object.values(firstRow)[0] as string) : "";
+          const status = details === "ok" ? "pass" : "fail";
+          return { status, details };
+        });
+
+      return Object.assign(client, { healthCheck });
     }),
-  );
+  ).pipe(Layer.provide(Reactivity.layer));
 }, Layer.unwrap);
 
-export const SqlitePersistenceMemory = Layer.provideMerge(
-  setup,
-  makeRuntimeSqliteLayer({ filename: ":memory:" }),
+export const SqlitePersistenceMemory = Layer.unwrap(
+  Effect.succeed(makeSqlitePersistenceLive(":memory:")),
 );
 
 export const layerConfig = Layer.unwrap(
