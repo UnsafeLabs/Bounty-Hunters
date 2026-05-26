@@ -299,6 +299,32 @@ def test_decimal_encoder_infinity():
     assert isinf(jsonable_encoder(data)["value"])
 
 
+def test_encode_bytes_as_base64_by_default():
+    assert jsonable_encoder(b"\x00\xffhello") == "AP9oZWxsbw=="
+
+
+def test_encode_memoryview_as_base64_by_default():
+    assert jsonable_encoder(memoryview(b"\x00\xff")) == "AP8="
+
+
+def test_encode_binary_values_as_hex_recursively():
+    data = {"payloads": [b"\x0f", memoryview(b"\x10\x11")]}
+
+    assert jsonable_encoder(data, bytes_encoding="hex") == {
+        "payloads": ["0f", "1011"],
+    }
+
+
+def test_encode_model_bytes_field_uses_configured_binary_encoding():
+    class BinaryPayload(BaseModel):
+        payload: bytes
+
+    model = BinaryPayload(payload=b"\x00\xff")
+
+    assert jsonable_encoder(model) == {"payload": "AP8="}
+    assert jsonable_encoder(model, bytes_encoding="hex") == {"payload": "00ff"}
+
+
 def test_encode_deque_encodes_child_models():
     class Model(BaseModel):
         test: str
