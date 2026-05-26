@@ -99,7 +99,7 @@ static int check_expiry(X509 *cert)
     if (!ASN1_TIME_diff(&day_diff, &sec_diff, NULL, not_after))
         return CERT_STATUS_INVALID;
 
-    remaining_seconds = day_diff * 86400 + sec_diff;
+    remaining_seconds = (int)((long)day_diff * 86400 + sec_diff);
     if (remaining_seconds < 86400 * 30)
         log_cert_event(LOG_LEVEL_WARN, "certificate expires in %d seconds", remaining_seconds);
     return CERT_STATUS_OK;
