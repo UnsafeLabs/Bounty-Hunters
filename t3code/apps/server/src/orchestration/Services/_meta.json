@@ -1,0 +1,5 @@
+{
+  "contributor": "OWL",
+  "generation_context": "[ T3 Code ] Add deferred command scheduler with Effect.Schedule and SQLite persistence - Issue #851",
+  "completed_at": "2026-05-26T00:00:00Z"
+}
