@@ -1172,6 +1172,15 @@ function OpenCommandPaletteDialog() {
     ],
   );
 
+  useLayoutEffect(() => {
+    if (openIntent?.kind !== "open-project-path") {
+      return;
+    }
+    const path = openIntent.path;
+    clearOpenIntent();
+    void handleAddProject(path);
+  }, [clearOpenIntent, handleAddProject, openIntent]);
+
   function getDefaultCloneParentPath(environmentId: EnvironmentId): string {
     return getAddProjectInitialQueryForEnvironment(environmentId);
   }

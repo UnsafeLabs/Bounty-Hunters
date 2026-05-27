@@ -5,12 +5,19 @@ interface CommandPaletteOpenIntent {
   requestId: number;
 }
 
+interface CommandPaletteOpenProjectPathIntent {
+  kind: "open-project-path";
+  requestId: number;
+  path: string;
+}
+
 interface CommandPaletteStore {
   open: boolean;
-  openIntent: CommandPaletteOpenIntent | null;
+  openIntent: CommandPaletteOpenIntent | CommandPaletteOpenProjectPathIntent | null;
   setOpen: (open: boolean) => void;
   toggleOpen: () => void;
   openAddProject: () => void;
+  openProjectPath: (path: string) => void;
   clearOpenIntent: () => void;
 }
 
@@ -26,6 +33,15 @@ export const useCommandPaletteStore = create<CommandPaletteStore>((set) => ({
       openIntent: {
         kind: "add-project",
         requestId: (state.openIntent?.requestId ?? 0) + 1,
+      },
+    })),
+  openProjectPath: (path) =>
+    set((state) => ({
+      open: true,
+      openIntent: {
+        kind: "open-project-path",
+        requestId: (state.openIntent?.requestId ?? 0) + 1,
+        path,
       },
     })),
   clearOpenIntent: () => set({ openIntent: null }),

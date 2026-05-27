@@ -369,6 +369,11 @@ export const PickFolderOptionsSchema = Schema.Struct({
   initialPath: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
+export type DesktopDeepLinkRoute =
+  | { readonly kind: "open-project"; readonly path: string }
+  | { readonly kind: "open-thread"; readonly id: string }
+  | { readonly kind: "open-settings" };
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
@@ -414,6 +419,7 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
+  onDeepLink: (listener: (route: DesktopDeepLinkRoute) => void) => () => void;
   onMenuAction: (listener: (action: string) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;

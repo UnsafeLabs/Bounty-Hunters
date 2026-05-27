@@ -1,4 +1,4 @@
-import type { DesktopBridge } from "@t3tools/contracts";
+import type { DesktopBridge, DesktopDeepLinkRoute } from "@t3tools/contracts";
 import { contextBridge, ipcRenderer } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
@@ -96,6 +96,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ...(position === undefined ? {} : { position }),
     }),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
+  onDeepLink: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, route: unknown) => {
+      if (typeof route !== "object" || route === null || !("kind" in route)) return;
+      listener(route as DesktopDeepLinkRoute);
+    };
+
+    ipcRenderer.on(IpcChannels.DEEP_LINK_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.DEEP_LINK_CHANNEL, wrappedListener);
+    };
+  },
   onMenuAction: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {
       if (typeof action !== "string") return;

@@ -16,6 +16,7 @@ import serverPackageJson from "../../server/package.json" with { type: "json" };
 import type { DesktopSettings as DesktopSettingsValue } from "./settings/DesktopAppSettings.ts";
 import * as DesktopIpc from "./ipc/DesktopIpc.ts";
 import * as ElectronApp from "./electron/ElectronApp.ts";
+import * as ElectronDeepLink from "./electron/ElectronDeepLink.ts";
 import * as ElectronDialog from "./electron/ElectronDialog.ts";
 import * as ElectronMenu from "./electron/ElectronMenu.ts";
 import * as ElectronProtocol from "./electron/ElectronProtocol.ts";
@@ -136,6 +137,7 @@ const desktopBackendLayer = DesktopBackendManager.layer.pipe(
 const desktopApplicationLayer = Layer.mergeAll(
   DesktopLifecycle.layer,
   DesktopApplicationMenu.layer,
+  ElectronDeepLink.layer,
   DesktopShellEnvironment.layer,
   desktopSshLayer,
 ).pipe(Layer.provideMerge(DesktopUpdates.layer), Layer.provideMerge(desktopBackendLayer));
