@@ -111,6 +111,8 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
       activePid: Option.none(),
       restartAttempt: 0,
       restartScheduled: false,
+      consecutiveHealthFailures: 0,
+      restartAttempts: 0,
     }),
   });
 
