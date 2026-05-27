@@ -1,0 +1,14 @@
+{
+  "audits": [
+    {
+      "bounty": "#761",
+      "title": "Add file size and content type validation to UploadFile",
+      "branch": "feat-file-validation",
+      "files_changed": [
+        "fastapi/fastapi/datastructures.py",
+        "fastapi/tests/test_datastructures.py"
+      ],
+      "summary": "Added max_size and allowed_content_types parameters to UploadFile class, along with a validate() method that raises HTTPException when constraints are violated. Tests cover size exceedance, size within limits, allowed content types, and disallowed content types."
+    }
+  ]
+}

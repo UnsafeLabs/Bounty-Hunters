@@ -16,6 +16,8 @@ from starlette.datastructures import Headers as Headers  # noqa: F401
 from starlette.datastructures import QueryParams as QueryParams  # noqa: F401
 from starlette.datastructures import State as State  # noqa: F401
 from starlette.datastructures import UploadFile as StarletteUploadFile
+from starlette.exceptions import HTTPException
+from starlette.status import HTTP_400_BAD_REQUEST, HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
 
 class UploadFile(StarletteUploadFile):
@@ -62,6 +64,58 @@ class UploadFile(StarletteUploadFile):
     content_type: Annotated[
         str | None, Doc("The content type of the request, from the headers.")
     ]
+    max_size: Annotated[
+        int | None,
+        Doc(
+            "The maximum allowed file size in bytes. "
+            "If set, the file will be validated against this limit."
+        ),
+    ] = None
+    allowed_content_types: Annotated[
+        list[str] | None,
+        Doc(
+            "The list of allowed content types for the file. "
+            "If set, the file's content type will be validated against this list."
+        ),
+    ] = None
+
+    def __init__(
+        self,
+        file: BinaryIO,
+        *,
+        size: int | None = None,
+        filename: str | None = None,
+        headers: Headers | None = None,
+        max_size: int | None = None,
+        allowed_content_types: list[str] | None = None,
+    ) -> None:
+        super().__init__(file=file, size=size, filename=filename, headers=headers)
+        self.max_size = max_size
+        self.allowed_content_types = allowed_content_types
+
+    def validate(self) -> "UploadFile":
+        """
+        Validate the file against the configured constraints.
+
+        Raises `HTTPException` if:
+        - The file size exceeds `max_size`.
+        - The content type is not in `allowed_content_types`.
+
+        Returns the current instance for chaining.
+        """
+        if self.max_size is not None and self.size is not None and self.size > self.max_size:
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail=f"File size exceeds maximum allowed size of {self.max_size} bytes",
+            )
+        if self.allowed_content_types is not None and self.content_type is not None:
+            if self.content_type not in self.allowed_content_types:
+                raise HTTPException(
+                    status_code=HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail=f"Content type '{self.content_type}' is not allowed. "
+                    f"Allowed content types: {self.allowed_content_types}",
+                )
+        return self
 
     async def write(
         self,

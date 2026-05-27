@@ -48,6 +48,57 @@ def test_upload_file_is_closed(tmp_path: Path):
     assert testing_file_store[0].file.closed
 
 
+def test_upload_file_validate_max_size():
+    """Test that validate() rejects files exceeding max_size."""
+    from starlette.exceptions import HTTPException
+
+    stream = io.BytesIO(b"x" * 1000)
+    file = UploadFile(filename="test.txt", file=stream, size=1000, max_size=500)
+    with pytest.raises(HTTPException) as exc_info:
+        file.validate()
+    assert exc_info.value.status_code == 400
+    assert "File size exceeds maximum allowed size" in str(exc_info.value.detail)
+
+
+def test_upload_file_validate_max_size_ok():
+    """Test that validate() passes when size is within limits."""
+    stream = io.BytesIO(b"x" * 100)
+    file = UploadFile(filename="test.txt", file=stream, size=100, max_size=500)
+    result = file.validate()
+    assert result is file  # returns self for chaining
+
+
+def test_upload_file_validate_content_type_allowed():
+    """Test that validate() passes for an allowed content type."""
+    from starlette.datastructures import Headers
+
+    headers = Headers({"content-type": "image/png"})
+    stream = io.BytesIO(b"fake png data")
+    file = UploadFile(
+        filename="img.png", file=stream, size=12, headers=headers,
+        allowed_content_types=["image/png", "image/jpeg"],
+    )
+    result = file.validate()
+    assert result is file
+
+
+def test_upload_file_validate_content_type_blocked():
+    """Test that validate() rejects a disallowed content type."""
+    from starlette.exceptions import HTTPException
+    from starlette.datastructures import Headers
+
+    headers = Headers({"content-type": "text/html"})
+    stream = io.BytesIO(b"<html></html>")
+    file = UploadFile(
+        filename="doc.html", file=stream, size=15, headers=headers,
+        allowed_content_types=["image/png", "application/pdf"],
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        file.validate()
+    assert exc_info.value.status_code == 415
+    assert "Content type" in str(exc_info.value.detail)
+
+
 # For UploadFile coverage, segments copied from Starlette tests
 
 
