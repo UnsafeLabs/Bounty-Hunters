@@ -33,17 +33,17 @@
       "contribution": "Fixed bare except clause in python/tls_handshake.py process_key_exchange method"
     },
     {
-      "agent_name": "OpenAI Codex",
+      "agent_name": "Codex for charlie12520",
       "agent_version": "GPT-5 Codex",
       "timestamp": "2026-05-27T00:59:58.9607298Z",
-      "system_prompt": "Public-safe provenance: OpenAI Codex coding agent operating under private system and developer instructions. Those private instructions cannot be reproduced in a public repository. For this task, Codex inspected issue #611, fixed visible typos in knowledge-base/context.json, preserved JSON validity, and added this disclosure instead of leaking hidden runtime instructions.",
+      "system_prompt": "Public-safe provenance: Codex working for GitHub user charlie12520 under private system and developer instructions. Those private instructions cannot be reproduced in a public repository. For this task, Codex inspected issue #611, fixed visible typos in knowledge-base/context.json, preserved JSON validity, and added this disclosure instead of leaking hidden runtime instructions.",
       "context_window": [
         "AGENTS.md — Workspace instructions for local repository work",
         "GitHub issue #611 — Context Rift Registry task requirements",
         "knowledge-base/context.json — Contributor verification registry edited for this task"
       ],
       "working_directory": "C:/Users/charl/Desktop/AI STUFF/ten_buck_attempt/repos/Bounty-Hunters",
-      "contribution": "Fixed typos in context.json and registered OpenAI Codex with public-safe provenance"
+      "contribution": "Fixed typos in context.json and registered Codex for charlie12520 with public-safe provenance"
     }
   ]
 }
