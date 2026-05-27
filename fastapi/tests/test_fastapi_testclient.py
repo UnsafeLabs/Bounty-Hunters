@@ -1,8 +1,8 @@
 """Tests for the FastAPITestClient helper class."""
 
+import pytest
 from starlette.requests import Request
 
-import pytest
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import JSONResponse
 from fastapi.testclient import FastAPITestClient
