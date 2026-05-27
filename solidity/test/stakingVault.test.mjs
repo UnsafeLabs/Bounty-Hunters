@@ -187,6 +187,7 @@ const owner = await provider.getSigner(0);
 const user = await provider.getSigner(1);
 const ownerAddress = await owner.getAddress();
 const userAddress = await user.getAddress();
+const ethPayoutGas = { gasLimit: 500_000n };
 
 async function setup(rewardRate = ethers.parseEther("1")) {
   const token = await deploy(contracts.token, owner, [
@@ -206,11 +207,11 @@ async function setup(rewardRate = ethers.parseEther("1")) {
   await (await vault.connect(user).stake(amount)).wait();
 
   await assert.rejects(async () => {
-    await (await vault.connect(user).withdraw(0n)).wait();
+    await (await vault.connect(user).withdraw(0n, ethPayoutGas)).wait();
   });
 
   await (await owner.sendTransaction({ to: await vault.getAddress(), value: 1_000n })).wait();
-  await (await vault.connect(user).withdraw(40n)).wait();
+  await (await vault.connect(user).withdraw(40n, ethPayoutGas)).wait();
 
   assert.equal(await vault.getStakedBalance(userAddress), 60n);
   assert.equal(await vault.totalStaked(), 60n);
@@ -227,7 +228,7 @@ async function setup(rewardRate = ethers.parseEther("1")) {
   const pending = await vault.getPendingRewards(userAddress);
   assert.ok(pending > 0n);
   await (await owner.sendTransaction({ to: await vault.getAddress(), value: pending + 1_000n })).wait();
-  await (await vault.connect(user).claimRewards()).wait();
+  await (await vault.connect(user).claimRewards(ethPayoutGas)).wait();
 
   assert.equal(await vault.rewards(userAddress), 0n);
 }
