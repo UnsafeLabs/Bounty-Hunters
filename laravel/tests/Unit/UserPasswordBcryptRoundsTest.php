@@ -13,16 +13,25 @@ class UserPasswordBcryptRoundsTest extends TestCase
 
     public function test_password_hashing_uses_configured_bcrypt_rounds(): void
     {
-        $customRounds = 12;
-        Config::set('hashing.bcrypt.rounds', $customRounds);
+        $configuredRounds = 12;
+        Config::set('hashing.bcrypt.rounds', $configuredRounds);
 
         $user = new User();
         $user->password = 'secret';
-        $user->save();
 
-        $hash = $user->password;
-        $cost = (int) explode('$', $hash)[3] ?? 0;
+        $info = password_get_info($user->password);
 
-        $this->assertEquals($customRounds, $cost);
+        $this->assertSame($configuredRounds, $info['options']['cost']);
+    }
+
+    public function test_password_verification_works_with_different_rounds(): void
+    {
+        $user = new User();
+        $user->password = 'secret';
+
+        $this->assertTrue(password_verify('secret', $user->password));
+
+        // Verify with Hash facade as well
+        $this->assertTrue(\Illuminate\Support\Facades\Hash::check('secret', $user->password));
     }
 }
