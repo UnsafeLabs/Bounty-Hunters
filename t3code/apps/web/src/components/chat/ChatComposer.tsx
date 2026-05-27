@@ -63,6 +63,9 @@ import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../Compos
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
+
+const COMPOSER_PROVIDER_MODEL_PICKER_PERSISTENCE_KEY =
+  "t3code:composer-provider-model-picker-selection:v1";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
@@ -2331,6 +2334,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         activeProviderIconClassName: composerProviderState.modelPickerIconClassName,
                       }
                     : {})}
+                  persistenceKey={COMPOSER_PROVIDER_MODEL_PICKER_PERSISTENCE_KEY}
                   onOpenChange={(open) => {
                     setIsComposerModelPickerOpen(open);
                   }}

@@ -213,6 +213,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
 const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
 const CLAUDE_INSTANCE_ID = ProviderInstanceId.make("claudeAgent");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
+const PERSISTENCE_KEY = "t3code:test:provider-model-picker-selection:v1";
 
 function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
   return {
@@ -255,6 +256,7 @@ async function mountPicker(props: {
   providers?: ReadonlyArray<ServerProvider>;
   settings?: UnifiedSettings;
   triggerVariant?: "ghost" | "outline";
+  persistenceKey?: string;
 }) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -277,6 +279,7 @@ async function mountPicker(props: {
       instanceEntries={instanceEntries}
       modelOptionsByInstance={modelOptionsByInstance}
       triggerVariant={props.triggerVariant}
+      {...(props.persistenceKey ? { persistenceKey: props.persistenceKey } : {})}
       onInstanceModelChange={onInstanceModelChange}
     />,
     { container: host },
@@ -322,10 +325,12 @@ describe("ProviderModelPicker", () => {
   beforeEach(async () => {
     // Reset test environment before each test
     await __resetLocalApiForTests();
+    localStorage.removeItem(PERSISTENCE_KEY);
   });
 
   afterEach(async () => {
     document.body.innerHTML = "";
+    localStorage.removeItem(PERSISTENCE_KEY);
     await __resetLocalApiForTests();
   });
 
@@ -1219,6 +1224,124 @@ describe("ProviderModelPicker", () => {
       }
       expect(button.className).toContain("border-input");
       expect(button.className).toContain("bg-popover");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("restores the persisted provider/model selection after reload", async () => {
+    const firstMount = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+      persistenceKey: PERSISTENCE_KEY,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByRole("button", { name: "Codex", exact: true }).click();
+      await page.getByText("GPT-5.3 Codex").first().click();
+
+      expect(firstMount.onInstanceModelChange).toHaveBeenCalledWith("codex", "gpt-5.3-codex");
+    } finally {
+      await firstMount.cleanup();
+    }
+
+    const secondMount = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+      persistenceKey: PERSISTENCE_KEY,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(secondMount.onInstanceModelChange).toHaveBeenCalledWith("codex", "gpt-5.3-codex");
+      });
+    } finally {
+      await secondMount.cleanup();
+    }
+  });
+
+  it("falls back to the first available option when persisted selection is invalid", async () => {
+    localStorage.setItem(
+      PERSISTENCE_KEY,
+      JSON.stringify({
+        instanceId: "missing-provider",
+        model: "missing-model",
+      }),
+    );
+
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+      persistenceKey: PERSISTENCE_KEY,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith("codex", "gpt-5-codex");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("resets the persisted selection back to the default choice", async () => {
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+      persistenceKey: PERSISTENCE_KEY,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByRole("button", { name: "Codex", exact: true }).click();
+      await page.getByText("GPT-5.3 Codex").first().click();
+
+      await page.getByRole("button").click();
+      await page.getByRole("button", { name: "Reset to default" }).click();
+
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenLastCalledWith(
+          "claudeAgent",
+          "claude-opus-4-6",
+        );
+      });
+      expect(localStorage.getItem(PERSISTENCE_KEY)).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("syncs persisted picker changes from storage events", async () => {
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+      persistenceKey: PERSISTENCE_KEY,
+    });
+
+    try {
+      localStorage.setItem(
+        PERSISTENCE_KEY,
+        JSON.stringify({
+          instanceId: "codex",
+          model: "gpt-5.3-codex",
+        }),
+      );
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: PERSISTENCE_KEY,
+          newValue: localStorage.getItem(PERSISTENCE_KEY),
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith("codex", "gpt-5.3-codex");
+      });
     } finally {
       await mounted.cleanup();
     }

@@ -11,6 +11,7 @@ import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { isModelPickerNewModel } from "./modelPickerModelHighlights";
 import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxList } from "../ui/combobox";
+import { Button } from "../ui/button";
 import { ModelEsque, PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
 import {
   modelPickerJumpCommandForIndex,
@@ -80,6 +81,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
    */
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   terminalOpen: boolean;
+  onResetToDefault?: () => void;
   onRequestClose?: () => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
@@ -569,10 +571,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             )}
           >
             {/* Search bar */}
-            <div className="border-b px-3 py-2">
+            <div className="flex items-center gap-2 border-b px-3 py-2">
               <ComboboxInput
                 ref={searchInputRef}
-                className="[&_input]:font-sans rounded-md"
+                className="min-w-0 flex-1 [&_input]:font-sans rounded-md"
                 inputClassName="border-0 shadow-none ring-0 focus-visible:ring-0"
                 placeholder="Search models..."
                 showTrigger={false}
@@ -604,6 +606,21 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 onTouchStart={(e) => e.stopPropagation()}
                 size="sm"
               />
+              {props.onResetToDefault ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 text-xs"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    props.onResetToDefault?.();
+                  }}
+                >
+                  Reset to default
+                </Button>
+              ) : null}
             </div>
 
             {/* Model list */}

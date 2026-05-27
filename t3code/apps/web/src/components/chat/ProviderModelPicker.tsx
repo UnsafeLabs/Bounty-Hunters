@@ -3,7 +3,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -19,6 +19,38 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+
+const PROVIDER_MODEL_PICKER_PERSIST_EVENT = "t3code:provider-model-picker-selection-change";
+
+type PersistedProviderModelPickerSelection = {
+  instanceId: ProviderInstanceId;
+  model: string;
+};
+
+function parsePersistedProviderModelPickerSelection(
+  raw: string | null,
+): PersistedProviderModelPickerSelection | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.instanceId === "string" &&
+      typeof parsed.model === "string"
+    ) {
+      return {
+        instanceId: parsed.instanceId as ProviderInstanceId,
+        model: parsed.model,
+      };
+    }
+  } catch {
+    // Ignore malformed persisted picker state and fall back to defaults.
+  }
+  return null;
+}
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -40,11 +72,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   open?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  persistenceKey?: string;
   onOpenChange?: (open: boolean) => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+  const defaultSelectionRef = useRef<PersistedProviderModelPickerSelection>({
+    instanceId: props.activeInstanceId,
+    model: props.model,
+  });
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -71,6 +108,73 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     (entry) => activeEntry !== null && entry.driverKind === activeEntry.driverKind,
   ).length;
   const showInstanceBadge = Boolean(activeEntry?.accentColor) || duplicateDriverCount > 1;
+  const firstAvailableSelection = useMemo<PersistedProviderModelPickerSelection | null>(() => {
+    for (const entry of props.instanceEntries) {
+      if (!entry.enabled || entry.status !== "ready") {
+        continue;
+      }
+      if (props.lockedProvider && entry.driverKind !== props.lockedProvider) {
+        continue;
+      }
+      if (
+        props.lockedContinuationGroupKey &&
+        entry.continuationGroupKey !== props.lockedContinuationGroupKey
+      ) {
+        continue;
+      }
+      const firstOption = props.modelOptionsByInstance.get(entry.instanceId)?.[0];
+      if (firstOption) {
+        return {
+          instanceId: entry.instanceId,
+          model: firstOption.slug,
+        };
+      }
+    }
+    return null;
+  }, [
+    props.instanceEntries,
+    props.lockedContinuationGroupKey,
+    props.lockedProvider,
+    props.modelOptionsByInstance,
+  ]);
+
+  const resolveSelectionIfValid = useCallback(
+    (
+      selection: PersistedProviderModelPickerSelection | null,
+    ): PersistedProviderModelPickerSelection | null => {
+      if (!selection) {
+        return null;
+      }
+      const matchingEntry = props.instanceEntries.find(
+        (entry) =>
+          entry.instanceId === selection.instanceId &&
+          entry.enabled &&
+          entry.status === "ready" &&
+          (!props.lockedProvider || entry.driverKind === props.lockedProvider) &&
+          (!props.lockedContinuationGroupKey ||
+            entry.continuationGroupKey === props.lockedContinuationGroupKey),
+      );
+      if (!matchingEntry) {
+        return null;
+      }
+      const matchingModel = props.modelOptionsByInstance
+        .get(matchingEntry.instanceId)
+        ?.find((option) => option.slug === selection.model);
+      if (!matchingModel) {
+        return null;
+      }
+      return {
+        instanceId: matchingEntry.instanceId,
+        model: matchingModel.slug,
+      };
+    },
+    [
+      props.instanceEntries,
+      props.lockedContinuationGroupKey,
+      props.lockedProvider,
+      props.modelOptionsByInstance,
+    ],
+  );
 
   const setIsMenuOpen = (open: boolean) => {
     props.onOpenChange?.(open);
@@ -86,11 +190,123 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
+  const persistSelection = useCallback(
+    (selection: PersistedProviderModelPickerSelection) => {
+      if (!props.persistenceKey || typeof window === "undefined") {
+        return;
+      }
+      window.localStorage.setItem(props.persistenceKey, JSON.stringify(selection));
+      window.dispatchEvent(
+        new CustomEvent<PersistedProviderModelPickerSelection>(PROVIDER_MODEL_PICKER_PERSIST_EVENT, {
+          detail: selection,
+        }),
+      );
+    },
+    [props.persistenceKey],
+  );
+
+  const clearPersistedSelection = useCallback(() => {
+    if (!props.persistenceKey || typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.removeItem(props.persistenceKey);
+    window.dispatchEvent(
+      new CustomEvent<{ instanceId: ProviderInstanceId | null }>(
+        PROVIDER_MODEL_PICKER_PERSIST_EVENT,
+        {
+          detail: { instanceId: null },
+        },
+      ),
+    );
+  }, [props.persistenceKey]);
+
+  const applySelection = useCallback(
+    (selection: PersistedProviderModelPickerSelection | null) => {
+      const resolvedSelection = selection ?? firstAvailableSelection;
+      if (!resolvedSelection) {
+        return;
+      }
+      if (
+        props.activeInstanceId === resolvedSelection.instanceId &&
+        props.model === resolvedSelection.model
+      ) {
+        return;
+      }
+      props.onInstanceModelChange(resolvedSelection.instanceId, resolvedSelection.model);
+    },
+    [firstAvailableSelection, props.activeInstanceId, props.model, props.onInstanceModelChange],
+  );
+
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
+    persistSelection({ instanceId, model });
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
   };
+
+  const handleResetToDefault = useCallback(() => {
+    clearPersistedSelection();
+    const defaultSelection = resolveSelectionIfValid(defaultSelectionRef.current) ?? firstAvailableSelection;
+    if (defaultSelection) {
+      props.onInstanceModelChange(defaultSelection.instanceId, defaultSelection.model);
+    }
+    setIsMenuOpen(false);
+  }, [
+    clearPersistedSelection,
+    firstAvailableSelection,
+    props.onInstanceModelChange,
+    resolveSelectionIfValid,
+  ]);
+
+  useEffect(() => {
+    if (!props.persistenceKey || typeof window === "undefined") {
+      return;
+    }
+    const persistenceKey = props.persistenceKey;
+
+    const resolvePersistedSelection = (): PersistedProviderModelPickerSelection | null => {
+      const persistedSelection = parsePersistedProviderModelPickerSelection(window.localStorage.getItem(persistenceKey));
+      if (!persistedSelection) {
+        return null;
+      }
+      return resolveSelectionIfValid(persistedSelection) ?? firstAvailableSelection;
+    };
+
+    const syncFromPersistence = () => {
+      applySelection(resolvePersistedSelection());
+    };
+
+    syncFromPersistence();
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === persistenceKey) {
+        syncFromPersistence();
+      }
+    };
+    const onLocalChange = (event: Event) => {
+      const detail = (event as CustomEvent<PersistedProviderModelPickerSelection | null>).detail;
+      if (detail === undefined) {
+        return;
+      }
+      syncFromPersistence();
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(PROVIDER_MODEL_PICKER_PERSIST_EVENT, onLocalChange);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(PROVIDER_MODEL_PICKER_PERSIST_EVENT, onLocalChange);
+    };
+  }, [
+    applySelection,
+    firstAvailableSelection,
+    props.instanceEntries,
+    props.lockedContinuationGroupKey,
+    props.lockedProvider,
+    props.modelOptionsByInstance,
+    props.persistenceKey,
+    resolveSelectionIfValid,
+  ]);
 
   return (
     <Popover
@@ -178,6 +394,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           {...(props.keybindings ? { keybindings: props.keybindings } : {})}
           modelOptionsByInstance={props.modelOptionsByInstance}
           terminalOpen={props.terminalOpen ?? false}
+          {...(props.persistenceKey ? { onResetToDefault: handleResetToDefault } : {})}
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
         />
