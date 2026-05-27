@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.0;
 
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract StakingVault {
     IERC20 public stakingToken;
     uint256 public rewardRate;
     uint256 public totalStaked;
-
-    mapping(address => uint256) public balances;
-    mapping(address => uint256) public rewards;
-    mapping(address => uint256) public lastStakeTime;
-
-    event Staked(address indexed user, uint256 amount);
-    event Withdrawn(address indexed user, uint256 amount);
+ * @dev Allows users to stake ETH, earn rewards over time, and withdraw their stake.
+ *      Includes reward distribution based on staking duration.
+ */
+contract StakingVault is Ownable, ReentrancyGuard {
+    // ============ State Variables ============
+    
+    /// @notice Tracks staked balance per user
     event RewardClaimed(address indexed user, uint256 amount);
 
     constructor(address _stakingToken, uint256 _rewardRate) {
@@ -75,6 +76,30 @@ contract StakingVault {
         uint256 timeStaked = block.timestamp - lastStakeTime[account];
         return rewards[account] + balances[account] * timeStaked * rewardRate / 1e18;
     }
-
-    receive() external payable {}
-}
+     * @notice Withdraw staked ETH
+     * @param amount The amount to withdraw
+     */
+    function withdraw(uint256 amount) external nonReentrant {
+        require(amount > 0, "Cannot withdraw zero");
+        require(balances[msg.sender] >= amount, "Insufficient balance");
+        
+        balances[msg.sender] -= amount;
+        
+        payable(msg.sender).transfer(amount);
+        
+        totalStaked -= amount;
+        
+        emit Withdrawn(msg.sender, amount);
+    /**
+     * @notice Claim accumulated rewards
+     */
+    function claimRewards() external nonReentrant {
+        uint256 rewards = calculateRewards(msg.sender);
+        require(rewards > 0, "No rewards to claim");
+        
+        rewardsAccrued[msg.sender] = block.timestamp;
+        
+        payable(msg.sender).transfer(rewards);
+        
+        emit RewardsClaimed(msg.sender, rewards);
+    }
