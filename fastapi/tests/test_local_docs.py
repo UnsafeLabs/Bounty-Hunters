@@ -65,3 +65,22 @@ def test_google_fonts_in_generated_redoc():
         openapi_url="/docs", title="title", with_google_fonts=False
     ).body.decode()
     assert "fonts.googleapis.com" not in body_without_google_fonts
+
+
+def test_fastapi_custom_cdn_urls():
+    """Test that FastAPI class accepts custom CDN URLs."""
+    from fastapi import FastAPI
+    
+    app = FastAPI(
+        swagger_js_url="https://custom-cdn.com/swagger-ui-bundle.js",
+        swagger_css_url="https://custom-cdn.com/swagger-ui.css",
+        swagger_favicon_url="https://custom-cdn.com/favicon.ico",
+        redoc_js_url="https://custom-cdn.com/redoc.standalone.js",
+        redoc_favicon_url="https://custom-cdn.com/favicon.ico",
+    )
+    
+    assert app.swagger_js_url == "https://custom-cdn.com/swagger-ui-bundle.js"
+    assert app.swagger_css_url == "https://custom-cdn.com/swagger-ui.css"
+    assert app.swagger_favicon_url == "https://custom-cdn.com/favicon.ico"
+    assert app.redoc_js_url == "https://custom-cdn.com/redoc.standalone.js"
+    assert app.redoc_favicon_url == "https://custom-cdn.com/favicon.ico"
