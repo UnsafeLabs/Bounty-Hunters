@@ -16,6 +16,7 @@ contract MultiSigWallet {
     mapping(uint256 => Transaction) public transactions;
     mapping(uint256 => mapping(address => bool)) public confirmations;
     mapping(address => bool) public isOwner;
+    bool private _executing;
 
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
@@ -25,6 +26,13 @@ contract MultiSigWallet {
     modifier onlyOwner() {
         require(isOwner[msg.sender], "Not owner");
         _;
+    }
+
+    modifier nonReentrant() {
+        require(!_executing, "Reentrancy");
+        _executing = true;
+        _;
+        _executing = false;
     }
 
     constructor(address[] memory _owners, uint256 _required) {
@@ -39,6 +47,7 @@ contract MultiSigWallet {
 
     // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Invalid target");
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -72,9 +81,10 @@ contract MultiSigWallet {
 
     // BUG: No reentrancy protection — confirmation can be revoked during callback
     // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+        uint256 confirmationSnapshot = getConfirmationCount(txId);
+        require(confirmationSnapshot >= required, "Not enough confirmations");
 
         Transaction storage txn = transactions[txId];
         txn.executed = true;
