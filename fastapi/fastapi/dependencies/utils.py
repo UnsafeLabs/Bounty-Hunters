@@ -661,7 +661,7 @@ async def solve_dependencies(
         if solved_result.errors:
             errors.extend(solved_result.errors)
             continue
-        if sub_dependant.use_cache and sub_dependant.cache_key in dependency_cache:
+        if (sub_dependant.use_cache or sub_dependant.scope == "request") and sub_dependant.cache_key in dependency_cache:
             solved = dependency_cache[sub_dependant.cache_key]
         elif (
             use_sub_dependant.is_gen_callable or use_sub_dependant.is_async_gen_callable

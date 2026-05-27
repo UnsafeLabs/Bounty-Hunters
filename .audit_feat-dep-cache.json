@@ -1,0 +1,8 @@
+{
+  "bounty": "#795 FastAPI request-scoped dependency caching",
+  "branch": "feat-dep-cache",
+  "changes": [
+    "Modified fastapi/fastapi/dependencies/utils.py - request-scoped dependencies (scope='request') are now always cached regardless of use_cache flag",
+    "Added fastapi/tests/test_dependency_request_scoped_cache.py - tests for request-scoped caching behavior"
+  ]
+}
