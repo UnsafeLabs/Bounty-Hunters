@@ -1,0 +1,1 @@
+{"name": "Hermes Agent", "session_init": "Add Effect.Cache-based provider API response caching with configurable TTL: 5min for model lists, 15min for capabilities. Cache miss triggers provider API call. Provider config changes invalidate cache entries. Cache hit/miss tracking via Ref counters. Bounded by max 256 entries.", "ts": "2026-05-28T03:30:00Z"}
