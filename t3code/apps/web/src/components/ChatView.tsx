@@ -704,6 +704,7 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
@@ -2549,6 +2550,95 @@ export default function ChatView(props: ChatViewProps) {
     toggleTerminalVisibility,
   ]);
 
+  // Keyboard navigation for messages (Arrow Up/Down, Enter to expand, Escape to focus composer)
+  useEffect(() => {
+    const handler = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || useCommandPaletteStore.getState().open) {
+        return;
+      }
+
+      const messageEntries = timelineEntries.filter((e) => e.kind === "message");
+      if (messageEntries.length === 0) return;
+
+      // Only handle these keys when not focused in the composer
+      const activeEl = document.activeElement;
+      const isInComposer = activeEl?.closest('[data-chat-composer-form="true"]');
+      const isInLog = activeEl?.closest('[role="log"]');
+
+      if (event.key === "Escape") {
+        // Escape returns focus to composer
+        if (focusedMessageId) {
+          setFocusedMessageId(null);
+          event.preventDefault();
+          focusComposer();
+        }
+        return;
+      }
+
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        // Only handle when not in composer
+        if (isInComposer) return;
+
+        event.preventDefault();
+        const currentIndex = focusedMessageId
+          ? messageEntries.findIndex((e) => e.id === focusedMessageId)
+          : -1;
+
+        let nextIndex: number;
+        if (event.key === "ArrowUp") {
+          nextIndex = currentIndex > 0 ? currentIndex - 1 : 0;
+        } else {
+          nextIndex =
+            currentIndex < messageEntries.length - 1 ? currentIndex + 1 : messageEntries.length - 1;
+        }
+
+        const targetEntry = messageEntries[nextIndex];
+        if (targetEntry) {
+          setFocusedMessageId(targetEntry.id);
+          // Update visual focus indicator via DOM
+          document
+            .querySelectorAll('[data-message-focused="true"]')
+            .forEach((el) => el.removeAttribute("data-message-focused"));
+          document
+            .querySelectorAll('[aria-current="true"]')
+            .forEach((el) => el.removeAttribute("aria-current"));
+          const rowEl = document.querySelector(
+            `[data-timeline-row-id="${targetEntry.id}"]`,
+          );
+          if (rowEl instanceof HTMLElement) {
+            rowEl.setAttribute("data-message-focused", "true");
+            rowEl.setAttribute("aria-current", "true");
+            rowEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
+        }
+        return;
+      }
+
+      if (event.key === "Enter" && focusedMessageId) {
+        // Enter on a focused message - find expand/collapse button and click it
+        const rowEl = document.querySelector(
+          `[data-timeline-row-id="${focusedMessageId}"]`,
+        );
+        if (rowEl instanceof HTMLElement) {
+          const expandBtn = rowEl.querySelector<HTMLButtonElement>(
+            'button[aria-label="Show full message"], button[aria-label="Show less"]',
+          );
+          if (expandBtn) {
+            event.preventDefault();
+            expandBtn.click();
+          }
+        }
+        return;
+      }
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [
+    timelineEntries,
+    focusedMessageId,
+    focusComposer,
+  ]);
+
   const onRevertToTurnCount = useCallback(
     async (turnCount: number) => {
       const api = readEnvironmentApi(environmentId);
@@ -3498,6 +3588,34 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      {/* Skip links for keyboard accessibility */}
+      <div className="sr-only focus-within:not-sr-only focus-within:fixed focus-within:z-50 focus-within:m-2 focus-within:rounded focus-within:bg-background focus-within:p-2 focus-within:text-sm focus-within:text-foreground">
+        <a
+          href="#chat-messages"
+          className="focus:outline-none focus:underline"
+          onClick={(e) => {
+            e.preventDefault();
+            const el = document.querySelector('[role="log"]');
+            if (el instanceof HTMLElement) {
+              el.focus();
+            }
+          }}
+        >
+          Skip to chat messages
+        </a>
+        <span className="mx-2" aria-hidden="true">·</span>
+        <a
+          href="#chat-composer"
+          className="focus:outline-none focus:underline"
+          onClick={(e) => {
+            e.preventDefault();
+            focusComposer();
+          }}
+        >
+          Skip to composer
+        </a>
+      </div>
+
       {/* Top bar */}
       <header
         className={cn(
@@ -3586,6 +3704,7 @@ export default function ChatView(props: ChatViewProps) {
                   type="button"
                   onClick={() => scrollToEnd(true)}
                   className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
+                  aria-label="Scroll to bottom of chat"
                 >
                   <ChevronDownIcon className="size-3.5" />
                   Scroll to bottom
@@ -3596,6 +3715,7 @@ export default function ChatView(props: ChatViewProps) {
 
           {/* Input bar */}
           <div
+            id="chat-composer"
             className={cn(
               "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
               isGitRepo

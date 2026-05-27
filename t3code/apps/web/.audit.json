@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-05-27T12:56:00.000Z",
+  "changes": [
+    {
+      "file": "apps/web/src/components/chat/MessagesTimeline.tsx",
+      "description": "Added role=\"log\", aria-live=\"polite\", aria-label=\"Chat messages\", tabIndex={-1} wrapper around LegendList; role=\"list\" on LegendList; role=\"listitem\" on each timeline row; role=\"status\" on empty state"
+    },
+    {
+      "file": "apps/web/src/components/ChatView.tsx",
+      "description": "Added skip links (Skip to chat messages, Skip to composer); added keyboard navigation state and handlers (Arrow Up/Down to move between messages, Enter to expand/collapse, Escape to focus composer); added aria-label to scroll-to-bottom button; added id=\"chat-composer\" to composer section"
+    },
+    {
+      "file": "apps/web/src/components/chat/ChatComposer.tsx",
+      "description": "Added aria-label=\"Chat message composer\" to form element"
+    }
+  ],
+  "aria_improvements": {
+    "role_log": true,
+    "aria_live_polite": true,
+    "role_listitem": true,
+    "aria_labels_buttons": true,
+    "keyboard_navigation": true,
+    "skip_links": true,
+    "focus_trap_respected": true
+  }
+}
