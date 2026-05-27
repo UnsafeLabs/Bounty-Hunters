@@ -2,46 +2,39 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Notification;
 use App\Models\NotificationPreference;
-use App\Models\User;
-use Illuminate\Support\Facades\Log;
 
 class NotificationRouter
 {
-    public function shouldSendToChannel(User $user, string $channel, string $eventType): bool
+    public static function route($notifiable, $notification, $event_type)
     {
-        $preference = NotificationPreference::forUser($user->id)
-            ->forChannel($channel)
-            ->forEventType($eventType)
-            ->first();
+        // Get user's preferences for this event type
+        $preferences = NotificationPreference::where('user_id', $notifiable->id)
+            ->where('event_type', $event_type)
+            ->where('enabled', true)
+            ->get();
 
-        if (!$preference) {
-            Log::warning("No notification preference found for user {$user->id}, channel {$channel}, event {$eventType}");
-            return false;
+        // If no preferences found, send to all default channels
+        if ($preferences->isEmpty()) {
+            Notification::send($notifiable, $notification);
+            return;
         }
 
-        return $preference->enabled;
-    }
+        // Filter notification channels based on preferences
+        $channels = $preferences->pluck('channel')->toArray();
 
-    public function getEnabledChannels(User $user, string $eventType): array
-    {
-        return NotificationPreference::forUser($user->id)
-            ->forEventType($eventType)
-            ->where('enabled', true)
-            ->pluck('channel')
-            ->toArray();
-    }
-
-    public function routeNotification(User $user, string $eventType, callable $sendCallback): void
-    {
-        $enabledChannels = $this->getEnabledChannels($user, $eventType);
-
-        foreach ($enabledChannels as $channel) {
-            try {
-                $sendCallback($channel);
-            } catch (\Exception $e) {
-                Log::error("Failed to send notification to {$channel} for user {$user->id}: " . $e->getMessage());
+        // Send notification only to enabled channels
+        foreach ($channels as $channel) {
+            if (method_exists($notification, 'to' . ucfirst($channel))) {
+                Notification::send($notifiable, $notification->via([$channel]));
             }
         }
+    }
+
+    public static function shouldRoute($notifiable, $event_type)
+    {
+        return NotificationPreference::where('user_id', $notifiable->id)->where('event_type', $event_type)->exists();
     }
 }
