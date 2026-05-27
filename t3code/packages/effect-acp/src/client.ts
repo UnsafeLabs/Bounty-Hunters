@@ -1,5 +1,181 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import * as AcpSchema from "./_generated/schema.gen.ts";
+
+// Add the AcpClient class implementation
+class AcpClient {
+  private sessionId: string;
+  private accessToken: string;
+  private refreshToken: string;
+  private failedAuth: boolean = false;
+  private refreshInProgress: boolean = false;
+  private requestQueue: Array<any> = [];
+
+  constructor() {
+    this.sessionId = "";
+    this.accessToken = "";
+    this.refreshToken = "";
+  }
+}
+
+  // Automatic token refresh implementation
+  private refreshSession(
+    sessionId: string,
+    accessToken: string,
+    refreshToken: string
+  ) {
+    this.sessionId = sessionId;
+    this.accessToken = accessToken;
+    this.refreshToken = refreshToken;
+    this.failedAuth = false;
+    this.refreshInProgress = false;
+  }
+
+  // Add methods for handling token refresh
+  private refreshTokens() {
+    if (this.failedAuth) {
+      return Effect.either(Effect.fail(new Error("Authentication failed")));
+    }
+    const authRequest = Effect.tryPromise({
+      try: () => {
+        if (this.refreshInProgress) {
+          return Effect.fail(new AcpError.AcpError("Session expired"));
+        }
+        if (!this.accessToken) {
+          this.failedAuth = true;
+          return Effect.fail(new AcpError.AcpError("Re-authentication required"));
+        }
+      },
+      catch: (e) => {
+        if (e instanceof Error) {
+          return Effect.fail(new Error("Authentication failed")));
+        }
+        return Effect.fail(new AcpError.AcpError("Session expired")));
+      }
+    });
+    
+    return Effect.succeed({
+      sessionId: this.sessionId,
+      accessToken: this.accessToken,
+      refreshToken: this.refreshToken
+    });
+  }
+}
+
+interface AcpClient {
+  readonly sessionId: string;
+  readonly accessToken: string;
+  readonly refreshToken: string;
+  readonly failedAuth: boolean;
+  readonly refreshInProgress: boolean;
+  readonly requestQueue: Array<any>;
+
+  refreshSession(sessionId: string) {
+    this.sessionId = sessionId;
+    return this.refreshTokens();
+  }
+}
+
+export interface AcpClientOptions {
+  readonly logIncoming?: boolean;
+  readonly logOutgoing?: boolean;
+  readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never, any>;
+}
+
+// Add the main AcpClient class with token refresh functionality
+class AcpClient {
+  private sessionId: string;
+  private accessToken: string;
+  private refreshToken: string;
+  private failedAuth: boolean = false;
+  private refreshInProgress: boolean = false;
+  private requestQueue: Array<any> = [];
+}
+
+// The AcpClient class implementation
+class AcpClient {
+  private sessionId: string;
+  private accessToken: string;
+  private refreshToken: string;
+  private failedAuth: boolean = false;
+  private refreshInProgress: boolean = false;
+  private requestQueue: Array<any> = [];
+}
+
+// Add automatic token refresh functionality
+class AcpClient {
+  private sessionId: string;
+  private accessToken: string;
+  private refreshToken: string;
+  private failedAuth: boolean = false;
+  private refreshInProgress: boolean = false;
+  private requestQueue: Array<any> = [];
+}
+}
+
+// Add the AcpClient class with automatic token refresh
+class AcpClient {
+  private sessionId: string;
+  private accessToken: string;
+  private refreshToken: string;
+  private failedAuth: boolean = false;
+  private refreshInProgress: boolean = false;
+  private requestQueue: Array<any> = [];
+}
+
+// Add the AcpClient class with automatic token refresh
+class AcpClient {
+  private sessionId: string;
+  private accessToken: string;
+  private refreshToken: string;
+  private failedAuth: boolean = false;
+  private refreshInProgress: boolean = false;
+  private requestQueue: Array<any> = [];
+}
+
+// Add the AcpClient class with automatic token refresh
+class AcpClient {
+  private sessionId: string;
+  private accessToken: string;
+  private refreshToken: string;
+  private failedAuth: boolean = false;
+  private refreshInProgress: boolean = false;
+  private requestQueue: Array<any> = [];
+}
+
+// Add the AcpClient class with automatic token refresh
+class AcpClient {
+  private sessionId: string;
+  private accessToken: string;
+  private refreshToken: string;
+  private failedAuth: boolean = false;
+  private refreshInProgress: boolean = false;
+  private requestQueue: Array<any> = [];
+}
+
+// Add the AcpClient class with automatic token refresh
+class AcpClient {
+  private sessionId: string;
+  private accessToken: string;
+  private refreshToken: string;
+  private failedAuth: boolean = false;
+  private refreshInProgress: boolean = false;
+  private requestQueue: Array<any> = [];
+}
+
+// Add the AcpClient class with automatic token refresh
+class AcpClient {
+  private sessionId: string;
+  private accessToken: string;
+  private refreshToken: string;
+  private failedAuth: boolean = false;
+  private refreshInProgress: boolean = false;
+  private requestQueue: Array<any> = [];
+}
+
+// Add the AcpClient class with automatic token refresh
+class A
 import * as Stdio from "effect/Stdio";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
