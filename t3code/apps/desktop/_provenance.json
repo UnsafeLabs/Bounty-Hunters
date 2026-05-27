@@ -1,0 +1,6 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Non-sensitive provenance only. Private system, developer, runtime, and session instructions are intentionally not copied into repository files.",
+  "timestamp": "2026-05-27T20:25:00Z",
+  "scope": "Issue #820 backend health monitoring and automatic recovery"
+}

@@ -5,13 +5,14 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
-import type * as Electron from "electron";
+import * as Electron from "electron";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -33,10 +34,13 @@ type DesktopWindowRuntimeServices =
   | DesktopAssets.DesktopAssets
   | DesktopServerExposure.DesktopServerExposure
   | DesktopState.DesktopState
+  | ElectronDialog.ElectronDialog
   | ElectronMenu.ElectronMenu
   | ElectronShell.ElectronShell
   | ElectronTheme.ElectronTheme
   | ElectronWindow.ElectronWindow;
+
+export type DesktopBackendRecoveryDecision = "retry" | "quit";
 
 export class DesktopWindowDevServerUrlMissingError extends Data.TaggedError(
   "DesktopWindowDevServerUrlMissingError",
@@ -57,6 +61,11 @@ export interface DesktopWindowShape {
   readonly activate: Effect.Effect<void, DesktopWindowError>;
   readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
   readonly handleBackendReady: Effect.Effect<void, DesktopWindowError>;
+  readonly notifyBackendRestarting: Effect.Effect<void>;
+  readonly promptBackendRecoveryFailed: (input: {
+    readonly attempts: number;
+    readonly reason: string;
+  }) => Effect.Effect<DesktopBackendRecoveryDecision>;
   readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
   readonly syncAppearance: Effect.Effect<void>;
 }
@@ -147,6 +156,7 @@ function bindFirstRevealTrigger(
 const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const assets = yield* DesktopAssets.DesktopAssets;
+  const electronDialog = yield* ElectronDialog.ElectronDialog;
   const electronMenu = yield* ElectronMenu.ElectronMenu;
   const electronShell = yield* ElectronShell.ElectronShell;
   const electronTheme = yield* ElectronTheme.ElectronTheme;
@@ -336,8 +346,39 @@ const make = Effect.gen(function* () {
     handleBackendReady: Effect.gen(function* () {
       yield* Ref.set(state.backendReady, true);
       yield* logWindowInfo("backend ready", { source: "http" });
+      const existingWindow = yield* electronWindow.currentMainOrFirst;
+      if (Option.isSome(existingWindow) && !existingWindow.value.isDestroyed()) {
+        existingWindow.value.webContents.reload();
+        yield* electronWindow.reveal(existingWindow.value);
+        return;
+      }
       yield* createMainIfBackendReady;
     }).pipe(Effect.withSpan("desktop.window.handleBackendReady")),
+    notifyBackendRestarting: Effect.sync(() => {
+      if (!Electron.Notification.isSupported()) {
+        return;
+      }
+      new Electron.Notification({
+        title: `${environment.displayName} is reconnecting`,
+        body: "The local backend stopped responding. Restarting it now.",
+        silent: true,
+      }).show();
+    }).pipe(Effect.withSpan("desktop.window.notifyBackendRestarting")),
+    promptBackendRecoveryFailed: Effect.fn("desktop.window.promptBackendRecoveryFailed")(
+      function* (input) {
+        const result = yield* electronDialog.showMessageBox({
+          type: "error",
+          buttons: ["Retry", "Quit"],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+          title: `${environment.displayName} backend failed`,
+          message: "The local backend could not be restarted.",
+          detail: `Tried ${input.attempts} times.\nLast failure: ${input.reason}`,
+        });
+        return result.response === 0 ? "retry" : "quit";
+      },
+    ),
     dispatchMenuAction: Effect.fn("desktop.window.dispatchMenuAction")(function* (action) {
       yield* Effect.annotateCurrentSpan({ action });
       const existingWindow = yield* electronWindow.focusedMainOrFirst;

@@ -71,6 +71,8 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     activate: Effect.void,
     createMainIfBackendReady: Effect.void,
     handleBackendReady: Effect.void,
+    notifyBackendRestarting: Effect.void,
+    promptBackendRecoveryFailed: () => Effect.succeed("retry"),
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),
     syncAppearance: Effect.void,
   } satisfies DesktopWindow.DesktopWindowShape);

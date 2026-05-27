@@ -23,6 +23,7 @@ import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 const decodeDesktopBackendBootstrap = Schema.decodeEffect(
@@ -123,6 +124,22 @@ function makeManagerLayer(input: {
         input.desktopState
           ? Layer.succeed(DesktopState.DesktopState, input.desktopState)
           : DesktopState.layer,
+        Layer.succeed(ElectronApp.ElectronApp, {
+          metadata: Effect.die("unexpected metadata read"),
+          name: Effect.succeed("T3 Code"),
+          whenReady: Effect.void,
+          quit: Effect.void,
+          exit: () => Effect.void,
+          relaunch: () => Effect.void,
+          setPath: () => Effect.void,
+          setName: () => Effect.void,
+          setAboutPanelOptions: () => Effect.void,
+          setAppUserModelId: () => Effect.void,
+          setDesktopName: () => Effect.void,
+          setDockIcon: () => Effect.void,
+          appendCommandLineSwitch: () => Effect.void,
+          on: () => Effect.void,
+        } satisfies ElectronApp.ElectronAppShape),
         Layer.succeed(DesktopObservability.DesktopBackendOutputLog, {
           writeSessionBoundary: () => Effect.void,
           writeOutputChunk: () => Effect.void,
@@ -135,6 +152,8 @@ function makeManagerLayer(input: {
           activate: Effect.void,
           createMainIfBackendReady: Effect.void,
           handleBackendReady: Effect.void,
+          notifyBackendRestarting: Effect.void,
+          promptBackendRecoveryFailed: () => Effect.succeed("retry"),
           dispatchMenuAction: () => Effect.void,
           syncAppearance: Effect.void,
           ...input.desktopWindow,
@@ -488,6 +507,123 @@ describe("DesktopBackendManager", () => {
 
         assert.equal(yield* Queue.size(starts), 0);
         assert.equal((yield* manager.snapshot).desiredRunning, false);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("restarts the active backend after three failed health checks", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      const closed = yield* Queue.unbounded<number>();
+      const statuses = [200, 500, 500, 500, 200];
+      let startCount = 0;
+      let notificationCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            const exit = yield* Deferred.make<void>();
+            startCount += 1;
+            const currentStart = startCount;
+            yield* Queue.offer(starts, currentStart);
+            const close = Queue.offer(closed, currentStart).pipe(
+              Effect.andThen(Deferred.succeed(exit, void 0)),
+              Effect.asVoid,
+            );
+            yield* Scope.addFinalizer(scope, close);
+
+            return makeProcess({
+              exitCode: Deferred.await(exit).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+              kill: () => close,
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer((request) =>
+          Effect.sync(() => {
+            const status = statuses.shift();
+            assert.isDefined(status);
+            return responseForRequest(request, status);
+          }),
+        ),
+        desktopWindow: {
+          notifyBackendRestarting: Effect.sync(() => {
+            notificationCount += 1;
+          }),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        assert.equal(yield* Queue.take(starts), 1);
+
+        yield* TestClock.adjust(Duration.seconds(60));
+        assert.equal(yield* Queue.take(closed), 1);
+        assert.equal(notificationCount, 1);
+        assert.isFalse((yield* manager.snapshot).ready);
+
+        yield* TestClock.adjust(Duration.millis(500));
+        assert.equal(yield* Queue.take(starts), 2);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("prompts for retry or quit after the automatic restart limit is reached", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      const prompted = yield* Queue.unbounded<void>();
+      let startCount = 0;
+      const backendReady = yield* Ref.make(false);
+      const quitting = yield* Ref.make(false);
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.sync(() => {
+            startCount += 1;
+            return makeProcess({
+              exitCode: Queue.offer(starts, startCount).pipe(
+                Effect.as(ChildProcessSpawner.ExitCode(1)),
+              ),
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer(() => Effect.never),
+        desktopState: {
+          backendReady,
+          quitting,
+        },
+        desktopWindow: {
+          promptBackendRecoveryFailed: () =>
+            Queue.offer(prompted, void 0).pipe(Effect.as("quit" as const)),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        assert.equal(yield* Queue.take(starts), 1);
+
+        yield* TestClock.adjust(Duration.millis(500));
+        assert.equal(yield* Queue.take(starts), 2);
+        yield* TestClock.adjust(Duration.seconds(1));
+        assert.equal(yield* Queue.take(starts), 3);
+        yield* TestClock.adjust(Duration.seconds(2));
+        assert.equal(yield* Queue.take(starts), 4);
+
+        yield* Queue.take(prompted);
+        assert.isFalse((yield* manager.snapshot).desiredRunning);
+        assert.isTrue(yield* Ref.get(quitting));
       }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
     }),
   );

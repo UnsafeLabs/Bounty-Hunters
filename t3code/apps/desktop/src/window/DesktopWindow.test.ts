@@ -12,6 +12,7 @@ import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
@@ -38,6 +39,7 @@ function makeFakeBrowserWindow() {
     on: vi.fn(),
     once: vi.fn(),
     openDevTools: vi.fn(),
+    reload: vi.fn(),
     replaceMisspelling: vi.fn(),
     send: vi.fn(),
     setWindowOpenHandler: vi.fn(),
@@ -63,6 +65,7 @@ function makeFakeBrowserWindow() {
     window: window as unknown as Electron.BrowserWindow,
     loadURL: window.loadURL,
     openDevTools: webContents.openDevTools,
+    reload: webContents.reload,
   };
 }
 
@@ -95,6 +98,13 @@ const electronMenuLayer = Layer.succeed(ElectronMenu.ElectronMenu, {
   popupTemplate: () => Effect.void,
   showContextMenu: () => Effect.succeed(Option.none()),
 } satisfies ElectronMenu.ElectronMenuShape);
+
+const electronDialogLayer = Layer.succeed(ElectronDialog.ElectronDialog, {
+  pickFolder: () => Effect.succeed(Option.none()),
+  confirm: () => Effect.succeed(false),
+  showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
+  showErrorBox: () => Effect.void,
+} satisfies ElectronDialog.ElectronDialogShape);
 
 const electronShellLayer = Layer.succeed(ElectronShell.ElectronShell, {
   openExternal: () => Effect.succeed(true),
@@ -144,6 +154,7 @@ function makeTestLayer(input: {
         desktopEnvironmentLayer,
         desktopServerExposureLayer,
         DesktopState.layer,
+        electronDialogLayer,
         electronMenuLayer,
         electronShellLayer,
         electronThemeLayer,
@@ -174,6 +185,29 @@ describe("DesktopWindow", () => {
         assert.equal(yield* Ref.get(createCount), 1);
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["http://127.0.0.1:5733/"]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("reloads an existing main window when the backend becomes ready again", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(
+        Option.some(fakeWindow.window),
+      );
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady;
+
+        assert.equal(yield* Ref.get(createCount), 0);
+        assert.equal(fakeWindow.reload.mock.calls.length, 1);
       }).pipe(Effect.provide(layer));
     }),
   );
