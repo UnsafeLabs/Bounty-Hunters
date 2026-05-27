@@ -1,5 +1,7 @@
 import binascii
+import time
 from base64 import b64decode
+from collections import defaultdict
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -10,7 +12,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -188,11 +190,32 @@ class HTTPBasic(HTTPBase):
                 """
             ),
         ] = True,
+        max_failed_attempts: Annotated[
+            int,
+            Doc(
+                """
+                Maximum number of failed authentication attempts before the IP is
+                temporarily locked out. Defaults to 5.
+                """
+            ),
+        ] = 5,
+        lockout_duration_seconds: Annotated[
+            int,
+            Doc(
+                """
+                Duration in seconds for which an IP is locked out after exceeding the
+                maximum failed attempts. Defaults to 300 (5 minutes).
+                """
+            ),
+        ] = 300,
     ):
         self.model = HTTPBaseModel(scheme="basic", description=description)
         self.scheme_name = scheme_name or self.__class__.__name__
         self.realm = realm
         self.auto_error = auto_error
+        self.max_failed_attempts = max_failed_attempts
+        self.lockout_duration = lockout_duration_seconds
+        self._failed_attempts: dict[str, list[float]] = defaultdict(list)
 
     def make_authenticate_headers(self) -> dict[str, str]:
         if self.realm:
@@ -202,20 +225,46 @@ class HTTPBasic(HTTPBase):
     async def __call__(  # type: ignore
         self, request: Request
     ) -> HTTPBasicCredentials | None:
+        # Resolve client IP, falling back to a placeholder
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+
+        # Prune expired entries for this IP
+        self._failed_attempts[client_ip] = [
+            ts for ts in self._failed_attempts[client_ip]
+            if now - ts < self.lockout_duration
+        ]
+
+        # Check if IP is currently locked out
+        if len(self._failed_attempts[client_ip]) >= self.max_failed_attempts:
+            retry_after = int(self.lockout_duration - (now - self._failed_attempts[client_ip][0]))
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed authentication attempts. Try again later.",
+                headers={"Retry-After": str(max(retry_after, 1))},
+            )
+
         authorization = request.headers.get("Authorization")
         scheme, param = get_authorization_scheme_param(authorization)
         if not authorization or scheme.lower() != "basic":
             if self.auto_error:
+                self._failed_attempts[client_ip].append(now)
                 raise self.make_not_authenticated_error()
             else:
                 return None
         try:
             data = b64decode(param).decode("ascii")
         except (ValueError, UnicodeDecodeError, binascii.Error) as e:
+            if self.auto_error:
+                self._failed_attempts[client_ip].append(now)
             raise self.make_not_authenticated_error() from e
         username, separator, password = data.partition(":")
         if not separator:
+            if self.auto_error:
+                self._failed_attempts[client_ip].append(now)
             raise self.make_not_authenticated_error()
+        # On success, clear failed attempts for this IP
+        self._failed_attempts.pop(client_ip, None)
         return HTTPBasicCredentials(username=username, password=password)
 
 

@@ -1,0 +1,8 @@
+{
+  "bounty": "#800 FastAPI brute force protection",
+  "branch": "feat-brute-force",
+  "changes": [
+    "Modified fastapi/fastapi/security/http.py - added brute force tracking (failed attempts per IP, configurable threshold and lockout duration, lockout check with 429 response)",
+    "Added fastapi/tests/test_security_http_basic_brute_force.py - tests for lockout after failures and clearing on success"
+  ]
+}
