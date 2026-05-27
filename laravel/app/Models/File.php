@@ -1,30 +1,25 @@
-<?php
 
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\UploadedFile;
 
 class File extends Model
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory;
+
+    protected $table = 'files';
 
     protected $fillable = [
         'original_name',
         'stored_path',
         'mime_type',
-        'size_bytes',
-        'checksum_sha256',
-        'uploaded_by',
-        'thumbnail_path',
-    ];
-
-    protected $table = 'files';
-
-    protected $casts = [
-        'size_bytes' => 'integer',
-        'uploaded_at' => 'datetime',
+        "size_bytes",
+        "checksum_sha256",
+        "uploaded_by",
+        "thumbnail_path"
     ];
 
     public function user()
@@ -32,13 +27,21 @@ class File extends Model
         return $this->belongsTo(User::class, 'uploaded_by');
     }
 
-    public function getFilePathAttribute($value)
+    public function getFilePath()
     {
-        return $value;
+        return storage_path('app/uploads/' . date('Y/m/d') . '/');
     }
 
-    public function getThumbnailPathAttribute($value)
+    public function storeFile(UploadedFile $file)
     {
-        return $value;
+        $path = $this->getFilePath();
+        $fileName = $file->hashName();
+        $file->storeAs($path, $fileName);
+        return $path . $fileName;
+    }
+
+    public function generateThumbnail($filePath)
+    {
+        // Thumbnail generation logic will go here
     }
 }
