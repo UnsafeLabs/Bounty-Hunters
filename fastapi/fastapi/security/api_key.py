@@ -1,3 +1,5 @@
+import time
+from collections import defaultdict
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -5,11 +7,13 @@ from fastapi.openapi.models import APIKey, APIKeyIn
 from fastapi.security.base import SecurityBase
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class APIKeyBase(SecurityBase):
     model: APIKey
+
+    _rate_limit_store: dict[str, list[float]] = defaultdict(list)
 
     def __init__(
         self,
@@ -18,8 +22,12 @@ class APIKeyBase(SecurityBase):
         description: str | None,
         scheme_name: str | None,
         auto_error: bool,
+        max_requests: int | None = None,
+        window_seconds: int = 60,
     ):
         self.auto_error = auto_error
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
 
         self.model: APIKey = APIKey(
             **{"in": location},  # ty: ignore[invalid-argument-type]
@@ -44,11 +52,29 @@ class APIKeyBase(SecurityBase):
             headers={"WWW-Authenticate": "APIKey"},
         )
 
+    def _check_rate_limit(self, api_key: str) -> None:
+        """Check if the API key has exceeded its rate limit."""
+        if self.max_requests is None:
+            return
+        now = time.time()
+        window_start = now - self.window_seconds
+        timestamps = self._rate_limit_store[api_key]
+        # Remove timestamps outside the current window
+        self._rate_limit_store[api_key] = [t for t in timestamps if t > window_start]
+        if len(self._rate_limit_store[api_key]) >= self.max_requests:
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded",
+            )
+        self._rate_limit_store[api_key].append(now)
+
     def check_api_key(self, api_key: str | None) -> str | None:
         if not api_key:
             if self.auto_error:
                 raise self.make_not_authenticated_error()
             return None
+        if self.max_requests is not None:
+            self._check_rate_limit(api_key)
         return api_key
 
 
@@ -130,6 +156,26 @@ class APIKeyQuery(APIKeyBase):
                 """
             ),
         ] = True,
+        max_requests: Annotated[
+            int | None,
+            Doc(
+                """
+                Maximum number of requests allowed within the time window.
+
+                If `None`, rate limiting is disabled.
+                """
+            ),
+        ] = None,
+        window_seconds: Annotated[
+            int,
+            Doc(
+                """
+                Time window in seconds for rate limiting.
+
+                Only used when `max_requests` is set.
+                """
+            ),
+        ] = 60,
     ):
         super().__init__(
             location=APIKeyIn.query,
@@ -137,6 +183,8 @@ class APIKeyQuery(APIKeyBase):
             scheme_name=scheme_name,
             description=description,
             auto_error=auto_error,
+            max_requests=max_requests,
+            window_seconds=window_seconds,
         )
 
     async def __call__(self, request: Request) -> str | None:
@@ -218,6 +266,26 @@ class APIKeyHeader(APIKeyBase):
                 """
             ),
         ] = True,
+        max_requests: Annotated[
+            int | None,
+            Doc(
+                """
+                Maximum number of requests allowed within the time window.
+
+                If `None`, rate limiting is disabled.
+                """
+            ),
+        ] = None,
+        window_seconds: Annotated[
+            int,
+            Doc(
+                """
+                Time window in seconds for rate limiting.
+
+                Only used when `max_requests` is set.
+                """
+            ),
+        ] = 60,
     ):
         super().__init__(
             location=APIKeyIn.header,
@@ -225,6 +293,8 @@ class APIKeyHeader(APIKeyBase):
             scheme_name=scheme_name,
             description=description,
             auto_error=auto_error,
+            max_requests=max_requests,
+            window_seconds=window_seconds,
         )
 
     async def __call__(self, request: Request) -> str | None:
@@ -306,6 +376,26 @@ class APIKeyCookie(APIKeyBase):
                 """
             ),
         ] = True,
+        max_requests: Annotated[
+            int | None,
+            Doc(
+                """
+                Maximum number of requests allowed within the time window.
+
+                If `None`, rate limiting is disabled.
+                """
+            ),
+        ] = None,
+        window_seconds: Annotated[
+            int,
+            Doc(
+                """
+                Time window in seconds for rate limiting.
+
+                Only used when `max_requests` is set.
+                """
+            ),
+        ] = 60,
     ):
         super().__init__(
             location=APIKeyIn.cookie,
@@ -313,6 +403,8 @@ class APIKeyCookie(APIKeyBase):
             scheme_name=scheme_name,
             description=description,
             auto_error=auto_error,
+            max_requests=max_requests,
+            window_seconds=window_seconds,
         )
 
     async def __call__(self, request: Request) -> str | None:
