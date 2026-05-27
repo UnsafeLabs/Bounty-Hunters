@@ -4,142 +4,102 @@ namespace App\Http\Controllers;
 
 use App\Models\File;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Hash;
+use Intervention\Image\ImageManagerStatic as Image;
 
 class FileController extends Controller
 {
-    /**
-     * Upload a new file.
-     */
     public function upload(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'file' => 'required|file|max:10240',
+        // Validate request
+        $request->validate([
+            'file' => 'required|file'
         ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
 
         $uploadedFile = $request->file('file');
+        $originalName = $uploadedFile->getClientOriginalName();
+        $mimeType = $uploadedFile->getMimeType();
+        $size = $uploadedFile->getSize();
+        $checksum = hash_file('sha256', $uploadedFile->getPathname());
 
-        // Generate SHA-256 checksum
-        $checksum = hash_file('sha256', $uploadedFile->getRealPath());
-
-        // Check for duplicates
+        // Check for duplicate files
         $existingFile = File::where('checksum_sha256', $checksum)->first();
         if ($existingFile) {
-            return response()->json([
-                'message' => 'Duplicate file detected.',
-                'file' => $existingFile,
-            ], 409);
+            return response()->json(['error' => 'File already exists'], 409);
         }
 
-        // Store file in date-organized folder
-        $dateFolder = now()->format('Y/m/d');
-        $storedPath = $uploadedFile->store('uploads/' . $dateFolder, 'local');
-
-        // Determine if image and generate thumbnail
-        $thumbnailPath = null;
-        $mimeType = $uploadedFile->getMimeType();
-
-        if (str_starts_with($mimeType, 'image/')) {
-            $thumbnailPath = $this->generateThumbnail($uploadedFile, $dateFolder);
+        // Generate file path
+        $year = now()->year;
+        $month = now()->month;
+        $day = now()->day;
+        $directory = storage_path("app/uploads/{$year}/{$month}/{$day}/");
+        if (!Storage::exists($directory)) {
+            Storage::makeDirectory($directory);
         }
 
-        // Create database record
-        $file = File::create([
-            'original_name' => $uploadedFile->getClientOriginalName(),
-            'stored_path' => $storedPath,
-            'mime_type' => $mimeType,
-            'size_bytes' => $uploadedFile->getSize(),
-            'checksum_sha256' => $checksum,
-            'uploaded_by' => Auth::id(),
-            'thumbnail_path' => $thumbnailPath,
-        ]);
+        // Store file
+        $path = $directory . '/' . $uploadedFile->hashName();
+        $storedFile = $uploadedFile->storeAs("uploads/{$year}/{$month}/{$day}", $uploadedFile->hashName(), 'local');
 
-        return response()->json($file, 201);
+        // Save to database
+        $fileRecord = new File();
+        $fileRecord->original_name = $originalName;
+        $fileRecord->stored_path = $storedFile;
+        $fileRecord->mime_type = $mimeType;
+        $fileRecord->size_bytes = $size;
+        $fileRecord->checksum_sha256 = $checksum;
+        $fileRecord->save();
+
+        // Generate thumbnail if image
+        if (Str::startsWith($mimeType, 'image/')) {
+            $thumbnailPath = storage_path('app/thumbnails/');
+            if (!Storage::exists($thumbnailPath)) {
+                Storage::makeDirectory($thumbnailPath);
+            }
+            $image = Image::make($uploadedFile->getPathname());
+            $image->resize(200, 200);
+            $image->save($thumbnailPath . $storedFile);
+            $fileRecord->thumbnail_path = $thumbnailPath . $storedFile;
+            $fileRecord->save();
+        }
+
+        return response()->json($fileRecord);
     }
 
-    /**
-     * Generate a 200x200 thumbnail for an image.
-     */
-    private function generateThumbnail($uploadedFile, string $dateFolder): string
-    {
-        $thumbnailDir = 'thumbnails/' . $dateFolder;
-        $thumbnailName = uniqid() . '.jpg';
-        $thumbnailPath = $thumbnailDir . '/' . $thumbnailName;
-
-        $fullThumbnailPath = storage_path('app/' . $thumbnailPath);
-
-        // Ensure directory exists
-        if (!file_exists(dirname($fullThumbnailPath))) {
-            mkdir(dirname($fullThumbnailPath), 0755, true);
-        }
-
-        $sourceImage = imagecreatefromstring(file_get_contents($uploadedFile->getRealPath()));
-        $originalWidth = imagesx($sourceImage);
-        $originalHeight = imagesy($sourceImage);
-
-        $thumbnail = imagecreatetruecolor(200, 200);
-        imagecopyresampled($thumbnail, $sourceImage, 0, 0, 0, 0, 200, 200, $originalWidth, $originalHeight);
-
-        imagejpeg($thumbnail, $fullThumbnailPath, 85);
-
-        imagedestroy($sourceImage);
-        imagedestroy($thumbnail);
-
-        return $thumbnailPath;
-    }
-
-    /**
-     * Download a file.
-     */
     public function download($id)
     {
-        $file = File::findOrFail($id);
-
-        $fullPath = storage_path('app/' . $file->stored_path);
-
-        if (!file_exists($fullPath)) {
-            return response()->json(['message' => 'File not found on disk.'], 404);
+        $file = File::find($id);
+        if (!$file) {
+            return response()->json(['error' => 'File not found'], 404);
         }
 
-        return response()->streamDownload(function () use ($fullPath) {
-            readfile($fullPath);
-        }, $file->original_name, [
-            'Content-Type' => $file->mime_type,
-        ]);
+        $path = storage_path('app/' . $file->stored_path);
+        return response()->download($path, $file->original_name, [], 'attachment');
     }
 
-    /**
-     * Delete a file.
-     */
-    public function destroy($id)
+    public function delete($id)
     {
-        $file = File::findOrFail($id);
+        $file = File::find($id);
+        if (!$file) {
+            return response()->json(['error' => 'File not found'], 404);
+        }
 
-        // Delete files from disk
-        Storage::disk('local')->delete($file->stored_path);
-        if ($file->thumbnail_path) {
-            Storage::disk('local')->delete($file->thumbnail_path);
+        $filePath = storage_path('app/' . $file->stored_path);
+        if (file_exists($filePath)) {
+            unlink($filePath);
         }
 
         $file->delete();
 
-        return response()->json(['message' => 'File deleted successfully.']);
+        return response()->json(['message' => 'File deleted']);
     }
 
-    /**
-     * List files with pagination.
-     */
-    public function index()
+    public function list()
     {
         $files = File::paginate(20);
-
         return response()->json($files);
     }
 }
