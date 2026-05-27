@@ -10,6 +10,7 @@ interface IFlashLoanReceiver {
 contract FlashLoan {
     IERC20 public loanToken;
     uint256 public feeBPS; // fee in basis points
+    uint256 public maxLoanBPS = 9000;
     uint256 public totalFees;
     address public owner;
     bool public paused;
@@ -31,9 +32,10 @@ contract FlashLoan {
 
         uint256 balanceBefore = loanToken.balanceOf(address(this));
         require(balanceBefore >= amount, "Insufficient pool balance");
+        require(amount <= (balanceBefore * maxLoanBPS) / 10000, "Amount exceeds max loan");
 
         // BUG: Truncates to 0 when amount < 10000/feeBPS
-        uint256 fee = amount * feeBPS / 10000;
+        uint256 fee = (amount * feeBPS + 9999) / 10000;
 
         loanToken.transfer(msg.sender, amount);
 
@@ -59,6 +61,17 @@ contract FlashLoan {
     }
 
     // BUG: No emergency pause function
+    function setPaused(bool _paused) external {
+        require(msg.sender == owner, "Not owner");
+        paused = _paused;
+    }
+
+    function setMaxLoanBPS(uint256 _maxLoanBPS) external {
+        require(msg.sender == owner, "Not owner");
+        require(_maxLoanBPS > 0 && _maxLoanBPS <= 10000, "Invalid max loan BPS");
+        maxLoanBPS = _maxLoanBPS;
+    }
+
     function getPoolBalance() external view returns (uint256) {
         return loanToken.balanceOf(address(this));
     }
