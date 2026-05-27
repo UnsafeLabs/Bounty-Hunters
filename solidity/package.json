@@ -1,0 +1,14 @@
+{
+  "name": "bounty-hunters-solidity",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/simpleSwap.test.mjs"
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "ethers": "^6.15.0",
+    "ganache": "^7.9.2",
+    "solc": "^0.8.20"
+  }
+}
