@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 
 import * as DesktopIpc from "./DesktopIpc.ts";
+import * as IpcChannels from "./channels.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
 import {
   getSavedEnvironmentRegistry,
@@ -47,6 +48,11 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
 
   yield* ipc.handleSync(getAppBranding);
   yield* ipc.handleSync(getLocalEnvironmentBootstrap);
+  yield* ipc.handle({
+    channel: IpcChannels.GET_IPC_CONNECTION_STATE_CHANNEL,
+    queueWhenDisconnected: false,
+    handler: () => ipc.connectionState,
+  });
 
   yield* ipc.handle(getClientSettings);
   yield* ipc.handle(setClientSettings);

@@ -34,6 +34,18 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     }
     return result as ReturnType<DesktopBridge["getLocalEnvironmentBootstrap"]>;
   },
+  getIpcConnectionState: () => ipcRenderer.invoke(IpcChannels.GET_IPC_CONNECTION_STATE_CHANNEL),
+  onIpcConnectionState: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+      if (state !== "connected" && state !== "disconnected" && state !== "reconnecting") return;
+      listener(state);
+    };
+
+    ipcRenderer.on(IpcChannels.IPC_CONNECTION_STATE_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.IPC_CONNECTION_STATE_CHANNEL, wrappedListener);
+    };
+  },
   getClientSettings: () => ipcRenderer.invoke(IpcChannels.GET_CLIENT_SETTINGS_CHANNEL),
   setClientSettings: (settings) =>
     ipcRenderer.invoke(IpcChannels.SET_CLIENT_SETTINGS_CHANNEL, settings),

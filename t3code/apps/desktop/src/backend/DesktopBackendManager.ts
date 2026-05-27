@@ -27,6 +27,7 @@ import {
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopIpc from "../ipc/DesktopIpc.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 const INITIAL_RESTART_DELAY = Duration.millis(500);
@@ -283,6 +284,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
   const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
   const backendOutputLog = yield* DesktopObservability.DesktopBackendOutputLog;
   const desktopState = yield* DesktopState.DesktopState;
+  const desktopIpc = yield* DesktopIpc.DesktopIpc;
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
@@ -329,6 +331,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
         }
 
         yield* Ref.set(desktopState.backendReady, false);
+        yield* desktopIpc.setConnectionState("reconnecting");
         const config = yield* configuration.resolve;
         const entryExists = yield* fileSystem
           .exists(config.entryPath)
@@ -415,6 +418,9 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                   });
                 }
                 yield* Ref.set(desktopState.backendReady, false);
+                yield* desktopIpc.setConnectionState(
+                  nextState.desiredRunning ? "reconnecting" : "disconnected",
+                );
               }
 
               if (isCurrentRun && nextState.desiredRunning) {
@@ -457,6 +463,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             }
 
             yield* Ref.set(desktopState.backendReady, true);
+            yield* desktopIpc.setConnectionState("connected");
             yield* desktopWindow.handleBackendReady.pipe(
               Effect.catch((error) =>
                 logBackendManagerError("failed to open main window after backend readiness", {
@@ -569,6 +576,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
           },
         ]);
         yield* Ref.set(desktopState.backendReady, false);
+        yield* desktopIpc.setConnectionState("disconnected");
         return result;
       }),
     );

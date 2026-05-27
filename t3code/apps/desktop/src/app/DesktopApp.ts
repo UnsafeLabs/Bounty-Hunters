@@ -9,7 +9,10 @@ import * as NetService from "@t3tools/shared/Net";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import * as DesktopIpc from "../ipc/DesktopIpc.ts";
 import { installDesktopIpcHandlers } from "../ipc/DesktopIpcHandlers.ts";
+import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
@@ -131,6 +134,8 @@ const fatalStartupCause = <E>(stage: string, cause: Cause.Cause<E>) =>
 
 const bootstrap = Effect.gen(function* () {
   const backendManager = yield* DesktopBackendManager.DesktopBackendManager;
+  const desktopIpc = yield* DesktopIpc.DesktopIpc;
+  const electronWindow = yield* ElectronWindow.ElectronWindow;
   const state = yield* DesktopState.DesktopState;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
@@ -175,6 +180,9 @@ const bootstrap = Effect.gen(function* () {
   }
 
   yield* installDesktopIpcHandlers;
+  yield* desktopIpc.subscribeConnectionState((connectionState) =>
+    electronWindow.sendAll(IpcChannels.IPC_CONNECTION_STATE_CHANNEL, connectionState),
+  );
   yield* logBootstrapInfo("bootstrap ipc handlers registered");
 
   if (!(yield* Ref.get(state.quitting))) {

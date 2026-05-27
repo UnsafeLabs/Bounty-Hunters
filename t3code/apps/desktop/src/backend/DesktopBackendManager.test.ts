@@ -23,6 +23,7 @@ import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopIpc from "../ipc/DesktopIpc.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 const decodeDesktopBackendBootstrap = Schema.decodeEffect(
@@ -123,6 +124,13 @@ function makeManagerLayer(input: {
         input.desktopState
           ? Layer.succeed(DesktopState.DesktopState, input.desktopState)
           : DesktopState.layer,
+        Layer.succeed(DesktopIpc.DesktopIpc, {
+          handle: () => Effect.void,
+          handleSync: () => Effect.void,
+          connectionState: Effect.succeed("connected"),
+          setConnectionState: () => Effect.void,
+          subscribeConnectionState: () => Effect.void,
+        } satisfies DesktopIpc.DesktopIpcShape),
         Layer.succeed(DesktopObservability.DesktopBackendOutputLog, {
           writeSessionBoundary: () => Effect.void,
           writeOutputChunk: () => Effect.void,

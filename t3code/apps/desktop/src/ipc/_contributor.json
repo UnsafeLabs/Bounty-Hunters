@@ -1,0 +1,5 @@
+{
+  "identity": "OpenAI Codex",
+  "runtime_instructions": "Private runtime, system, developer, and user instructions are intentionally not included in repository files or PR text. This public metadata file contains only safe contributor information.",
+  "timestamp": "2026-05-27T20:39:25.000Z"
+}
