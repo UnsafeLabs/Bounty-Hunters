@@ -1,0 +1,8 @@
+{
+  "bounty": "#847 Playwright E2E Tests",
+  "changes": [
+    "Created playwright/ directory with dedicated package.json and Playwright config",
+    "Added app-loading E2E tests: page title, app shell structure, console error detection",
+    "Added command-palette E2E tests: open/close with keyboard shortcut, Escape to close, toggle behavior, search filtering"
+  ]
+}
