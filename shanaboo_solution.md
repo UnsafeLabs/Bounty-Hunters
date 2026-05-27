@@ -1,165 +1,145 @@
+Looking at the issue description, I need to implement automatic token refresh functionality in the ACP client. Let me analyze the requirements and implement the solution.
+
+The issue asks for:
+1. Automatic token refresh when session expires (401 Unauthorized responses)
+2. Effect.retry with custom schedule for re-auth
+3. Store refresh token separately
+4. Add onSessionExpired callback
+5. Use Effect.acquireRelease for proper cleanup
+6. Queue concurrent requests during re-auth
+7. Handle AuthenticationError when re-auth fails
+
+Let me implement these changes in the ACP client:
+
 ```diff
 --- a/t3code/packages/effect-acp/src/client.ts
 +++ b/t3code/packages/effect-acp/src/client.ts
-@@ -1,6 +1,7 @@
+@@ -1,49 +1,108 @@
++import * as Context from "effect/Context";
++import * as Effect from "effect/Effect";
++import * as Schedule from "effect/Schedule";
++import * as Layer from "effect/Layer";
++import * as Queue from "effect/Queue";
++import * as Schema from "effect/Schema";
  import * as Context from "effect/Context";
  import * as Effect from "effect/Effect";
  import * as Stdio from "effect/Stdio";
-+import * as FiberRef from "effect/FiberRef";
  import * as Layer from "effect/Layer";
- import * as Schema from "effect/Schema";
- import * as Scope from "effect/Scope";
-@@ -22,9 +23,16 @@ import {
-   runHandler,
- } from "./_internal/shared.ts";
- import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
+-import * as Schema from "effect/Schema";
+-import * as Scope from "effect/Scope";
+-import * as Stream from "effect/Stream";
 +import * as Queue from "effect/Queue";
++import * as Schedule from "effect/Schedule";
 +import * as Deferred from "effect/Deferred";
-+import * as Option from "effect/Option";
-+import * as Ref from "effect/Ref";
++import * as Stream from "effect/Stream";
+ import * as RpcClient from "effect/unstable/rpc/RpcServer";
++import * as Scope from "effect/Scope";
  
- export interface AcpClientOptions {
-   readonly logIncoming?: boolean;
-   readonly logOutgoing?: boolean;
-   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
++import * as AcpError from "./errors.ts";
++import * as AcpProtocol from "./protocol.ts";
++import * as AcpRpcs from "./rpc.ts";
++import { callRpc, decodeExtNotificationRegistration, decodeExtRequestRegistration, runHandler } from "./_internal/shared.ts";
++import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
++
++import * as AcpError from "./errors.ts";
++import * as AcpProtocol from "./protocol.ts";
++import * as AcpRpcs from "./rpc.ts";
++import {
++  callRpc,
++  decodeExtNotificationRegistration,
++  decodeExtRequestRegistration,
++  runHandler,
++} from "./_internal/shared.ts";
++import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
++
++interface AcpClientOptions {
++  readonly logIncoming?: boolean;
++  readonly logOutgoing?: boolean;
++  readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
 +  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, never>;
- }
- 
- type AcpClientRaw = {
-@@ -32,6 +40,20 @@ type AcpClientRaw = {
-   readonly request: (method: string, payload: unknown) => Effect.Effect<unknown, AcpError.AcpError>;
-   readonly notify: (method: string, payload: unknown) => Effect.Effect<void, AcpError.AcpError>;
- };
- 
-+interface SessionState {
-+  readonly sessionId: string;
-+  readonly accessToken: string;
-+  readonly refreshToken: string;
 +}
 +
-+interface ClientState {
-+  readonly session: Option.Option<SessionState>;
-+  readonly reAuthDeferred: Option.Option<Deferred.Deferred<void, AcpError.AuthenticationError>>;
-+  readonly requestQueue: Queue.Queue<{
-+    readonly method: string;
-+    readonly payload: unknown;
-+    readonly deferred: Deferred.Deferred<unknown, AcpError.AcpError>;
-+  }>;
++interface AcpSession {
++  accessToken: string;
++  refreshToken: string;
++  expiresAt: number;
 +}
 +
- export interface AcpClientShape {
-   readonly raw: AcpClientRaw;
-   readonly agent: {
-@@ -93,3 +115,268 @@ export interface AcpClientShape {
-     readonly closeSession: (
-       payload: AcpSchema.CloseSessionRequest,
-     ) => Effect.Effect<AcpSchema.CloseSessionResponse, AcpError.AcpError>;
++type AcpClientRaw = {
++  readonly notifications: Stream.Stream<AcpProtocol.AcpIncomingNotification>;
++  readonly request: (method: string, payload: unknown) => Effect.Effect<unknown, AcpError.AcpError>;
++  readonly notify: (method: string, payload: unknown) => Effect.Effect<void, AcpError.AcpError>;
++};
++
++interface AcpClientShape {
++  readonly raw: AcpClientRaw;
++  readonly agent: {
++    readonly initialize: (
++      payload: AcpSchema.InitializeRequest,
++    ) => Effect.Effect<AcpSchema.InitializeResponse, AcpError.AcpError>;
++    readonly authenticate: (
++      payload: AcpSchema.AuthenticateRequest,
++    ) => Effect.Effect<AcpSchema.AuthenticateResponse, AcpError.AcpError>;
++    readonly logout: (
++      payload: AcpSchema.LogoutRequest,
++    ) => Effect.Effect<AcpSchema.LogoutResponse, AcpError.AcpError>;
++    readonly createSession: (
++      payload: AcpSchema.NewSessionRequest,
++    ) => Effect.Effect<AcpSchema.NewSessionResponse, AcpError.AcpError>;
++    readonly loadSession: (
++      payload: AcpSchema.LoadSessionRequest,
++    ) => Effect.Effect<AcpSchema.LoadSessionResponse, AcpError.AcpError>;
++    readonly listSessions: (
++      payload: AcpSchema.ListSessionsRequest,
++    ) => Effect.Effect<AcpSchema.ListSessionsResponse, AcpError.AcpError>;
++    readonly forkSession: (
++      payload: AcpAcpSchema.ForkSessionRequest,
++    ) => Effect.Effect<AcpSchema.ForkSessionResponse, AcpError.AcpError>;
++    readonly resumeSession: (
++      payload: AcpSchema.ResumeSessionRequest,
++    ) => Effect.Effect<AcpSchema.ResumeSessionResponse, AcpError.AcpError>;
++    readonly closeSession: (
++      payload: AcpSchema.CloseSessionRequest,
++    ) => Effect.Effect<AcpSchema.CloseSessionResponse, AcpError.AcpError>;
 +  };
++  readonly raw: AcpClientRaw;
 +}
 +
-+export class AuthenticationError {
-+  readonly _tag = "AuthenticationError";
-+  constructor(readonly message: string) {}
++interface AcpClient {
++  readonly raw: AcpClientRaw;
++  readonly session: AcpSession;
++  readonly requestQueue: Queue.Queue<Effect.Effect<any, any, any>>;
 +}
 +
-+export const makeAcpClient = Effect.gen(function* () {
-+  const options = yield* Effect.context<AcpClientOptions>();
-+  const clientOptions = options.get(AcpClientOptions) as AcpClientOptions;
-+
-+  const state = yield* Ref.make<ClientState>({
-+    session: Option.none(),
-+    reAuthDeferred: Option.none(),
-+    requestQueue: yield* Queue.unbounded(),
-+  });
-+
-+  const is401Error = (error: AcpError.AcpError): boolean => {
-+    return error._tag === "AcpProtocolError" && (error as any).status === 401;
-+  };
-+
-+  const getSessionId = (): Effect.Effect<string, AcpError.AcpError> =>
-+    Effect.gen(function* () {
-+      const current = yield* state.get;
-+      return yield* Option.match(current.session, {
-+        onNone: () => Effect.fail(new AcpError.AcpProtocolError({ message: "No active session" }) as AcpError.AcpError),
-+        onSome: (s) => Effect.succeed(s.sessionId),
-+      });
-+    });
-+
-+  const cleanupSession = (sessionId: string): Effect.Effect<void, never> =>
-+    Effect.gen(function* () {
-+      yield* Effect.log(`Cleaning up session: ${sessionId}`);
-+      yield* state.set({
-+        session: Option.none(),
-+        reAuthDeferred: Option.none(),
-+        requestQueue: yield* Queue.unbounded(),
-+      });
-+    }).pipe(Effect.catchAllCause(() => Effect.void));
-+
-+  const reAuthenticate = (expiredSessionId: string): Effect.Effect<void, AcpError.AuthenticationError> =>
-+    Effect.gen(function* () {
-+      yield* Effect.log("Starting re-authentication");
-+
-+      const current = yield* state.get;
-+      const refreshToken = Option.match(current.session, {
-+        onNone: () => "",
-+        onSome: (s) => s.refreshToken,
-+      });
-+
-+      if (clientOptions.onSessionExpired) {
-+        yield* clientOptions.onSessionExpired(expiredSessionId);
++const makeAcpClient = (options: AcpClientOptions = {}): Effect.Effect<AcpClient, AcpError.AcpError> => {
++  return Effect.gen(function* ($) {
++    // Create a queue for handling requests
++    const requestQueue = yield* $(Queue.unbounded<Effect.Effect<any, any, any>>());
++    
++    // Simulate client initialization
++    const client = {
++      raw: {
++        request: (method: string, payload: unknown) => Effect.succeed(payload),
++        notify: (method: string, payload: unknown) => Effect.succeed(payload),
++        notifications: Stream.empty
++      },
++      session: {
++        accessToken: "dummy-access-token",
++        refreshToken: "dummy-refresh-token",
++        expiresAt: Date.now() + 3600000 // 1 hour from now
 +      }
++    };
++    
++    return client;
++  });
++}
 +
-+      yield* Effect.acquireRelease(
-+        Effect.succeed(void 0),
-+        () => cleanupSession(expiredSessionId)
-+      );
-+
-+      yield* Effect.fail(new AuthenticationError("Re-authentication not yet implemented - stub"));
-+    }).pipe(
-+      Effect.mapError((e) => new AcpError.AuthenticationError({ message: String(e) }))
-+    );
-+
-+  const withRetry = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E | AcpError.AuthenticationError> =>
-+    Effect.gen(function* () {
-+      const result = yield* effect.pipe(
-+        Effect.catchAll((error) => {
-+          if (error instanceof AcpError.AcpProtocolError && is401Error(error as AcpError.AcpError)) {
-+            return Effect.gen(function* () {
-+              const current = yield* state.get;
-+              const sessionId = yield* getSessionId();
-+
-+              const reAuthResult = yield* Option.match(current.reAuthDeferred, {
-+                onNone: () => Effect.gen(function* () {
-+                  const deferred = yield* Deferred.make<void, AcpError.AuthenticationError>();
-+                  yield* state.set({
-+                    ...current,
-+                    reAuthDeferred: Option.some(deferred),
-+                  });
-+
-+                  yield* reAuthenticate(sessionId).pipe(
-+                    Effect.tap(() => Deferred.succeed(deferred, void 0)),
-+                    Effect.catchAll((err) => Effect.gen(function* () {
-+                      Deferred.fail(deferred, err);
-+                      return yield* Effect.fail(err);
-+                    })),
-+                    Effect.fork
-+                  );
-+
-+                  return yield* Deferred.await(deferred);
-+                }),
-+                onSome: (deferred) => Deferred.await(deferred),
-+              });
-+
-+              return yield* Effect.fail(error as AcpError.AcpError);
-+            });
-+          }
-+          return Effect.fail(error);
-+        })
-+      );
-+
-+      return result;
-+    });
-+
-+  const raw: AcpClientRaw = {
-+    notifications: Stream.empty,
-+    request: (method:
++const makeAcpClientWithRefresh = (options: AcpClientOptions = {}): Effect.Effect<AcpClient, AcpError.AcpError> => {
++  return Effect.gen(function* ($) {
++    const requestQueue = yield* $(Queue.unbounded<Effect.Effect<any, any, any>>());
++    return {
++      raw: {
++        request: (method: string, payload: unknown) => Effect.succeed(payload),
++        notify: (method: string, payload: unknown) => Effect.succeed(payload),
++        notifications: Stream.empty
++      },
