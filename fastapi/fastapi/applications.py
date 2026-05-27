@@ -761,6 +761,74 @@ class FastAPI(Starlette):
                 """
             ),
         ] = None,
+        swagger_js_url: Annotated[
+            str,
+            Doc(
+                """
+                The URL to load the Swagger UI JavaScript bundle from.
+
+                It is normally set to a CDN URL. You can use this parameter to
+                override it and use a custom or self-hosted URL.
+
+                Read more about it in the
+                [FastAPI docs for Custom Docs UI Static Assets](https://fastapi.tiangolo.com/how-to/custom-docs-ui-assets/).
+                """
+            ),
+        ] = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+        swagger_css_url: Annotated[
+            str,
+            Doc(
+                """
+                The URL to load the Swagger UI CSS from.
+
+                It is normally set to a CDN URL. You can use this parameter to
+                override it and use a custom or self-hosted URL.
+
+                Read more about it in the
+                [FastAPI docs for Custom Docs UI Static Assets](https://fastapi.tiangolo.com/how-to/custom-docs-ui-assets/).
+                """
+            ),
+        ] = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+        swagger_favicon_url: Annotated[
+            str,
+            Doc(
+                """
+                The URL of the favicon to use in the Swagger UI docs.
+                It is normally shown in the browser tab.
+                """
+            ),
+        ] = "https://fastapi.tiangolo.com/img/favicon.png",
+        redoc_js_url: Annotated[
+            str,
+            Doc(
+                """
+                The URL to load the ReDoc JavaScript bundle from.
+
+                It is normally set to a CDN URL. You can use this parameter to
+                override it and use a custom or self-hosted URL.
+
+                Read more about it in the
+                [FastAPI docs for Custom Docs UI Static Assets](https://fastapi.tiangolo.com/how-to/custom-docs-ui-assets/).
+                """
+            ),
+        ] = "https://cdn.jsdelivr.net/npm/redoc@2/bundles/redoc.standalone.js",
+        redoc_favicon_url: Annotated[
+            str,
+            Doc(
+                """
+                The URL of the favicon to use in the ReDoc docs.
+                It is normally shown in the browser tab.
+                """
+            ),
+        ] = "https://fastapi.tiangolo.com/img/favicon.png",
+        with_google_fonts: Annotated[
+            bool,
+            Doc(
+                """
+                Load and use Google Fonts in ReDoc.
+                """
+            ),
+        ] = True,
         generate_unique_id_function: Annotated[
             Callable[[routing.APIRoute], str],
             Doc(
@@ -885,6 +953,12 @@ class FastAPI(Starlette):
         self.swagger_ui_oauth2_redirect_url = swagger_ui_oauth2_redirect_url
         self.swagger_ui_init_oauth = swagger_ui_init_oauth
         self.swagger_ui_parameters = swagger_ui_parameters
+        self.swagger_js_url = swagger_js_url
+        self.swagger_css_url = swagger_css_url
+        self.swagger_favicon_url = swagger_favicon_url
+        self.redoc_js_url = redoc_js_url
+        self.redoc_favicon_url = redoc_favicon_url
+        self.with_google_fonts = with_google_fonts
         self.servers = servers or []
         self.separate_input_output_schemas = separate_input_output_schemas
         self.openapi_external_docs = openapi_external_docs
@@ -1125,6 +1199,9 @@ class FastAPI(Starlette):
                 return get_swagger_ui_html(
                     openapi_url=openapi_url,
                     title=f"{self.title} - Swagger UI",
+                    swagger_js_url=self.swagger_js_url,
+                    swagger_css_url=self.swagger_css_url,
+                    swagger_favicon_url=self.swagger_favicon_url,
                     oauth2_redirect_url=oauth2_redirect_url,
                     init_oauth=self.swagger_ui_init_oauth,
                     swagger_ui_parameters=self.swagger_ui_parameters,
@@ -1148,7 +1225,11 @@ class FastAPI(Starlette):
                 root_path = req.scope.get("root_path", "").rstrip("/")
                 openapi_url = root_path + self.openapi_url
                 return get_redoc_html(
-                    openapi_url=openapi_url, title=f"{self.title} - ReDoc"
+                    openapi_url=openapi_url,
+                    title=f"{self.title} - ReDoc",
+                    redoc_js_url=self.redoc_js_url,
+                    redoc_favicon_url=self.redoc_favicon_url,
+                    with_google_fonts=self.with_google_fonts,
                 )
 
             self.add_route(self.redoc_url, redoc_html, include_in_schema=False)

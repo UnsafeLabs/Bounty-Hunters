@@ -1,0 +1,28 @@
+{
+  "app": "fastapi",
+  "issue": "#762 - Make CDN URLs configurable in FastAPI",
+  "changes": [
+    {
+      "file": "fastapi/applications.py",
+      "description": "Added swagger_js_url, swagger_css_url, swagger_favicon_url, redoc_js_url, redoc_favicon_url, with_google_fonts constructor parameters to FastAPI.__init__ with sensible defaults matching the existing hardcoded CDN URLs"
+    },
+    {
+      "file": "fastapi/applications.py",
+      "description": "Stored new parameters as instance attributes in __init__"
+    },
+    {
+      "file": "fastapi/applications.py",
+      "description": "Passed swagger_js_url, swagger_css_url, swagger_favicon_url to get_swagger_ui_html() in setup()"
+    },
+    {
+      "file": "fastapi/applications.py",
+      "description": "Passed redoc_js_url, redoc_favicon_url, with_google_fonts to get_redoc_html() in setup()"
+    },
+    {
+      "file": "tests/test_custom_cdn_urls.py",
+      "description": "Added test verifying custom CDN URLs are used in Swagger UI and ReDoc"
+    }
+  ],
+  "status": "implemented",
+  "timestamp": "2026-05-27"
+}
