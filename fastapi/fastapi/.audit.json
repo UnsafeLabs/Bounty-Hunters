@@ -1,0 +1,12 @@
+{
+  "audit": "API key rate limiting implementation",
+  "branch": "feat-apikey-ratelimit",
+  "changes": [
+    "Added max_requests and window_seconds parameters to APIKeyBase, APIKeyQuery, APIKeyHeader, and APIKeyCookie",
+    "Added in-memory rate limit tracking using defaultdict(list) of timestamps per API key",
+    "Added _check_rate_limit method that prunes expired timestamps and raises HTTP 429 when limit exceeded",
+    "Added rate limiting tests to test_security_api_key_header.py"
+  ],
+  "status": "implemented",
+  "date": "2026-05-27"
+}
