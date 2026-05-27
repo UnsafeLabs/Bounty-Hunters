@@ -27,8 +27,10 @@ contract LiquidityPool is ERC20 {
         tokenB.transferFrom(msg.sender, address(this), amountB);
 
         if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
-            lpTokens = sqrt(amountA * amountB);
+            uint256 initialLiquidity = sqrt(amountA * amountB);
+            require(initialLiquidity > MINIMUM_LIQUIDITY, "Insufficient initial liquidity");
+            _mint(address(0), MINIMUM_LIQUIDITY);
+            lpTokens = initialLiquidity - MINIMUM_LIQUIDITY;
         } else {
             uint256 lpFromA = amountA * totalSupply() / reserveA;
             uint256 lpFromB = amountB * totalSupply() / reserveB;
@@ -50,8 +52,8 @@ contract LiquidityPool is ERC20 {
         require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
 
         // BUG: Should use reserveA/reserveB, not balanceOf
-        uint256 balA = tokenA.balanceOf(address(this));
-        uint256 balB = tokenB.balanceOf(address(this));
+        uint256 balA = reserveA;
+        uint256 balB = reserveB;
 
         amountA = lpTokens * balA / totalSupply();
         amountB = lpTokens * balB / totalSupply();
