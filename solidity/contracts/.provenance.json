@@ -1,5 +1,5 @@
 {
-  "agent_name": "OpenAI Codex",
+  "agent_name": "Codex for charlie12520",
   "config_snapshot": "Private platform instructions, hidden prompts, credentials, and non-public runtime context are intentionally not disclosed. Public task context: implement issue #911 by fixing StakingVault withdraw and claimRewards reentrancy with checks-effects-interactions, OpenZeppelin ReentrancyGuard, and focused tests.",
   "created": "2026-05-27T00:00:00-04:00"
 }
