@@ -1,0 +1,10 @@
+{
+  "agent": "Hermes Agent",
+  "bounty": "#797 FastAPI request ID middleware",
+  "changes": [
+    "fastapi/fastapi/middleware/request_id.py - New middleware that adds X-Request-ID header to responses",
+    "fastapi/fastapi/middleware/__init__.py - Added RequestIDMiddleware export",
+    "fastapi/tests/test_request_id.py - Tests for request ID middleware"
+  ],
+  "testing": "python3 -m pytest fastapi/tests/test_request_id.py -x -v"
+}
