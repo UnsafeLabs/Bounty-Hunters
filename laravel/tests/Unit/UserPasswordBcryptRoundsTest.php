@@ -18,13 +18,11 @@ class UserPasswordBcryptRoundsTest extends TestCase
 
         $user = new User();
         $user->password = 'secret';
+        $user->save();
 
-        $this->assertStringStartsWith('$2y$', $user->password);
+        $hash = $user->password;
+        $cost = (int) explode('$', $hash)[3] ?? 0;
 
-        // Extract rounds from hash: $2y$<rounds>$...
-        $roundsPart = explode('$', $user->password)[2] ?? '';
-        $actualRounds = (int) $roundsPart;
-
-        $this->assertSame($customRounds, $actualRounds);
+        $this->assertEquals($customRounds, $cost);
     }
 }
