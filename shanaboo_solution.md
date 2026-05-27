@@ -2,176 +2,187 @@
 --- a/t3code/apps/desktop/src/electron/protocol.ts
 +++ b/t3code/apps/desktop/src/electron/protocol.ts
 @@ -0,0 +1,298 @@
-+import * as Cause from "effect/Cause";
-+import * as Context from "effect/Context";
-+import * as Data from "effect/Data";
 +import * as Effect from "effect/Effect";
-+import * as FileSystem from "effect/FileSystem";
 +import * as Layer from "effect/Layer";
 +import * as Option from "effect/Option";
-+import * as Ref from "effect/Ref";
-+import * as Scope from "effect/Scope";
++import * as Either from "effect/Either";
++import * as Data from "effect/Data";
++import * as Console from "effect/Console";
 +
 +import * as Electron from "electron";
++import * as Path from "node:path";
 +
-+import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/DesktopEnvironment.ts";
++// Protocol name for deep linking
++export const DEEP_LINK_SCHEME = "t3code";
 +
-+export const DESKTOP_SCHEME = "t3code";
-+
-+export class ElectronProtocolRegistrationError extends Data.TaggedError(
-+  "ElectronProtocolRegistrationError",
-+)<{
-+  readonly scheme: string;
-+  readonly cause: unknown;
++// Error types for deep link handling
++export class DeepLinkError extends Data.TaggedError("DeepLinkError")<{
++  readonly url: string;
++  readonly reason: string;
 +}> {
 +  override get message() {
-+    return `Failed to register ${this.scheme}: file protocol.`;
++    return `Deep link error for ${this.url}: ${this.reason}`;
 +  }
 +}
 +
-+export class ElectronProtocolStaticBundleMissingError extends Data.TaggedError(
-+  "ElectronProtocolStaticBundleMissingError",
-+)<{}> {
++export class PathTraversalError extends Data.TaggedError("PathTraversalError")<{
++  readonly path: string;
++}> {
 +  override get message() {
-+    return "Desktop static bundle missing. Build apps/server (with bundled client) first.";
++    return `Path traversal attempt detected: ${this.path}`;
 +  }
 +}
 +
-+export interface ElectronProtocolShape {
-+  readonly registerFileProtocol: <E, R>(input: {
-+    readonly scheme: string;
-+    readonly handler: (
-+      request: Electron.ProtocolRequest,
-+    ) => Effect.Effect<Electron.ProtocolResponse, E, R>;
-+    readonly onFailure?: (
-+      request: Electron.ProtocolRequest,
-+      cause: Cause.Cause<E>,
-+    ) => Electron.ProtocolResponse;
-+  }) => Effect.Effect<void, ElectronProtocolRegistrationError, R | Scope.Scope>;
-+  readonly registerDesktopFileProtocol: Effect.Effect<
-+    void,
-+    ElectronProtocolRegistrationError | ElectronProtocolStaticBundleMissingError,
-+    FileSystem.FileSystem | DesktopEnvironment | Scope.Scope
-+  >;
++// Deep link action types
++export type DeepLinkAction =
++  | { readonly _tag: "OpenProject"; readonly path: string }
++  | { readonly _tag: "OpenChatThread"; readonly threadId: string }
++  | { readonly _tag: "OpenSettings" }
++  | { readonly _tag: "Unknown"; readonly url: string };
++
++// IPC channel names for deep linking
++export const IPC_DEEP_LINK = "t3code:deep-link";
++
++// Store for pending deep links when app is not yet ready
++let pendingDeepLink: string | null = null;
++let isAppReady = false;
++
++/**
++ * Validates a project path to prevent path traversal attacks.
++ * Rejects paths containing .., null bytes, or overly long paths.
++ */
++export function validateProjectPath(path: string): Either.Either<string, PathTraversalError> {
++  // Check for null bytes
++  if (path.includes("\0")) {
++    return Either.left(new PathTraversalError({ path }));
++  }
++
++  // Normalize the path
++  const normalized = Path.normalize(path);
++
++  // Check for path traversal attempts
++  if (normalized.includes("..")) {
++    return Either.left(new PathTraversalError({ path }));
++  }
++
++  // Check for absolute paths that try to escape (platform-specific)
++  if (Path.isAbsolute(normalized)) {
++    // Absolute paths are allowed but we ensure they're clean
++    // Additional platform-specific checks can be added here
++  }
++
++  // Reject overly long paths (potential buffer overflow)
++  if (normalized.length > 4096) {
++    return Either.left(new PathTraversalError({ path }));
++  }
++
++  return Either.right(normalized);
 +}
 +
-+export class ElectronProtocol extends Context.Service<ElectronProtocol, ElectronProtocolShape>()(
-+  "t3/desktop/electron/Protocol",
-+) {}
++/**
++ * Parses a t3code:// URL and returns the corresponding action.
++ */
++export function parseDeepLink(url: string): Either.Either<DeepLinkAction, DeepLinkError> {
++  let parsedUrl: URL;
 +
-+export function normalizeDesktopProtocolPathname(rawPath: string): Option.Option<string> {
-+  const segments: string[] = [];
-+  for (const segment of rawPath.split("/")) {
-+    if (segment.length === 0 || segment === ".") {
-+      continue;
-+    }
-+    if (segment === "..") {
-+      return Option.none();
-+    }
-+    segments.push(segment);
++  try {
++    parsedUrl = new URL(url);
++  } catch {
++    return Either.left(new DeepLinkError({ url, reason: "Invalid URL format" }));
 +  }
-+  return Option.some(segments.join("/"));
++
++  // Validate scheme
++  if (parsedUrl.protocol !== `${DEEP_LINK_SCHEME}:`) {
++    return Either.left(new DeepLinkError({ url, reason: `Invalid scheme: ${parsedUrl.protocol}` }));
++  }
++
++  const host = parsedUrl.hostname;
++  const pathname = parsedUrl.pathname;
++
++  // Route based on host and path
++  switch (host) {
++    case "open": {
++      if (pathname === "/project") {
++        const projectPath = parsedUrl.searchParams.get("path");
++        if (!projectPath) {
++          return Either.left(new DeepLinkError({ url, reason: "Missing path parameter for project" }));
++        }
++
++        const validation = validateProjectPath(projectPath);
++        if (Either.isLeft(validation)) {
++          return Either.left(new DeepLinkError({ url, reason: `Path traversal detected: ${projectPath}` }));
++        }
++
++        return Either.right({ _tag: "OpenProject", path: Either.getOrThrow(validation) });
++      }
++      break;
++    }
++
++    case "chat": {
++      if (pathname === "/thread") {
++        const threadId = parsedUrl.searchParams.get("id");
++        if (!threadId) {
++          return Either.left(new DeepLinkError({ url, reason: "Missing id parameter for chat thread" }));
++        }
++
++        // Validate thread ID format (alphanumeric, hyphens, underscores)
++        if (!/^[a-zA-Z0-9_-]+$/.test(threadId)) {
++          return Either.left(new DeepLinkError({ url, reason: `Invalid thread ID format: ${threadId}` }));
++        }
++
++        return Either.right({ _tag: "OpenChatThread", threadId });
++      }
++      break;
++    }
++
++    case "settings": {
++      if (pathname === "" || pathname === "/") {
++        return Either.right({ _tag: "OpenSettings" });
++      }
++      break;
++    }
++  }
++
++  return Either.left(new DeepLinkError({ url, reason: `Unknown deep link pattern: ${host}${pathname}` }));
 +}
 +
-+const registerDesktopSchemePrivileges = Effect.sync(() => {
-+  Electron.protocol.registerSchemesAsPrivileged([
-+    {
-+      scheme: DESKTOP_SCHEME,
-+      privileges: {
-+        standard: true,
-+        secure: true,
-+        supportFetchAPI: true,
-+        corsEnabled: true,
-+      },
-+    },
-+  ]);
-+}).pipe(Effect.withSpan("desktop.electron.protocol.registerSchemePrivileges"));
++/**
++ * Sends a deep link action to the renderer process via IPC.
++ */
++export function sendDeepLinkAction(
++  window: Electron.BrowserWindow,
++  action: DeepLinkAction,
++): Effect.Effect<void, never, never> {
++  return Effect.sync(() => {
++    window.webContents.send(IPC_DEEP_LINK, action);
++  });
++}
 +
-+export const layerSchemePrivileges = Layer.effectDiscard(registerDesktopSchemePrivileges);
++/**
++ * Handles a deep link URL, parsing it and sending to the renderer.
++ */
++export function handleDeepLink(
++  window: Electron.BrowserWindow,
++  url: string,
++): Effect.Effect<void, DeepLinkError, never> {
++  return Effect.gen(function* () {
++    const parsed = parseDeepLink(url);
 +
-+const resolveDesktopStaticDir: Effect.Effect<
-+  Option.Option<string>,
-+  never,
-+  FileSystem.FileSystem | DesktopEnvironment
-+> = Effect.gen(function* () {
-+  const fileSystem = yield* FileSystem.FileSystem;
-+  const environment = yield* DesktopEnvironment;
-+  const candidates = [
-+    environment.path.join(environment.appRoot, "apps/server/dist/client"),
-+    environment.path.join(environment.appRoot, "apps/web/dist"),
-+  ];
-+  for (const candidate of candidates) {
-+    const hasIndex = yield* fileSystem
-+      .exists(environment.path.join(candidate, "index.html"))
-+      .pipe(Effect.orElseSucceed(() => false));
-+    if (hasIndex) {
-+      return Option.some(candidate);
++    if (Either.isLeft(parsed)) {
++      yield* Console.error(`Deep link error: ${parsed.left.message}`);
++      return yield* Effect.fail(parsed.left);
 +    }
-+  }
-+  return Option.none<string>();
-+});
 +
-+const resolveDesktopStaticPath = Effect.fn("desktop.electron.protocol.resolveDesktopStaticPath")(
-+  function* (
-+    staticRoot: string,
-+    requestUrl: string,
-+  ): Effect.fn.Return<string, never, FileSystem.FileSystem | DesktopEnvironment> {
-+    const fileSystem = yield* FileSystem.FileSystem;
-+    const environment = yield* DesktopEnvironment;
-+    const url = new URL(requestUrl);
-+    const rawPath = decodeURIComponent(url.pathname);
-+    const normalizedPath = normalizeDesktopProtocolPathname(rawPath);
-+    if (Option.isNone(normalizedPath)) {
-+      return environment.path.join(staticRoot, "index.html");
-+    }
-+    const candidatePath = environment.path.join(staticRoot, normalizedPath.value);
-+    const isFile = yield* fileSystem.exists(candidatePath).pipe(
-+      Effect.andThen((exists) => (exists ? fileSystem.isFile(candidatePath) : Effect.succeed(false))),
-+      Effect.orElseSucceed(() => false),
-+    );
-+    if (isFile) {
-+      return candidatePath;
-+    }
-+    const withHtml = candidatePath + ".html";
-+    const hasHtml = yield* fileSystem.exists(withHtml).pipe(Effect.orElseSucceed(() => false));
-+    if (hasHtml) {
-+      return withHtml;
-+    }
-+    return environment.path.join(staticRoot, "index.html");
-+  },
-+);
++    yield* sendDeepLinkAction(window, parsed.right);
++  });
++}
 +
-+export const ElectronProtocolLive = Layer.effect(
-+  ElectronProtocol,
-+  Effect.gen(function* () {
-+    const fileSystem = yield* FileSystem.FileSystem;
-+    const environment = yield* DesktopEnvironment;
++/**
++ * Sets a pending deep link to be processed when app is ready.
++ */
++export function setPendingDeepLink(url: string): void {
++  pendingDeepLink = url;
++}
 +
-+    const registerFileProtocol = <E, R>(input: {
-+      readonly scheme: string;
-+      readonly handler: (
-+        request: Electron.ProtocolRequest,
-+      ) => Effect.Effect<Electron.ProtocolResponse, E, R>;
-+      readonly onFailure?: (
-+        request: Electron.ProtocolRequest,
-+        cause: Cause.Cause<E>,
-+      ) => Electron.ProtocolResponse;
-+    }): Effect.Effect<void, ElectronProtocolRegistrationError, R | Scope.Scope> =>
-+      Effect.acquireUseRelease(
-+        Effect.sync(() => {
-+          const handler = (request: Electron.ProtocolRequest, callback: (response: Electron.ProtocolResponse) => void) => {
-+            Effect.runPromise(input.handler(request)).then(
-+              (response) => callback(response),
-+              (error) => {
-+                if (input.onFailure) {
-+                  callback(input.onFailure(request, Cause.fail(error)));
-+                } else {
-+                  callback({ statusCode: 500, data: "Internal Server Error" });
-+                }
-+              },
-+            );
-+          };
-+          Electron.protocol.handle(input.scheme, handler);
-+          return handler;
-+        }),
-+        () => Effect.
++/**
++ * Gets and clears the pending deep link
