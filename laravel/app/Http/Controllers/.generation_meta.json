@@ -1,0 +1,8 @@
+{
+  "bounty": "#787 Laravel Logging Improvements",
+  "changes": [
+    "Added dedicated 'errors' channel using JSON format (Monolog JsonFormatter)",
+    "Errors logged to separate laravel-errors.log file with 'error' level minimum",
+    "Updated stack channel to include both 'single' and 'errors' channels"
+  ]
+}
