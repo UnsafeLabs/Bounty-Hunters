@@ -1,20 +1,10 @@
-Looking at the issue description, I need to implement deep linking support for the `t3code://` custom protocol. The main file to modify is the Electron protocol handler.
-
-Let me analyze what's needed:
-1. Add deep linking support to handle `t3code://` URLs
-2. Parse URL patterns for project, chat, and settings links
-3. Route to correct views via IPC
-4. Handle app lifecycle (already running vs new instance)
-5. Validate URL parameters to prevent path traversal
-6. Support all the specified URL patterns
-
 ```diff
---- a/t3code/apps/desktop/src/electron/ElectronProtocol.ts
-+++ b/t3code/apps/desktop/./src/electron/ElectronProtocol.ts
-@@ -1,3 +1,100 @@
+--- a/t3code/apps/desktop/src/electron/protocol.ts
++++ b/t3code/apps/desktop/src/electron/protocol.ts
+@@ -0,0 +1,298 @@
 +import * as Cause from "effect/Cause";
 +import * as Context from "effect/Context";
-+import * Data from "effect/Data";
++import * as Data from "effect/Data";
 +import * as Effect from "effect/Effect";
 +import * as FileSystem from "effect/FileSystem";
 +import * as Layer from "effect/Layer";
@@ -35,7 +25,7 @@ Let me analyze what's needed:
 +  readonly cause: unknown;
 +}> {
 +  override get message() {
-+    return `Failed to register ${this.scheme} protocol.`;
++    return `Failed to register ${this.scheme}: file protocol.`;
 +  }
 +}
 +
@@ -108,13 +98,13 @@ Let me analyze what's needed:
 +  const environment = yield* DesktopEnvironment;
 +  const candidates = [
 +    environment.path.join(environment.appRoot, "apps/server/dist/client"),
-+    environment.path: string, "apps/web/dist"),
++    environment.path.join(environment.appRoot, "apps/web/dist"),
 +  ];
 +  for (const candidate of candidates) {
 +    const hasIndex = yield* fileSystem
 +      .exists(environment.path.join(candidate, "index.html"))
 +      .pipe(Effect.orElseSucceed(() => false));
-+    if (hasIndex) {  
++    if (hasIndex) {
 +      return Option.some(candidate);
 +    }
 +  }
@@ -132,48 +122,56 @@ Let me analyze what's needed:
 +    const rawPath = decodeURIComponent(url.pathname);
 +    const normalizedPath = normalizeDesktopProtocolPathname(rawPath);
 +    if (Option.isNone(normalizedPath)) {
-+      return;
++      return environment.path.join(staticRoot, "index.html");
 +    }
-+    const normalized = normalizedPath.value;
-+    const resolvedPath = environment.path.join(staticRoot, normalized);
-+    const exists = yield* fileSystem.exists(resolvedPath);
-+    if (!exists) {
-+      return;
++    const candidatePath = environment.path.join(staticRoot, normalizedPath.value);
++    const isFile = yield* fileSystem.exists(candidatePath).pipe(
++      Effect.andThen((exists) => (exists ? fileSystem.isFile(candidatePath) : Effect.succeed(false))),
++      Effect.orElseSucceed(() => false),
++    );
++    if (isFile) {
++      return candidatePath;
 +    }
-+    return resolvedPath;
-+  }
++    const withHtml = candidatePath + ".html";
++    const hasHtml = yield* fileSystem.exists(withHtml).pipe(Effect.orElseSucceed(() => false));
++    if (hasHtml) {
++      return withHtml;
++    }
++    return environment.path.join(staticRoot, "index.html");
++  },
 +);
 +
-+export const layerSchemePrivileges = Layer.effectDiscard(registerDesktopSchemePrivileges);
-+export const resolveDesktopStaticDir = Effect.fn;
-+export const resolveDesktopStaticPath = Effect.fn;
++export const ElectronProtocolLive = Layer.effect(
++  ElectronProtocol,
++  Effect.gen(function* () {
++    const fileSystem = yield* FileSystem.FileSystem;
++    const environment = yield* DesktopEnvironment;
 +
-+export interface ElectronProtocolShape {
-+  readonly registerFileProtocol: <E, R>(input: {
-+    readonly scheme: string;
-+    readonly handler: (
-+      request: Electron.ProtocolRequest,
-+    ) => Effect.Effect<Electron.ProtocolResponse, E, R>;
-+    readonly onFailure?: (
-+      request: Electron.ProtocolRequest,
-+      cause: Cause.Cause<E>,
-+    ) => Electron.ProtocolResponse;
-+  }) => Effect.Effect<void, ElectronProtocolRegistrationError, R | Scope.Scope>;
-+  readonly registerDesktopFileProtocol: Effect.Effect<
-+    void,
-+    ElectronProtocolRegistrationError | ElectronProtocolStaticBundleMissingError,
-+    FileSystem.FileSystem | DesktopEnvironment | Scope.Scope
-+  >;
-+}
-+
-+export class ElectronProtocol extends Context.Service<ElectronProtocol, ElectronProtocolShape>()(
-+  "t3/desktop/electron/Protocol",
-+) {}
-+
-+export function normalizeDesktopProtocolPathname(rawPath: string): Option.Option<string> {
-+  const segments: string[] = [];
-+  for (const segment of rawPath.split("/")) {
-+    if (segment.length === 0 || segment === ".") {
-+      continue;
-+    }
-+   
++    const registerFileProtocol = <E, R>(input: {
++      readonly scheme: string;
++      readonly handler: (
++        request: Electron.ProtocolRequest,
++      ) => Effect.Effect<Electron.ProtocolResponse, E, R>;
++      readonly onFailure?: (
++        request: Electron.ProtocolRequest,
++        cause: Cause.Cause<E>,
++      ) => Electron.ProtocolResponse;
++    }): Effect.Effect<void, ElectronProtocolRegistrationError, R | Scope.Scope> =>
++      Effect.acquireUseRelease(
++        Effect.sync(() => {
++          const handler = (request: Electron.ProtocolRequest, callback: (response: Electron.ProtocolResponse) => void) => {
++            Effect.runPromise(input.handler(request)).then(
++              (response) => callback(response),
++              (error) => {
++                if (input.onFailure) {
++                  callback(input.onFailure(request, Cause.fail(error)));
++                } else {
++                  callback({ statusCode: 500, data: "Internal Server Error" });
++                }
++              },
++            );
++          };
++          Electron.protocol.handle(input.scheme, handler);
++          return handler;
++        }),
++        () => Effect.
