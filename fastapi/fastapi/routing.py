@@ -79,14 +79,15 @@ from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
+from starlette.middleware import Middleware
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import (
     BaseRoute,
     Match,
     compile_path,
     get_name,
+    Router as StarletteRouter,
 )
-from starlette.routing import Mount as Mount  # noqa
 from starlette.types import AppType, ASGIApp, Lifespan, Receive, Scope, Send
 from starlette.websockets import WebSocket
 from typing_extensions import deprecated
@@ -1266,6 +1267,20 @@ class APIRouter(routing.Router):
                 """
             ),
         ] = Default(True),
+        middleware: Annotated[
+            Sequence[Middleware] | None,
+            Doc(
+                """
+                A list of middleware to be applied to all requests handled by this router.
+
+                Each middleware is a `Middleware` class (or `(cls, options)`) tuple.
+                Middleware is applied in the order it's defined.
+
+                Read more about it in the
+                [Starlette docs for Middleware](https://www.starlette.io/middleware/).
+                """
+            ),
+        ] = None,
     ) -> None:
         # Determine the lifespan context to use
         if lifespan is None:
@@ -1284,6 +1299,7 @@ class APIRouter(routing.Router):
             redirect_slashes=redirect_slashes,
             default=default,
             lifespan=lifespan_context,
+            middleware=middleware,
         )
         if prefix:
             assert prefix.startswith("/"), "A path prefix must start with '/'"
