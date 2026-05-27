@@ -95,6 +95,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       items,
       ...(position === undefined ? {} : { position }),
     }),
+  onDeepLink: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, route: unknown) => {
+      if (typeof route !== "object" || route === null) return;
+      listener(route as { kind: string; path?: string; id?: string });
+    };
+
+    ipcRenderer.on(IpcChannels.DEEP_LINK_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.DEEP_LINK_CHANNEL, wrappedListener);
+    };
+  },
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
   onMenuAction: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {

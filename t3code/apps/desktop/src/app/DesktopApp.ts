@@ -6,6 +6,7 @@ import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 
 import * as NetService from "@t3tools/shared/Net";
+import * as ElectronDeepLink from "../electron/ElectronDeepLink.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
@@ -215,6 +216,9 @@ const startup = Effect.gen(function* () {
   yield* appIdentity.configure;
   yield* applicationMenu.configure;
   yield* electronProtocol.registerDesktopFileProtocol;
+  yield* Effect.service(ElectronDeepLink.ElectronDeepLink).pipe(
+    Effect.flatMap((deepLink) => deepLink.register),
+  );
   yield* updates.configure;
   yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
 }).pipe(Effect.withSpan("desktop.startup"));
