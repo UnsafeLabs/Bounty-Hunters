@@ -3,7 +3,7 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "@t3tools/web#build", "t3#build"],
       "outputs": ["dist-electron/**"],
     },
     "dev": {
