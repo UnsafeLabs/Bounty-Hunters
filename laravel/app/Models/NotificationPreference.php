@@ -14,11 +14,11 @@ class NotificationPreference extends Model
         'user_id',
         'channel',
         'event_type',
-        'enabled'
+        'enabled',
     ];
 
     protected $casts = [
-        'enabled' => 'boolean'
+        'enabled' => 'boolean',
     ];
 
     public function user(): BelongsTo
@@ -26,8 +26,18 @@ class NotificationPreference extends Model
         return $this->belongsTo(User::class);
     }
 
-    public function scopeEnabled($query)
+    public function scopeForUser($query, int $userId)
     {
-        return $query->where('enabled', true);
+        return $query->where('user_id', $userId);
+    }
+
+    public function scopeForChannel($query, string $channel)
+    {
+        return $query->where('channel', $channel);
+    }
+
+    public function scopeForEventType($query, string $eventType)
+    {
+        return $query->where('event_type', $eventType);
     }
 }
