@@ -72,6 +72,28 @@ class ModelWithDefault(BaseModel):
     bla: str = "bla"
 
 
+
+def test_encode_bytes_default_base64():
+    assert jsonable_encoder(b"hello") == "aGVsbG8="
+    assert jsonable_encoder({"payload": b"hello"}) == {"payload": "aGVsbG8="}
+
+
+def test_encode_memoryview_default_base64():
+    assert jsonable_encoder(memoryview(b"hello")) == "aGVsbG8="
+    assert jsonable_encoder([memoryview(b"hello")]) == ["aGVsbG8="]
+
+
+def test_encode_bytes_hex():
+    assert jsonable_encoder(b"hello", bytes_encoding="hex") == "68656c6c6f"
+    assert jsonable_encoder(
+        {"payload": memoryview(b"hello")}, bytes_encoding="hex"
+    ) == {"payload": "68656c6c6f"}
+
+
+def test_encode_bytes_invalid_encoding():
+    with pytest.raises(ValueError, match="Unsupported bytes_encoding"):
+        jsonable_encoder(b"hello", bytes_encoding="utf-8")
+
 def test_encode_dict():
     pet = {"name": "Firulais", "owner": {"name": "Foo"}}
     assert jsonable_encoder(pet) == {"name": "Firulais", "owner": {"name": "Foo"}}

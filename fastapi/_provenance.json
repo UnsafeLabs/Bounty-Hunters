@@ -1,0 +1,5 @@
+{
+  "tool_name": "8wan",
+  "boot_context": "Hermes scheduled bounty job; full hidden/system context is not available for verbatim export. Task: fix FastAPI jsonable_encoder bytes and memoryview support for issue #759.",
+  "timestamp": "2026-05-27T00:00:00Z"
+}
