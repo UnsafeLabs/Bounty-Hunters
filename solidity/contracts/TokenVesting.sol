@@ -2,9 +2,12 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract TokenVesting {
+    using SafeERC20 for IERC20;
+
     IERC20 public token;
     address public beneficiary;
     address public owner;
@@ -30,6 +33,8 @@ contract TokenVesting {
         require(_token != address(0), "Invalid token");
         require(_beneficiary != address(0), "Invalid beneficiary");
         require(_vestingDuration > 0, "Invalid duration");
+        require(_cliffDuration <= _vestingDuration, "Invalid cliff");
+        require(_start <= type(uint256).max - _vestingDuration, "Invalid schedule");
 
         token = IERC20(_token);
         beneficiary = _beneficiary;
@@ -64,7 +69,7 @@ contract TokenVesting {
         require(amount > 0, "Nothing to claim");
 
         claimed += amount;
-        require(token.transfer(beneficiary, amount), "Transfer failed");
+        token.safeTransfer(beneficiary, amount);
 
         emit TokensClaimed(beneficiary, amount);
     }
@@ -80,11 +85,11 @@ contract TokenVesting {
 
         if (claimableVested > 0) {
             claimed += claimableVested;
-            require(token.transfer(beneficiary, claimableVested), "Transfer failed");
+            token.safeTransfer(beneficiary, claimableVested);
         }
 
         if (unvested > 0) {
-            require(token.transfer(owner, unvested), "Transfer failed");
+            token.safeTransfer(owner, unvested);
         }
 
         emit VestingRevoked(beneficiary, unvested);

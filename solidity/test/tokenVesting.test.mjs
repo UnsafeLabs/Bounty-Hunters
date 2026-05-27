@@ -162,6 +162,16 @@ async function deployVesting(totalAllocation, start, cliffDuration, duration, fu
 }
 
 {
+  await assert.rejects(async () => {
+    await deployVesting(100n, baseTime, 101n, 100n, false);
+  });
+
+  await assert.rejects(async () => {
+    await deployVesting(100n, ethers.MaxUint256, 0n, 1n, false);
+  });
+}
+
+{
   const hugeAllocation = ethers.parseEther("1000000000");
   const duration = longDuration;
   const elapsed = duration / 2n;
