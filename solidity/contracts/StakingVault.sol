@@ -2,9 +2,12 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract StakingVault is ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     IERC20 public stakingToken;
     uint256 public rewardRate;
     uint256 public totalStaked;
@@ -18,13 +21,15 @@ contract StakingVault is ReentrancyGuard {
     event RewardClaimed(address indexed user, uint256 amount);
 
     constructor(address _stakingToken, uint256 _rewardRate) {
+        require(_stakingToken != address(0), "Invalid token");
+
         stakingToken = IERC20(_stakingToken);
         rewardRate = _rewardRate;
     }
 
     function stake(uint256 amount) external {
         require(amount > 0, "Cannot stake 0");
-        stakingToken.transferFrom(msg.sender, address(this), amount);
+        stakingToken.safeTransferFrom(msg.sender, address(this), amount);
         _updateReward(msg.sender);
         balances[msg.sender] += amount;
         totalStaked += amount;
@@ -41,6 +46,7 @@ contract StakingVault is ReentrancyGuard {
     }
 
     function withdraw(uint256 amount) external nonReentrant {
+        require(amount > 0, "Cannot withdraw 0");
         require(balances[msg.sender] >= amount, "Insufficient balance");
         _updateReward(msg.sender);
 

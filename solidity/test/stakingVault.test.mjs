@@ -205,6 +205,10 @@ async function setup(rewardRate = ethers.parseEther("1")) {
   await (await token.connect(user).approve(await vault.getAddress(), amount)).wait();
   await (await vault.connect(user).stake(amount)).wait();
 
+  await assert.rejects(async () => {
+    await (await vault.connect(user).withdraw(0n)).wait();
+  });
+
   await (await owner.sendTransaction({ to: await vault.getAddress(), value: 1_000n })).wait();
   await (await vault.connect(user).withdraw(40n)).wait();
 
