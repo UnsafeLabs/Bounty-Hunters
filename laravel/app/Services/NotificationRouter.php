@@ -3,38 +3,44 @@
 namespace App\Services;
 
 use App\Models\NotificationPreference;
-use Illuminate\Support\Facades\Notification;
+use App\Models\User;
+use Illuminate\Support\Facades\Log;
 
 class NotificationRouter
 {
-    public function route($notifiable, $notification, $eventType)
+    public function shouldSendToChannel(User $user, string $channel, string $eventType): bool
     {
-        // Get user's enabled channels for this event type
-        $enabledPreferences = NotificationPreference::where('user_id', $notifiable->id)
-            ->where('event_type', $eventType)
-            ->enabled()
-            ->get();
+        $preference = NotificationPreference::forUser($user->id)
+            ->forChannel($channel)
+            ->forEventType($eventType)
+            ->first();
 
-        $enabledChannels = $enabledPreferences->pluck('channel')->toArray();
-
-        // If no preferences found, send to all channels by default
-        if ($enabledPreferences->isEmpty()) {
-            Notification::send($notifiable, $notification);
-            return;
+        if (!$preference) {
+            Log::warning("No notification preference found for user {$user->id}, channel {$channel}, event {$eventType}");
+            return false;
         }
 
-        // Send to enabled channels only
+        return $preference->enabled;
+    }
+
+    public function getEnabledChannels(User $user, string $eventType): array
+    {
+        return NotificationPreference::forUser($user->id)
+            ->forEventType($eventType)
+            ->where('enabled', true)
+            ->pluck('channel')
+            ->toArray();
+    }
+
+    public function routeNotification(User $user, string $eventType, callable $sendCallback): void
+    {
+        $enabledChannels = $this->getEnabledChannels($user, $eventType);
+
         foreach ($enabledChannels as $channel) {
-            switch ($channel) {
-                case 'mail':
-                    Notification::send($notifiable, $notification->toMail($notifiable));
-                    break;
-                case 'slack':
-                    Notification::send($notifiable, $notification->toSlack($notifiable));
-                    break;
-                case 'database':
-                    $notifiable->notify($notification);
-                    break;
+            try {
+                $sendCallback($channel);
+            } catch (\Exception $e) {
+                Log::error("Failed to send notification to {$channel} for user {$user->id}: " . $e->getMessage());
             }
         }
     }
