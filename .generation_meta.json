@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Private system, developer, and runtime instructions are intentionally not disclosed. Public task context: implement issue #651 by adding brainfuck/fizzbuzz.bf, verify exact FizzBuzz output for 1 through 100, and provide safe provenance metadata only.",
+  "date": "2026-05-26T21:07:25.3064639-04:00"
+}
