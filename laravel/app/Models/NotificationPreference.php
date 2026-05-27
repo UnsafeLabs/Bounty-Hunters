@@ -33,6 +33,28 @@ class NotificationPreference extends Model
 
     public static function getDefaultEventTypes(): array
     {
-        return ['comment', 'mention', 'task_assigned', 'task_completed', 'general'];
+        return [
+            'user.registered',
+            'user.updated',
+            'notification.received',
+        ];
+    }
+
+    public static function getDefaultsForUser(int $userId): array
+    {
+        $preferences = [];
+        foreach (self::getDefaultEventTypes() as $eventType) {
+            foreach (self::getDefaultChannels() as $channel) {
+                $preferences[] = [
+                    'user_id' => $userId,
+                    'channel' => $channel,
+                    'event_type' => $eventType,
+                    'enabled' => true,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+        }
+        return $preferences;
     }
 }
