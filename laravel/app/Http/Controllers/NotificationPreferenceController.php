@@ -2,59 +2,55 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\NotificationPreference;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Http\Request;
 
 class NotificationPreferenceController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $preferences = NotificationPreference::where('user_id', Auth::id())->get();
+        $preferences = $request->user()
+            ->notificationPreferences()
+            ->get();
+
         return response()->json($preferences);
     }
 
-    public function update(Request $request, $id)
+    public function update(Request $request, NotificationPreference $preference)
     {
-        $preference = NotificationPreference::where('user_id', Auth::id())->findOrFail($id);
+        // Ensure user can only update their own preferences
+        if ($request->user()->id !== $preference->user_id) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $request->validate([
+            'enabled' => 'boolean'
+        ]);
+
         $preference->update($request->only('enabled'));
+
         return response()->json($preference);
     }
 
     public function bulkUpdate(Request $request)
     {
-        $validated = $request->validate([
+        $request->validate([
             'preferences' => 'required|array',
             'preferences.*.id' => 'required|exists:notification_preferences,id',
             'preferences.*.enabled' => 'required|boolean'
         ]);
 
         $updated = [];
-        foreach ($validated['preferences'] as $pref) {
-            $preference = NotificationPreference::where('user_id', Auth::id())->findOrFail($pref['id']);
-            $preference->update(['enabled' => $pref['enabled']]);
-            $updated[] = $preference;
+        foreach ($request->preferences as $prefData) {
+            $preference = NotificationPreference::find($prefData['id']);
+            
+            // Ensure user can only update their own preferences
+            if ($request->user()->id === $preference->user_id) {
+                $preference->update(['enabled' => $prefData['enabled']]);
+                $updated[] = $preference;
+            }
         }
 
         return response()->json($updated);
-    }
-
-    public function storeDefaultPreferences($userId)
-    {
-        $defaultEventTypes = ['user_registered', 'task_assigned', 'task_completed'];
-        $channels = ['mail', 'slack', 'database'];
-        
-        foreach ($defaultEventTypes as $eventType) {
-            foreach ($channels as $channel) {
-                NotificationPreference::firstOrCreate(
-                    [
-                        'user_id' => $userId,
-                        'channel' => $channel,
-                        'event_type' => $eventType
-                    ],
-                    ['enabled' => true]
-                );
-            }
-        }
     }
 }
