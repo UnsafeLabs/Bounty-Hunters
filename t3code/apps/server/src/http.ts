@@ -14,6 +14,69 @@ import {
   HttpServerResponse,
   HttpServerRequest,
 } from "effect/unstable/http";
+import zlib from "node:zlib";
+
+// ─── Compression helpers ──────────────────────────────────────────
+
+const MIN_COMPRESS_BYTES = 1024;
+
+function pickEncoding(acceptEncoding: string | undefined): "br" | "gzip" | false {
+  if (!acceptEncoding) return false;
+  const ae = acceptEncoding.toLowerCase();
+  if (ae.includes("br")) return "br";
+  if (ae.includes("gzip")) return "gzip";
+  return false;
+}
+
+export function compressData(
+  data: Uint8Array,
+  encoding: "br" | "gzip",
+): Effect.Effect<Uint8Array, Error> {
+  return Effect.promise(() => {
+    return new Promise<Uint8Array>((resolve, reject) => {
+      const cb = encoding === "br" ? zlib.brotliCompress : zlib.gzip;
+      cb(Buffer.from(data), (err, result) => {
+        if (err) reject(err);
+        else resolve(new Uint8Array(result));
+      });
+    });
+  });
+}
+
+/**
+ * Compress the response body if the client supports it and the body
+ * is large enough. Returns the (possibly compressed) response.
+ */
+function maybeCompressResponse(
+  data: Uint8Array,
+  options: {
+    status?: number;
+    contentType?: string;
+    headers?: Record<string, string>;
+  },
+  request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<HttpServerResponse.HttpServerResponse> {
+  const encoding = pickEncoding(request.headers["accept-encoding"]);
+
+  if (!encoding || data.length < MIN_COMPRESS_BYTES) {
+    return Effect.succeed(
+      HttpServerResponse.uint8Array(data, options),
+    );
+  }
+
+  return Effect.gen(function* () {
+    const compressed = yield* compressData(data, encoding);
+    return HttpServerResponse.uint8Array(compressed, {
+      ...options,
+      headers: {
+        ...options.headers,
+        "Content-Encoding": encoding,
+      },
+    });
+  }).pipe(Effect.catch(() =>
+    Effect.succeed(HttpServerResponse.uint8Array(data, options)),
+  ));
+}
 import { OtlpTracer } from "effect/unstable/observability";
 
 import {
@@ -302,10 +365,10 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       if (!indexData) {
         return HttpServerResponse.text("Not Found", { status: 404 });
       }
-      return HttpServerResponse.uint8Array(indexData, {
+      return yield* maybeCompressResponse(indexData, {
         status: 200,
         contentType: "text/html; charset=utf-8",
-      });
+      }, request);
     }
 
     const contentType = Mime.getType(filePath) ?? "application/octet-stream";
@@ -316,9 +379,9 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Internal Server Error", { status: 500 });
     }
 
-    return HttpServerResponse.uint8Array(data, {
+    return yield* maybeCompressResponse(data, {
       status: 200,
       contentType,
-    });
+    }, request);
   }),
 );
