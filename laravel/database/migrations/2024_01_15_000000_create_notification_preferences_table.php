@@ -10,16 +10,13 @@ return new class extends Migration
     {
         Schema::create('notification_preferences', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->enum('channel', ['mail', 'slack', 'database']);
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->string('channel'); // mail, slack, database
             $table->string('event_type');
             $table->boolean('enabled')->default(true);
             $table->timestamps();
 
-            $table->unique(
-                ['user_id', 'channel', 'event_type'],
-                'unique_user_channel_event'
-            );
+            $table->unique(['user_id', 'channel', 'event_type'], 'unique_user_channel_event');
         });
     }
 
