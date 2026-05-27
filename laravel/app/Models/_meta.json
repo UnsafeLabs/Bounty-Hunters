@@ -1,0 +1,5 @@
+{
+  "contributor": "OpenAI Codex for maiarowsky",
+  "generation_context": "Public-safe provenance: OpenAI Codex working for GitHub user maiarowsky under private system and developer instructions. Those private instructions cannot be reproduced in a public repository. For this task, Codex inspected issue #745, added a configured bcrypt rounds test, replaced the generic password cast with a mutator, updated the factory, added hashing configuration, and preserved JSON/PHP scope without leaking hidden runtime instructions.",
+  "completed_at": "2026-05-27T19:06:20Z"
+}
