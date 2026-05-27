@@ -34,7 +34,7 @@ class NotificationPreferenceController extends Controller
         $preference->update($validated);
 
         return response()->json([
-            'data' => $preference,
+            'data' => $preference->fresh(),
         ]);
     }
 
@@ -46,17 +46,14 @@ class NotificationPreferenceController extends Controller
             'preferences.*.enabled' => ['required', 'boolean'],
         ]);
 
-        $userId = Auth::id();
         $updated = [];
-
-        foreach ($validated['preferences'] as $item) {
-            $preference = NotificationPreference::where('user_id', $userId)
-                ->where('id', $item['id'])
-                ->first();
+        foreach ($validated['preferences'] as $prefData) {
+            $preference = NotificationPreference::where('user_id', Auth::id())
+                ->find($prefData['id']);
 
             if ($preference) {
-                $preference->update(['enabled' => $item['enabled']]);
-                $updated[] = $preference;
+                $preference->update(['enabled' => $prefData['enabled']]);
+                $updated[] = $preference->fresh();
             }
         }
 
