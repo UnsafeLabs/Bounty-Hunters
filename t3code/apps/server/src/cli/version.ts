@@ -11,12 +11,12 @@ export interface VersionInfo {
   readonly arch: string;
 }
 
-export const getVersionInfo = (): VersionInfo => {
+export const getVersionInfo = (version = packageJson.version): VersionInfo => {
   const versions = process.versions as NodeJS.ProcessVersions & { readonly bun?: string };
   const runtimeName = versions.bun === undefined ? "node" : "bun";
 
   return {
-    version: packageJson.version,
+    version,
     runtimeName,
     runtimeVersion: versions.bun ?? versions.node,
     platform: process.platform,
@@ -24,8 +24,14 @@ export const getVersionInfo = (): VersionInfo => {
   };
 };
 
+const formatRuntimeInfo = (info: VersionInfo) =>
+  `${info.runtimeName} ${info.runtimeVersion}, ${info.platform} ${info.arch}`;
+
+export const formatCliVersionOption = (info: VersionInfo) =>
+  `${info.version} (${formatRuntimeInfo(info)})`;
+
 export const formatVersionInfo = (info: VersionInfo) =>
-  `t3code v${info.version} (${info.runtimeName} ${info.runtimeVersion}, ${info.platform} ${info.arch})`;
+  `t3code v${info.version} (${formatRuntimeInfo(info)})`;
 
 export const versionCommand = Command.make("version").pipe(
   Command.withDescription("Print detailed T3 Code CLI version information."),

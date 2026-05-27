@@ -10,7 +10,7 @@ import { authCommand } from "./cli/auth.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
-import { versionCommand } from "./cli/version.ts";
+import { formatCliVersionOption, getVersionInfo, versionCommand } from "./cli/version.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
@@ -27,7 +27,7 @@ export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
 );
 
 if (import.meta.main) {
-  Command.run(cli, { version: packageJson.version }).pipe(
+  Command.run(cli, { version: formatCliVersionOption(getVersionInfo(packageJson.version)) }).pipe(
     Effect.scoped,
     Effect.provide(CliRuntimeLayer),
     NodeRuntime.runMain,

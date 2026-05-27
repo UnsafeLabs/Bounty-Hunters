@@ -33,10 +33,14 @@ import {
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import { formatCliVersionOption, getVersionInfo } from "./cli/version.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
-const runCli = (args: ReadonlyArray<string>) => Command.runWith(cli, { version: "0.0.0" })(args);
+const testVersionInfo = getVersionInfo("0.0.0");
+
+const runCli = (args: ReadonlyArray<string>) =>
+  Command.runWith(cli, { version: formatCliVersionOption(testVersionInfo) })(args);
 const runCliWithRuntime = (args: ReadonlyArray<string>) =>
   runCli(args).pipe(Effect.provide(CliRuntimeLayer));
 
@@ -163,6 +167,14 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       const { output } = yield* captureStdout(runCli(["version"]));
 
       assert.match(output, /^t3code v\d+\.\d+\.\d+ \((bun|node) [^,\s]+, [a-z0-9]+ [a-z0-9_]+\)$/);
+    }),
+  );
+
+  it.effect("prints detailed version information from the global --version flag", () =>
+    Effect.gen(function* () {
+      const { output } = yield* captureStdout(runCli(["--version"]));
+
+      assert.match(output, /^t3 v\d+\.\d+\.\d+ \((bun|node) [^,\s]+, [a-z0-9]+ [a-z0-9_]+\)$/);
     }),
   );
 
