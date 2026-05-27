@@ -2,8 +2,12 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract SimpleSwap {
+contract SimpleSwap is ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     IERC20 public tokenA;
     IERC20 public tokenB;
     uint256 public reserveA;
@@ -14,17 +18,22 @@ contract SimpleSwap {
     event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
 
     constructor(address _tokenA, address _tokenB, uint256 _fee) {
+        require(_tokenA != address(0) && _tokenB != address(0), "Invalid token");
+        require(_tokenA != _tokenB, "Duplicate token");
         require(_fee < BASIS_POINTS, "Invalid fee");
         tokenA = IERC20(_tokenA);
         tokenB = IERC20(_tokenB);
         fee = _fee;
     }
 
-    function addLiquidity(uint256 amountA, uint256 amountB) external {
-        require(tokenA.transferFrom(msg.sender, address(this), amountA), "Transfer failed");
-        require(tokenB.transferFrom(msg.sender, address(this), amountB), "Transfer failed");
+    function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant {
+        require(amountA > 0 && amountB > 0, "Invalid liquidity");
+
         reserveA += amountA;
         reserveB += amountB;
+
+        tokenA.safeTransferFrom(msg.sender, address(this), amountA);
+        tokenB.safeTransferFrom(msg.sender, address(this), amountB);
     }
 
     function swap(
@@ -32,7 +41,7 @@ contract SimpleSwap {
         uint256 amountIn,
         uint256 minAmountOut,
         uint256 deadline
-    ) external returns (uint256 amountOut) {
+    ) external nonReentrant returns (uint256 amountOut) {
         require(block.timestamp <= deadline, "Deadline expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
 
@@ -44,9 +53,6 @@ contract SimpleSwap {
         amountOut = _getAmountOut(amountIn, reserveIn, reserveOut);
         require(amountOut >= minAmountOut, "Slippage exceeded");
 
-        require(inputToken.transferFrom(msg.sender, address(this), amountIn), "Transfer failed");
-        require(outputToken.transfer(msg.sender, amountOut), "Transfer failed");
-
         if (isTokenA) {
             reserveA += amountIn;
             reserveB -= amountOut;
@@ -54,6 +60,9 @@ contract SimpleSwap {
             reserveB += amountIn;
             reserveA -= amountOut;
         }
+
+        inputToken.safeTransferFrom(msg.sender, address(this), amountIn);
+        outputToken.safeTransfer(msg.sender, amountOut);
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }

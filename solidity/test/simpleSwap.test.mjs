@@ -142,6 +142,15 @@ const tokenA = await deploy(contracts.token, owner, ["Token A", "A", supply]);
 const tokenB = await deploy(contracts.token, owner, ["Token B", "B", supply]);
 const tokenAAddress = await tokenA.getAddress();
 const tokenBAddress = await tokenB.getAddress();
+
+await assert.rejects(async () => {
+  await deploy(contracts.swap, owner, [ethers.ZeroAddress, tokenBAddress, 30]);
+});
+
+await assert.rejects(async () => {
+  await deploy(contracts.swap, owner, [tokenAAddress, tokenAAddress, 30]);
+});
+
 const swap = await deploy(contracts.swap, owner, [
   tokenAAddress,
   tokenBAddress,
@@ -151,6 +160,11 @@ const swapAddress = await swap.getAddress();
 
 const reserveA = ethers.parseEther("1000");
 const reserveB = ethers.parseEther("1000");
+await expectRevert(
+  () => swap.addLiquidity.staticCall(0, reserveB),
+  "Invalid liquidity",
+);
+
 await (await tokenA.approve(swapAddress, reserveA)).wait();
 await (await tokenB.approve(swapAddress, reserveB)).wait();
 await (await swap.addLiquidity(reserveA, reserveB)).wait();
