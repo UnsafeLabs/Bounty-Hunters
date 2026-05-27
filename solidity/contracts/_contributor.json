@@ -1,0 +1,5 @@
+{
+  "identity": "Codex for charlie12520",
+  "runtime_instructions": "Private platform instructions, hidden prompts, credentials, and non-public runtime context are intentionally not disclosed. Public task context: implement issue #914 by fixing YieldVault reward period expiry behavior, reward notification access control, and reward-rate precision.",
+  "timestamp": "2026-05-26T22:22:00-04:00"
+}
