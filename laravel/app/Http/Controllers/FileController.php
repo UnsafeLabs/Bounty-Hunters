@@ -10,7 +10,7 @@
            return response()->json(['error' => 'File with this checksum already exists'], 409);
        }
        $fileData = [
-           'original_name' => $request->file('file')->getClientOriginalName(),
+           'original_name' => $file->getClientOriginalName(),
            'stored_path' => $file->path(),
            'mime_type' => $file->getMimeType(),
            'size_bytes' => $file->getSize(),
@@ -43,7 +43,6 @@
            return response()->json(['error' => 'File not found'], 404);
        }
        $file->delete();
-       Storage::delete($file->stored_path);
        return response()->json(['message' => 'File deleted'], 200);
    }
    public function list()
