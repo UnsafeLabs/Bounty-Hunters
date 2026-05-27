@@ -3,54 +3,67 @@
 namespace App\Http\Controllers;
 
 use App\Models\NotificationPreference;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rule;
 
 class NotificationPreferenceController extends Controller
 {
-    public function index(Request $request)
+    public function index(): JsonResponse
     {
-        $preferences = $request->user()
-            ->notificationPreferences()
-            ->get();
+        $preferences = NotificationPreference::forUser(Auth::id())
+            ->get()
+            ->groupBy('event_type')
+            ->map(function ($group) {
+                return $group->mapWithKeys(function ($item) {
+                    return [$item->channel => $item->enabled];
+                });
+            });
 
         return response()->json($preferences);
     }
 
-    public function update(Request $request, NotificationPreference $preference)
+    public function update(Request $request, int $id): JsonResponse
     {
-        // Ensure user can only update their own preferences
-        if ($request->user()->id !== $preference->user_id) {
-            return response()->json(['error' => 'Unauthorized'], 403);
-        }
-
-        $request->validate([
-            'enabled' => 'boolean'
+        $validated = $request->validate([
+            'enabled' => ['required', 'boolean'],
         ]);
 
-        $preference->update($request->only('enabled'));
+        $preference = NotificationPreference::forUser(Auth::id())
+            ->findOrFail($id);
+
+        $preference->update(['enabled' => $validated['enabled']]);
 
         return response()->json($preference);
     }
 
-    public function bulkUpdate(Request $request)
+    public function bulkUpdate(Request $request): JsonResponse
     {
-        $request->validate([
-            'preferences' => 'required|array',
-            'preferences.*.id' => 'required|exists:notification_preferences,id',
-            'preferences.*.enabled' => 'required|boolean'
+        $validated = $request->validate([
+            'preferences' => ['required', 'array'],
+            'preferences.*.id' => ['required', 'integer', 'exists:notification_preferences,id'],
+            'preferences.*.enabled' => ['required', 'boolean'],
         ]);
 
+        $userId = Auth::id();
         $updated = [];
-        foreach ($request->preferences as $prefData) {
-            $preference = NotificationPreference::find($prefData['id']);
-            
-            // Ensure user can only update their own preferences
-            if ($request->user()->id === $preference->user_id) {
+
+        foreach ($validated['preferences'] as $prefData) {
+            $preference = NotificationPreference::forUser($userId)
+                ->where('id', $prefData['id'])
+                ->first();
+
+            if ($preference) {
                 $preference->update(['enabled' => $prefData['enabled']]);
                 $updated[] = $preference;
             }
         }
 
-        return response()->json($updated);
+        return response()->json([
+            'message' => 'Preferences updated successfully',
+            'updated' => count($updated),
+            'preferences' => $updated,
+        ]);
     }
 }
