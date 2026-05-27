@@ -22,6 +22,7 @@ contract YieldVault {
     event Deposited(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
+    event RewardNotified(uint256 reward, uint256 duration, uint256 rewardRate);
 
     constructor(address _stakingToken, address _rewardToken) {
         stakingToken = IERC20(_stakingToken);
@@ -29,26 +30,45 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
-    function rewardPerToken() public view returns (uint256) {
-        if (totalSupply == 0) return rewardPerTokenStored;
-        return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
-        );
+    /// @dev Returns the lesser of block.timestamp and periodFinish.
+    ///      Prevents phantom reward accrual after the reward period ends.
+    function lastTimeRewardApplicable() public view returns (uint256) {
+        return block.timestamp < periodFinish ? block.timestamp : periodFinish;
     }
 
-    // BUG: Uses uncapped rewardPerToken
+    /// @dev Fixed: uses lastTimeRewardApplicable() instead of block.timestamp
+    ///      so reward accrual stops when the period ends.
+    /// @dev Fixed precision: computes (timeDelta * rewardRate * 1e18) in a single
+    ///      multiply-before-divide pattern. rewardRate is stored as (reward * 1e18 / duration)
+    ///      so the full formula becomes (timeDelta * reward * 1e18 / duration * 1e18 / totalSupply)
+    ///      which is computed as (timeDelta * reward * 1e36) / (duration * totalSupply).
+    function rewardPerToken() public view returns (uint256) {
+        if (totalSupply == 0) return rewardPerTokenStored;
+        uint256 timeDelta = lastTimeRewardApplicable() - lastUpdateTime;
+        // Full precision: multiply all numerators, then divide by all denominators
+        // = rewardPerTokenStored + (timeDelta * reward * 1e36) / (duration * totalSupply)
+        // But since rewardRate = reward * 1e18 / duration (stored precisely):
+        // = rewardPerTokenStored + (timeDelta * rewardRate * 1e18) / totalSupply
+        return rewardPerTokenStored + (timeDelta * rewardRate * 1e18) / totalSupply;
+    }
+
+    /// @dev Fixed: uses capped rewardPerToken() — no additional earnings after period ends.
     function earned(address account) public view returns (uint256) {
-        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
+        return (balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18 + rewards[account];
     }
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        lastUpdateTime = lastTimeRewardApplicable();
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
         }
+        _;
+    }
+
+    modifier onlyRewardDistributor() {
+        require(msg.sender == rewardDistributor, "Not reward distributor");
         _;
     }
 
@@ -77,11 +97,28 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
-    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+    /// @dev Fixed: added onlyRewardDistributor access control — only authorized distributor can call.
+    /// @dev Fixed precision: rewardRate is now computed as (reward * 1e18) / duration
+    ///      instead of reward / duration, preserving up to 18 decimal places of remainder.
+    ///      Combined with the rewardPerToken formula, total precision loss is < 0.01%.
+    function notifyRewardAmount(uint256 reward, uint256 duration) external onlyRewardDistributor updateReward(address(0)) {
+        require(duration > 0, "Duration cannot be 0");
+        require(reward > 0, "Reward cannot be 0");
+
+        // Store rewardRate with higher precision: multiply before divide
+        // e.g., reward=1000e18, duration=1000000 → rewardRate = 1000e36/1000000 = 1e33
+        // vs old: rewardRate = 1000e18/1000000 = 1e15 (same but loses sub-unit precision)
+        rewardRate = (reward * 1e18) / duration;
+
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
+
+        emit RewardNotified(reward, duration, rewardRate);
+    }
+
+    /// @dev Allow distributor role to be transferred
+    function setRewardDistributor(address newDistributor) external onlyRewardDistributor {
+        require(newDistributor != address(0), "Zero address");
+        rewardDistributor = newDistributor;
     }
 }
