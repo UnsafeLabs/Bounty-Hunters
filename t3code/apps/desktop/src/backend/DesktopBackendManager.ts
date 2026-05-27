@@ -328,7 +328,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
           return;
         }
 
-        yield* Ref.set(desktopState.backendReady, false);
+        yield* desktopState.setBackendReady(false);
         const config = yield* configuration.resolve;
         const entryExists = yield* fileSystem
           .exists(config.entryPath)
@@ -414,7 +414,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                     details: `pid=${pid.value} ${reason}`,
                   });
                 }
-                yield* Ref.set(desktopState.backendReady, false);
+                yield* desktopState.setBackendReady(false);
               }
 
               if (isCurrentRun && nextState.desiredRunning) {
@@ -456,7 +456,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
               return;
             }
 
-            yield* Ref.set(desktopState.backendReady, true);
+            yield* desktopState.setBackendReady(true);
             yield* desktopWindow.handleBackendReady.pipe(
               Effect.catch((error) =>
                 logBackendManagerError("failed to open main window after backend readiness", {
@@ -568,7 +568,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             restartFiber: Option.none<Fiber.Fiber<void, never>>(),
           },
         ]);
-        yield* Ref.set(desktopState.backendReady, false);
+        yield* desktopState.setBackendReady(false);
         return result;
       }),
     );

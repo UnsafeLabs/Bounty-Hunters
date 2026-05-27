@@ -334,7 +334,7 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.withSpan("desktop.window.activate")),
     createMainIfBackendReady,
     handleBackendReady: Effect.gen(function* () {
-      yield* Ref.set(state.backendReady, true);
+      yield* state.setBackendReady(true);
       yield* logWindowInfo("backend ready", { source: "http" });
       yield* createMainIfBackendReady;
     }).pipe(Effect.withSpan("desktop.window.handleBackendReady")),

@@ -91,6 +91,7 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
     },
     vcs: {
       pull: vi.fn(async () => undefined),
+      stageAll: vi.fn(async () => ({ status: "staged" as const })),
       refreshStatus: vi.fn(async (input: { cwd: string }) => ({
         ...BASE_STATUS,
         refName: `${input.cwd}-refreshed`,

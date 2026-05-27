@@ -25,6 +25,8 @@ import {
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
   VcsPullInput,
+  VcsStageAllInput,
+  VcsStageAllResult,
   GitPullRequestRefInput,
   VcsPullResult,
   VcsRemoveWorktreeInput,
@@ -115,6 +117,7 @@ export const WS_METHODS = {
 
   // VCS methods
   vcsPull: "vcs.pull",
+  vcsStageAll: "vcs.stageAll",
   vcsRefreshStatus: "vcs.refreshStatus",
   vcsListRefs: "vcs.listRefs",
   vcsCreateWorktree: "vcs.createWorktree",
@@ -297,6 +300,12 @@ export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
 export const WsVcsPullRpc = Rpc.make(WS_METHODS.vcsPull, {
   payload: VcsPullInput,
   success: VcsPullResult,
+  error: GitCommandError,
+});
+
+export const WsVcsStageAllRpc = Rpc.make(WS_METHODS.vcsStageAll, {
+  payload: VcsStageAllInput,
+  success: VcsStageAllResult,
   error: GitCommandError,
 });
 
@@ -494,6 +503,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemBrowseRpc,
   WsSubscribeVcsStatusRpc,
   WsVcsPullRpc,
+  WsVcsStageAllRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,

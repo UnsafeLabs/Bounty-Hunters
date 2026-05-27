@@ -164,6 +164,7 @@ export interface GitVcsDriverShape {
     cwd: string,
     filePaths?: readonly string[],
   ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
+  readonly stageAll: (cwd: string) => Effect.Effect<void, GitCommandError>;
   readonly commit: (
     cwd: string,
     subject: string,

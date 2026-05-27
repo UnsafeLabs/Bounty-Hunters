@@ -1,6 +1,7 @@
 import {
   type ApprovalRequestId,
   DEFAULT_MODEL,
+  DESKTOP_MENU_ACTIONS,
   defaultInstanceIdForDriver,
   type EnvironmentId,
   type MessageId,
@@ -97,6 +98,7 @@ import {
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
+import { subscribeDesktopMenuAction } from "../desktopMenuActions";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
@@ -1851,6 +1853,51 @@ export default function ChatView(props: ChatViewProps) {
       terminalState.terminalIds.length,
     ],
   );
+  const clearActiveTerminal = useCallback(() => {
+    const api = readEnvironmentApi(environmentId);
+    if (!activeThreadId || !api) return;
+    const terminalId =
+      terminalState.activeTerminalId || terminalState.terminalIds[0] || DEFAULT_THREAD_TERMINAL_ID;
+    void api.terminal.clear({ threadId: activeThreadId, terminalId }).catch((error: unknown) => {
+      setThreadError(
+        activeThreadId,
+        error instanceof Error ? error.message : "Failed to clear terminal.",
+      );
+    });
+  }, [
+    activeThreadId,
+    environmentId,
+    setThreadError,
+    terminalState.activeTerminalId,
+    terminalState.terminalIds,
+  ]);
+  const restartBackendFromMenu = useCallback(() => {
+    const restartBackend = window.desktopBridge?.restartBackend;
+    if (typeof restartBackend !== "function") return;
+
+    const toastId = toastManager.add({
+      type: "loading",
+      title: "Restarting backend...",
+      timeout: 0,
+    });
+    void restartBackend()
+      .then(() => {
+        toastManager.update(toastId, {
+          type: "success",
+          title: "Backend restarted",
+        });
+      })
+      .catch((error: unknown) => {
+        toastManager.update(
+          toastId,
+          stackedThreadToast({
+            type: "error",
+            title: "Backend restart failed",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      });
+  }, []);
   const runProjectScript = useCallback(
     async (
       script: ProjectScript,
@@ -2548,6 +2595,24 @@ export default function ChatView(props: ChatViewProps) {
     onToggleDiff,
     toggleTerminalVisibility,
   ]);
+
+  useEffect(
+    () =>
+      subscribeDesktopMenuAction((action) => {
+        if (action === DESKTOP_MENU_ACTIONS.terminalToggle) {
+          toggleTerminalVisibility();
+          return;
+        }
+        if (action === DESKTOP_MENU_ACTIONS.terminalClear) {
+          clearActiveTerminal();
+          return;
+        }
+        if (action === DESKTOP_MENU_ACTIONS.backendRestart) {
+          restartBackendFromMenu();
+        }
+      }),
+    [clearActiveTerminal, restartBackendFromMenu, toggleTerminalVisibility],
+  );
 
   const onRevertToTurnCount = useCallback(
     async (turnCount: number) => {

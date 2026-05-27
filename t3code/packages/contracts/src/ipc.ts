@@ -17,6 +17,8 @@ import type {
   VcsStatusInput,
   VcsStatusResult,
   VcsCreateRefResult,
+  VcsStageAllInput,
+  VcsStageAllResult,
 } from "./git.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type {
@@ -294,6 +296,31 @@ export const DesktopSshPasswordPromptCancelledResultSchema = Schema.Struct({
   message: Schema.String,
 });
 
+export const DESKTOP_MENU_ACTIONS = {
+  openSettings: "open-settings",
+  terminalToggle: "terminal.toggle",
+  terminalClear: "terminal.clear",
+  backendRestart: "developer.backend.restart",
+  gitStageAll: "git.stage-all",
+  gitCommit: "git.commit",
+  gitPush: "git.push",
+  gitPull: "git.pull",
+  gitCreateBranch: "git.create-branch",
+} as const;
+
+export const DesktopMenuActionSchema = Schema.Literals([
+  DESKTOP_MENU_ACTIONS.openSettings,
+  DESKTOP_MENU_ACTIONS.terminalToggle,
+  DESKTOP_MENU_ACTIONS.terminalClear,
+  DESKTOP_MENU_ACTIONS.backendRestart,
+  DESKTOP_MENU_ACTIONS.gitStageAll,
+  DESKTOP_MENU_ACTIONS.gitCommit,
+  DESKTOP_MENU_ACTIONS.gitPush,
+  DESKTOP_MENU_ACTIONS.gitPull,
+  DESKTOP_MENU_ACTIONS.gitCreateBranch,
+]);
+export type DesktopMenuAction = typeof DesktopMenuActionSchema.Type;
+
 export const DesktopSshEnvironmentEnsureOptionsSchema = Schema.Struct({
   issuePairingToken: Schema.optionalKey(Schema.Boolean),
 });
@@ -415,6 +442,7 @@ export interface DesktopBridge {
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
   onMenuAction: (listener: (action: string) => void) => () => void;
+  restartBackend: () => Promise<void>;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;
@@ -529,6 +557,7 @@ export interface EnvironmentApi {
     switchRef: (input: VcsSwitchRefInput) => Promise<VcsSwitchRefResult>;
     init: (input: VcsInitInput) => Promise<void>;
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
+    stageAll: (input: VcsStageAllInput) => Promise<VcsStageAllResult>;
     refreshStatus: (input: VcsStatusInput) => Promise<VcsStatusResult>;
     onStatus: (
       input: VcsStatusInput,

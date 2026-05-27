@@ -133,3 +133,14 @@ export const openExternal = makeIpcMethod({
     return yield* shell.openExternal(url);
   }),
 });
+
+export const restartBackend = makeIpcMethod({
+  channel: IpcChannels.RESTART_BACKEND_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.restartBackend")(function* () {
+    const backendManager = yield* DesktopBackendManager.DesktopBackendManager;
+    yield* backendManager.stop();
+    yield* backendManager.start;
+  }),
+});

@@ -315,6 +315,8 @@ describe("DesktopBackendManager", () => {
         spawnerLayer,
         desktopState: {
           backendReady,
+          setBackendReady: (ready) => Ref.set(backendReady, ready),
+          onBackendReadyChange: () => Effect.succeed(() => Effect.void),
           quitting,
         },
         desktopWindow: {
