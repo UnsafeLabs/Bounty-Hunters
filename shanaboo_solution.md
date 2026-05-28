@@ -1,154 +1,186 @@
 ```diff
---- a/t3code/apps/web/src/components/ChatView.tsx
+--- /dev/null
 +++ b/t3code/apps/web/src/components/ChatView.tsx
-@@ -1,10 +1,12 @@
- "use client";
- 
--import { useCallback, useEffect, useRef, useState } from "react";
-+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
- import { AnimatedHeight } from "./AnimatedHeight";
- 
- interface Message {
-   id: string;
-+  role: "user" | "assistant";
+@@ -0,0 +1,298 @@
++"use client";
++
++import React, { useCallback, useEffect, useRef, useState } from "react";
++
++// Types
++interface Message {
++  id: string;
 +  content: string;
-   text: string;
-   timestamp: Date;
- }
-@@ -15,6 +17,8 @@ interface ChatViewProps {
- 
- export function ChatView({ messages, onSendMessage }: ChatViewProps) {
-   const [inputValue, setInputValue] = useState("");
-+  const messagesEndRef = useRef<HTMLDivElement>(null);
-+  const messageRefs = useRef<(HTMLLIElement | null)[]>([]);
-   const inputRef = useRef<HTMLInputElement>(null);
-   const sendButtonRef = useRef<HTMLButtonElement>(null);
-   const attachButtonRef = useRef<HTMLButtonElement>(null);
-@@ -22,6 +26,12 @@ export function ChatView({ messages, onSendMessage }: ChatViewProps) {
-   const composerRef = useRef<HTMLDivElement>(null);
-   const skipLinkRef = useRef<HTMLAnchorElement>(null);
- 
++  sender: "user" | "bot";
++  timestamp: Date;
++  details?: string;
++}
++
++// MessagesTimeline Component
++function MessagesTimeline({
++  messages,
++  activeIndex,
++  onSelectMessage,
++}: {
++  messages: Message[];
++  activeIndex: number;
++  onSelectMessage: (index: number) => void;
++}) {
++  const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
++
 +  useEffect(() => {
-+    if (messagesEndRef.current) {
-+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
++    if (itemRefs.current[activeIndex]) {
++      itemRefs.current[activeIndex]?.focus();
 +    }
-+  }, [messages]);
++  }, [activeIndex]);
 +
-   const handleSend = useCallback(() => {
-     const trimmed = inputValue.trim();
-     if (!trimmed) return;
-@@ -30,6 +40,51 @@ export function ChatView({ messages, onSendMessage }: ChatViewProps) {
-     inputRef.current?.focus();
-   }, [inputValue, onSendMessage]);
- 
-+  const handleMessageKeyDown = useCallback((event: KeyboardEvent<HTMLLIElement>, index: number) => {
-+    switch (event.key) {
-+      case "ArrowUp":
++  const handleKeyDown = useCallback(
++    (event: React.KeyboardEvent, index: number) => {
++      if (event.key === "Enter") {
 +        event.preventDefault();
-+        if (index > 0) {
-+          messageRefs.current[index - 1]?.focus();
-+        } else {
-+          inputRef.current?.focus();
-+        }
-+        break;
-+      case "ArrowDown":
-+        event.preventDefault();
-+        if (index < messages.length - 1) {
-+          messageRefs.current[index + 1]?.focus();
-+        } else {
-+          inputRef.current?.focus();
-+        }
-+        break;
-+      case "Enter":
-+        event.preventDefault();
-+        // Expand message details - toggle expanded state
-+        const message = messages[index];
-+        if (message) {
-+          // Dispatch custom event for message detail expansion
-+          const detailEvent = new CustomEvent("message:expand", { detail: { messageId: message.id } });
-+          window.dispatchEvent(detailEvent);
-+        }
-+        break;
-+      case "Escape":
-+        event.preventDefault();
-+        inputRef.current?.focus();
-+        break;
++        onSelectMessage(index);
++      }
++    },
++    [onSelectMessage]
++  );
++
++  return (
++    <div
++      role="log"
++      aria-live="polite"
++      aria-relevant="additions"
++      aria-atomic="false"
++      className="flex-1 overflow-y-auto p-4 space-y-4"
++      id="chat-messages"
++    >
++      {messages.length === 0 && (
++        <div className="text-gray-500 text-center py-8">No messages yet</div>
++      )}
++      {messages.map((message, index) => (
++        <div
++          key={message.id}
++          ref={(el) => {
++            itemRefs.current[index] = el;
++          }}
++          role="listitem"
++          tabIndex={0}
++          onKeyDown={(e) => handleKeyDown(e, index)}
++          onClick={() => onSelectMessage(index)}
++          className={`p-3 rounded-lg cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 ${
++            message.sender === "user" ? "bg-blue-100 ml-auto" : "bg-gray-100"
++          } ${activeIndex === index ? "ring-2 ring-blue-500" : ""} max-w-[80%]`}
++          aria-selected={activeIndex === index}
++        >
++          <div className="text-sm font-medium mb-1">
++            {message.sender === "user" ? "You" : "Assistant"}
++          </div>
++          <div>{message.content}</div>
++          {message.details && activeIndex === index && (
++            <div className="mt-2 text-sm text-gray-600 border-t pt-2">
++              {message.details}
++            </div>
++          )}
++        </div>
++      ))}
++    </div>
++  );
++}
++
++// ChatComposer Component
++function ChatComposer({
++  onSend,
++  onClear,
++  composerRef,
++}: {
++  onSend: (message: string) => void;
++  onClear: () => void;
++  composerRef: React.RefObject<HTMLDivElement | null>;
++}) {
++  const [text, setText] = useState("");
++  const inputRef = useRef<HTMLInputElement>(null);
++  const sendButtonRef = useRef<HTMLButtonElement>(null);
++  const attachButtonRef = useRef<HTMLButtonElement>(null);
++  const clearButtonRef = useRef<HTMLButtonElement>(null);
++
++  const handleSend = useCallback(() => {
++    if (text.trim()) {
++      onSend(text.trim());
++      setText("");
 +    }
-+  }, [messages]);
++  }, [text, onSend]);
 +
-+  const handleComposerKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
-+    if (event.key === "ArrowUp" && messages.length > 0) {
-+      event.preventDefault();
-+      messageRefs.current[messages.length - 1]?.focus();
-+    }
-+  }, [messages.length]);
++  const handleKeyDown = useCallback(
++    (event: React.KeyboardEvent) => {
++      if (event.key === "Enter" && !event.shiftKey) {
++        event.preventDefault();
++        handleSend();
++      }
++    },
++    [handleSend]
++  );
 +
-+  const handleSkipToMessages = useCallback((event: React.MouseEvent) => {
-+    event.preventDefault();
-+    const lastMessage = messageRefs.current[messages.length - 1];
-+    lastMessage?.focus();
-+  }, [messages.length]);
++  // Focus trap within composer
++  const handleComposerKeyDown = useCallback(
++    (event: React.KeyboardEvent) => {
++      if (event.key !== "Tab") return;
 +
-   const handleSkipToComposer = useCallback((event: React.MouseEvent) => {
-     event.preventDefault();
-     inputRef.current?.focus();
-@@ -41,6 +96,11 @@ export function ChatView({ messages, onSendMessage }: ChatViewProps) {
-     clearButtonRef.current?.focus();
-   }, []);
- 
-+  const handleSkipToSidebar = useCallback((event: React.MouseEvent) => {
-+    event.preventDefault();
-+    // Focus on sidebar - assuming sidebar has id="sidebar"
-+    document.getElementById("sidebar")?.focus();
-+  }, []);
++      const focusableElements = [
++        inputRef.current,
++        attachButtonRef.current,
++        clearButtonRef.current,
++        sendButtonRef.current,
++      ].filter(Boolean) as HTMLElement[];
 +
-   const handleClear = useCallback(() => {
-     setInputValue("");
-     inputRef.current?.focus();
-@@ -48,6 +108,7 @@ export function ChatView({ messages, onSendMessage }: ChatViewProps) {
- 
-   return (
-     <div className="flex flex-col h-full">
-+      {/* Skip links - visually hidden until focused */}
-       <a
-         href="#chat-messages"
-         ref={skipLinkRef}
-@@ -56,6 +117,7 @@ export function ChatView({ messages, onSendMessage }: ChatViewProps) {
-           focus:static focus:w-auto focus:h-auto focus:m-0 focus:overflow-visible focus:clip-auto focus:whitespace-normal
-           sr-only focus:not-sr-only
-         "
-+        onClick={handleSkipToMessages}
-       >
-         Skip to messages
-       </a>
-@@ -66,6 +128,7 @@ export function ChatView({ messages, onSendMessage }: ChatViewProps) {
-           focus:static focus:w-auto focus:h-auto focus:m-0 focus:overflow-visible focus:clip-auto focus:whitespace-normal
-           sr-only focus:not-sr-only
-         "
-+        onClick={handleSkipToSidebar}
-       >
-         Skip to sidebar
-       </a>
-@@ -82,25 +145,46 @@ export function ChatView({ messages, onSendMessage }: ChatViewProps) {
-       </a>
- 
-       {/* Messages Timeline */}
--      <div id="chat-messages" className="flex-1 overflow-y-auto p-4 space-y-4" role="log" aria-live="polite" aria-relevant="additions">
-+      <div
-+        id="chat-messages"
-+        className="flex-1 overflow-y-auto p-4 space-y-4"
-+        role="log"
-+        aria-live="polite"
-+        aria-relevant="additions"
-+        aria-atomic="false"
-+      >
-         {messages.length === 0 ? (
-           <div className="text-center text-gray-500" role="status">
-             No messages yet. Start a conversation!
-           </div>
-         ) : (
--          <ul className="space-y-4" aria-label="Chat messages">
--            {messages.map((message) => (
--              <li key={message.id} className="p-3 rounded-lg bg-gray-100 dark:bg-gray-800">
--                <div className="text-sm text-gray-600 dark:text-gray-300">{message.text}</div>
-+          <ul className="space-y-4" aria-label
++      const firstElement = focusableElements[0];
++      const lastElement = focusableElements[focusableElements.length - 1];
++
++      if (event.shiftKey && document.activeElement === firstElement) {
++        event.preventDefault();
++        lastElement?.focus();
++      } else if (!event.shiftKey && document.activeElement === lastElement) {
++        event.preventDefault();
++        firstElement?.focus();
++      }
++    },
++    []
++  );
++
++  return (
++    <div
++      ref={composerRef}
++      onKeyDown={handleComposerKeyDown}
++      className="p-4 border-t"
++      id="chat-composer"
++    >
++      <div className="flex items-center gap-2">
++        <input
++          ref={inputRef}
++          type="text"
++          value={text}
++          onChange={(e) => setText(e.target.value)}
++          onKeyDown={handleKeyDown}
++          placeholder="Type a message..."
++          className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
++          aria-label="Message input"
++        />
++        <button
++          ref={attachButtonRef}
++          type="button"
++          aria-label="Attach file"
++          className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
++        >
++          📎
++        </button>
++        <button
++          ref={clearButtonRef}
++          type="button"
++          onClick={onClear}
++          aria-label="Clear chat"
++          className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
++        >
++          🗑️
++        </button>
++        <button
++          ref={sendButtonRef}
++          type="button"
++          onClick={handleSend}
++          aria-label
