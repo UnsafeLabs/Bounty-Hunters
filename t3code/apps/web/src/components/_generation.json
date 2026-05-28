@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent (zhangjiayang6835-cyber)",
+  "pre_task_context": "You are Hermes Agent. Add drag-and-drop file moving to the sidebar file tree using @dnd-kit (already in dependencies). Create a FileTree component with SortableContext, DragOverlay, pointer sensor with distance activation, drop indicator, multi-select support with Shift/Ctrl, and git mv support for tracked files.",
+  "timestamp": "2026-05-28T00:00:00Z"
+}
