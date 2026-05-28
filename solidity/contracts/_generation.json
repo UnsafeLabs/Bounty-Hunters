@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "pre_task_context": "Public task context for UnsafeLabs/Bounty-Hunters issue #918: harden LiquidityPool first-depositor behavior by locking MINIMUM_LIQUIDITY, using internal reserve accounting for LP pricing and removals, adding sync recovery, and verifying direct-transfer donation isolation with Solidity/Ganache tests. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "timestamp": "2026-05-28T22:40:00Z"
+}

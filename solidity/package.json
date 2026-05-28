@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "test": "mocha \"test/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "ethers": "^6.13.4",
+    "ganache": "^7.9.2",
+    "mocha": "^10.8.2",
+    "solc": "^0.8.30"
+  }
+}
