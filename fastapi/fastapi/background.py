@@ -1,11 +1,77 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Annotated, Any
 
 from annotated_doc import Doc
+from fastapi.logger import logger
+from starlette._utils import is_async_callable
+from starlette.background import BackgroundTask as StarletteBackgroundTask
 from starlette.background import BackgroundTasks as StarletteBackgroundTasks
-from typing_extensions import ParamSpec
+from starlette.concurrency import run_in_threadpool
 
-P = ParamSpec("P")
+ErrorCallback = Callable[[Exception, str, int], Any]
+
+
+class BackgroundTask(StarletteBackgroundTask):
+    def __init__(
+        self,
+        func: Callable[..., Any],
+        *args: Any,
+        max_retries: int = 0,
+        on_error: ErrorCallback | None = None,
+        task_results: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(func, *args, **kwargs)
+        self.max_retries = max(0, max_retries)
+        self.on_error = on_error
+        self.task_results = task_results
+        self.task_name = getattr(func, "__name__", func.__class__.__name__)
+
+    async def __call__(self) -> None:
+        retry_count = 0
+        while True:
+            try:
+                await super().__call__()
+            except Exception as exc:
+                logger.exception(
+                    "Background task %s failed (retry %s/%s)",
+                    self.task_name,
+                    retry_count,
+                    self.max_retries,
+                )
+                await self._call_error_handler(exc, retry_count)
+                if retry_count >= self.max_retries:
+                    self._record_result("failed", exc, retry_count)
+                    return
+                retry_count += 1
+            else:
+                self._record_result("success", None, retry_count)
+                return
+
+    async def _call_error_handler(self, exc: Exception, retry_count: int) -> None:
+        if self.on_error is None:
+            return
+        try:
+            if is_async_callable(self.on_error):
+                await self.on_error(exc, self.task_name, retry_count)
+            else:
+                await run_in_threadpool(self.on_error, exc, self.task_name, retry_count)
+        except Exception:
+            logger.exception("Background task %s error callback failed", self.task_name)
+
+    def _record_result(
+        self, status: str, exc: Exception | None, retry_count: int
+    ) -> None:
+        if self.task_results is None:
+            return
+        self.task_results.append(
+            {
+                "status": status,
+                "task_name": self.task_name,
+                "exception": str(exc) if exc else None,
+                "retry_count": retry_count,
+            }
+        )
 
 
 class BackgroundTasks(StarletteBackgroundTasks):
@@ -37,10 +103,14 @@ class BackgroundTasks(StarletteBackgroundTasks):
     ```
     """
 
-    def add_task(
+    def __init__(self, tasks: Sequence[StarletteBackgroundTask] | None = None) -> None:
+        super().__init__(tasks)
+        self.task_results: list[dict[str, Any]] = []
+
+    def add_task(  # type: ignore[override]
         self,
         func: Annotated[
-            Callable[P, Any],
+            Callable[..., Any],
             Doc(
                 """
                 The function to call after the response is sent.
@@ -49,8 +119,25 @@ class BackgroundTasks(StarletteBackgroundTasks):
                 """
             ),
         ],
-        *args: P.args,
-        **kwargs: P.kwargs,
+        *args: Any,
+        max_retries: Annotated[
+            int,
+            Doc(
+                """
+                The number of times to retry the task after a failure.
+                """
+            ),
+        ] = 0,
+        on_error: Annotated[
+            ErrorCallback | None,
+            Doc(
+                """
+                Optional callback called with the exception, task name, and retry
+                count when the task fails.
+                """
+            ),
+        ] = None,
+        **kwargs: Any,
     ) -> None:
         """
         Add a function to be called in the background after the response is sent.
@@ -58,4 +145,12 @@ class BackgroundTasks(StarletteBackgroundTasks):
         Read more about it in the
         [FastAPI docs for Background Tasks](https://fastapi.tiangolo.com/tutorial/background-tasks/).
         """
-        return super().add_task(func, *args, **kwargs)
+        task = BackgroundTask(
+            func,
+            *args,
+            max_retries=max_retries,
+            on_error=on_error,
+            task_results=self.task_results,
+            **kwargs,
+        )
+        self.tasks.append(task)
