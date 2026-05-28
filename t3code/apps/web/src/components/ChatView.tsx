@@ -1,126 +1,3 @@
-"use client";
-
-import { useState, useEffect, useRef } from 'react';
-
-interface Message {
-  id: string;
-  content: string;
-  sender: string;
-  timestamp: Date;
-}
-
-export function ChatView() {
-  return (
-    <div 
-      role="log" 
-      aria-live="polite"
-      className="chat-messages"
-    >
-      <MessagesTimeline />
-      <ChatComposer />
-    </div>
-  );
-}
-
-function MessagesTimeline() {
-  return (
-    <div role="listbox" className="messages-timeline">
-      {messages.map((message, index) => (
-        <div 
-          key={message.id} 
-          role="listitem"
-          tabIndex={0}
-        >
-          {message.content}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ChatComposer() {
-  return (
-    <div className="chat-composer">
-      <input 
-        aria-label="Type your message here"
-        role="textbox"
-      />
-      <button 
-        aria-label="Send message"
-        onClick={handleSendMessage}
-      >
-        Send
-      </button>
-      <button 
-        aria-label="Attach file"
-      >
-        Attach
-      </button>
-      <button 
-        aria-label="Clear chat"
-      >
-        Clear
-      </button>
-    </div>
-  );
-}
-
-function ChatView() {
-  return (
-    <div>
-      <a href="#messages" tabIndex={0}>Skip to messages</a>
-      <a href="#composer" tabIndex={0}>Skip to composer</a>
-      <div ref={messagesEndRef} />
-    </div>
-  );
-}
-
-function MessagesTimeline() {
-  const messages = [
-    {id: '1', content: 'Hello there!', sender: 'user1', timestamp: new Date()},
-    {id: '2', content: 'Hi!', sender: 'user2', timestamp: new Date()}
-  ];
-  
-  return (
-    <div id="messages">
-      {messages.map((message) => (
-        <div 
-          key={message.id}
-          role="listitem"
-          tabIndex={0}
-        >
-          <div>{message.content}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ChatComposer() {
-  return (
-    <div>
-      <input 
-        aria-label="Message input"
-        role="textbox"
-      />
-      <button 
-        aria-label="Send message"
-        onClick={handleSend}
-      >
-        Send
-      </button>
-      <button 
-        aria-label="Attach file"
-      >
-      </button>
-      <button 
-        aria-label="Clear chat"
-      >
-        Clear
-      </button>
-    </div>
-  );
-}
 import {
   type ApprovalRequestId,
   DEFAULT_MODEL,
@@ -3900,4 +3777,121 @@ export default function ChatView(props: ChatViewProps) {
       )}
     </div>
   );
+"use client";
+
+import { useState, useRef, useEffect, KeyboardEvent } from "react";
+import { MessagesTimeline } from "./MessagesTimeline";
+import { ChatComposer } from "./ChatComposer";
+
+interface Message {
+  id: string;
+  text: string;
+  sender: string;
+  timestamp: Date;
+}
+
+export function ChatView() {
+  const [messages, setMessages] = useState<Message[]>([
+    { id: "1", text: "Hello there!", sender: "Alice", timestamp: new Date() },
+    { id: "2", text: "Hi! How are you?", sender: "Bob", timestamp: new Date() },
+  ]);
+  const [activeMessageIndex, setActiveMessageIndex] = useState<number | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const skipToMessagesRef = useRef<HTMLAnchorElement>(null);
+  const skipToComposerRef = useRef<HTMLAnchorElement>(null);
+  const skipToSidebarRef = useRef<HTMLAnchorElement>(null);
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "ArrowDown" && messages.length > 0) {
+      event.preventDefault();
+      if (activeMessageIndex === null || activeMessageIndex >= messages.length - 1) {
+        setActiveMessageIndex(0);
+      } else {
+        setActiveMessageIndex(activeMessageIndex + 1);
+      }
+    } else if (event.key === "ArrowUp" && messages.length > 0) {
+      event.preventDefault();
+      if (activeMessageIndex === null || activeMessageIndex <= 0) {
+        setActiveMessageIndex(messages.length - 1);
+      } else {
+        setActiveMessageIndex(activeMessageIndex - 1);
+      }
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setActiveMessageIndex(null);
+      // Focus back to composer
+      const composer = document.querySelector('[data-composer-input]');
+      if (composer instanceof HTMLElement) {
+        composer.focus();
+      }
+    }
+  };
+
+  const addMessage = (text: string) => {
+    const newMessage: Message = {
+      id: Date.now().toString(),
+      text,
+      sender: "You",
+      timestamp: new Date(),
+    };
+    setMessages([...messages, newMessage]);
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Skip Links */}
+      <div className="sr-only">
+        <a 
+          ref={skipToSidebarRef}
+          href="#sidebar" 
+          className="skip-link focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:bg-white focus:p-2 focus:z-50"
+        >
+          Skip to sidebar
+        </a>
+        <a 
+          ref={skipToMessagesRef}
+          href="#messages" 
+          className="skip-link focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:bg-white focus:p-2 focus:z-50"
+        >
+          Skip to messages
+        </a>
+        <a 
+          ref={skipToComposerRef}
+          href="#composer" 
+          className="skip-link focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:bg-white focus:p-2 focus:z-50"
+        >
+          Skip to composer
+        </a>
+      </div>
+
+      {/* Sidebar */}
+      <div id="sidebar" className="border-b p-4">
+        <h2>Chat Rooms</h2>
+        {/* Sidebar content */}
+      </div>
+
+      {/* Messages Container */}
+      <div 
+        id="messages"
+        ref={messagesContainerRef}
+        role="log" 
+        aria-live="polite"
+        className="flex-1 overflow-y-auto p-4"
+        onKeyDown={handleKeyDown}
+        tabIndex={-1}
+      >
+        <MessagesTimeline 
+          messages={messages} 
+          activeIndex={activeMessageIndex}
+          onMessageFocus={(index) => setActiveMessageIndex(index)}
+        />
+      </div>
+
+      {/* Composer */}
+      <div id="composer" className="border-t p-4">
+        <ChatComposer onSend={addMessage} />
+      </div>
+    </div>
+  );
+}
 }
