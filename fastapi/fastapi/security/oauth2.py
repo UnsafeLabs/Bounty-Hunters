@@ -7,6 +7,7 @@ from fastapi.openapi.models import OAuthFlows as OAuthFlowsModel
 from fastapi.param_functions import Form
 from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
+from pydantic import BaseModel
 from starlette.requests import Request
 from starlette.status import HTTP_401_UNAUTHORIZED
 
@@ -691,3 +692,169 @@ class SecurityScopes:
                 """
             ),
         ] = " ".join(self.scopes)
+
+
+class OAuth2RefreshToken:
+    """
+    This is a dependency class to collect the `refresh_token` from the request
+    for OAuth2 token refresh flows.
+
+    The refresh token can be provided either as a form field or as a JSON body.
+    When provided as form data, it follows the OAuth2 specification for the
+    refresh token grant type.
+
+    Read more about it in the
+    [OAuth 2.0 RFC 6749 - Section 6](https://datatracker.ietf.org/doc/html/rfc6749#section-6).
+
+    ## Example
+
+    ```python
+    from fastapi import FastAPI, Depends, HTTPException
+    from fastapi.security import OAuth2RefreshToken, OAuth2PasswordBearer
+    from pydantic import BaseModel
+
+    app = FastAPI()
+    oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", refreshUrl="refresh")
+
+    class Token(BaseModel):
+        access_token: str
+        token_type: str
+        expires_in: int | None = None
+
+    async def refresh_token_handler(
+        refresh_token: OAuth2RefreshToken = Depends()
+    ):
+        # Exchange refresh token for new access token
+        # This is where you'd validate the refresh token and issue a new one
+        if not is_valid_refresh_token(refresh_token.refresh_token):
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+        new_access_token = generate_access_token(refresh_token.refresh_token)
+        return Token(access_token=new_access_token, token_type="bearer")
+    ```
+    """
+
+    def __init__(
+        self,
+        refresh_token: Annotated[
+            str,
+            Form(
+                default="",
+                description="The refresh token used to obtain a new access token.",
+            ),
+        ],
+    ):
+        self.refresh_token = refresh_token
+
+
+class TokenRefreshResponse(BaseModel):
+    """
+    Standard OAuth2 token refresh response model.
+
+    Follows the OAuth 2.0 specification (RFC 6749, Section 5.1):
+    https://datatracker.ietf.org/doc/html/rfc6749#section-5.1
+
+    The response includes:
+    - `access_token`: The new access token
+    - `token_type`: Usually "Bearer"
+    - `expires_in`: Lifetime of the access token in seconds
+    - `refresh_token`: A new refresh token (optional, for refresh token rotation)
+    - `scope`: The scope of the access token (optional)
+    """
+
+    access_token: Annotated[
+        str,
+        Doc("The new access token."),
+    ]
+    token_type: Annotated[
+        str,
+        Doc('The token type, usually "Bearer".'),
+    ] = "bearer"
+    expires_in: Annotated[
+        int | None,
+        Doc("The lifetime in seconds of the access token."),
+    ] = None
+    refresh_token: Annotated[
+        str | None,
+        Doc(
+            "A new refresh token. "
+            "Used for refresh token rotation to enhance security."
+        ),
+    ] = None
+    scope: Annotated[
+        str | None,
+        Doc("The scope of the access token as a space-delimited list."),
+    ] = None
+
+    def model_dump_jwt(self, include: set[str] | None = None) -> dict[str, Any]:
+        """
+        Dump the response as a dictionary, excluding None values.
+
+        Args:
+            include: Optional set of fields to include.
+
+        Returns:
+            Dictionary suitable for JSON serialization.
+        """
+        data = self.model_dump(exclude_none=True)
+        if include:
+            data = {k: v for k, v in data.items() if k in include}
+        return data
+
+
+class RefreshTokenError(Exception):
+    """
+    Exception raised when token refresh fails.
+
+    Used to signal various refresh token failure conditions with
+    standardized error codes per the OAuth 2.0 specification.
+    """
+
+    def __init__(
+        self,
+        error: str,
+        error_description: str | None = None,
+        error_uri: str | None = None,
+    ):
+        self.error = error
+        self.error_description = error_description
+        self.error_uri = error_uri
+        super().__init__(error_description or error)
+
+    def to_dict(self) -> dict[str, str]:
+        """Convert to OAuth2 error response dictionary."""
+        result = {"error": self.error}
+        if self.error_description:
+            result["error_description"] = self.error_description
+        if self.error_uri:
+            result["error_uri"] = self.error_uri
+        return result
+
+
+# Common refresh token error codes
+class InvalidGrantError(RefreshTokenError):
+    """The provided refresh token is invalid, expired, revoked, or was issued to another client."""
+
+    def __init__(self, description: str = "Invalid or expired refresh token"):
+        super().__init__("invalid_grant", description)
+
+
+class InvalidRequestError(RefreshTokenError):
+    """The request is missing a required parameter or has an invalid value."""
+
+    def __init__(self, description: str = "Missing refresh token"):
+        super().__init__("invalid_request", description)
+
+
+class UnauthorizedClientError(RefreshTokenError):
+    """The client is not authorized to use the refresh token."""
+
+    def __init__(self, description: str = "Client not authorized"):
+        super().__init__("unauthorized_client", description)
+
+
+class UnsupportedGrantTypeError(RefreshTokenError):
+    """The grant type is not supported by the authorization server."""
+
+    def __init__(self, description: str = "Unsupported grant type"):
+        super().__init__("unsupported_grant_type", description)
