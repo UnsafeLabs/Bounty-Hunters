@@ -8,7 +8,15 @@ contract CrossChainBridge {
     address public validator;
     uint256 public nonce;
 
+    // Per-sender nonce tracking to prevent same-chain replay
+    mapping(address => uint256) public senderNonces;
+
     mapping(bytes32 => bool) public processedTransfers;
+
+    error ZeroAmount();
+    error InvalidSignatureLength();
+    error InvalidSignature();
+    error AlreadyProcessed();
 
     event TransferInitiated(address indexed sender, uint256 amount, uint256 targetChain, uint256 nonce);
     event TransferProcessed(bytes32 indexed transferHash, address indexed recipient, uint256 amount);
@@ -19,40 +27,54 @@ contract CrossChainBridge {
     }
 
     function initiateTransfer(uint256 amount, uint256 targetChain) external {
-        require(amount > 0, "Amount must be > 0");
+        if (amount == 0) {
+            revert ZeroAmount();
+        }
         bridgeToken.transferFrom(msg.sender, address(this), amount);
         emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
     }
 
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
+    // Fix: Include chainId, contract address, and sender nonce in hash to prevent replay
     function processTransfer(
         address recipient,
         uint256 amount,
         uint256 transferNonce,
+        address sender,
         bytes calldata signature
     ) external {
+        // Include chainId, contract address, and sender to prevent cross-chain and cross-contract replay
         bytes32 transferHash = keccak256(abi.encodePacked(
             recipient,
             amount,
-            transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
+            transferNonce,
+            sender,
+            block.chainid,        // prevents cross-chain replay
+            address(this)         // prevents replay after contract upgrade
         ));
 
-        require(!processedTransfers[transferHash], "Already processed");
-        require(verifySignature(transferHash, signature), "Invalid signature");
+        if (processedTransfers[transferHash]) {
+            revert AlreadyProcessed();
+        }
+
+        // Verify sender nonce to prevent same-chain replay
+        require(transferNonce == senderNonces[sender], "Invalid nonce");
+
+        if (!verifySignature(transferHash, signature)) {
+            revert InvalidSignature();
+        }
 
         processedTransfers[transferHash] = true;
+        senderNonces[sender]++; // increment sender nonce
         bridgeToken.transfer(recipient, amount);
 
         emit TransferProcessed(transferHash, recipient, amount);
     }
 
-    // BUG: Does not check for zero-address return from ecrecover
+    // Fix: Check for zero-address return from ecrecover
     function verifySignature(bytes32 hash, bytes calldata signature) public view returns (bool) {
-        require(signature.length == 65, "Invalid signature length");
+        if (signature.length != 65) {
+            revert InvalidSignatureLength();
+        }
 
         bytes32 r;
         bytes32 s;
@@ -71,7 +93,11 @@ contract CrossChainBridge {
             v, r, s
         );
 
-        // BUG: Missing require(recovered != address(0))
+        // Fix: Check for zero-address return from ecrecover (invalid signature)
+        if (recovered == address(0)) {
+            return false;
+        }
+
         return recovered == validator;
     }
 
