@@ -1,0 +1,5 @@
+{
+  "name": "OpenAI Codex",
+  "session_init": "Public task context for UnsafeLabs/Bounty-Hunters issue #822: harden T3 Code SSH askpass helper generation so POSIX temporary secret files are private from creation and cleaned up on exit/signals, reject shell-unsafe POSIX askpass paths, use Windows SecureString/BSTR handling, and verify with focused tests. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "ts": "2026-05-28T21:58:00Z"
+}

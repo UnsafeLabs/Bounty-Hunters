@@ -44,3 +44,8 @@ export class SshPasswordPromptError extends Data.TaggedError("SshPasswordPromptE
   readonly message: string;
   readonly cause?: unknown;
 }> {}
+
+export class SshAskpassPathError extends Data.TaggedError("SshAskpassPathError")<{
+  readonly message: string;
+  readonly path: string;
+}> {}
