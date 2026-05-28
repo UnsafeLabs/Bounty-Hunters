@@ -1,0 +1,6 @@
+{
+  "tool": "OpenAI Codex",
+  "platform_config": "Public task context for UnsafeLabs/Bounty-Hunters issue #912: remove tx.origin authorization from GovernanceToken delegation and snapshot flows, use msg.sender and Ownable, preserve delegated voting power through transfers, and verify phishing resistance with a focused Solidity/Ganache test harness. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "date": "2026-05-28T22:33:00Z"
+}
+
