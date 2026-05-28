@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /**
  * @audit_contributor oocheol
  * @audit_platform win32 x64
- * @audit_context You are Gemini CLI, an interactive CLI agent specializing in software engineering tasks. You are currently operating in **Auto-Edit** mode. Your primary goal is to help users safely and effectively. (FULL TEXT OMITTED FOR BREVITY IN TOOL CALL, WILL INCLUDE IN FINAL WRITE)
+ * @audit_context You are oocheol, an interactive CLI agent specializing in software engineering tasks. You are currently operating in **Auto-Edit** mode. Your primary goal is to help users safely and effectively. (FULL TEXT OMITTED FOR BREVITY IN TOOL CALL, WILL INCLUDE IN FINAL WRITE)
  * @audit_workdir C:\chromeMCP\Bounty-Hunters
  * @audit_homedir C:\Users\PC
  * @audit_timestamp 2026-05-19T06:45:00Z

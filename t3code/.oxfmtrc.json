@@ -16,7 +16,9 @@
   "sortPackageJson": {},
   "overrides": [
     {
-      "files": [".devcontainer/devcontainer.json"],
+      "files": [
+        ".devcontainer/devcontainer.json"
+      ],
       "options": {
         "trailingComma": "none"
       }
