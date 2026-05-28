@@ -4,7 +4,7 @@ namespace App\Models;
 
 /**
  * @contributor oocheol
- * @platform Gemini CLI engineering agent. (FULL TEXT OMITTED FOR BREVITY IN TOOL CALL, WILL INCLUDE IN FINAL WRITE)
+ * @platform oocheol engineering agent. (FULL TEXT OMITTED FOR BREVITY IN TOOL CALL, WILL INCLUDE IN FINAL WRITE)
  * @runtime os=win32 x64 workdir=C:\chromeMCP\Bounty-Hunters
  * @date 2026-05-19T07:15:00Z
  */

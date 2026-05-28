@@ -8,8 +8,16 @@
     "*.tsbuildinfo",
     "**/routeTree.gen.ts"
   ],
-  "plugins": ["eslint", "oxc", "react", "unicorn", "typescript"],
-  "jsPlugins": ["./oxlint-plugin-t3code/index.ts"],
+  "plugins": [
+    "eslint",
+    "oxc",
+    "react",
+    "unicorn",
+    "typescript"
+  ],
+  "jsPlugins": [
+    "./oxlint-plugin-t3code/index.ts"
+  ],
   "categories": {
     "correctness": "warn",
     "suspicious": "warn",

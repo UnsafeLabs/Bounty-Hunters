@@ -7,15 +7,26 @@
     "erasableSyntaxOnly": false,
     "verbatimModuleSyntax": false,
     "jsx": "react-jsx",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "vite/client"
+    ],
     "paths": {
-      "~/*": ["./src/*"]
+      "~/*": [
+        "./src/*"
+      ]
     },
     "plugins": [
       {
         "name": "@effect/language-service",
-        "namespaceImportPackages": ["@effect/platform-node", "effect"],
+        "namespaceImportPackages": [
+          "@effect/platform-node",
+          "effect"
+        ],
         "diagnosticSeverity": {
           "importFromBarrel": "error",
           "anyUnknownInErrorContext": "error",
@@ -35,5 +46,10 @@
       }
     ]
   },
-  "include": ["src", "vite.config.ts", "vercel.ts", "test"]
+  "include": [
+    "src",
+    "vite.config.ts",
+    "vercel.ts",
+    "test"
+  ]
 }
