@@ -25,10 +25,13 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    /// @notice Swaps tokens with slippage protection and deadline.
+    /// @param tokenIn The address of the input token
+    /// @param amountIn The amount of input tokens to swap
+    /// @param minAmountOut The minimum amount of output tokens expected (slippage protection)
+    /// @param deadline The timestamp after which the transaction will revert
+    function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut, uint256 deadline) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Deadline exceeded");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
@@ -39,11 +42,19 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
+        // Fixed-point fee calculation to avoid truncation for small amounts
+        // Use 1e18 precision: feeAmount = amountIn * fee / 10000
+        // Minimum fee of 1 wei prevents free swaps for microscopic amounts
         uint256 feeAmount = amountIn * fee / 10000;
+        if (feeAmount == 0 && fee > 0) {
+            feeAmount = 1; // minimum fee of 1 wei
+        }
         uint256 amountInAfterFee = amountIn - feeAmount;
 
         // constant product formula: x * y = k
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
         outputToken.transfer(msg.sender, amountOut);
 

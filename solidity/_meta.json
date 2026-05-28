@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent (zhangjiayang6835-cyber)",
+  "initial_directives": "You are Hermes Agent. Fix SimpleSwap contract: add minAmountOut and deadline parameters, fix fee calculation precision loss for small amounts. Create tests and _meta.json.",
+  "date": "2026-05-28T00:00:00Z"
+}
