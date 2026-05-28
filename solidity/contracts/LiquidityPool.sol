@@ -11,8 +11,12 @@ contract LiquidityPool is ERC20 {
     uint256 public reserveA;
     uint256 public reserveB;
 
-    // BUG: No MINIMUM_LIQUIDITY lock — first depositor can manipulate LP price
+    // Minimum liquidity locked to address(0) to prevent first-depositor price manipulation
     uint256 public constant MINIMUM_LIQUIDITY = 1000;
+
+    error InsufficientLiquidity();
+    error InsufficientLPTokens();
+    error ZeroAmount();
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
@@ -27,15 +31,20 @@ contract LiquidityPool is ERC20 {
         tokenB.transferFrom(msg.sender, address(this), amountB);
 
         if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
             lpTokens = sqrt(amountA * amountB);
+            // Fix: Lock minimum liquidity to address(0) to prevent first-depositor manipulation
+            // This ensures the pool always has some liquidity and prevents price manipulation
+            _mint(address(1), MINIMUM_LIQUIDITY); // address(1) as dead address (like Uniswap)
+            lpTokens -= MINIMUM_LIQUIDITY;
         } else {
             uint256 lpFromA = amountA * totalSupply() / reserveA;
             uint256 lpFromB = amountB * totalSupply() / reserveB;
             lpTokens = lpFromA < lpFromB ? lpFromA : lpFromB;
         }
 
-        require(lpTokens > 0, "Insufficient liquidity");
+        if (lpTokens == 0) {
+            revert InsufficientLiquidity();
+        }
         _mint(msg.sender, lpTokens);
 
         reserveA += amountA;
@@ -44,17 +53,18 @@ contract LiquidityPool is ERC20 {
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
     }
 
-    // BUG: Uses balanceOf instead of internal reserves — manipulable via direct transfer
+    // Fix: Use internal reserves instead of balanceOf to prevent manipulation via direct transfer
     function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
-        require(lpTokens > 0, "Must burn > 0");
-        require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
+        if (lpTokens == 0) {
+            revert ZeroAmount();
+        }
+        if (balanceOf(msg.sender) < lpTokens) {
+            revert InsufficientLPTokens();
+        }
 
-        // BUG: Should use reserveA/reserveB, not balanceOf
-        uint256 balA = tokenA.balanceOf(address(this));
-        uint256 balB = tokenB.balanceOf(address(this));
-
-        amountA = lpTokens * balA / totalSupply();
-        amountB = lpTokens * balB / totalSupply();
+        // Use internal reserves instead of balanceOf to prevent manipulation
+        amountA = lpTokens * reserveA / totalSupply();
+        amountB = lpTokens * reserveB / totalSupply();
 
         _burn(msg.sender, lpTokens);
 
