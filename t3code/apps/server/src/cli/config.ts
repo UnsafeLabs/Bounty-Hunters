@@ -19,6 +19,7 @@ import {
   deriveServerPaths,
   ensureServerDirectories,
   resolveStaticDir,
+  exitIfEnvVarsInvalid,
   RuntimeMode,
   type ServerConfigShape,
   type StartupPresentation,
@@ -213,6 +214,7 @@ export const resolveServerConfig = (
   },
 ) =>
   Effect.gen(function* () {
+    exitIfEnvVarsInvalid();
     const { findAvailablePort } = yield* NetService.NetService;
     const path = yield* Path.Path;
     const fs = yield* FileSystem.FileSystem;
