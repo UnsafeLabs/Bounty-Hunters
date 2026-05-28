@@ -1,39 +1,3 @@
-import { Effect, pipe } from "@effect/io";
-
-export class GitManager {
-  // Core rebase functionality with conflict detection
-  constructor() {
-    this.rebase = this.rebase.bind(this);
-    this.getConflictFiles = this.getConflictFiles.bind(this);
-    this.abortRebase = this.abortRebase.bind(this);
-    this.continueRebase = this.continueRebase.bind(this;
-  }
-
-  rebase(branch: string) {
-    return pipe(
-      GitManager.run("git", ["rebase", branch]),
-      Effect.mapError(() => new Error("Rebase failed")))
-      .catch(e => new GitError(e.message));
-  }
-  
-  getConflictFiles() {
-    return pipe(
-      GitManager.run("git", ["diff", "--name-only", "--diff-filter=U"])),
-      Effect.mapError(() => new GitError("Git command failed")));
-  }
-  
-  abortRebase() {
-    return pipe(
-      GitManager.run("git", ["rebase", "--abort"])),
-      Effect.mapError(() => new GitError("Rebase abort failed"));;
-  }
-  
-  continueRebase() {
-    return pipe(
-      GitManager.run("git", ["rebase", "--continue"])),
-      Effect.mapError(() => new GitError("Rebase continue failed")));
-  }
-}
 import { randomUUID } from "node:crypto";
 
 import * as Arr from "effect/Array";
@@ -1817,4 +1781,5 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   } satisfies GitManagerShape;
 });
 
+import { GitManager } from "./GitManager"
 export const layer = Layer.effect(GitManager, makeGitManager());
