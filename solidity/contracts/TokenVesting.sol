@@ -35,13 +35,18 @@ contract TokenVesting {
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
+    // FIXED: Prevent overflow by checking multiplication bounds
     function vestedAmount() public view returns (uint256) {
         if (block.timestamp < cliff) return 0;
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
+        // Check overflow before multiplication
+        if (totalAllocation > type(uint256).max / elapsed) {
+            // For large allocations, use per-second rate to avoid overflow
+            uint256 rate = totalAllocation / duration;
+            return rate * elapsed;
+        }
         return totalAllocation * elapsed / duration;
     }
 
@@ -58,16 +63,15 @@ contract TokenVesting {
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
+    // FIXED: Correct unvested calculation
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        // Unvested = what hasn't been claimed yet
+        uint256 unvested = totalAllocation - claimed;
 
         if (vested > claimed) {
             token.transfer(beneficiary, vested - claimed);
