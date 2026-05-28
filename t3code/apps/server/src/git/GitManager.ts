@@ -1,9 +1,10 @@
-import { exec } from 'child_process';
-import { join } from 'path';
+import { Effect } from "effect"
+import * as CP from "child_process"
+import * as FS from "fs"
+import * as Path from "path"
 
-export class GitManager {
-import * as Context from "effect/Context";
-import * as DateTime from "effect/DateTime";
+interface GitError {
+  readonly _tag: "GitError"
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -12,12 +13,19 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 import * as Path from "effect/Path";
-import * as Ref from "effect/Ref";
-import {
-  GitActionProgressEvent,
-  GitActionProgressPhase,
-  GitCommandError,
-  GitPreparePullRequestThreadInput,
+  readonly message: string
+  readonly conflictedFiles: ReadonlyArray<string>
+}
+
+interface RebaseInProgressError {
+  readonly _tag: "RebaseInProgressError"
+  readonly message: string
+}
+
+type GitManagerError = GitError | RebaseConflictError | RebaseInProgressError
+
+interface ExecOptions {
+  cwd: string
   GitPreparePullRequestThreadResult,
   GitPullRequestRefInput,
   GitResolvePullRequestResult,
@@ -42,12 +50,36 @@ import {
   type ChangeRequestTerminology,
 } from "@t3tools/shared/sourceControl";
 
-import { GitManagerError } from "@t3tools/contracts";
-import { TextGeneration } from "../textGeneration/TextGeneration.ts";
-import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
-import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
-import { ServerSettingsService } from "../serverSettings.ts";
-import type { GitManagerServiceError } from "@t3tools/contracts";
+    })
+  })
+
+const checkRebaseConflicts = (cwd: string): Effect.Effect<ReadonlyArray<string>, GitError> =>
+  Effect.gen(function* (_) {
+    const rebaseHeadPath = Path.join(cwd, ".git", "REBASE_HEAD")
+    const rebaseHeadExists = yield* Effect.tryPromise({
+      try: () => FS.promises.access(rebaseHeadPath).then(() => true).catch(() => false),
+      catch: (error) => ({ _tag: "GitError" as const, message: `Failed to check REBASE_HEAD: ${String(error)}` })
+    })
+
+    if (!rebaseHeadExists) {
+      return []
+    }
+
+    return yield* execGit(["diff", "--name-only", "--diff-filter=U"], { cwd }).pipe(
+      Effect.map((output) => output.split("\n").filter((line) => line.trim().length > 0)),
+      Effect.mapError((error) => ({ _tag: "GitError" as const, message: `Failed to get conflict files: ${error.message}` }))
+    )
+  })
+
+const getConflictFiles = (cwd: string): Effect.Effect<ReadonlyArray<string>, GitError> =>
+  execGit(["diff", "--name-only", "--diff-filter=U"], { cwd }).pipe(
+    Effect.map((output) => output.split("\n").filter((line) => line.trim().length > 0)),
+    Effect.mapError((error) => ({ _tag: "GitError" as const, message: `Failed to get conflict files: ${error.message}` }))
+  )
+
+export class GitManager {
+  private readonly repoPath: string
+
 import { GitVcsDriver, type GitStatusDetails } from "../vcs/GitVcsDriver.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
 import type { ChangeRequest } from "@t3tools/contracts";
@@ -82,15 +114,64 @@ export interface GitManagerShape {
   ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
-    options?: GitRunStackedActionOptions,
-  ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
+  rebase(branch: string): Effect.Effect<string, GitError | RebaseConflictError> {
+    return Effect.gen(function* (_) {
+      const result = yield* execGit(["rebase", branch], { cwd: this.repoPath }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* (_) {
+            const conflictedFiles = yield* checkRebaseConflicts(this.repoPath)
+            if (conflictedFiles.length > 0) {
+              return yield* Effect.fail<RebaseConflictError>({
+                _tag: "RebaseConflictError",
+                message: `Rebase conflicts detected in files: ${conflictedFiles.join(", ")}`,
+                conflictedFiles
+              })
+            }
+            return yield* Effect.fail<GitError>({ _tag: "GitError", message: `Rebase failed: ${error.message}` })
+          })
+        )
+      )
+      return result
+    })
+  }
+
+  abortRebase(): Effect.Effect<string, GitError> {
+    return execGit(["rebase", "--abort"], { cwd: this.repoPath }).pipe(
+      Effect.mapError((error) => ({ _tag: "GitError" as const, message: `Failed to abort rebase: ${error.message}` }))
+    )
+  }
+
+  continueRebase(): Effect.Effect<string, GitError | RebaseConflictError> {
+    return Effect.gen(function* (_) {
+      const conflictedFilesBefore = yield* checkRebaseConflicts(this.repoPath)
+      
+      if (conflictedFilesBefore.length > 0) {
+        return yield* Effect.fail<RebaseConflictError>({
+          _tag: "RebaseConflictError",
+          message: `Cannot continue rebase with unresolved conflicts in: ${conflictedFilesBefore.join(", ")}`,
+          conflictedFiles: conflictedFilesBefore
+        })
+      }
+
+      const result = yield* execGit(["rebase", "--continue"], { cwd: this.repoPath }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* (_) {
+            const conflictedFiles = yield* checkRebaseConflicts(this.repoPath)
+            if (conflictedFiles.length > 0) {
+              return yield* Effect.fail<RebaseConflictError>({
+                _tag: "RebaseConflictError",
+                message: `Rebase continue resulted in conflicts: ${conflictedFiles.join(", ")}`,
+                conflictedFiles
+              })
+            }
+            return yield* Effect.fail<GitError>({ _tag: "GitError", message: `Failed to continue rebase: ${error.message}` })
+          })
+        )
+      )
+      return result
+    })
+  }
 }
-
-export class GitManager extends Context.Service<GitManager, GitManagerShape>()(
-  "t3/git/GitManager",
-) {}
-
-const COMMIT_TIMEOUT_MS = 10 * 60_000;
 const MAX_PROGRESS_TEXT_LENGTH = 500;
 const SHORT_SHA_LENGTH = 7;
 const TOAST_DESCRIPTION_MAX = 72;
