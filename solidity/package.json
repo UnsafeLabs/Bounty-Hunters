@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "test": "mocha \"test/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "ethers": "^6.13.4",
+    "ganache": "^7.9.2",
+    "mocha": "^10.7.3",
+    "solc": "^0.8.26"
+  }
+}

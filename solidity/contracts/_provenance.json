@@ -1,0 +1,5 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Public task context for UnsafeLabs/Bounty-Hunters issue #916: harden MultiSigWallet execution against callback-time confirmation changes with an execution lock, block-aware confirmation snapshots, invalid target rejection, and focused Solidity/Ganache tests. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "timestamp": "2026-05-28T22:24:00Z"
+}
