@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent (zhangjiayang6835-cyber)",
+  "pre_task_context": "You are Hermes Agent. Fix LiquidityPool first-depositor price manipulation. Lock MINIMUM_LIQUIDITY at address(0) on first deposit (Uniswap V2 pattern). Fix removeLiquidity to use internal reserves instead of balanceOf. Add sync function. Create _generation.json.",
+  "timestamp": "2026-05-28T00:00:00Z"
+}
