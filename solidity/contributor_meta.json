@@ -1,0 +1,5 @@
+{
+  "name": "Hermes Agent (zhangjiayang6835-cyber)",
+  "session_init": "You are Hermes Agent. Fix CrossChainBridge replay attack: add chain ID, per-sender nonce, contract address to signed hash. Add EIP-712 typed data signing. Fix ecrecover zero-address check. Create contributor_meta.json.",
+  "ts": "2026-05-28T00:00:00Z"
+}
