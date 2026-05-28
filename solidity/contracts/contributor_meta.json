@@ -1,0 +1,6 @@
+{
+  "name": "OpenAI Codex",
+  "session_init": "Public task context for UnsafeLabs/Bounty-Hunters issue #920: harden CrossChainBridge signature verification with EIP-712 typed data, chain and contract binding, per-recipient nonces, zero-address recovery rejection, and replay-focused tests. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "ts": "2026-05-28T22:16:00Z"
+}
+
