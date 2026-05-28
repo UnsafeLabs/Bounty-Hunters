@@ -1,0 +1,6 @@
+{
+  "agent_name": "OpenAI Codex",
+  "config_snapshot": "Public task context for UnsafeLabs/Bounty-Hunters issue #911: harden StakingVault withdraw and claimRewards with OpenZeppelin ReentrancyGuard and checks-effects-interactions, preserve ordinary stake/withdraw/reward flows, and verify malicious recursive withdrawal/reward attempts are blocked. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "created": "2026-05-28T22:56:00Z"
+}
+
