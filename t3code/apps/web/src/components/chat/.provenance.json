@@ -1,6 +1,7 @@
 {
   "agent_name": "OpenAI Codex",
+  "config_snapshot": "[REDACTED: private system, developer, and user instructions are not disclosed in public pull requests.]",
+  "created": "2026-05-28T06:55:00+08:00",
   "issue": 852,
-  "contribution": "Added live-region semantics, keyboard navigation, skip links, and ARIA labels for the chat flow.",
-  "timestamp": "2026-05-28T06:55:00+08:00"
+  "contribution": "Added live-region semantics, keyboard navigation, skip links, and ARIA labels for the chat flow."
 }
