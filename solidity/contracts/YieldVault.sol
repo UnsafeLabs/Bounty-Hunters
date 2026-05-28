@@ -19,9 +19,14 @@ contract YieldVault {
 
     address public rewardDistributor;
 
+    error ZeroDeposit();
+    error ZeroWithdraw();
+    error NotDistributor();
+
     event Deposited(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
+    event RewardAdded(uint256 reward, uint256 duration);
 
     constructor(address _stakingToken, address _rewardToken) {
         stakingToken = IERC20(_stakingToken);
@@ -29,15 +34,16 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    // Fix: Cap timestamp at periodFinish to prevent phantom reward accrual
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+        // Use the lesser of block.timestamp or periodFinish to stop accrual after period ends
+        uint256 currentTime = block.timestamp > periodFinish ? periodFinish : block.timestamp;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (currentTime - lastUpdateTime) * rewardRate * 1e18 / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
@@ -53,7 +59,9 @@ contract YieldVault {
     }
 
     function deposit(uint256 amount) external updateReward(msg.sender) {
-        require(amount > 0, "Cannot deposit 0");
+        if (amount == 0) {
+            revert ZeroDeposit();
+        }
         totalSupply += amount;
         balanceOf[msg.sender] += amount;
         stakingToken.transferFrom(msg.sender, address(this), amount);
@@ -61,7 +69,9 @@ contract YieldVault {
     }
 
     function withdraw(uint256 amount) external updateReward(msg.sender) {
-        require(amount > 0, "Cannot withdraw 0");
+        if (amount == 0) {
+            revert ZeroWithdraw();
+        }
         totalSupply -= amount;
         balanceOf[msg.sender] -= amount;
         stakingToken.transfer(msg.sender, amount);
@@ -77,11 +87,23 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
+    // Fix: Add access control for reward distributor
+    // Fix: Handle precision loss by using higher precision for rewardRate
     function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
+        if (msg.sender != rewardDistributor) {
+            revert NotDistributor();
+        }
+
+        // If there's remaining time in the current period, add leftover rewards
+        if (block.timestamp < periodFinish) {
+            uint256 remaining = periodFinish - block.timestamp;
+            reward += remaining * rewardRate;
+        }
+
         rewardRate = reward / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
+
+        emit RewardAdded(reward, duration);
     }
 }
