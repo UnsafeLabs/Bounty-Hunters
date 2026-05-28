@@ -25,10 +25,13 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    /// @notice Swap tokens with slippage protection and deadline
+    /// @param tokenIn The input token address
+    /// @param amountIn The amount of input tokens
+    /// @param minAmountOut Minimum output tokens to accept (slippage protection)
+    /// @param deadline Transaction must execute before this timestamp
+    function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut, uint256 deadline) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Transaction expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
@@ -43,6 +46,43 @@ contract SimpleSwap {
         uint256 amountInAfterFee = amountIn - feeAmount;
 
         // constant product formula: x * y = k
+        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        // Slippage protection: ensure minimum output
+        require(amountOut >= minAmountOut, "Insufficient output amount");
+
+        outputToken.transfer(msg.sender, amountOut);
+
+        if (isTokenA) {
+            reserveA += amountIn;
+            reserveB -= amountOut;
+        } else {
+            reserveB += amountIn;
+            reserveA -= amountOut;
+        }
+
+        emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+    }
+
+    /// @notice Backward compatible swap without slippage protection
+    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+        return _swapInternal(tokenIn, amountIn);
+    }
+
+    function _swapInternal(address tokenIn, uint256 amountIn) internal returns (uint256 amountOut) {
+        require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
+        require(amountIn > 0, "Amount must be > 0");
+
+        bool isTokenA = tokenIn == address(tokenA);
+        (IERC20 inputToken, IERC20 outputToken, uint256 reserveIn, uint256 reserveOut) = isTokenA
+            ? (tokenA, tokenB, reserveA, reserveB)
+            : (tokenB, tokenA, reserveB, reserveA);
+
+        inputToken.transferFrom(msg.sender, address(this), amountIn);
+
+        uint256 feeAmount = amountIn * fee / 10000;
+        uint256 amountInAfterFee = amountIn - feeAmount;
+
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
 
         outputToken.transfer(msg.sender, amountOut);
