@@ -66,6 +66,12 @@
     "last_pr": "2026-05-17T14:08:03.577Z"
   },
   {
+    "username": "oocheol",
+    "total_prs": 55,
+    "first_pr": "2026-05-18T08:53:21.999Z",
+    "last_pr": "2026-05-28T08:00:13.792Z"
+  },
+  {
     "username": "lichen7567",
     "total_prs": 54,
     "first_pr": "2026-05-18T19:17:26.067Z",
@@ -78,22 +84,16 @@
     "last_pr": "2026-05-19T03:50:18.098Z"
   },
   {
-    "username": "oocheol",
+    "username": "genesisrevelationinc-debug",
     "total_prs": 49,
-    "first_pr": "2026-05-18T08:53:21.999Z",
-    "last_pr": "2026-05-20T05:55:12.563Z"
+    "first_pr": "2026-05-22T14:02:27.948Z",
+    "last_pr": "2026-05-28T08:20:18.404Z"
   },
   {
     "username": "simisdav55-oss",
     "total_prs": 46,
     "first_pr": "2026-05-26T16:25:52.518Z",
     "last_pr": "2026-05-27T15:31:36.572Z"
-  },
-  {
-    "username": "genesisrevelationinc-debug",
-    "total_prs": 44,
-    "first_pr": "2026-05-22T14:02:27.948Z",
-    "last_pr": "2026-05-28T00:42:41.467Z"
   },
   {
     "username": "zp6",
@@ -642,6 +642,12 @@
     "last_pr": "2026-05-27T14:08:27.848Z"
   },
   {
+    "username": "yunrongy424-oss",
+    "total_prs": 7,
+    "first_pr": "2026-05-27T21:32:27.183Z",
+    "last_pr": "2026-05-28T02:54:21.652Z"
+  },
+  {
     "username": "freeediting35-png",
     "total_prs": 7,
     "first_pr": "2026-05-18T12:43:15.214Z",
@@ -690,10 +696,10 @@
     "last_pr": "2026-05-27T02:17:30.464Z"
   },
   {
-    "username": "yunrongy424-oss",
+    "username": "zhangjiayang6835-cyber",
     "total_prs": 6,
-    "first_pr": "2026-05-27T21:32:27.183Z",
-    "last_pr": "2026-05-28T00:52:42.305Z"
+    "first_pr": "2026-05-26T17:33:54.308Z",
+    "last_pr": "2026-05-28T04:14:30.109Z"
   },
   {
     "username": "CuboYe",
@@ -1074,16 +1080,16 @@
     "last_pr": "2026-05-27T19:29:40.451Z"
   },
   {
+    "username": "chaudl113",
+    "total_prs": 3,
+    "first_pr": "2026-05-28T02:28:45.418Z",
+    "last_pr": "2026-05-28T07:53:07.537Z"
+  },
+  {
     "username": "huthoinguyn",
     "total_prs": 3,
     "first_pr": "2026-05-13T08:10:47Z",
     "last_pr": "2026-05-16T17:22:43.947Z"
-  },
-  {
-    "username": "zhangjiayang6835-cyber",
-    "total_prs": 3,
-    "first_pr": "2026-05-26T17:33:54.308Z",
-    "last_pr": "2026-05-28T00:22:53.971Z"
   },
   {
     "username": "haisui157",
@@ -1704,10 +1710,22 @@
     "last_pr": "2026-05-27T21:24:46.897Z"
   },
   {
-    "username": "chaudl113",
+    "username": "Jinyzhi",
     "total_prs": 1,
-    "first_pr": "2026-05-28T02:28:45.418Z",
-    "last_pr": "2026-05-28T02:28:45.418Z"
+    "first_pr": "2026-05-28T03:36:37.871Z",
+    "last_pr": "2026-05-28T03:36:37.871Z"
+  },
+  {
+    "username": "wbo68410-lgtm",
+    "total_prs": 1,
+    "first_pr": "2026-05-28T07:11:06.457Z",
+    "last_pr": "2026-05-28T07:11:06.457Z"
+  },
+  {
+    "username": "duongynhi000005-oss",
+    "total_prs": 1,
+    "first_pr": "2026-05-28T07:19:05.261Z",
+    "last_pr": "2026-05-28T07:19:05.261Z"
   },
   {
     "username": "MichisGitIsKing",
@@ -1810,5 +1828,17 @@
     "total_prs": 1,
     "first_pr": "2026-05-27T01:42:57.674Z",
     "last_pr": "2026-05-27T01:42:57.674Z"
+  },
+  {
+    "username": "himanshu748",
+    "total_prs": 1,
+    "first_pr": "2026-05-28T05:54:28.787Z",
+    "last_pr": "2026-05-28T05:54:28.787Z"
+  },
+  {
+    "username": "liyanzong",
+    "total_prs": 1,
+    "first_pr": "2026-05-28T10:45:54.231Z",
+    "last_pr": "2026-05-28T10:45:54.231Z"
   }
 ]

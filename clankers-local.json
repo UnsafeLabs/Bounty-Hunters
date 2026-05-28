@@ -55,9 +55,9 @@
   },
   {
     "username": "genesisrevelationinc-debug",
-    "total_prs": 47,
+    "total_prs": 49,
     "first_pr": "2026-05-22T14:02:27.948Z",
-    "last_pr": "2026-05-28T03:20:46.517Z"
+    "last_pr": "2026-05-28T08:20:18.404Z"
   },
   {
     "username": "arthurus36-alt",
@@ -252,6 +252,12 @@
     "last_pr": "2026-05-27T11:32:50.051Z"
   },
   {
+    "username": "oocheol",
+    "total_prs": 14,
+    "first_pr": "2026-05-19T00:08:49.379Z",
+    "last_pr": "2026-05-28T07:55:38.766Z"
+  },
+  {
     "username": "MNgaminhhh",
     "total_prs": 13,
     "first_pr": "2026-05-13T10:46:58Z",
@@ -328,12 +334,6 @@
     "total_prs": 12,
     "first_pr": "2026-05-19T06:31:50.305Z",
     "last_pr": "2026-05-20T02:56:12.502Z"
-  },
-  {
-    "username": "oocheol",
-    "total_prs": 12,
-    "first_pr": "2026-05-19T00:08:49.379Z",
-    "last_pr": "2026-05-20T04:09:37.954Z"
   },
   {
     "username": "Ahmadkhattak1",
@@ -702,6 +702,12 @@
     "last_pr": "2026-05-27T10:42:53.642Z"
   },
   {
+    "username": "zhangjiayang6835-cyber",
+    "total_prs": 5,
+    "first_pr": "2026-05-27T17:38:55.381Z",
+    "last_pr": "2026-05-28T04:14:30.109Z"
+  },
+  {
     "username": "spqrcode",
     "total_prs": 4,
     "first_pr": "2026-05-14T12:12:04.319Z",
@@ -924,6 +930,12 @@
     "last_pr": "2026-05-27T19:29:40.451Z"
   },
   {
+    "username": "chaudl113",
+    "total_prs": 3,
+    "first_pr": "2026-05-28T02:28:45.418Z",
+    "last_pr": "2026-05-28T07:53:07.537Z"
+  },
+  {
     "username": "Saumya-Verma123",
     "total_prs": 2,
     "first_pr": "2026-05-13T11:20:03Z",
@@ -1096,12 +1108,6 @@
     "total_prs": 2,
     "first_pr": "2026-05-27T19:28:44.445Z",
     "last_pr": "2026-05-27T20:44:41.974Z"
-  },
-  {
-    "username": "zhangjiayang6835-cyber",
-    "total_prs": 2,
-    "first_pr": "2026-05-27T17:38:55.381Z",
-    "last_pr": "2026-05-28T00:22:53.971Z"
   },
   {
     "username": "ErenCankutUYSAL",
@@ -1530,9 +1536,21 @@
     "last_pr": "2026-05-27T21:24:46.897Z"
   },
   {
-    "username": "chaudl113",
+    "username": "Jinyzhi",
     "total_prs": 1,
-    "first_pr": "2026-05-28T02:28:45.418Z",
-    "last_pr": "2026-05-28T02:28:45.418Z"
+    "first_pr": "2026-05-28T03:36:37.871Z",
+    "last_pr": "2026-05-28T03:36:37.871Z"
+  },
+  {
+    "username": "wbo68410-lgtm",
+    "total_prs": 1,
+    "first_pr": "2026-05-28T07:11:06.457Z",
+    "last_pr": "2026-05-28T07:11:06.457Z"
+  },
+  {
+    "username": "duongynhi000005-oss",
+    "total_prs": 1,
+    "first_pr": "2026-05-28T07:19:05.261Z",
+    "last_pr": "2026-05-28T07:19:05.261Z"
   }
 ]
