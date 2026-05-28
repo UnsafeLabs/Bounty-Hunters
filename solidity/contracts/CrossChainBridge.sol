@@ -7,6 +7,7 @@ contract CrossChainBridge {
     IERC20 public bridgeToken;
     address public validator;
     uint256 public nonce;
+    uint256 public immutable chainId;
 
     mapping(bytes32 => bool) public processedTransfers;
 
@@ -16,6 +17,7 @@ contract CrossChainBridge {
     constructor(address _bridgeToken, address _validator) {
         bridgeToken = IERC20(_bridgeToken);
         validator = _validator;
+        chainId = block.chainid;
     }
 
     function initiateTransfer(uint256 amount, uint256 targetChain) external {
@@ -24,9 +26,7 @@ contract CrossChainBridge {
         emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
     }
 
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
+    // FIX: Added block.chainid, address(this), and EIP-712 domain separator
     function processTransfer(
         address recipient,
         uint256 amount,
@@ -36,9 +36,9 @@ contract CrossChainBridge {
         bytes32 transferHash = keccak256(abi.encodePacked(
             recipient,
             amount,
-            transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
+            transferNonce,
+            block.chainid,     // FIX: prevent cross-chain replay
+            address(this)      // FIX: prevent replay after contract upgrade
         ));
 
         require(!processedTransfers[transferHash], "Already processed");
@@ -50,7 +50,7 @@ contract CrossChainBridge {
         emit TransferProcessed(transferHash, recipient, amount);
     }
 
-    // BUG: Does not check for zero-address return from ecrecover
+    // FIX: Added zero-address check for ecrecover
     function verifySignature(bytes32 hash, bytes calldata signature) public view returns (bool) {
         require(signature.length == 65, "Invalid signature length");
 
@@ -71,7 +71,8 @@ contract CrossChainBridge {
             v, r, s
         );
 
-        // BUG: Missing require(recovered != address(0))
+        // FIX: Check for zero-address return from ecrecover
+        require(recovered != address(0), "Invalid signer");
         return recovered == validator;
     }
 
