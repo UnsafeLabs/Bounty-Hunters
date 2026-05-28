@@ -136,6 +136,20 @@ function parsePorcelainPath(line: string): string | null {
   return filePath.length > 0 ? filePath : null;
 }
 
+function parseConflictPorcelainLine(line: string): { path: string; status: string } | null {
+  if (!line.startsWith("u ")) {
+    return null;
+  }
+
+  const status = line.slice(2).trim().split(/\s+/g)[0] ?? "";
+  const filePath = parsePorcelainPath(line);
+  if (status.length === 0 || !filePath) {
+    return null;
+  }
+
+  return { path: filePath, status };
+}
+
 function parseBranchLine(line: string): { name: string; current: boolean } | null {
   const trimmed = line.trim();
   if (trimmed.length === 0) return null;
@@ -805,6 +819,47 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ),
     );
 
+  const gitPathExists = (cwd: string, gitPath: string) =>
+    runGitStdout(
+      "GitVcsDriver.conflictStatus.gitPath",
+      cwd,
+      ["rev-parse", "--git-path", gitPath],
+      true,
+    ).pipe(
+      Effect.map((stdout) => stdout.trim()),
+      Effect.flatMap((resolvedPath) => {
+        if (resolvedPath.length === 0) {
+          return Effect.succeed(false);
+        }
+        const absolutePath = path.isAbsolute(resolvedPath)
+          ? resolvedPath
+          : path.resolve(cwd, resolvedPath);
+        return fileSystem.exists(absolutePath).pipe(Effect.orElseSucceed(() => false));
+      }),
+      Effect.catch(() => Effect.succeed(false)),
+    );
+
+  const detectConflictOperation = Effect.fn("GitVcsDriver.detectConflictOperation")(function* (
+    cwd: string,
+  ): Effect.fn.Return<"merge" | "rebase" | "cherry-pick" | "revert" | "unknown", never> {
+    if (
+      (yield* gitPathExists(cwd, "rebase-merge")) ||
+      (yield* gitPathExists(cwd, "rebase-apply"))
+    ) {
+      return "rebase";
+    }
+    if (yield* gitPathExists(cwd, "MERGE_HEAD")) {
+      return "merge";
+    }
+    if (yield* gitPathExists(cwd, "CHERRY_PICK_HEAD")) {
+      return "cherry-pick";
+    }
+    if (yield* gitPathExists(cwd, "REVERT_HEAD")) {
+      return "revert";
+    }
+    return "unknown";
+  });
+
   const branchExists = (cwd: string, refName: string): Effect.Effect<boolean, GitCommandError> =>
     executeGit(
       "GitVcsDriver.branchExists",
@@ -1218,6 +1273,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     let aheadOfDefaultCount = 0;
     let hasWorkingTreeChanges = false;
     const changedFilesWithoutNumstat = new Set<string>();
+    const conflictFiles: Array<{ path: string; status: string }> = [];
 
     for (const line of statusStdout.split(/\r?\n/g)) {
       if (line.startsWith("# branch.head ")) {
@@ -1241,8 +1297,19 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         hasWorkingTreeChanges = true;
         const pathValue = parsePorcelainPath(line);
         if (pathValue) changedFilesWithoutNumstat.add(pathValue);
+        const conflictFile = parseConflictPorcelainLine(line);
+        if (conflictFile) conflictFiles.push(conflictFile);
       }
     }
+
+    const conflicts =
+      conflictFiles.length > 0
+        ? {
+            hasConflicts: true,
+            operation: yield* detectConflictOperation(cwd),
+            files: conflictFiles.toSorted((a, b) => a.path.localeCompare(b.path)),
+          }
+        : undefined;
 
     const fallbackAheadCount =
       !upstreamRef && refName
@@ -1307,6 +1374,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         insertions,
         deletions,
       },
+      ...(conflicts ? { conflicts } : {}),
       hasUpstream: upstreamRef !== null,
       aheadCount,
       behindCount,
@@ -1339,6 +1407,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         refName: details.branch,
         hasWorkingTreeChanges: details.hasWorkingTreeChanges,
         workingTree: details.workingTree,
+        ...(details.conflicts ? { conflicts: details.conflicts } : {}),
         hasUpstream: details.hasUpstream,
         aheadCount: details.aheadCount,
         behindCount: details.behindCount,

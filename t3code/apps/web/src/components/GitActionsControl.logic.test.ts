@@ -150,6 +150,56 @@ describe("when: git status is unavailable", () => {
   });
 });
 
+describe("when: git has unresolved conflicts", () => {
+  it("resolveQuickAction shows a conflict-resolution hint", () => {
+    const quick = resolveQuickAction(
+      status({
+        hasWorkingTreeChanges: true,
+        conflicts: {
+          hasConflicts: true,
+          operation: "rebase",
+          files: [
+            { path: "src/a.ts", status: "UU" },
+            { path: "src/b.ts", status: "AA" },
+          ],
+        },
+      }),
+      false,
+    );
+
+    assert.deepInclude(quick, {
+      kind: "show_hint",
+      label: "Resolve conflicts",
+      disabled: true,
+      hint: "Resolve 2 rebase conflicted files before running git actions.",
+    });
+  });
+
+  it("buildMenuItems disables commit, push, and PR actions", () => {
+    const items = buildMenuItems(
+      status({
+        hasWorkingTreeChanges: true,
+        aheadCount: 1,
+        conflicts: {
+          hasConflicts: true,
+          operation: "merge",
+          files: [{ path: "src/a.ts", status: "UU" }],
+        },
+      }),
+      false,
+    );
+
+    assert.deepEqual(
+      items.map((item) => ({ id: item.id, disabled: item.disabled })),
+      [
+        { id: "commit", disabled: true },
+        { id: "push", disabled: true },
+        { id: "pr", disabled: true },
+      ],
+    );
+  });
+});
+
 describe("when: ref is clean, ahead, and has an open PR", () => {
   it("resolveQuickAction prefers push", () => {
     const quick = resolveQuickAction(

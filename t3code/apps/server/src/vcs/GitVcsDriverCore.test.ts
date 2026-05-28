@@ -107,6 +107,43 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("reports unmerged files and the active rebase operation", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "conflict.txt", "base\n");
+        yield* git(cwd, ["add", "conflict.txt"]);
+        yield* git(cwd, ["commit", "-m", "add conflict base"]);
+        yield* git(cwd, ["checkout", "-b", "feature/conflict"]);
+        yield* writeTextFile(cwd, "conflict.txt", "feature\n");
+        yield* git(cwd, ["commit", "-am", "feature edit"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+        yield* writeTextFile(cwd, "conflict.txt", "main\n");
+        yield* git(cwd, ["commit", "-am", "main edit"]);
+        yield* git(cwd, ["checkout", "feature/conflict"]);
+
+        const rebase = yield* driver.execute({
+          operation: "GitVcsDriver.test.rebaseConflict",
+          cwd,
+          args: ["rebase", initialBranch],
+          allowNonZeroExit: true,
+          timeoutMs: 10_000,
+        });
+        assert.notEqual(rebase.exitCode, 0);
+
+        const status = yield* driver.statusDetails(cwd);
+
+        assert.equal(status.hasWorkingTreeChanges, true);
+        assert.deepStrictEqual(status.conflicts, {
+          hasConflicts: true,
+          operation: "rebase",
+          files: [{ path: "conflict.txt", status: "UU" }],
+        });
+      }),
+    );
+
     it.effect("reports default-branch delta separately from upstream delta", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

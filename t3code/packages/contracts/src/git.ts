@@ -194,6 +194,23 @@ const VcsStatusChangeRequest = Schema.Struct({
   headRef: TrimmedNonEmptyStringSchema,
   state: VcsStatusChangeRequestState,
 });
+const VcsConflictOperation = Schema.Literals([
+  "merge",
+  "rebase",
+  "cherry-pick",
+  "revert",
+  "unknown",
+]);
+const VcsConflictFile = Schema.Struct({
+  path: TrimmedNonEmptyStringSchema,
+  status: TrimmedNonEmptyStringSchema,
+});
+const VcsConflictStatus = Schema.Struct({
+  hasConflicts: Schema.Boolean,
+  operation: VcsConflictOperation.pipe(Schema.NullOr),
+  files: Schema.Array(VcsConflictFile),
+});
+export type VcsConflictStatus = typeof VcsConflictStatus.Type;
 
 const VcsStatusLocalShape = {
   isRepo: Schema.Boolean,
@@ -213,6 +230,7 @@ const VcsStatusLocalShape = {
     insertions: NonNegativeInt,
     deletions: NonNegativeInt,
   }),
+  conflicts: Schema.optional(VcsConflictStatus),
 };
 
 const VcsStatusRemoteShape = {

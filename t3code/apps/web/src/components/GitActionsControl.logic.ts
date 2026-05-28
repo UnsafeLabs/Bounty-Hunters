@@ -43,6 +43,16 @@ export type DefaultBranchConfirmableAction =
   | "commit_push"
   | "commit_push_pr";
 
+function formatConflictHint(gitStatus: VcsStatusResult): string {
+  const conflictCount = gitStatus.conflicts?.files.length ?? 0;
+  const fileLabel = conflictCount === 1 ? "file" : "files";
+  const operation =
+    gitStatus.conflicts?.operation && gitStatus.conflicts.operation !== "unknown"
+      ? `${gitStatus.conflicts.operation} `
+      : "";
+  return `Resolve ${conflictCount} ${operation}conflicted ${fileLabel} before running git actions.`;
+}
+
 function resolveChangeRequestTerminology(
   gitStatus: VcsStatusResult | null,
 ): ChangeRequestTerminology {
@@ -101,20 +111,23 @@ export function buildMenuItems(
 
   const hasBranch = gitStatus.refName !== null;
   const hasChanges = gitStatus.hasWorkingTreeChanges;
+  const hasConflicts = gitStatus.conflicts?.hasConflicts === true;
   const hasOpenPr = gitStatus.pr?.state === "open";
   const isBehind = gitStatus.behindCount > 0;
   const hasDefaultBranchDelta = (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0;
   const canPushWithoutUpstream = hasPrimaryRemote && !gitStatus.hasUpstream;
-  const canCommit = !isBusy && hasChanges;
+  const canCommit = !isBusy && hasChanges && !hasConflicts;
   const canPush =
     !isBusy &&
     hasBranch &&
+    !hasConflicts &&
     !isBehind &&
     gitStatus.aheadCount > 0 &&
     (gitStatus.hasUpstream || canPushWithoutUpstream);
   const canCreatePr =
     !isBusy &&
     hasBranch &&
+    !hasConflicts &&
     !hasChanges &&
     !hasOpenPr &&
     hasDefaultBranchDelta &&
@@ -185,6 +198,7 @@ export function resolveQuickAction(
 
   const hasBranch = gitStatus.refName !== null;
   const hasChanges = gitStatus.hasWorkingTreeChanges;
+  const hasConflicts = gitStatus.conflicts?.hasConflicts === true;
   const hasOpenPr = gitStatus.pr?.state === "open";
   const isAhead = gitStatus.aheadCount > 0;
   const hasDefaultBranchDelta = (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0;
@@ -198,6 +212,15 @@ export function resolveQuickAction(
       disabled: true,
       kind: "show_hint",
       hint: `Create and checkout a ref before pushing or opening a ${terminology.singular}.`,
+    };
+  }
+
+  if (hasConflicts) {
+    return {
+      label: "Resolve conflicts",
+      disabled: true,
+      kind: "show_hint",
+      hint: formatConflictHint(gitStatus),
     };
   }
 

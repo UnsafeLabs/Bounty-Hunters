@@ -60,6 +60,7 @@ export interface GitStatusDetails {
   upstreamRef: string | null;
   hasWorkingTreeChanges: boolean;
   workingTree: VcsStatusResult["workingTree"];
+  conflicts?: VcsStatusResult["conflicts"];
   hasUpstream: boolean;
   aheadCount: number;
   behindCount: number;

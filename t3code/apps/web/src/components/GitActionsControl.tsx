@@ -252,6 +252,15 @@ function getMenuActionDisabledReason({
   const isAhead = gitStatus.aheadCount > 0;
   const isBehind = gitStatus.behindCount > 0;
   const terminology = getSourceControlPresentation(gitStatus.sourceControlProvider).terminology;
+  if (gitStatus.conflicts?.hasConflicts) {
+    const conflictCount = gitStatus.conflicts.files.length;
+    const fileLabel = conflictCount === 1 ? "file" : "files";
+    const operation =
+      gitStatus.conflicts.operation && gitStatus.conflicts.operation !== "unknown"
+        ? `${gitStatus.conflicts.operation} `
+        : "";
+    return `Resolve ${conflictCount} ${operation}conflicted ${fileLabel} before running git actions.`;
+  }
 
   if (item.id === "commit") {
     if (!hasChanges) {
