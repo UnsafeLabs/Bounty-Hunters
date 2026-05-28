@@ -1,204 +1,175 @@
+Looking at the issue description, I need to add rebase conflict detection and resolution functionality to the GitManager class. However, I don't see the actual GitManager.ts file in the provided file listing. Let me examine the structure and create the necessary implementation.
+
 ```diff
---- /dev/null
+--- a/t3code/apps/server/src/git/GitManager.ts
 +++ b/t3code/apps/server/src/git/GitManager.ts
-@@ -0,0 +1,1 @@
-+// GitManager implementation with rebase conflict detection and resolution
-+import { Effect } from "effect"
-+import * as CP from "child_process"
-+import * as FS from "fs"
-+import * as Path from "path"
+@@ -1,15 +1,145 @@
++import { Effect, pipe } from "effect";
++import * as cp from "node:child_process";
++import * as fs from "node:fs";
++import * as path from "node:path";
++import { GitError, type GitResult } from "../types";
 +
-+// Types for git operations
-+export interface GitError {
-+  readonly _tag: "GitError"
-+  readonly message: string
-+  readonly command?: string
++export interface GitManager {
++  rebase: (upstream: string) => Effect.Effect<GitResult, GitError>;
++  getConflictFiles: () => Effect.Effect<GitResult, GitError>;
++  abortRebase: () => Effect.Effect<GitResult, GitError>;
++  continueRebase: () => Effect.Effect<GitResult, GitError>;
 +}
 +
-+export interface RebaseConflictError {
-+  readonly _tag: "RebaseConflictError"
-+  readonly branch: string
-+  readonly onto: string
-+  readonly conflictedFiles: ReadonlyArray<string>
-+}
-+
-+export interface RebaseInProgressError {
-+  readonly _tag: "RebaseInProgressError"
-+  readonly message: string
-+}
-+
-+export interface NoRebaseInProgressError {
-+  readonly _tag: "NoRebaseInProgressError"
-+  readonly message: string
-+}
-+
-+export type GitManagerError =
-+  | GitError
-+  | RebaseConflictError
-+  | RebaseInProgressError
-+  | NoRebaseInProgressError
-+
-+// Configuration for git operations
-+interface GitManagerConfig {
-+  readonly workingDirectory: string
-+}
-+
-+// Helper to execute git commands
-+const execGit = (
-+  args: ReadonlyArray<string>,
-+  cwd: string
-+): Effect.Effect<never, GitError, string> =>
-+  Effect.async((resume) => {
-+    const child = CP.spawn("git", [...args], {
-+      cwd,
-+      stdio: ["ignore", "pipe", "pipe"],
-+    })
-+
-+    let stdout = ""
-+    let stderr = ""
-+
-+    child.stdout.on("data", (data: Buffer) => {
-+      stdout += data.toString()
-+    })
-+
-+    child.stderr.on("data", (data: Buffer) => {
-+      stderr += data.toString()
-+    })
-+
-+    child.on("close", (code) => {
-+      if (code !== 0) {
-+        resume(
-+          Effect.fail({
-+            _tag: "GitError",
-+            message: stderr.trim() || `Git command failed with code ${code}`,
-+            command: `git ${args.join(" ")}`,
-+          })
-+        )
-+      } else {
-+        resume(Effect.succeed(stdout.trim()))
-+      }
-+    })
-+
-+    child.on("error", (err) => {
-+      resume(
-+        Effect.fail({
-+          _tag: "GitError",
-+          message: err.message,
-+          command: `git ${args.join(" ")}`,
-+        })
-+      )
-+    })
-+  })
-+
-+// Check if a rebase is in progress by looking for .git/REBASE_HEAD
-+const isRebaseInProgress = (cwd: string): boolean => {
-+  const rebaseHeadPath = Path.join(cwd, ".git", "REBASE_HEAD")
-+  try {
-+    FS.accessSync(rebaseHeadPath)
-+    return true
-+  } catch {
-+    return false
-+  }
-+}
-+
-+// Get the current branch name
-+const getCurrentBranch = (
-+  cwd: string
-+): Effect.Effect<never, GitError, string> =>
-+  execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)
-+
-+// GitManager class
-+export class GitManager {
-+  private readonly config: GitManagerConfig
-+
-+  constructor(config: GitManagerConfig) {
-+    this.config = config
-+  }
-+
-+  // Rebase the current branch onto another branch
-+  rebase(onto: string): Effect.Effect<never, GitManagerError, void> {
-+    const cwd = this.config.workingDirectory
-+
-+    return Effect.gen(function* (_) {
-+      const currentBranch = yield* _(getCurrentBranch(cwd))
-+
-+      const result = yield* _(
-+        Effect.either(
-+          execGit(["rebase", onto], cwd)
-+        )
-+      )
-+
-+      if (result._tag === "Left") {
-+        // Check if rebase failed due to conflicts
-+        if (isRebaseInProgress(cwd)) {
-+          const conflictedFiles = yield* _(getConflictFiles(cwd))
-+          yield* _(
-+            Effect.fail<RebaseConflictError>({
-+              _tag: "RebaseConflictError",
-+              branch: currentBranch,
-+              onto,
-+              conflictedFiles,
-+            })
++export const makeGitManager = (workingDir: string): GitManager => {
++  const runGitCommand = (command: string): Effect.Effect<GitResult, GitError> =>
++    pipe(
++      Effect.try({
++        try: () => new cp.execSync(`cd ${workingDir} && ${command}`, { encoding: 'utf8' }),
++        catch: () => new GitError('Git command failed')
++      }),
++      Effect.map(toString)
++    );
++  
++  const rebase = (upstream: string) => 
++    pipe(
++      runGitCommand(`git rebase ${upstream}`),
++      Effect.catchAll(() => 
++        pipe(
++          detectRebaseConflicts(),
++          Effect.flatMap(conflicts => 
++            Effect.fail(new Error('Rebase conflicts detected'))
 +          )
-+        }
-+        return yield* _(Effect.fail(result.left))
-+      }
-+
-+      return void 0
-+    })
-+  }
-+
-+  // Get list of conflicted files
-+  getConflictFiles(): Effect.Effect<never, GitError, ReadonlyArray<string>> {
-+    return getConflictFiles(this.config.workingDirectory)
-+  }
-+
-+  // Abort the current rebase
-+  abortRebase(): Effect.Effect<never, GitManagerError, void> {
-+    const cwd = this.config.workingDirectory
-+
-+    return Effect.gen(function* (_) {
-+      if (!isRebaseInProgress(cwd)) {
-+        yield* _(
-+          Effect.fail<NoRebaseInProgressError>({
-+            _tag: "NoRebaseInProgressError",
-+            message: "No rebase in progress to abort",
-+          })
 +        )
-+      }
++      )
++    );
++  
++  const detectRebaseConflicts = () => 
++    pipe(
++      runGitCommand('git diff --name-only --diff-filter=U'),
++      Effect.map((output) => {
++        const conflictedFiles = output.split('\n').filter(file => file.trim() !== '');
++        return conflictedFiles;
++      })
++    );
 +
-+      yield* _(execGit(["rebase", "--abort"], cwd))
-+      return void 0
-+    })
-+  }
++  const getConflictFiles = () => 
++    pipe(
++      runGitCommand('git diff --name-only --diff-filter=U'),
++      Effect.map(output => output.split('\n').filter(file => file.trim() !== ''))
++    );
++  
++  const abortRebase = () => 
++    pipe(
++      runGitCommand('git rebase --abort'),
++      Effect.map(() => ({ success: true, message: 'Rebase aborted successfully' }))
++    );
 +
-+  // Continue the current rebase after conflicts are resolved
-+  continueRebase(): Effect.Effect<never, GitManagerError, void> {
-+    const cwd = this.config.workingDirectory
++  const continueRebase = () => 
++    pipe(
++      runGitCommand('git add .'),
++      Effect.flatMap(() => runGitCommand('git rebase --continue')),
++      Effect.map(() => ({ success: true, message: 'Rebase continued successfully' }))
++    );
++  
++  const checkRebaseConflicts = () => {
++    const rebaseHeadPath = path.join(workingDir, '.git', 'REBASE_HEAD');
++    return fs.existsSync(rebaseHeadPath);
++  };
++  
++  return {
++    rebase,
++    getConflictFiles,
++    abortRebase,
++    continueRebase
++  };
++};
 +
-+    return Effect.gen(function* (_) {
-+      if (!isRebaseInProgress(cwd)) {
-+        yield* _(
-+          Effect.fail<NoRebaseInProgressError>({
-+            _tag: "NoRebaseInProgressError",
-+            message: "No rebase in progress to continue",
-+          })
++export const makeGitManagerWithConflictDetection = (workingDir: string) => {
++  const manager = makeGitManager(workingDir);
++  
++  return {
++    ...manager,
++    rebase: (upstream: string) => 
++      pipe(
++        manager.rebase(upstream),
++        Effect.catchAll(() => 
++          pipe(
++            detectRebaseConflicts(),
++            Effect.flatMap(conflicts => 
++              Effect.fail(new Error('Rebase conflicts detected'))
++            )
++          )
 +        )
-+      }
++      ),
++    detectRebaseConflicts,
++    getConflictFiles,
++    abortRebase,
++    continueRebase
++  };
++};
 +
-+      // Check if there are still unresolved conflicts
-+      const conflicts = yield* _(getConflictFiles(cwd))
-+      if (conflicts.length > 0) {
-+        yield* _(
-+          Effect.fail<RebaseConflictError>({
-+            _tag: "RebaseConflictError",
-+            branch: yield* _(getCurrentBranch(cwd)),
-+            onto: "unknown", // We don't track this currently
-+            conflictedFiles: conflicts,
-+          })
++export interface GitManagerWithConflicts extends GitManager {
++  detectRebaseConflicts: () => Effect.Effect<boolean>;
++  getConflictFiles: () => Effect.Effect<string[]>;
++  abortRebase: () => Effect.Effect<GitResult>;
++  continueRebase: () => Effect.Effect<GitResult>;
++}
++
++export const createGitManager = (workingDir: string): GitManagerWithConflicts => {
++  const baseManager = makeGitManagerWithConflictDetection(workingDir);
++  return {
++    ...baseManager,
++    rebase: (upstream: string) => 
++      pipe(
++        baseManager.rebase(upstream),
++        Effect.catchAll(() => 
++          pipe(
++            baseManager.detectRebaseConflicts(),
++            Effect.flatMap(conflicts => 
++              Effect.fail(new Error('Rebase conflicts detected'))
++            )
++          )
 +        )
-+      }
++      )
++  };
++};
 +
-+      yield* _(execGit(["rebase", "--continue"], cwd))
-+      return void 0
-+    })
++const detectRebaseConflicts = () => 
++  pipe(
++    Effect.try(() => fs.existsSync(path.join(workingDir, '.git', 'REBASE_HEAD'))),
++    Effect.map(exists => Boolean(exists))
++  );
++
++export const makeGitManagerWithConflictDetection = (workingDir: string) => {
++  const baseManager = makeGitManager(workingDir);
++  
++  const detectRebaseConflicts = () => 
++    pipe(
++      runGitCommand('git status'),
++      Effect.map(output => {
++        const hasConflicts = output.includes('Unmerged paths');
++        return Effect.succeed(hasConflicts);
++      })
++    );
++  
++  return {
++    ...baseManager,
++    getConflictFiles: () => 
++      pipe(
++        runGitCommand('git diff --name-only --diff-filter=U'),
++        Effect.map(output => output.split('\n').filter(file => file.trim() !== ''))
++      ),
++    abortRebase: () => 
++      pipe(
++        runGit(workingDir, 'git rebase --abort'),
++        Effect.map(() => ({ success: true, message: 'Rebase aborted successfully' }))
++      ),
++    continueRebase: () => 
++      pipe(
++        runGit(workingDir, 'git add .'),
++        Effect.flatMap(() => runGit(workingDir, 'git rebase --continue')),
++        Effect.map(() => ({ success: true, message: 'Rebase continued successfully' }))
++      )
++  };
++};
++
++export const runGit = (workingDir: string, command: string) => 
++  pipe(
++    Effect.try(() => cp.execSync(`cd ${workingDir} && ${command}`, { encoding: '
