@@ -12,6 +12,26 @@ contract StakingVault {
     mapping(address => uint256) public rewards;
     mapping(address => uint256) public lastStakeTime;
 
+    // Reentrancy guard
+    uint256 private constant NOT_ENTERED = 1;
+    uint256 private constant ENTERED = 2;
+    uint256 private _status;
+
+    error InsufficientBalance();
+    error NoRewards();
+    error TransferFailed();
+    error ReentrantCall();
+    error ZeroAmount();
+
+    modifier nonReentrant() {
+        if (_status == ENTERED) {
+            revert ReentrantCall();
+        }
+        _status = ENTERED;
+        _;
+        _status = NOT_ENTERED;
+    }
+
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardClaimed(address indexed user, uint256 amount);
@@ -19,10 +39,13 @@ contract StakingVault {
     constructor(address _stakingToken, uint256 _rewardRate) {
         stakingToken = IERC20(_stakingToken);
         rewardRate = _rewardRate;
+        _status = NOT_ENTERED;
     }
 
-    function stake(uint256 amount) external {
-        require(amount > 0, "Cannot stake 0");
+    function stake(uint256 amount) external nonReentrant {
+        if (amount == 0) {
+            revert ZeroAmount();
+        }
         stakingToken.transferFrom(msg.sender, address(this), amount);
         _updateReward(msg.sender);
         balances[msg.sender] += amount;
@@ -39,31 +62,51 @@ contract StakingVault {
         lastStakeTime[account] = block.timestamp;
     }
 
-    // BUG: Reentrancy — state update after external call
-    function withdraw(uint256 amount) external {
-        require(balances[msg.sender] >= amount, "Insufficient balance");
+    // Fix: Apply Checks-Effects-Interactions pattern + nonReentrant modifier
+    function withdraw(uint256 amount) external nonReentrant {
+        // Checks
+        if (balances[msg.sender] < amount) {
+            revert InsufficientBalance();
+        }
+
+        // Update rewards before changing balance
         _updateReward(msg.sender);
 
-        // External call before state update
-        (bool success, ) = payable(msg.sender).call{value: amount}("");
-        require(success, "Transfer failed");
-
-        // State update after external call — vulnerable to reentrancy
+        // Effects: update state BEFORE external call
         balances[msg.sender] -= amount;
         totalStaked -= amount;
+
+        // Interactions: external call AFTER state update
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        if (!success) {
+            revert TransferFailed();
+        }
+
         emit Withdrawn(msg.sender, amount);
     }
 
-    // BUG: Same reentrancy pattern in claimRewards
-    function claimRewards() external {
+    // Fix: Apply Checks-Effects-Interactions pattern + nonReentrant modifier
+    function claimRewards() external nonReentrant {
+        // Update rewards first
         _updateReward(msg.sender);
+
+        // Checks
         uint256 reward = rewards[msg.sender];
-        require(reward > 0, "No rewards");
+        if (reward == 0) {
+            revert NoRewards();
+        }
 
-        (bool success, ) = payable(msg.sender).call{value: reward}("");
-        require(success, "Transfer failed");
-
+        // Effects: zero out rewards BEFORE external call
         rewards[msg.sender] = 0;
+
+        // Interactions: external call AFTER state update
+        (bool success, ) = payable(msg.sender).call{value: reward}("");
+        if (!success) {
+            // Restore rewards on failure
+            rewards[msg.sender] = reward;
+            revert TransferFailed();
+        }
+
         emit RewardClaimed(msg.sender, reward);
     }
 
