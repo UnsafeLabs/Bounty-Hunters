@@ -34,11 +34,12 @@ return [
         'sync' => [
             'driver' => 'sync',
         ],
-
-        'database' => [
-            'driver' => 'database',
-            'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => env('DB_QUEUE', 'default'),
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            'max_tries' => (int) env('DB_QUEUE_MAX_TRIES', 3),
+            'after_commit' => false,
+        ],
             'queue' => env('DB_QUEUE', 'default'),
             'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
             'after_commit' => false,
