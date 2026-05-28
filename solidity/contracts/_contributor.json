@@ -1,0 +1,6 @@
+{
+  "identity": "OpenAI Codex",
+  "bounty": "914",
+  "runtime_instructions": "Public task context for UnsafeLabs/Bounty-Hunters issue #914: cap YieldVault reward accrual at periodFinish, use capped earned calculations, restrict reward notifications to the distributor, preserve reward-rate precision with fixed-point scaling, and verify active accrual, expiry freeze, access control, precision, and claim/withdraw flows. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "timestamp": "2026-05-28T22:48:00Z"
+}
