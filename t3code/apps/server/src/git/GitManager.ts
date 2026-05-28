@@ -1,18 +1,27 @@
-import { randomUUID } from "node:crypto";
+import { Effect } from "effect"
+import * as fs from "fs"
+import * as path from "path"
+import { execSync, exec } from "child_process"
+import { promisify } from "util"
+import { GitError } from "./GitError"
 
-import * as Arr from "effect/Array";
-import * as Cache from "effect/Cache";
-import * as Context from "effect/Context";
-import * as DateTime from "effect/DateTime";
-import * as Duration from "effect/Duration";
-import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Order from "effect/Order";
-import * as Path from "effect/Path";
-import * as Ref from "effect/Ref";
+const execAsync = promisify(exec)
+
+export interface GitManagerOptions {
+  repoPath: string
+}
+
+export interface RebaseConflict {
+  file: string
+  status: "unmerged"
+}
+
+export class GitManager {
+  private repoPath: string
+  private previousBranch: string | null = null
+
+  constructor(options: GitManagerOptions) {
+    this.repoPath = options.repoPath
 import {
   GitActionProgressEvent,
   GitActionProgressPhase,
@@ -20,12 +29,21 @@ import {
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
   GitPullRequestRefInput,
-  GitResolvePullRequestResult,
-  GitRunStackedActionInput,
-  GitRunStackedActionResult,
-  GitStackedAction,
-  VcsStatusInput,
-  type VcsStatusLocalResult,
+    }
+  }
+
+  private async execGit(command: string): Promise<string> {
+    const { stdout } = await execAsync(command, { cwd: this.repoPath })
+    return stdout.trim()
+  }
+
+  private isRebaseInProgress(): boolean {
+    return fs.existsSync(path.join(this.repoPath, ".git", "REBASE_HEAD"))
+  }
+
+  public pull = (branch: string): Effect.Effect<never, GitError, string> => {
+    return Effect.tryPromise({
+      try: () => {
   type VcsStatusRemoteResult,
   VcsStatusResult,
   ModelSelection,
@@ -44,20 +62,120 @@ import {
 
 import { GitManagerError } from "@t3tools/contracts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
-import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
-import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
-import { ServerSettingsService } from "../serverSettings.ts";
-import type { GitManagerServiceError } from "@t3tools/contracts";
-import { GitVcsDriver, type GitStatusDetails } from "../vcs/GitVcsDriver.ts";
-import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
-import type { ChangeRequest } from "@t3tools/contracts";
+    })
+  }
 
-export interface GitActionProgressReporter {
-  readonly publish: (event: GitActionProgressEvent) => Effect.Effect<void, never>;
-}
+  public getConflictFiles = (): Effect.Effect<
+    never,
+    GitError,
+    RebaseConflict[]
+  > => {
+    return Effect.tryPromise({
+      try: async () => {
+        if (!this.isRebaseInProgress()) {
+          return []
+        }
+        try {
+          const output = await this.execGit(
+            "git diff --name-only --diff-filter=U"
+          )
+          if (!output) {
+            return []
+          }
+          const files = output
+            .split("\n")
+            .map((f) => f.trim())
+            .filter((f) => f.length > 0)
+          return files.map((file) => ({ file, status: "unmerged" as const }))
+        } catch {
+          return []
+        }
+      },
+      catch: (error) =>
+        new GitError({
+          message: `Failed to get conflict files: ${error}`,
+          cause: error,
+        }),
+    })
+  }
 
-export interface GitRunStackedActionOptions {
-  readonly actionId?: string;
+  public rebase = (
+    branch: string
+  ): Effect.Effect<never, GitError, string | { conflicts: RebaseConflict[] }> => {
+    return Effect.gen(this, function* (_) {
+      const currentBranch = yield* _(
+        Effect.tryPromise({
+          try: () => this.execGit("git rev-parse --abbrev-ref HEAD"),
+          catch: (error) =>
+            new GitError({
+              message: `Failed to get current branch: ${error}`,
+              cause: error,
+            }),
+        })
+      )
+
+      this.previousBranch = currentBranch
+
+      const result = yield* _(
+        Effect.tryPromise({
+          try: async () => {
+            try {
+              const result = await this.execGit(`git rebase ${branch}`)
+              return { success: true, output: result }
+            } catch (error: any) {
+              if (this.isRebaseInProgress()) {
+                return { success: false, error }
+              }
+              throw error
+            }
+          },
+          catch: (error) =>
+            new GitError({
+              message: `Rebase failed: ${error}`,
+              cause: error,
+            }),
+        })
+      )
+
+      if (!result.success) {
+        const conflicts = yield* _(this.getConflictFiles())
+        return { conflicts }
+      }
+
+      return result.output
+    })
+  }
+
+  public abortRebase = (): Effect.Effect<never, GitError, string> => {
+    return Effect.tryPromise({
+      try: async () => {
+        if (!this.isRebaseInProgress()) {
+          throw new Error("No rebase in progress")
+        }
+        const result = await this.execGit("git rebase --abort")
+        this.previousBranch = null
+        return result
+      },
+      catch: (error) =>
+        new GitError({
+          message: `Failed to abort rebase: ${error}`,
+          cause: error,
+        }),
+    })
+  }
+
+  public continueRebase = (): Effect.Effect<never, GitError, string> => {
+    return Effect.tryPromise({
+      try: async () => {
+        if (!this.isRebaseInProgress()) {
+          throw new Error("No rebase in progress")
+        }
+        const result = await this.execGit("git rebase --continue")
+        this.previousBranch = null
+        return result
+      },
+      catch: (error) =>
+        new GitError({
   readonly progressReporter?: GitActionProgressReporter;
 }
 
@@ -1781,176 +1899,4 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   } satisfies GitManagerShape;
 });
 
-import { Effect, pipe } from "effect";
-import { exec } from "child_process";
-import { promisify } from "util";
-import * as fs from "fs/promises";
-import * as path from "path";
-
-const execPromise = promisify(exec);
-
-// Error types
-export class RebaseConflictError {
-  readonly _tag = "RebaseConflictError";
-  constructor(readonly message: string, readonly conflictedFiles: string[]) {}
-}
-
-export class GitCommandError {
-  readonly _tag = "GitCommandError";
-  constructor(readonly message: string, readonly command: string) {}
-}
-
-export class RebaseAbortError {
-  readonly _tag = "RebaseAbortError";
-  constructor(readonly message: string) {}
-}
-
-export class RebaseContinueError {
-  readonly _tag = "RebaseContinueError";
-  constructor(readonly message: string) {}
-}
-
-export interface RebaseResult {
-  success: boolean;
-  conflictedFiles?: string[];
-}
-
-export class GitManager {
-  constructor(private readonly repoPath: string) {}
-
-  /**
-   * Performs a rebase operation
-   * @param targetBranch The branch to rebase onto
-   * @returns Effect that resolves when rebase completes or conflicts are detected
-   */
-  rebase(targetBranch: string): Effect.Effect<never, RebaseConflictError | GitCommandError, RebaseResult> {
-    return pipe(
-      Effect.tryPromise({
-        try: async () => {
-          try {
-            await execPromise(`git rebase ${targetBranch}`, { cwd: this.repoPath });
-            return { success: true };
-          } catch (error) {
-            // Check if rebase conflict occurred
-            const hasConflicts = await this.hasRebaseConflicts();
-            if (hasConflicts) {
-              const conflictedFiles = await this.getConflictFiles();
-              throw new RebaseConflictError(
-                "Rebase conflict detected",
-                conflictedFiles
-              );
-            } else {
-              throw new GitCommandError(
-                error instanceof Error ? error.message : "Unknown git error",
-                `git rebase ${targetBranch}`
-              );
-            }
-          }
-        },
-        catch: (error) => {
-          if (error instanceof RebaseConflictError) {
-            return error;
-          } else if (error instanceof GitCommandError) {
-            return error;
-          }
-          return new GitCommandError(
-            error instanceof Error ? error.message : "Unknown error",
-            `git rebase ${targetBranch}`
-          );
-        }
-      })
-    );
-  }
-
-  /**
-   * Checks if there are rebase conflicts by looking for REBASE_HEAD file
-   * @returns boolean indicating if conflicts exist
-   */
-  private async hasRebaseConflicts(): Promise<boolean> {
-    try {
-      await fs.access(path.join(this.repoPath, ".git", "REBASE_HEAD"));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Gets list of files with conflicts
-   * @returns Array of conflicted file paths
-   */
-  async getConflictFiles(): Promise<string[]> {
-    try {
-      const { stdout } = await execPromise(
-        "git diff --name-only --diff-filter=U",
-        { cwd: this.repoPath }
-      );
-      return stdout
-        .split("\n")
-        .filter(file => file.trim().length > 0);
-    } catch (error) {
-      return [];
-    }
-  }
-
-  /**
-   * Aborts the current rebase operation
-   * @returns Effect that resolves when rebase is aborted
-   */
-  abortRebase(): Effect.Effect<never, RebaseAbortError, void> {
-    return pipe(
-      Effect.tryPromise({
-        try: async () => {
-          await execPromise("git rebase --abort", { cwd: this.repoPath });
-        },
-        catch: (error) => {
-          return new RebaseAbortError(
-            error instanceof Error ? error.message : "Failed to abort rebase"
-          );
-        }
-      })
-    );
-  }
-
-  /**
-   * Continues the current rebase operation after conflicts are resolved
-   * @returns Effect that resolves when rebase continues successfully
-   */
-  continueRebase(): Effect.Effect<never, RebaseContinueError, void> {
-    return pipe(
-      Effect.tryPromise({
-        try: async () => {
-          await execPromise("git rebase --continue", { cwd: this.repoPath });
-        },
-        catch: (error) => {
-          return new RebaseContinueError(
-            error instanceof Error ? error.message : "Failed to continue rebase"
-          );
-        }
-      })
-    );
-  }
-
-  /**
-   * Gets the current branch name
-   * @returns Current branch name
-   */
-  async getCurrentBranch(): Promise<string> {
-    const { stdout } = await execPromise("git branch --show-current", { cwd: this.repoPath });
-    return stdout.trim();
-  }
-
-  /**
-   * Checks if repository is in a rebase state
-   * @returns boolean indicating if rebase is in progress
-   */
-  async isRebasing(): Promise<boolean> {
-    try {
-      await fs.access(path.join(this.repoPath, ".git", "REBASE_HEAD"));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
 export const layer = Layer.effect(GitManager, makeGitManager());
