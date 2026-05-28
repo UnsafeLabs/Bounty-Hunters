@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Public task context for UnsafeLabs/Bounty-Hunters issue #915: harden PriceOracle with Chainlink round completeness, positive price, timestamp/staleness validation, stale-primary fallback, StalePrice event emission, owner-configurable max staleness, and Ganache/Solc tests for valid, stale fallback, invalid price, incomplete round, both-stale, and owner controls. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "date": "2026-05-28T18:50:00-05:00"
+}
