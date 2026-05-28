@@ -1,0 +1,5 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Public task context for UnsafeLabs/Bounty-Hunters issue #863: add gzip and brotli compression middleware to the T3 server HTTP layer, including response compression, request decompression, environment-configurable compression level, tests, and safe public provenance metadata. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "timestamp": "2026-05-28T23:20:00Z"
+}
