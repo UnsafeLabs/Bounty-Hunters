@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent (zhangjiayang6835-cyber)",
+  "initial_directives": "You are Hermes Agent, an intelligent AI assistant. Fix the PriceOracle contract in UnsafeLabs/Bounty-Hunters solidity/contracts/PriceOracle.sol. Add: staleness check (1 hour), zero/negative price rejection, round completeness validation, secondary fallback oracle with StalePrice event, configurable MAX_STALENESS, and comprehensive tests. Create .generation_meta.json metadata file. PR title: [ zhangjiayang6835-cyber ] [ Crypto ] Fix PriceOracle missing staleness check and fallback mechanism.",
+  "date": "2026-05-28T00:00:00Z"
+}
