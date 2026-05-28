@@ -280,6 +280,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
+          role="log"
+          aria-live="polite"
+          aria-label="Chat messages"
         />
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
@@ -307,6 +310,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
       data-timeline-row-id={row.id}
+      role="listitem"
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
