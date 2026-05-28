@@ -1,27 +1,18 @@
-import { Effect } from "effect"
-import * as fs from "fs"
-import * as path from "path"
-import { execSync, exec } from "child_process"
-import { promisify } from "util"
-import { GitError } from "./GitError"
-
-const execAsync = promisify(exec)
-
-export interface GitManagerOptions {
-  repoPath: string
-}
-
-export interface RebaseConflict {
-  file: string
-  status: "unmerged"
-}
+import { exec } from 'child_process';
+import { join } from 'path';
 
 export class GitManager {
-  private repoPath: string
-  private previousBranch: string | null = null
-
-  constructor(options: GitManagerOptions) {
-    this.repoPath = options.repoPath
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Order from "effect/Order";
+import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import {
   GitActionProgressEvent,
   GitActionProgressPhase,
@@ -29,21 +20,12 @@ import {
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
   GitPullRequestRefInput,
-    }
-  }
-
-  private async execGit(command: string): Promise<string> {
-    const { stdout } = await execAsync(command, { cwd: this.repoPath })
-    return stdout.trim()
-  }
-
-  private isRebaseInProgress(): boolean {
-    return fs.existsSync(path.join(this.repoPath, ".git", "REBASE_HEAD"))
-  }
-
-  public pull = (branch: string): Effect.Effect<never, GitError, string> => {
-    return Effect.tryPromise({
-      try: () => {
+  GitResolvePullRequestResult,
+  GitRunStackedActionInput,
+  GitRunStackedActionResult,
+  GitStackedAction,
+  VcsStatusInput,
+  type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
   VcsStatusResult,
   ModelSelection,
@@ -62,120 +44,20 @@ import {
 
 import { GitManagerError } from "@t3tools/contracts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
-    })
-  }
+import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
+import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import type { GitManagerServiceError } from "@t3tools/contracts";
+import { GitVcsDriver, type GitStatusDetails } from "../vcs/GitVcsDriver.ts";
+import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
+import type { ChangeRequest } from "@t3tools/contracts";
 
-  public getConflictFiles = (): Effect.Effect<
-    never,
-    GitError,
-    RebaseConflict[]
-  > => {
-    return Effect.tryPromise({
-      try: async () => {
-        if (!this.isRebaseInProgress()) {
-          return []
-        }
-        try {
-          const output = await this.execGit(
-            "git diff --name-only --diff-filter=U"
-          )
-          if (!output) {
-            return []
-          }
-          const files = output
-            .split("\n")
-            .map((f) => f.trim())
-            .filter((f) => f.length > 0)
-          return files.map((file) => ({ file, status: "unmerged" as const }))
-        } catch {
-          return []
-        }
-      },
-      catch: (error) =>
-        new GitError({
-          message: `Failed to get conflict files: ${error}`,
-          cause: error,
-        }),
-    })
-  }
+export interface GitActionProgressReporter {
+  readonly publish: (event: GitActionProgressEvent) => Effect.Effect<void, never>;
+}
 
-  public rebase = (
-    branch: string
-  ): Effect.Effect<never, GitError, string | { conflicts: RebaseConflict[] }> => {
-    return Effect.gen(this, function* (_) {
-      const currentBranch = yield* _(
-        Effect.tryPromise({
-          try: () => this.execGit("git rev-parse --abbrev-ref HEAD"),
-          catch: (error) =>
-            new GitError({
-              message: `Failed to get current branch: ${error}`,
-              cause: error,
-            }),
-        })
-      )
-
-      this.previousBranch = currentBranch
-
-      const result = yield* _(
-        Effect.tryPromise({
-          try: async () => {
-            try {
-              const result = await this.execGit(`git rebase ${branch}`)
-              return { success: true, output: result }
-            } catch (error: any) {
-              if (this.isRebaseInProgress()) {
-                return { success: false, error }
-              }
-              throw error
-            }
-          },
-          catch: (error) =>
-            new GitError({
-              message: `Rebase failed: ${error}`,
-              cause: error,
-            }),
-        })
-      )
-
-      if (!result.success) {
-        const conflicts = yield* _(this.getConflictFiles())
-        return { conflicts }
-      }
-
-      return result.output
-    })
-  }
-
-  public abortRebase = (): Effect.Effect<never, GitError, string> => {
-    return Effect.tryPromise({
-      try: async () => {
-        if (!this.isRebaseInProgress()) {
-          throw new Error("No rebase in progress")
-        }
-        const result = await this.execGit("git rebase --abort")
-        this.previousBranch = null
-        return result
-      },
-      catch: (error) =>
-        new GitError({
-          message: `Failed to abort rebase: ${error}`,
-          cause: error,
-        }),
-    })
-  }
-
-  public continueRebase = (): Effect.Effect<never, GitError, string> => {
-    return Effect.tryPromise({
-      try: async () => {
-        if (!this.isRebaseInProgress()) {
-          throw new Error("No rebase in progress")
-        }
-        const result = await this.execGit("git rebase --continue")
-        this.previousBranch = null
-        return result
-      },
-      catch: (error) =>
-        new GitError({
+export interface GitRunStackedActionOptions {
+  readonly actionId?: string;
   readonly progressReporter?: GitActionProgressReporter;
 }
 
