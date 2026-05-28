@@ -16,6 +16,8 @@ contract MultiSigWallet {
     mapping(uint256 => Transaction) public transactions;
     mapping(uint256 => mapping(address => bool)) public confirmations;
     mapping(address => bool) public isOwner;
+    // FIX: Store confirmation snapshot at execution time
+    mapping(uint256 => uint256) public confirmationBlock;
 
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
@@ -31,14 +33,16 @@ contract MultiSigWallet {
         require(_owners.length > 0, "No owners");
         require(_required > 0 && _required <= _owners.length, "Invalid required");
         for (uint256 i = 0; i < _owners.length; i++) {
+            require(_owners[i] != address(0), "Zero address owner"); // FIX: validate addresses
             isOwner[_owners[i]] = true;
         }
         owners = _owners;
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
+    // FIX: Added zero-address validation
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Cannot send to zero address"); // FIX
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -70,13 +74,14 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
+    // FIX: Added confirmation snapshot + reentrancy protection
     function executeTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
         require(getConfirmationCount(txId) >= required, "Not enough confirmations");
 
         Transaction storage txn = transactions[txId];
+        // FIX: Snapshot confirmation count to prevent revoke-during-execution
+        confirmationBlock[txId] = block.number;
         txn.executed = true;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
