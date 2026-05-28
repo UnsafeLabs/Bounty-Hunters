@@ -1,52 +1,62 @@
- "use client";
- 
- import { useState, useRef } from "react";
- 
- interface ChatComposerProps {
-   onSendMessage: (message: string) => void;
-   onAttachFile: () => void;
-   onClear: () => void;
- }
- 
- export function ChatComposer() {
-   const [message, setMessage] = useState("");
-   const inputRef = useRef<HTMLInputElement>(null);
-   
-   const sendMessage = () => {
-     // Send message logic
-   };
- 
-   const attachFile = () => {
-     // Attach file logic
-   };
- 
-   const clearChat = () => {
-     // Clear chat logic
-   };
- 
-   return (
-     <div className="chat-composer">
-       <div className="composer-actions">
-         <button 
-           onClick={sendMessage}
-           aria-label="Send message"
-         >
-           Send
-         </button>
-         <button 
-           onClick={attachFile}
-           aria-label="Attach file"
-         >
-           Attach
-         </button>
-         <button 
-           onClick={clearChat}
-           aria-label="Clear chat"
-           aria-label="Clear conversation"
-         >
-           Clear
-         </button>
-       </div>
-     </div>
-   );
- }
+import { useState, useRef } from "react";
+
+interface ChatComposerProps {
+  onSendMessage: (message: string) => void;
+}
+
+export function ChatComposer({ onSendMessage }: ChatComposerProps) {
+  const [message, setMessage] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sendButtonRef = useRef<HTMLButtonElement>(null);
+  const attachButtonRef = useRef<HTMLButtonElement>(null);
+  const clearButtonRef = useRef<HTMLButtonElement>(null);
+
+  const handleSend = () => {
+    onSendMessage(message);
+  };
+
+  return (
+    <div className="composer">
+      <div className="composer-header">
+        <h3>Chat Composer</h3>
+      </div>
+      
+      <div 
+        className="composer-input-container"
+        role="form"
+      >
+        <textarea
+          ref={textareaRef}
+          aria-label="Type your message"
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          aria-describedby="instructions"
+        />
+        
+        <div className="composer-controls">
+          <button
+            ref={sendButtonRef}
+            onClick={handleSend}
+            aria-label="Send message"
+          >
+            Send
+          </button>
+          
+          <button
+            ref={attachButtonRef}
+            aria-label="Attach file"
+          >
+            Attach
+          </button>
+          
+          <button
+            ref={clearButtonRef}
+            aria-label="Clear chat"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
