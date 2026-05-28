@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initialized_with": "Public task context for UnsafeLabs/Bounty-Hunters issue #919: harden FlashLoan with a one-unit minimum fee, 50% max-loan cap from internal pool accounting, explicit transferFrom repayment after callback, owner pause/unpause controls, checked transfers, and Ganache/Solc tests for fee floor, cap, balance manipulation, fee accounting, and pause/unpause. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "timestamp": "2026-05-28T18:35:00-05:00"
+}
