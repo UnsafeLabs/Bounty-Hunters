@@ -3777,27 +3777,59 @@ export default function ChatView(props: ChatViewProps) {
       )}
     </div>
   );
-import * as React from "react"
-import { type Message } from "ai"
+"use client";
 
-export interface ChatViewProps {
-  readonly className?: string
+import { useState, useEffect, useRef } from "react";
+import { MessagesTimeline } from "./MessagesTimeline";
+import { ChatComposer } from "./ChatComposer";
+
+interface ChatViewProps {
+  initialMessages: any[];
+  onNewMessage: (message: string) => void
 }
 
-export function ChatView({ className }: ChatViewProps) {
+export function ChatView({ initialMessages, onNewMessage }: ChatViewProps) {
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [messages, setMessages] = useState(initialMessages);
+  const [focusedMessageIndex, setFocusedMessageIndex] = useState(-1);
+
+  // Add new message to state when initialMessages changes
+  useEffect(() => {
+    setMessages(initialMessages);
+  }, [initialMessages]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    // This would be handled in the actual component
+  };
+
   return (
-    <div className={`flex flex-col h-screen ${className ?? ""}`} >
-     , and so on.
+    <div 
+      className="flex flex-col h-full"
+      role="log"
+      aria-live="polite"
+      aria-label="Chat messages timeline"
+    >
+      <div className="flex-1 overflow-y-auto">
+        <MessagesTimeline 
+          messages={messages}
+          onMessageFocus={(index) => setFocusedMessageIndex(index)}
+        />
+      </�
     </div>
-  )
+  );
+}
 }
 
-// Add keyboard navigation for chat message navigation
-// Add ARIA attributes for accessibility
-// Implement proper focus management and keyboard navigation
-// Add proper ARIA roles and labels
-// Add skip links for keyboard navigation
-// Add proper focus management
-// Add screen reader support with ARIA attributes
-// Add proper ARIA attributes and keyboard navigation
+// Add keyboard event handling for navigation
+function handleComposerInput(e: React.KeyboardEvent) {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    // Navigation logic would go here
+  }
+  if (e.key === 'Enter') {
+    // Message expansion logic would go here
+  }
+  if (e.key === 'Escape') {
+    // Return to composer logic would go here
+  }
+}
 }
