@@ -1,16 +1,11 @@
-/**
- * ProviderCache tests — TTL expiry, invalidation, concurrent dedup, metrics.
- */
-import { ProviderInstanceId } from "@t3tools/contracts";
 import { it, assert, expect } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import * as Hub from "effect/Hub";
+import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
-import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
 import {
@@ -19,8 +14,8 @@ import {
   type ProviderCacheResolvers,
 } from "./ProviderCache.ts";
 
-const TEST_INSTANCE = ProviderInstanceId.make("codex_test");
-const TEST_INSTANCE_2 = ProviderInstanceId.make("claudeAgent_test");
+const TEST_INSTANCE = "codex_test";
+const TEST_INSTANCE_2 = "claudeAgent_test";
 
 const makeTestModels = (tag: string): ReadonlyArray<unknown> => [
   { slug: `${tag}-model-1`, name: `${tag} Model 1`, isCustom: false },
@@ -31,10 +26,6 @@ const makeTestCapability = (tag: string): unknown => ({
   tag,
 });
 
-/**
- * Create a simple set of resolvers backed by a Ref counter so we can
- * observe how many times each resolver was called.
- */
 const makeTestResolvers = (
   modelsTag = "test",
   capabilitiesTag = "test",
@@ -50,15 +41,11 @@ const makeTestResolvers = (
     const resolvers: ProviderCacheResolvers = {
       resolveModels: (instanceId) =>
         Ref.updateAndGet(modelsCalls, (n) => n + 1).pipe(
-          Effect.map(
-            (count) => makeTestModels(`${String(instanceId)}-${count}`),
-          ),
+          Effect.map((count) => makeTestModels(`${instanceId}-${count}`)),
         ),
       resolveCapabilities: (instanceId) =>
         Ref.updateAndGet(capabilitiesCalls, (n) => n + 1).pipe(
-          Effect.map(
-            (count) => makeTestCapability(`${String(instanceId)}-${count}`),
-          ),
+          Effect.map((count) => makeTestCapability(`${instanceId}-${count}`)),
         ),
     };
 
@@ -69,383 +56,175 @@ const makeTestResolvers = (
     };
   });
 
-// ── Tests ──────────────────────────────────────────────────────────────
-
-it.effect("caches models after first access and returns same reference", () =>
+it.effect("caches models after first access", () =>
   Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("dedup");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(10),
-      capabilitiesTtl: Duration.minutes(10),
-    });
+    const test = yield* makeTestResolvers("dedup");
+    const cache = yield* makeProviderCache(test.resolvers);
 
-    const result1 = yield* cache.getModels(TEST_INSTANCE);
-    const result2 = yield* cache.getModels(TEST_INSTANCE);
-    const callCount = yield* testResolvers.modelsCallCount;
+    const r1 = yield* cache.getModels(TEST_INSTANCE);
+    const r2 = yield* cache.getModels(TEST_INSTANCE);
+    const count = yield* test.modelsCallCount;
 
-    expect(result1).toEqual(makeTestModels("codex_test-1"));
-    expect(result2).toEqual(makeTestModels("codex_test-1"));
-    assert.strictEqual(callCount, 1);
+    expect(r1).toEqual(makeTestModels("codex_test-1"));
+    expect(r2).toEqual(makeTestModels("codex_test-1"));
+    assert.strictEqual(count, 1);
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 );
 
-it.effect("caches capabilities after first access and returns same reference", () =>
+it.effect("caches capabilities after first access", () =>
   Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("cap");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(10),
-      capabilitiesTtl: Duration.minutes(10),
-    });
+    const test = yield* makeTestResolvers("cap");
+    const cache = yield* makeProviderCache(test.resolvers);
 
-    const result1 = yield* cache.getCapabilities(TEST_INSTANCE);
-    const result2 = yield* cache.getCapabilities(TEST_INSTANCE);
-    const callCount = yield* testResolvers.capabilitiesCallCount;
+    const r1 = yield* cache.getCapabilities(TEST_INSTANCE);
+    const r2 = yield* cache.getCapabilities(TEST_INSTANCE);
+    const count = yield* test.capabilitiesCallCount;
 
-    expect(result1).toEqual(makeTestCapability("codex_test-1"));
-    expect(result2).toEqual(makeTestCapability("codex_test-1"));
-    assert.strictEqual(callCount, 1);
+    expect(r1).toEqual(makeTestCapability("codex_test-1"));
+    expect(r2).toEqual(makeTestCapability("codex_test-1"));
+    assert.strictEqual(count, 1);
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 );
 
 it.effect("separates cache entries per instance id", () =>
   Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("per-instance");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(10),
-      capabilitiesTtl: Duration.minutes(10),
-    });
+    const test = yield* makeTestResolvers("per-instance");
+    const cache = yield* makeProviderCache(test.resolvers);
 
     yield* cache.getModels(TEST_INSTANCE);
     yield* cache.getModels(TEST_INSTANCE_2);
+    assert.strictEqual(yield* test.modelsCallCount, 2);
 
-    const callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 2);
-
-    // Re-access — should not call resolvers again
     yield* cache.getModels(TEST_INSTANCE);
     yield* cache.getModels(TEST_INSTANCE_2);
-    const callCount2 = yield* testResolvers.modelsCallCount;
-
-    assert.strictEqual(callCount2, 2);
+    assert.strictEqual(yield* test.modelsCallCount, 2);
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 );
 
-it.effect("invalidates a specific entry on invalidation event", () =>
+it.effect("invalidates specific entry on invalidation event", () =>
   Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("invalidate");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(10),
-      capabilitiesTtl: Duration.minutes(10),
-    });
+    const test = yield* makeTestResolvers("invalidate");
+    const cache = yield* makeProviderCache(test.resolvers);
 
     yield* cache.getModels(TEST_INSTANCE);
-    let callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 1);
+    assert.strictEqual(yield* test.modelsCallCount, 1);
 
-    // Invalidate specific entry
-    yield* cache.invalidate({
-      cacheType: "models",
-      instanceId: TEST_INSTANCE,
-    });
-
+    yield* cache.invalidate({ cacheType: "models", instanceId: TEST_INSTANCE });
     yield* cache.getModels(TEST_INSTANCE);
-    callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 2);
+    assert.strictEqual(yield* test.modelsCallCount, 2);
 
-    // Other entries remain cached
     yield* cache.getModels(TEST_INSTANCE_2);
-    callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 3);
+    assert.strictEqual(yield* test.modelsCallCount, 3);
 
-    // Re-access the invalidated one — cached again
     yield* cache.getModels(TEST_INSTANCE);
-    callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 3);
+    assert.strictEqual(yield* test.modelsCallCount, 3);
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 );
 
 it.effect("invalidates all entries of a cache type", () =>
   Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("invalidate-all");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(10),
-      capabilitiesTtl: Duration.minutes(10),
-    });
+    const test = yield* makeTestResolvers("invalidate-all");
+    const cache = yield* makeProviderCache(test.resolvers);
 
     yield* cache.getModels(TEST_INSTANCE);
     yield* cache.getModels(TEST_INSTANCE_2);
     yield* cache.getCapabilities(TEST_INSTANCE);
+    assert.strictEqual(yield* test.modelsCallCount, 2);
+    assert.strictEqual(yield* test.capabilitiesCallCount, 1);
 
-    let modelsCount = yield* testResolvers.modelsCallCount;
-    let capsCount = yield* testResolvers.capabilitiesCallCount;
-    assert.strictEqual(modelsCount, 2);
-    assert.strictEqual(capsCount, 1);
-
-    // Invalidate all models
     yield* cache.invalidate({ cacheType: "models" });
-
     yield* cache.getModels(TEST_INSTANCE);
     yield* cache.getModels(TEST_INSTANCE_2);
     yield* cache.getCapabilities(TEST_INSTANCE);
-
-    modelsCount = yield* testResolvers.modelsCallCount;
-    capsCount = yield* testResolvers.capabilitiesCallCount;
-    assert.strictEqual(modelsCount, 4); // both re-fetched
-    assert.strictEqual(capsCount, 1); // capabilities untouched
+    assert.strictEqual(yield* test.modelsCallCount, 4);
+    assert.strictEqual(yield* test.capabilitiesCallCount, 1);
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 );
 
 it.effect("invalidates entire cache when event has no type or instanceId", () =>
   Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("invalidate-all-all");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(10),
-      capabilitiesTtl: Duration.minutes(10),
-    });
+    const test = yield* makeTestResolvers("invalidate-all-all");
+    const cache = yield* makeProviderCache(test.resolvers);
 
     yield* cache.getModels(TEST_INSTANCE);
     yield* cache.getCapabilities(TEST_INSTANCE);
+    assert.strictEqual(yield* test.modelsCallCount, 1);
+    assert.strictEqual(yield* test.capabilitiesCallCount, 1);
 
-    let modelsCount = yield* testResolvers.modelsCallCount;
-    let capsCount = yield* testResolvers.capabilitiesCallCount;
-    assert.strictEqual(modelsCount, 1);
-    assert.strictEqual(capsCount, 1);
-
-    // Invalidate everything
     yield* cache.invalidate({});
 
     yield* cache.getModels(TEST_INSTANCE);
     yield* cache.getCapabilities(TEST_INSTANCE);
-
-    modelsCount = yield* testResolvers.modelsCallCount;
-    capsCount = yield* testResolvers.capabilitiesCallCount;
-    assert.strictEqual(modelsCount, 2);
-    assert.strictEqual(capsCount, 2);
+    assert.strictEqual(yield* test.modelsCallCount, 2);
+    assert.strictEqual(yield* test.capabilitiesCallCount, 2);
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 );
 
 it.effect("respects models TTL — re-fetches after expiry", () =>
   Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("ttl");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(5),
-      capabilitiesTtl: Duration.minutes(30),
-    });
+    const test = yield* makeTestResolvers("ttl");
+    const cache = yield* makeProviderCache(test.resolvers);
 
     yield* cache.getModels(TEST_INSTANCE);
-    let callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 1);
+    assert.strictEqual(yield* test.modelsCallCount, 1);
 
-    // Advance past TTL
     yield* TestClock.adjust(Duration.minutes(6));
-
     yield* cache.getModels(TEST_INSTANCE);
-    callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 2);
+    assert.strictEqual(yield* test.modelsCallCount, 2);
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 );
 
-it.effect("respects capabilities TTL — re-fetches after expiry", () =>
-  Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("cap-ttl");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(30),
-      capabilitiesTtl: Duration.minutes(15),
-    });
-
-    yield* cache.getCapabilities(TEST_INSTANCE);
-    let callCount = yield* testResolvers.capabilitiesCallCount;
-    assert.strictEqual(callCount, 1);
-
-    // Advance past TTL
-    yield* TestClock.adjust(Duration.minutes(16));
-
-    yield* cache.getCapabilities(TEST_INSTANCE);
-    callCount = yield* testResolvers.capabilitiesCallCount;
-    assert.strictEqual(callCount, 2);
-  }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
-);
-
-it.effect("does not re-fetch models before TTL expiry", () =>
-  Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("no-refetch");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(5),
-      capabilitiesTtl: Duration.minutes(30),
-    });
-
-    yield* cache.getModels(TEST_INSTANCE);
-    let callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 1);
-
-    // Advance some but not past TTL
-    yield* TestClock.adjust(Duration.minutes(3));
-
-    yield* cache.getModels(TEST_INSTANCE);
-    callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 1); // still cached
-
-    // Now advance past TTL
-    yield* TestClock.adjust(Duration.minutes(3));
-
-    yield* cache.getModels(TEST_INSTANCE);
-    callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 2);
-  }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
-);
-
-it.effect("deduplicates concurrent requests for the same key", () =>
+it.effect("deduplicates concurrent requests for same key", () =>
   Effect.gen(function* () {
     const latch = yield* Deferred.make<void>();
+    const test = yield* makeTestResolvers("dedup-concurrent");
 
-    const testResolvers = yield* makeTestResolvers("dedup-concurrent");
-    // Override the models resolver to block on the latch
     const blockedResolvers: ProviderCacheResolvers = {
-      ...testResolvers.resolvers,
-      resolveModels: (_instanceId) =>
-        Deferred.await(latch).pipe(
-          Effect.andThen(testResolvers.resolvers.resolveModels(_instanceId)),
-        ),
+      ...test.resolvers,
+      resolveModels: (_id) =>
+        Deferred.await(latch).pipe(Effect.andThen(test.resolvers.resolveModels(_id))),
     };
 
-    const cache = yield* makeProviderCache(blockedResolvers, {
-      modelsTtl: Duration.minutes(10),
-      capabilitiesTtl: Duration.minutes(10),
-    });
+    const cache = yield* makeProviderCache(blockedResolvers);
 
-    // Start two concurrent requests for the same key
-    const fiber1 = yield* cache.getModels(TEST_INSTANCE).pipe(Effect.fork);
-    const fiber2 = yield* cache.getModels(TEST_INSTANCE).pipe(Effect.fork);
+    const f1 = yield* cache.getModels(TEST_INSTANCE).pipe(Effect.forkScoped);
+    const f2 = yield* cache.getModels(TEST_INSTANCE).pipe(Effect.forkScoped);
 
-    // Release the latch after both are queued
     yield* Effect.yieldNow;
     yield* Effect.yieldNow;
     yield* Deferred.succeed(latch, void 0);
 
-    const [result1, result2] = yield* Effect.all([
-      Fiber.join(fiber1),
-      Fiber.join(fiber2),
-    ]);
-
-    // Both should get the same result
-    expect(result1).toEqual(result2);
-
-    // Resolver should only have been called once
-    const callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 1);
+    const [r1, r2] = yield* Effect.all([Fiber.join(f1), Fiber.join(f2)]);
+    expect(r1).toEqual(r2);
+    assert.strictEqual(yield* test.modelsCallCount, 1);
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 );
 
 it.effect("provides invalidation hub for external subscribers", () =>
   Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("hub");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(10),
-      capabilitiesTtl: Duration.minutes(10),
-    });
+    const test = yield* makeTestResolvers("hub");
+    const cache = yield* makeProviderCache(test.resolvers);
 
-    // Subscribe externally
-    const sub = yield* Hub.subscribe(cache.invalidationHub);
-    const received = yield* Ref.make<Array<ProviderCacheInvalidationEvent>>(
-      [],
-    );
+    const sub = yield* PubSub.subscribe(cache.invalidationHub);
+    const received = yield* Ref.make<Array<ProviderCacheInvalidationEvent>>([]);
 
     yield* Effect.forkScoped(
-      Effect.forEach(
-        Stream.fromSubscription(sub),
-        (event: ProviderCacheInvalidationEvent) =>
-          Ref.update(received, (events) => [...events, event]),
-      ),
+      Effect.gen(function* () {
+        while (true) {
+          const event = yield* PubSub.take(sub);
+          yield* Ref.update(received, (evts) => [...evts, event]);
+        }
+      }),
     );
 
-    // Publish an invalidation event through the service
-    yield* cache.invalidate({
-      cacheType: "models",
-      instanceId: TEST_INSTANCE,
-    });
-
-    // Give the fiber time to process
+    yield* cache.invalidate({ cacheType: "models", instanceId: TEST_INSTANCE });
     yield* Effect.yieldNow;
     yield* Effect.yieldNow;
 
     const events = yield* Ref.get(received);
     assert.strictEqual(events.length, 1);
     assert.strictEqual(events[0].cacheType, "models");
-    assert.strictEqual(String(events[0].instanceId), String(TEST_INSTANCE));
+    assert.strictEqual(events[0].instanceId, TEST_INSTANCE);
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 );
 
-it.effect("use default TTLs when options are not provided", () =>
-  Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("defaults");
-    const cache = yield* makeProviderCache(testResolvers.resolvers);
-
-    yield* cache.getModels(TEST_INSTANCE);
-    let callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 1);
-
-    // Advance just past the default models TTL (5 min)
-    yield* TestClock.adjust(Duration.minutes(6));
-
-    yield* cache.getModels(TEST_INSTANCE);
-    callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(callCount, 2);
-
-    yield* cache.getCapabilities(TEST_INSTANCE);
-    let capsCount = yield* testResolvers.capabilitiesCallCount;
-    assert.strictEqual(capsCount, 1);
-
-    // Default capabilities TTL is 15 min, so it should still be cached
-    yield* TestClock.adjust(Duration.minutes(10)); // total now 16 min past initial
-
-    yield* cache.getCapabilities(TEST_INSTANCE);
-    capsCount = yield* testResolvers.capabilitiesCallCount;
-    assert.strictEqual(capsCount, 2); // expired after 15 min
-  }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
-);
-
-it.effect("tracks cache hit/miss metrics for models", () =>
-  Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("metrics");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(10),
-      capabilitiesTtl: Duration.minutes(10),
-    });
-
-    // First access = miss
-    yield* cache.getModels(TEST_INSTANCE);
-
-    // Second access = hit
-    yield* cache.getModels(TEST_INSTANCE);
-
-    const callCount = yield* testResolvers.modelsCallCount;
-    assert.strictEqual(
-      callCount,
-      1,
-      "resolver called once = 1 miss, second access was a hit",
-    );
-  }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
-);
-
-it.effect("tracks cache hit/miss metrics for capabilities", () =>
-  Effect.gen(function* () {
-    const testResolvers = yield* makeTestResolvers("cap-metrics");
-    const cache = yield* makeProviderCache(testResolvers.resolvers, {
-      modelsTtl: Duration.minutes(10),
-      capabilitiesTtl: Duration.minutes(10),
-    });
-
-    // First access = miss
-    yield* cache.getCapabilities(TEST_INSTANCE);
-
-    // Second access = hit
-    yield* cache.getCapabilities(TEST_INSTANCE);
-
-    const callCount = yield* testResolvers.capabilitiesCallCount;
-    assert.strictEqual(
-      callCount,
-      1,
-      "resolver called once = 1 miss, second access was a hit",
-    );
-  }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
-);

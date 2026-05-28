@@ -20,9 +20,9 @@ export interface ProviderCacheResolvers<R = never> {
   readonly resolveCapabilities: (instanceId: string) => Effect.Effect<unknown, unknown, R>;
 }
 
-const MODELS_TTL = Duration.minutes(5);
-const CAPABILITIES_TTL = Duration.minutes(15);
-const CACHE_CAPACITY = 1_024;
+const N_MODELS_TTL = Duration.minutes(5);
+const N_CAPABILITIES_TTL = Duration.minutes(15);
+const N_CACHE_CAPACITY = 1_024;
 
 const modelsHits = Metric.counter("t3_models_cache_hits_total", { description: "Provider models cache hits" });
 const modelsMisses = Metric.counter("t3_models_cache_misses_total", { description: "Provider models cache misses" });
@@ -40,40 +40,29 @@ export class ProviderCache extends Context.Service<ProviderCache, ProviderCacheS
 
 export const makeProviderCache = Effect.fn("makeProviderCache")(function* <R>(
   resolvers: ProviderCacheResolvers<R>,
+  options?: {
+    readonly modelsTtl?: Duration.DurationInput;
+    readonly capabilitiesTtl?: Duration.DurationInput;
+    readonly capacity?: number;
+  },
 ) {
+  const modelsTtl = options?.modelsTtl ?? N_MODELS_TTL;
+  const capTtl = options?.capabilitiesTtl ?? N_CAPABILITIES_TTL;
+  const capacity = options?.capacity ?? N_CACHE_CAPACITY;
+
   const modelsCache = yield* Cache.make<string, ReadonlyArray<unknown>, unknown>({
-    capacity: CACHE_CAPACITY,
+    capacity,
     lookup: (key) => resolvers.resolveModels(key),
-    timeToLive: MODELS_TTL,
+    timeToLive: modelsTtl,
   });
 
   const capabilitiesCache = yield* Cache.make<string, unknown, unknown>({
-    capacity: CACHE_CAPACITY,
+    capacity,
     lookup: (key) => resolvers.resolveCapabilities(key),
-    timeToLive: CAPABILITIES_TTL,
+    timeToLive: capTtl,
   });
 
   const invalidationHub = yield* PubSub.unbounded<ProviderCacheInvalidationEvent>();
-  const sub = yield* PubSub.subscribe(invalidationHub);
-
-  yield* Effect.forkScoped(
-    Effect.gen(function* () {
-      while (true) {
-        const event = yield* PubSub.take(sub);
-        if (!event.cacheType && !event.instanceId) {
-          yield* Cache.invalidateAll(modelsCache);
-          yield* Cache.invalidateAll(capabilitiesCache);
-        } else if (event.instanceId) {
-          if (!event.cacheType || event.cacheType === "models") yield* Cache.invalidate(modelsCache, event.instanceId);
-          if (!event.cacheType || event.cacheType === "capabilities") yield* Cache.invalidate(capabilitiesCache, event.instanceId);
-        } else if (event.cacheType === "models") {
-          yield* Cache.invalidateAll(modelsCache);
-        } else {
-          yield* Cache.invalidateAll(capabilitiesCache);
-        }
-      }
-    }),
-  );
 
   const getModels: ProviderCacheShape["getModels"] = (instanceId) =>
     Effect.gen(function* () {
@@ -97,10 +86,31 @@ export const makeProviderCache = Effect.fn("makeProviderCache")(function* <R>(
       return yield* Cache.get(capabilitiesCache, instanceId);
     });
 
+  const doInvalidate = (event: ProviderCacheInvalidationEvent) =>
+    Effect.gen(function* () {
+      if (!event.cacheType && !event.instanceId) {
+        yield* Cache.invalidateAll(modelsCache);
+        yield* Cache.invalidateAll(capabilitiesCache);
+      } else if (event.instanceId) {
+        if (!event.cacheType || event.cacheType === "models")
+          yield* Cache.invalidate(modelsCache, event.instanceId);
+        if (!event.cacheType || event.cacheType === "capabilities")
+          yield* Cache.invalidate(capabilitiesCache, event.instanceId);
+      } else if (event.cacheType === "models") {
+        yield* Cache.invalidateAll(modelsCache);
+      } else {
+        yield* Cache.invalidateAll(capabilitiesCache);
+      }
+    });
+
   return {
     getModels,
     getCapabilities,
-    invalidate: (event) => PubSub.publish(invalidationHub, event),
+    invalidate: (event) =>
+      Effect.gen(function* () {
+        yield* PubSub.publish(invalidationHub, event);
+        yield* doInvalidate(event);
+      }),
     invalidationHub,
   } satisfies ProviderCacheShape;
 });
