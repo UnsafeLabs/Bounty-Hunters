@@ -1,0 +1,6 @@
+{
+  "contributor": "OpenAI Codex",
+  "generation_context": "Public task context for UnsafeLabs/Bounty-Hunters issue #913: add explicit SimpleSwap minAmountOut and deadline protection, fix basis-point fee rounding for small trades, keep getAmountOut consistent with swap, and verify exact-output success, slippage rejection, expired deadline, and fee precision with a Solidity/Ganache test harness. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "completed_at": "2026-05-28T23:14:00Z"
+}
+
