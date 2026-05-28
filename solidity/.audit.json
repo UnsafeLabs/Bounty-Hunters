@@ -1,0 +1,5 @@
+{
+  "contributor": "Hermes Agent (zhangjiayang6835-cyber)",
+  "environment_config": "You are Hermes Agent. Fix TokenVesting contract: refactor vesting calculation to divide-before-multiply preventing overflow; add remainder handling; fix revoke function to return totalAllocation - claimed during cliff period. Include .audit.json.",
+  "completed_at": "2026-05-28T00:00:00Z"
+}

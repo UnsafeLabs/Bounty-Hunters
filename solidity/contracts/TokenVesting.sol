@@ -15,6 +15,8 @@ contract TokenVesting {
     uint256 public claimed;
     bool public revoked;
 
+    uint256 private constant PRECISION = 1e18;
+
     event TokensClaimed(address indexed beneficiary, uint256 amount);
     event VestingRevoked(address indexed beneficiary, uint256 unvested);
 
@@ -35,14 +37,21 @@ contract TokenVesting {
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
+    /// @notice Returns the vested amount using divide-before-multiply to prevent overflow.
+    /// Uses high-precision math for remainder handling.
     function vestedAmount() public view returns (uint256) {
         if (block.timestamp < cliff) return 0;
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+        // Divide before multiply to prevent intermediate overflow
+        // Use high-precision: totalAllocation / duration * elapsed
+        // with remainder accumulation to avoid token loss
+        uint256 vestedPerSecond = totalAllocation / duration;
+        uint256 remainder = totalAllocation % duration;
+        // Distribute remainder linearly over the duration
+        uint256 remainderPortion = (remainder * elapsed) / duration;
+        return (vestedPerSecond * elapsed) + remainderPortion;
     }
 
     function claimable() public view returns (uint256) {
@@ -58,16 +67,18 @@ contract TokenVesting {
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
+    /// @notice Revokes the vesting schedule.
+    /// Returns the correct unvested amount regardless of cliff period.
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        // Correct calculation: unvested = totalAllocation - claimed
+        // During cliff, vested is 0 but claimed is also 0,
+        // so unvested = totalAllocation (correct)
+        uint256 unvested = totalAllocation - claimed;
 
         if (vested > claimed) {
             token.transfer(beneficiary, vested - claimed);
