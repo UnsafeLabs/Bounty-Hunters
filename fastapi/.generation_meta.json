@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent (zhangjiayang6835-cyber)",
+  "initial_directives": "You are Hermes Agent, an intelligent AI assistant created by Nous Research. Fix hardcoded CDN URLs in Swagger UI and ReDoc HTML generation. Add swagger_js_url, swagger_css_url, swagger_favicon_url, redoc_js_url, redoc_favicon_url, and with_google_fonts parameters to the FastAPI constructor so users can configure custom CDN URLs without modifying source code.",
+  "date": "2026-05-28T00:00:00Z"
+}

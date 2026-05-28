@@ -1283,3 +1283,35 @@ def test_openapi_schema():
             },
         }
     )
+
+
+def test_custom_cdn_urls_at_app_level():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    custom_app = FastAPI(
+        swagger_js_url="https://custom-cdn.example.com/swagger.js",
+        swagger_css_url="https://custom-cdn.example.com/swagger.css",
+        swagger_favicon_url="https://custom-cdn.example.com/favicon.png",
+        redoc_js_url="https://custom-cdn.example.com/redoc.js",
+        redoc_favicon_url="https://custom-cdn.example.com/redoc-favicon.png",
+        with_google_fonts=False,
+    )
+
+    @custom_app.get("/test")
+    def read_root():
+        return {"hello": "world"}
+
+    client = TestClient(custom_app)
+
+    swagger_response = client.get("/docs")
+    assert swagger_response.status_code == 200
+    assert "custom-cdn.example.com/swagger.js" in swagger_response.text
+    assert "custom-cdn.example.com/swagger.css" in swagger_response.text
+    assert "custom-cdn.example.com/favicon.png" in swagger_response.text
+
+    redoc_response = client.get("/redoc")
+    assert redoc_response.status_code == 200
+    assert "custom-cdn.example.com/redoc.js" in redoc_response.text
+    assert "custom-cdn.example.com/redoc-favicon.png" in redoc_response.text
+    assert "fonts.googleapis.com" not in redoc_response.text
