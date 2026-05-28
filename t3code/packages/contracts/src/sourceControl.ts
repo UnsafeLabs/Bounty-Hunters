@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { VcsDriverKind } from "./vcs.ts";
 
 export const SourceControlProviderKind = Schema.Literals([
@@ -35,6 +35,19 @@ export const ChangeRequest = Schema.Struct({
   headRepositoryOwnerLogin: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 });
 export type ChangeRequest = typeof ChangeRequest.Type;
+
+export const SourceControlBranchProtection = Schema.Struct({
+  provider: SourceControlProviderKind,
+  branch: TrimmedNonEmptyString,
+  requiresPullRequest: Schema.Boolean,
+  requiredApprovingReviewCount: NonNegativeInt,
+  requiresStatusChecks: Schema.Boolean,
+  requiredStatusCheckContexts: Schema.Array(Schema.String),
+  requiresSignedCommits: Schema.Boolean,
+  allowsForcePushes: Schema.Boolean,
+  restrictsPushes: Schema.Boolean,
+});
+export type SourceControlBranchProtection = typeof SourceControlBranchProtection.Type;
 
 export const SourceControlRepositoryCloneUrls = Schema.Struct({
   nameWithOwner: TrimmedNonEmptyString,

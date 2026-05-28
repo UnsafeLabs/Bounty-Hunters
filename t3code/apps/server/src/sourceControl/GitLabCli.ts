@@ -7,7 +7,12 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import type * as DateTime from "effect/DateTime";
 
-import { TrimmedNonEmptyString, type SourceControlRepositoryVisibility } from "@t3tools/contracts";
+import {
+  SourceControlBranchProtection,
+  TrimmedNonEmptyString,
+  type SourceControlBranchProtection as SourceControlBranchProtectionType,
+  type SourceControlRepositoryVisibility,
+} from "@t3tools/contracts";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitLabMergeRequests from "./gitLabMergeRequests.ts";
@@ -88,6 +93,11 @@ export interface GitLabCliShape {
   readonly getDefaultBranch: (input: {
     readonly cwd: string;
   }) => Effect.Effect<string | null, GitLabCliError>;
+
+  readonly getBranchProtection: (input: {
+    readonly cwd: string;
+    readonly branch: string;
+  }) => Effect.Effect<SourceControlBranchProtectionType | null, GitLabCliError>;
 
   readonly checkoutMergeRequest: (input: {
     readonly cwd: string;
@@ -170,6 +180,17 @@ const RawGitLabDefaultBranchSchema = Schema.Struct({
   default_branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 });
 
+const RawGitLabProtectedBranchSchema = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  allow_force_push: Schema.optional(Schema.Boolean),
+  code_owner_approval_required: Schema.optional(Schema.Boolean),
+  push_access_levels: Schema.optional(Schema.Array(Schema.Unknown)),
+  merge_access_levels: Schema.optional(Schema.Array(Schema.Unknown)),
+});
+const decodeGitLabProtectedBranchesJson = Schema.decodeEffect(
+  Schema.fromJsonString(Schema.Array(RawGitLabProtectedBranchSchema)),
+);
+
 const RawGitLabNamespaceSchema = Schema.Struct({
   id: Schema.Number,
 });
@@ -184,10 +205,54 @@ function normalizeRepositoryCloneUrls(
   };
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchesProtectedBranchPattern(pattern: string, branch: string): boolean {
+  if (pattern === branch) {
+    return true;
+  }
+  if (!pattern.includes("*")) {
+    return false;
+  }
+  const regex = new RegExp(`^${pattern.split("*").map(escapeRegex).join(".*")}$`);
+  return regex.test(branch);
+}
+
+function normalizeBranchProtection(
+  branch: string,
+  raw: Schema.Schema.Type<typeof RawGitLabProtectedBranchSchema>,
+): SourceControlBranchProtectionType {
+  const requiresCodeOwnerApproval = raw.code_owner_approval_required === true;
+  const hasMergeRules = (raw.merge_access_levels?.length ?? 0) > 0;
+
+  return SourceControlBranchProtection.make({
+    provider: "gitlab",
+    branch: raw.name || branch,
+    requiresPullRequest: requiresCodeOwnerApproval || hasMergeRules,
+    requiredApprovingReviewCount: requiresCodeOwnerApproval ? 1 : 0,
+    requiresStatusChecks: false,
+    requiredStatusCheckContexts: [],
+    requiresSignedCommits: false,
+    allowsForcePushes: raw.allow_force_push === true,
+    restrictsPushes: (raw.push_access_levels?.length ?? 0) > 0,
+  });
+}
+
+function isBranchProtectionNotFound(error: GitLabCliError): boolean {
+  const detail = error.detail.toLowerCase();
+  return detail.includes("404") || detail.includes("not found");
+}
+
 function decodeGitLabJson<S extends Schema.Top>(
   raw: string,
   schema: S,
-  operation: "getRepositoryCloneUrls" | "getDefaultBranch" | "createRepository",
+  operation:
+    | "getRepositoryCloneUrls"
+    | "getDefaultBranch"
+    | "createRepository"
+    | "getBranchProtection",
   invalidDetail: string,
 ): Effect.Effect<S["Type"], GitLabCliError, S["DecodingServices"]> {
   return Schema.decodeEffect(Schema.fromJsonString(schema))(raw).pipe(
@@ -438,6 +503,54 @@ export const make = Effect.fn("makeGitLabCli")(function* () {
         ),
         Effect.map((value) => value.default_branch ?? null),
       ),
+    getBranchProtection: (input) => {
+      const decodeProtectedBranch = (raw: string) =>
+        decodeGitLabJson(
+          raw,
+          RawGitLabProtectedBranchSchema,
+          "getBranchProtection",
+          "GitLab CLI returned invalid branch protection JSON.",
+        );
+      const readExact = execute({
+        cwd: input.cwd,
+        args: ["api", `projects/:fullpath/protected_branches/${encodeURIComponent(input.branch)}`],
+      }).pipe(
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap(decodeProtectedBranch),
+        Effect.map((raw) => normalizeBranchProtection(input.branch, raw)),
+      );
+      const readMatchingWildcard = execute({
+        cwd: input.cwd,
+        args: ["api", "projects/:fullpath/protected_branches?per_page=100"],
+      }).pipe(
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap((raw) =>
+          decodeGitLabProtectedBranchesJson(raw).pipe(
+            Effect.mapError(
+              (error) =>
+                new GitLabCliError({
+                  operation: "getBranchProtection",
+                  detail: `GitLab CLI returned invalid protected branches JSON: ${SchemaIssue.makeFormatterDefault()(error.issue)}`,
+                  cause: error,
+                }),
+            ),
+          ),
+        ),
+        Effect.map(
+          (branches) =>
+            branches.find((protectedBranch) =>
+              matchesProtectedBranchPattern(protectedBranch.name, input.branch),
+            ) ?? null,
+        ),
+        Effect.map((raw) => (raw ? normalizeBranchProtection(input.branch, raw) : null)),
+      );
+
+      return readExact.pipe(
+        Effect.catch((error) =>
+          isBranchProtectionNotFound(error) ? readMatchingWildcard : Effect.fail(error),
+        ),
+      );
+    },
     checkoutMergeRequest: (input) =>
       execute({
         cwd: input.cwd,

@@ -132,4 +132,28 @@ describe("applyGitStatusStreamEvent", () => {
       pr: null,
     });
   });
+
+  it("preserves branch protection metadata from remote status updates", () => {
+    const remote: VcsStatusRemoteResult = {
+      hasUpstream: true,
+      aheadCount: 0,
+      behindCount: 0,
+      pr: null,
+      branchProtection: {
+        provider: "gitlab",
+        branch: "main",
+        requiresPullRequest: true,
+        requiredApprovingReviewCount: 1,
+        requiresStatusChecks: false,
+        requiredStatusCheckContexts: [],
+        requiresSignedCommits: false,
+        allowsForcePushes: false,
+        restrictsPushes: true,
+      },
+    };
+
+    expect(applyGitStatusStreamEvent(null, { _tag: "remoteUpdated", remote })).toMatchObject({
+      branchProtection: remote.branchProtection,
+    });
+  });
 });

@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import type {
   ChangeRequest,
   ChangeRequestState,
+  SourceControlBranchProtection,
   SourceControlProviderError,
   SourceControlProviderInfo,
   SourceControlProviderKind,
@@ -88,6 +89,11 @@ export interface SourceControlProviderShape {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;
   }) => Effect.Effect<string | null, SourceControlProviderError>;
+  readonly getBranchProtection: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+    readonly branch: string;
+  }) => Effect.Effect<SourceControlBranchProtection | null, SourceControlProviderError>;
   readonly checkoutChangeRequest: (input: {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;

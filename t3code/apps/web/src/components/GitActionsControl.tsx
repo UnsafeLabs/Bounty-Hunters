@@ -31,6 +31,7 @@ import { RadioGroup } from "~/components/ui/radio-group";
 import { Spinner } from "~/components/ui/spinner";
 import { cn } from "~/lib/utils";
 import {
+  buildBranchProtectionDetails,
   buildGitActionProgressStages,
   buildMenuItems,
   type GitActionIconName,
@@ -38,6 +39,7 @@ import {
   type GitQuickAction,
   type DefaultBranchConfirmableAction,
   requiresDefaultBranchConfirmation,
+  requiresProtectedBranchPushWarning,
   resolveDefaultBranchActionDialogCopy,
   resolveLiveThreadBranchUpdate,
   resolveQuickAction,
@@ -97,6 +99,14 @@ interface PendingDefaultBranchAction {
   filePaths?: string[];
 }
 
+interface PendingProtectedBranchAction {
+  action: GitStackedAction;
+  branchName: string;
+  commitMessage?: string;
+  onConfirmed?: () => void;
+  filePaths?: string[];
+}
+
 type PublishProviderKind = Extract<
   SourceControlProviderKind,
   "github" | "gitlab" | "bitbucket" | "azure-devops"
@@ -121,6 +131,7 @@ interface RunGitActionWithToastInput {
   commitMessage?: string;
   onConfirmed?: () => void;
   skipDefaultBranchPrompt?: boolean;
+  skipProtectedBranchPrompt?: boolean;
   statusOverride?: VcsStatusResult | null;
   featureBranch?: boolean;
   progressToastId?: GitActionToastId;
@@ -977,6 +988,8 @@ export default function GitActionsControl({
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
+  const [pendingProtectedBranchAction, setPendingProtectedBranchAction] =
+    useState<PendingProtectedBranchAction | null>(null);
   const activeGitActionProgressRef = useRef<ActiveGitActionProgress | null>(null);
   let runGitActionWithToast: (input: RunGitActionWithToastInput) => Promise<void>;
 
@@ -1152,6 +1165,9 @@ export default function GitActionsControl({
         terminology: changeRequestTerminology,
       })
     : null;
+  const pendingProtectedBranchDetails = buildBranchProtectionDetails(
+    gitStatusForActions?.branchProtection,
+  );
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1238,6 +1254,7 @@ export default function GitActionsControl({
       commitMessage,
       onConfirmed,
       skipDefaultBranchPrompt = false,
+      skipProtectedBranchPrompt = false,
       statusOverride,
       featureBranch = false,
       progressToastId,
@@ -1251,6 +1268,21 @@ export default function GitActionsControl({
       const includesCommit =
         actionCanCommit &&
         (action === "commit" || !!actionStatus?.hasWorkingTreeChanges || featureBranch);
+      if (
+        !skipProtectedBranchPrompt &&
+        !featureBranch &&
+        actionBranch &&
+        requiresProtectedBranchPushWarning(action, actionStatus?.branchProtection)
+      ) {
+        setPendingProtectedBranchAction({
+          action,
+          branchName: actionBranch,
+          ...(commitMessage ? { commitMessage } : {}),
+          ...(onConfirmed ? { onConfirmed } : {}),
+          ...(filePaths ? { filePaths } : {}),
+        });
+        return;
+      }
       if (
         !skipDefaultBranchPrompt &&
         requiresDefaultBranchConfirmation(action, actionIsDefaultBranch) &&
@@ -1471,6 +1503,19 @@ export default function GitActionsControl({
       ...(onConfirmed ? { onConfirmed } : {}),
       ...(filePaths ? { filePaths } : {}),
       skipDefaultBranchPrompt: true,
+    });
+  };
+
+  const continuePendingProtectedBranchAction = () => {
+    if (!pendingProtectedBranchAction) return;
+    const { action, commitMessage, onConfirmed, filePaths } = pendingProtectedBranchAction;
+    setPendingProtectedBranchAction(null);
+    void runGitActionWithToast({
+      action,
+      ...(commitMessage ? { commitMessage } : {}),
+      ...(onConfirmed ? { onConfirmed } : {}),
+      ...(filePaths ? { filePaths } : {}),
+      skipProtectedBranchPrompt: true,
     });
   };
 
@@ -1728,6 +1773,23 @@ export default function GitActionsControl({
                   </MenuItem>
                 );
               })}
+              {gitStatusForActions?.branchProtection ? (
+                <Popover>
+                  <PopoverTrigger
+                    openOnHover
+                    nativeButton={false}
+                    render={<span className="block w-max cursor-not-allowed" />}
+                  >
+                    <MenuItem className="w-full" disabled>
+                      <LockIcon />
+                      Force push
+                    </MenuItem>
+                  </PopoverTrigger>
+                  <PopoverPopup tooltipStyle side="left" align="center">
+                    Force push is disabled for protected branches.
+                  </PopoverPopup>
+                </Popover>
+              ) : null}
               {canPublishRepository ? (
                 <MenuItem
                   disabled={isGitActionRunning}
@@ -1937,6 +1999,52 @@ export default function GitActionsControl({
         environmentId={activeEnvironmentId}
         gitCwd={gitCwd}
       />
+
+      <Dialog
+        open={pendingProtectedBranchAction !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingProtectedBranchAction(null);
+          }
+        }}
+      >
+        <DialogPopup className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>
+              Push to protected branch{" "}
+              {pendingProtectedBranchAction?.branchName
+                ? `"${pendingProtectedBranchAction.branchName}"`
+                : ""}
+              ?
+            </DialogTitle>
+            <DialogDescription>
+              This branch is protected and may require review before direct pushes are accepted.
+            </DialogDescription>
+          </DialogHeader>
+          {pendingProtectedBranchDetails.length > 0 ? (
+            <div className="rounded-md border bg-muted/20 p-3 text-muted-foreground text-xs leading-relaxed">
+              {pendingProtectedBranchDetails.join("; ")}
+            </div>
+          ) : null}
+          <DialogFooter className="sm:flex-wrap sm:items-center">
+            <Button
+              className="w-full sm:mr-auto sm:w-auto"
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingProtectedBranchAction(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="min-h-8 w-full max-w-full whitespace-normal py-1.5 leading-snug sm:min-h-7 sm:w-auto"
+              size="sm"
+              onClick={continuePendingProtectedBranchAction}
+            >
+              Push anyway
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
 
       <Dialog
         open={pendingDefaultBranchAction !== null}

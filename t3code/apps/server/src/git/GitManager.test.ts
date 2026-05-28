@@ -16,6 +16,7 @@ import type {
   GitActionProgressEvent,
   GitPreparePullRequestThreadInput,
   ModelSelection,
+  SourceControlBranchProtection,
   ThreadId,
 } from "@t3tools/contracts";
 
@@ -60,6 +61,7 @@ interface FakeGhScenario {
     headRepositoryOwnerLogin?: string | null;
   };
   repositoryCloneUrls?: Record<string, { url: string; sshUrl: string }>;
+  branchProtection?: SourceControlBranchProtection | null;
   failWith?: GitHubCliError;
 }
 
@@ -605,6 +607,10 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             detail: `Unexpected repository create: ${input.repository}`,
           }),
         ),
+      getBranchProtection: (input) => {
+        ghCalls.push(`branch-protection ${input.branch}`);
+        return Effect.succeed(scenario.branchProtection ?? null);
+      },
       checkoutPullRequest: (input) =>
         execute({
           cwd: input.cwd,
@@ -746,6 +752,50 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         headRef: "feature/status-open-pr",
         state: "open",
       });
+    }),
+  );
+
+  it.effect("status includes cached branch protection metadata for the current branch", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          branchProtection: {
+            provider: "github",
+            branch: "main",
+            requiresPullRequest: true,
+            requiredApprovingReviewCount: 1,
+            requiresStatusChecks: true,
+            requiredStatusCheckContexts: ["test"],
+            requiresSignedCommits: false,
+            allowsForcePushes: false,
+            restrictsPushes: true,
+          },
+        },
+      });
+
+      const first = yield* manager.status({ cwd: repoDir });
+      yield* manager.invalidateRemoteStatus(repoDir);
+      const second = yield* manager.status({ cwd: repoDir });
+
+      expect(first.branchProtection).toEqual({
+        provider: "github",
+        branch: "main",
+        requiresPullRequest: true,
+        requiredApprovingReviewCount: 1,
+        requiresStatusChecks: true,
+        requiredStatusCheckContexts: ["test"],
+        requiresSignedCommits: false,
+        allowsForcePushes: false,
+        restrictsPushes: true,
+      });
+      expect(second.branchProtection).toEqual(first.branchProtection);
+      expect(ghCalls.filter((call) => call === "branch-protection main")).toHaveLength(1);
     }),
   );
 

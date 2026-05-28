@@ -7,6 +7,7 @@ import {
   GitRunStackedActionResult,
   GitRunStackedActionInput,
   GitResolvePullRequestResult,
+  VcsStatusResult,
 } from "./git.ts";
 
 const decodeCreateWorktreeInput = Schema.decodeUnknownSync(VcsCreateWorktreeInput);
@@ -16,6 +17,7 @@ const decodePreparePullRequestThreadInput = Schema.decodeUnknownSync(
 const decodeRunStackedActionInput = Schema.decodeUnknownSync(GitRunStackedActionInput);
 const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActionResult);
 const decodeResolvePullRequestResult = Schema.decodeUnknownSync(GitResolvePullRequestResult);
+const decodeStatusResult = Schema.decodeUnknownSync(VcsStatusResult);
 
 describe("VcsCreateWorktreeInput", () => {
   it("accepts omitted newRefName for existing-refName worktrees", () => {
@@ -112,5 +114,35 @@ describe("GitRunStackedActionResult", () => {
     if (parsed.toast.cta.kind === "run_action") {
       expect(parsed.toast.cta.action.kind).toBe("create_pr");
     }
+  });
+});
+
+describe("VcsStatusResult", () => {
+  it("decodes branch protection metadata from the remote status portion", () => {
+    const parsed = decodeStatusResult({
+      isRepo: true,
+      hasPrimaryRemote: true,
+      isDefaultRef: true,
+      refName: "main",
+      hasWorkingTreeChanges: false,
+      workingTree: { files: [], insertions: 0, deletions: 0 },
+      hasUpstream: true,
+      aheadCount: 0,
+      behindCount: 0,
+      pr: null,
+      branchProtection: {
+        provider: "github",
+        branch: "main",
+        requiresPullRequest: true,
+        requiredApprovingReviewCount: 1,
+        requiresStatusChecks: true,
+        requiredStatusCheckContexts: ["test"],
+        requiresSignedCommits: false,
+        allowsForcePushes: false,
+        restrictsPushes: true,
+      },
+    });
+
+    expect(parsed.branchProtection?.requiredStatusCheckContexts).toEqual(["test"]);
   });
 });

@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -36,6 +38,7 @@ function makeProvider(
     getRepositoryCloneUrls: () => Effect.succeed(CLONE_URLS),
     createRepository: () => Effect.succeed(CLONE_URLS),
     getDefaultBranch: () => Effect.succeed(null),
+    getBranchProtection: () => Effect.succeed(null),
     checkoutChangeRequest: () => unsupported("checkoutChangeRequest"),
     ...overrides,
   };
@@ -109,7 +112,7 @@ it.effect("clones a looked-up repository into the requested destination", () =>
     const parent = yield* fs.makeTempDirectoryScoped({
       prefix: "t3-source-control-clone-parent-",
     });
-    const destinationPath = `${parent}/t3code`;
+    const destinationPath = path.join(parent, "t3code");
     const cloneCalls: Array<{ cwd: string; args: ReadonlyArray<string> }> = [];
 
     yield* Effect.gen(function* () {
