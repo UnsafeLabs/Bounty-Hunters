@@ -10,6 +10,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, assert } from "@effect/vitest";
@@ -24,6 +25,18 @@ const InitializeRequest = jsonRpcRequest("initialize", AcpSchema.InitializeReque
 const InitializeResponse = jsonRpcResponse(AcpSchema.InitializeResponse);
 const ExtRequest = jsonRpcRequest("x/test", Schema.Struct({ hello: Schema.String }));
 const ExtResponse = jsonRpcResponse(Schema.Struct({ ok: Schema.Boolean }));
+const AuthenticateRequest = jsonRpcRequest("authenticate", AcpSchema.AuthenticateRequest);
+const AuthenticateResponse = jsonRpcResponse(AcpSchema.AuthenticateResponse);
+const PromptRequest = jsonRpcRequest("session/prompt", AcpSchema.PromptRequest);
+const PromptResponse = jsonRpcResponse(AcpSchema.PromptResponse);
+const encoder = new TextEncoder();
+const rpcParser = RpcSerialization.ndJsonRpc().makeUnsafe();
+const encodeRpcMessage = (message: unknown) => {
+  const encoded = (
+    rpcParser as { encode: (message: unknown) => string | Uint8Array | undefined }
+  ).encode(message);
+  return typeof encoded === "string" ? encoder.encode(encoded) : (encoded ?? encoder.encode(""));
+};
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/acp-mock-peer.ts"),
 );
@@ -443,6 +456,93 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
 
       yield* Fiber.join(initializeFiber);
       assert.deepEqual(yield* Fiber.join(extFiber), { ok: true });
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
+  it.effect("refreshes authentication once and replays a request after 401", () =>
+    Effect.gen(function* () {
+      const expiredSessions = yield* Ref.make<Array<string>>([]);
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      const acp = yield* AcpClient.make(stdio, {
+        onSessionExpired: (sessionId) =>
+          Ref.update(expiredSessions, (sessions) => [...sessions, sessionId]),
+      }).pipe(Effect.provideService(Scope.Scope, scope));
+
+      const authFiber = yield* acp.agent
+        .authenticate({ methodId: "cursor_login" })
+        .pipe(Effect.forkScoped);
+      const initialAuth = yield* Schema.decodeEffect(Schema.fromJsonString(AuthenticateRequest))(
+        yield* Queue.take(output),
+      );
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(AuthenticateResponse, {
+          jsonrpc: "2.0",
+          id: initialAuth.id,
+          result: { _meta: { refreshToken: "refresh-1" } },
+        }),
+      );
+      yield* Fiber.join(authFiber);
+
+      const promptPayload: AcpSchema.PromptRequest = {
+        sessionId: "expired-session",
+        prompt: [{ type: "text", text: "hello" }],
+      };
+      const promptFiber = yield* acp.agent.prompt(promptPayload).pipe(Effect.forkScoped);
+
+      const firstPrompt = yield* Schema.decodeEffect(Schema.fromJsonString(PromptRequest))(
+        yield* Queue.take(output),
+      );
+      yield* Queue.offer(
+        input,
+        encodeRpcMessage({
+          _tag: "Exit",
+          requestId: String(firstPrompt.id),
+          exit: {
+            _tag: "Failure",
+            cause: [
+              {
+                _tag: "Fail",
+                error: { code: -32000, message: "401 Unauthorized" },
+              },
+            ],
+          },
+        }),
+      );
+
+      const refreshAuth = yield* Schema.decodeEffect(Schema.fromJsonString(AuthenticateRequest))(
+        yield* Queue.take(output),
+      );
+      assert.deepEqual(refreshAuth.params, {
+        methodId: "cursor_login",
+        _meta: { refreshToken: "refresh-1" },
+      });
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(AuthenticateResponse, {
+          jsonrpc: "2.0",
+          id: refreshAuth.id,
+          result: { _meta: { refreshToken: "refresh-2" } },
+        }),
+      );
+
+      const replayedPrompt = yield* Schema.decodeEffect(Schema.fromJsonString(PromptRequest))(
+        yield* Queue.take(output),
+      );
+      assert.deepEqual(replayedPrompt.params, firstPrompt.params);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(PromptResponse, {
+          jsonrpc: "2.0",
+          id: replayedPrompt.id,
+          result: { stopReason: "end_turn" },
+        }),
+      );
+
+      assert.deepEqual(yield* Fiber.join(promptFiber), { stopReason: "end_turn" });
+      assert.deepEqual(yield* Ref.get(expiredSessions), ["unknown"]);
       yield* Scope.close(scope, Exit.void);
     }),
   );
