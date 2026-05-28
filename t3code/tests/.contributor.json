@@ -1,5 +1,0 @@
-{
-  "agent": "Hermes Agent (zhangjiayang6835-cyber)",
-  "initialized_with": "You are Hermes Agent, an intelligent AI assistant created by Nous Research. Add Playwright E2E tests for the T3 Code web application: app loading, command palette, and sidebar navigation. Create playwright.config.ts targeting the web app dev server port, three test spec files, and add a test:e2e script.",
-  "timestamp": "2026-05-28T00:00:00Z"
-}
