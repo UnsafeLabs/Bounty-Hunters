@@ -9,12 +9,7 @@
  import * as Layer from "effect/Layer";
  import * as Schema from "effect/Schema";
  import * as Scope from "effect/Scope";
-@@ -24,9 +25,14 @@ import {
-   runHandler,
- } from "./_internal/shared.ts";
- import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
-+import { AuthenticationError } from "./errors.ts";
- 
+@@ -24,9 +25,16 @@ import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
  export interface AcpClientOptions {
    readonly logIncoming?: boolean;
    readonly logOutgoing?: boolean;
@@ -22,158 +17,149 @@
 +  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, never>;
  }
  
++export interface AcpClientState {
++  readonly accessToken: string | null;
++  readonly refreshToken: string | null;
++  readonly sessionId: string | null;
++}
++
  type AcpClientRaw = {
-@@ -34,6 +40,20 @@ type AcpClientRaw = {
-   readonly notify: (method: string, payload: unknown) => Effect.Effect<void, AcpError.AcpError>;
- };
+   readonly notifications: Stream.Stream<AcpProtocol.AcpIncomingNotification>;
+   readonly request: (method: string, payload: unknown) => Effect.Effect<unknown, AcpError.AcpError>;
+@@ -108,6 +116,8 @@ export interface AcpClientShape {
  
-+interface TokenState {
-+  readonly accessToken: string;
-+  readonly refreshToken: string;
-+  readonly expiresAt: number;
-+}
+ export class AcpClient extends Context.Tag("AcpClient")<AcpClient, AcpClientShape>() {}
+ 
++const ACP_CLIENT_STATE = Context.Tag<AcpClientState>("AcpClientState");
 +
-+interface SessionState {
-+  readonly sessionId: string;
-+  readonly tokenState: TokenState;
-+}
+ const makeRawClient = Effect.gen(function* () {
+   const stdio = yield* Stdio.Stdio;
+   const options = yield* Effect.context<AcpClientOptions | never>().pipe(
+@@ -115,6 +125,8 @@ const makeRawClient = Effect.gen(function* () {
+     Effect.orElseSucceed(() => ({}))
+   );
+ 
++  const stateRef = yield* FiberRef.make<AcpClientState>({ accessToken: null, refreshToken: null, sessionId: null });
 +
-+type RequestQueueItem = {
-+  readonly resolve: (value: unknown) => void;
-+  readonly reject: (error: unknown) => void;
-+  readonly execute: Effect.Effect<unknown, AcpError.AcpError>;
-+};
+   const childProcess = yield* ChildProcessSpawner.create({
+     command: "node",
+     args: ["--experimental-strip-types", new URL("./server.ts", import.meta.url).pathname],
+@@ -157,6 +169,8 @@ const makeRawClient = Effect.gen(function* () {
+     Effect.map((response) => response.result)
+   );
+ 
++  const requestQueue: Array<{ resolve: (value: unknown) => void; reject: (error: unknown) => void; method: string; payload: unknown }> = [];
 +
- export interface AcpClientShape {
-   readonly raw: AcpClientRaw;
-   readonly agent: {
-@@ -91,4 +111,232 @@ export interface AcpClientShape {
-      */
-     readonly closeSession: (
-       payload: AcpSchema.CloseSessionRequest,
--    ) => Effect.Effect<AcpSchema.CloseSessionResponse, AcpError.Ac
-+    ) => Effect.Effect<AcpSchema.CloseSessionResponse, AcpError.AcpError>;
-+  };
-+}
-+
-+const makeAcpClient = Effect.gen(function* () {
-+  const options = yield* AcpClientOptions;
-+  const requestQueue: Array<RequestQueueItem> = [];
+   const notifications = Stream.fromQueue(notificationQueue).pipe(
+     Stream.tap((notification) => {
+       if (options.logIncoming) {
+@@ -175,6 +189,8 @@ const makeRawClient = Effect.gen(function* () {
+     })
+   );
+ 
 +  let isReAuthenticating = false;
-+  let currentSessionState: SessionState | null = null;
 +
-+  const sessionStateRef = yield* FiberRef.make<SessionState | null>(null);
-+  const isReAuthenticatingRef = yield* FiberRef.make(false);
-+  const requestQueueRef = yield* FiberRef.make<Array<RequestQueueItem>>([]);
+   const request = (method: string, payload: unknown): Effect.Effect<unknown, AcpError.AcpError> =>
+     Effect.gen(function* () {
+       const id = crypto.randomUUID();
+@@ -183,6 +199,8 @@ const makeRawClient = Effect.gen(function* () {
+         jsonrpc: "2.0",
+         method,
+         params: payload,
++        ...(state.accessToken ? { headers: { Authorization: `Bearer ${state.accessToken}` } } : {}),
+       };
+ 
+       if (options.logOutgoing) {
+@@ -196,6 +214,8 @@ const makeRawClient = Effect.gen(function* () {
+         Effect.map((response) => response.result)
+       );
+ 
++      const state = yield* FiberRef.get(stateRef);
 +
-+  const setSessionState = (state: SessionState | null) => {
-+    currentSessionState = state;
-+    return FiberRef.set(sessionStateRef, state);
-+  };
-+
-+  const getSessionState = (): SessionState | null => currentSessionState;
-+
-+  const setIsReAuthenticating = (value: boolean) => {
-+    isReAuthenticating = value;
-+    return FiberRef.set(isReAuthenticatingRef, value);
-+  };
-+
-+  const getIsReAuthenticating = (): boolean => isReAuthenticating;
-+
-+  const addToQueue = (item: RequestQueueItem) => {
-+    requestQueue.push(item);
-+    return FiberRef.set(requestQueueRef, [...requestQueue]);
-+  };
-+
-+  const getQueue = (): Array<RequestQueueItem> => [...requestQueue];
-+
-+  const clearQueue = () => {
-+    requestQueue.length = 0;
-+    return FiberRef.set(requestQueueRef, []);
-+  };
-+
-+  const processQueue = (success: boolean) => {
-+    const queue = getQueue();
-+    clearQueue();
-+    for (const item of queue) {
-+      if (success) {
-+        item.resolve(item.execute);
-+      } else {
-+        item.reject(new AuthenticationError("Re-authentication failed"));
+       const result = yield* Effect.race(
+         responseEffect,
+         Effect.gen(function* () {
+@@ -206,6 +226,75 @@ const makeRawClient = Effect.gen(function* () {
+         })
+       );
+ 
++      if (result === "401") {
++        return yield* Effect.fail(new AcpError.AuthenticationError("Unauthorized"));
 +      }
-+    }
-+    return Effect.void;
-+  };
 +
-+  const reAuthenticate = Effect.gen(function* () {
-+    const sessionState = getSessionState();
-+    if (!sessionState) {
-+      return yield* new AuthenticationError("No session to re-authenticate");
-+    }
++      return result;
++    }).pipe(
++      Effect.catchAll((error) => {
++        if (error instanceof AcpError.AuthenticationError) {
++          return Effect.gen(function* () {
++            const state = yield* FiberRef.get(stateRef);
 +
-+    yield* setIsReAuthenticating(true);
++            if (isReAuthenticating) {
++              return yield* Effect.async<unknown, AcpError.AcpError>((resume) => {
++                requestQueue.push({
++                  resolve: (value) => resume(Effect.succeed(value)),
++                  reject: (error) => resume(Effect.fail(error)),
++                  method,
++                  payload,
++                });
++              });
++            }
 +
-+    const oldSessionId = sessionState.sessionId;
++            isReAuthenticating = true;
 +
-+    if (options?.onSessionExpired) {
-+      yield* options.onSessionExpired(oldSessionId);
-+    }
++            const reAuthEffect = Effect.gen(function* () {
++              if (state.sessionId && options.onSessionExpired) {
++                yield* options.onSessionExpired(state.sessionId);
++              }
 +
-+    const cleanupEffect = Effect.sync(() => {
-+      currentSessionState = null;
-+    });
++              if (!state.refreshToken) {
++                return yield* Effect.fail(new AcpError.AuthenticationError("No refresh token available"));
++              }
 +
-+    const acquireEffect = Effect.sync(() => {
-+      return { oldSessionId };
-+    });
++              const refreshResponse = yield* Effect.tryPromise({
++                try: () => fetch("/auth/refresh", {
++                  method: "POST",
++                  headers: { "Content-Type": "application/json" },
++                  body: JSON.stringify({ refreshToken: state.refreshToken }),
++                }),
++                catch: () => new AcpError.AuthenticationError("Refresh failed"),
++              });
 +
-+    const releaseEffect = (resource: { oldSessionId: string }) => {
-+      return Effect.sync(() => {
-+        currentSessionState = null;
-+      });
-+    };
++              if (!refreshResponse.ok) {
++                return yield* Effect.fail(new AcpError.AuthenticationError("Refresh failed"));
++              }
 +
-+    yield* Effect.acquireRelease(
-+      acquireEffect,
-+      releaseEffect
++              const newTokens = yield* Effect.tryPromise({
++                try: () => refreshResponse.json(),
++                catch: () => new AcpError.AuthenticationError("Failed to parse refresh response"),
++              });
++
++              yield* FiberRef.set(stateRef, {
++                accessToken: newTokens.accessToken,
++                refreshToken: newTokens.refreshToken ?? state.refreshToken,
++                sessionId: newTokens.sessionId ?? state.sessionId,
++              });
++
++              return yield* request(method, payload);
++            }).pipe(
++              Effect.acquireRelease(
++                Effect.succeed(void 0),
++                () => Effect.sync(() => { isReAuthenticating = false; })
++              )
++            );
++
++            return yield* Effect.retry(reAuthEffect, { schedule: Schedule.once, while: (error) => error instanceof AcpError.AuthenticationError });
++          });
++        }
++        return Effect.fail(error);
++      })
 +    );
 +
-+    const newTokenState: TokenState = {
-+      accessToken: `new_access_${Date.now()}`,
-+      refreshToken: sessionState.tokenState.refreshToken,
-+      expiresAt: Date.now() + 3600000,
-+    };
-+
-+    const newSessionState: SessionState = {
-+      sessionId: `session_${Date.now()}`,
-+      tokenState: newTokenState,
-+    };
-+
-+    yield* setSessionState(newSessionState);
-+    yield* setIsReAuthenticating(false);
-+
-+    return newSessionState;
-+  });
-+
-+  const retrySchedule = Effect.retry({
-+    schedule: Schedule.recurs(1),
-+    while: (error: AcpError.AcpError) => {
-+      return error._tag === "AcpError" && (error as any).status === 401;
-+    },
-+  });
-+
-+  const executeWithRetry = <A>(effect: Effect.Effect<A, AcpError.AcpError>) => {
-+    return Effect.gen(function* () {
-+      const result = yield* effect.pipe(
-+        Effect.catchAll((error) => {
-+          if (
-+            error._tag === "AcpError" &&
-+            (error as any).status === 401
-+          ) {
-+            return Effect.gen(function* () {
-+              if (getIsReAuthenticating()) {
-+                return yield* Effect.async<A, AcpError.AcpError>((resume) => {
-+                  addToQueue({
-+                    resolve: (value) => resume(Effect.succeed(value as A)),
-+                    reject: (error) => resume(Effect.fail(error as AcpError.AcpError)),
-+                    execute: effect
+       return result;
+     });
+ 
+@@ -215,6 +304,8 @@ const makeRawClient = Effect.gen(function* () {
+       jsonrpc: "2.0",
+       method,
+       params: payload,
++      ...(state.accessToken ? { headers: { Authorization: `Bearer ${state.accessToken
