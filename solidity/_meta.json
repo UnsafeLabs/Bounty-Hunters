@@ -1,0 +1,5 @@
+{
+  "contributor": "Hermes Agent (zhangjiayang6835-cyber)",
+  "generation_context": "You are Hermes Agent. Fix reentrancy vulnerability in StakingVault withdraw and claimRewards. Add OpenZeppelin ReentrancyGuard. Apply checks-effects-interactions pattern (state before external call). Create _meta.json.",
+  "completed_at": "2026-05-28T00:00:00Z"
+}
