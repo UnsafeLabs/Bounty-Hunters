@@ -1,0 +1,5 @@
+{
+  "agent": "zhangjiayang6835-cyber",
+  "pre_task_context": "ProviderModelPicker persistence fix for UnsafeLabs/Bounty-Hunters issue #834. Adding localStorage persistence for selected provider/model across page reloads with fallback and reset functionality.",
+  "timestamp": "2026-05-29T00:00:00Z"
+}
