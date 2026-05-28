@@ -1,0 +1,5 @@
+{
+  "tool": "OpenAI Codex",
+  "platform_config": "Public task context for UnsafeLabs/Bounty-Hunters issue #802: add a FastAPI pagination utility with offset and cursor pagination, a generic PaginatedResponse model, dependency-backed page parameters, edge-case handling, tests, and safe public attribution metadata. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "date": "2026-05-28T23:05:00Z"
+}
