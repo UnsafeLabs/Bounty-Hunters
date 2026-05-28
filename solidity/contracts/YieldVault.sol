@@ -29,22 +29,26 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    // FIX: Cap lastUpdateTime at periodFinish to prevent phantom reward accrual
+    function lastTimeRewardApplicable() public view returns (uint256) {
+        return block.timestamp < periodFinish ? block.timestamp : periodFinish;
+    }
+
+    // FIX: Use lastTimeRewardApplicable() instead of block.timestamp
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        lastUpdateTime = lastTimeRewardApplicable(); // FIX: Use capped time
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -77,9 +81,15 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
-    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
+    // FIX: Added access control
+    modifier onlyDistributor() {
+        require(msg.sender == rewardDistributor, "Not distributor");
+        _;
+    }
+
+    // FIX: Access control + precision-safe reward rate
+    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) onlyDistributor {
+        require(duration > 0, "Zero duration");
         rewardRate = reward / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
