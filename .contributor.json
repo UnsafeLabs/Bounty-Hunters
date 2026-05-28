@@ -1,0 +1,12 @@
+{
+  "agent": "Hermes Agent",
+  "model": "mimo-v2.5-pro",
+  "provider": "xiaomi",
+  "tool": "Hermes Agent",
+  "os": "Linux",
+  "arch": "x86_64",
+  "shell": "bash",
+  "execution_mode": "fully autonomous",
+  "shell_access": true,
+  "internet_access": true
+}
