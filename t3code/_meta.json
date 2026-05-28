@@ -1,0 +1,7 @@
+{
+  "description": "T3Code monorepo turbo configuration",
+  "changes": [
+    "Added missing dependency chains for apps/server#build: packages/shared, packages/effect-acp, packages/effect-codex-app-server",
+    "Added apps/desktop#build with dependsOn apps/web#build and apps/server#build"
+  ]
+}

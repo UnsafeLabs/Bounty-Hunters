@@ -43,7 +43,17 @@
     },
     "apps/server#build": {
       "dependsOn": [
-        "packages/contracts#build"
+        "packages/contracts#build",
+        "packages/shared#build",
+        "packages/effect-acp#build",
+        "packages/effect-codex-app-server#build"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "apps/desktop#build": {
+      "dependsOn": [
+        "apps/web#build",
+        "apps/server#build"
       ],
       "outputs": ["dist/**"]
     },
