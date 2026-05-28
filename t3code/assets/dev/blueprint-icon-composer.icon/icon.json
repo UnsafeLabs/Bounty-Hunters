@@ -14,7 +14,10 @@
           "name": "gpt-image-1.5-kn76n9hynne5q3qxy3g91chp2d84t871",
           "position": {
             "scale": 1.05,
-            "translation-in-points": [0, 0]
+            "translation-in-points": [
+              0,
+              0
+            ]
           }
         },
         {
@@ -22,7 +25,10 @@
           "name": "T3",
           "position": {
             "scale": 10,
-            "translation-in-points": [0, 0]
+            "translation-in-points": [
+              0,
+              0
+            ]
           }
         },
         {
@@ -42,6 +48,9 @@
     }
   ],
   "supported-platforms": {
-    "squares": ["iOS", "macOS"]
+    "squares": [
+      "iOS",
+      "macOS"
+    ]
   }
 }

@@ -23,7 +23,9 @@
   },
   "customizations": {
     "vscode": {
-      "extensions": ["oxc.oxc-vscode"]
+      "extensions": [
+        "oxc.oxc-vscode"
+      ]
     }
   }
 }
