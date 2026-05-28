@@ -1,0 +1,5 @@
+{
+  "tool_name": "claude-code",
+  "boot_context": "FastAPI contributor. Working on fixing bytes/memoryview serialization in jsonable_encoder.",
+  "timestamp": "2026-05-28T12:00:00Z"
+}
