@@ -1,0 +1,5 @@
+{
+  "agent": "zhangjiayang6835-cyber",
+  "initial_directives": "Implement API authentication controller with token-based login and registration for Laravel. Create AuthController with register/login/logout methods, api.php routes, use Sanctum for token generation. Validates all inputs, returns proper JSON responses with correct HTTP status codes.",
+  "date": "2026-05-29T00:00:00Z"
+}
