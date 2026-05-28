@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract MultiSigWallet {
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+contract MultiSigWallet is ReentrancyGuard {
     address[] public owners;
     uint256 public required;
     uint256 public transactionCount;
@@ -37,8 +39,9 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
+    // FIXED: Added zero-address validation
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Invalid recipient");
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -70,13 +73,17 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
-        require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
-
+    // FIXED: Block-level confirmation snapshot + nonReentrant + CEI pattern
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
+        require(txId < transactionCount, "Tx does not exist");
         Transaction storage txn = transactions[txId];
+        require(!txn.executed, "Already executed");
+
+        // Snapshot confirmation count at execution time (blocks confirmation revocation during callback)
+        uint256 snapshotCount = getConfirmationCount(txId);
+        require(snapshotCount >= required, "Not enough confirmations");
+
+        // CEI: mark executed BEFORE external call
         txn.executed = true;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
