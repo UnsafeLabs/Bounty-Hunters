@@ -1,0 +1,40 @@
+// Add rebase conflict detection and resolution to GitManager
+import { Effect, pipe, Schema } from "@effect/platform/...";
+import { GitManager } from "./GitManager";
+
+export class GitManager {
+  constructor() {
+    this.rebase = this.rebase.bind(this);
+    this.getConflictFiles = this.getConflictFiles.bind(this);
+    this.abortRebase = this.abortRebase.bind(this);
+    this.continueRebase = this.continueRebase.bind(this);
+  }
+
+  rebase(branch: string) {
+    return pipe(
+      GitManager.run("git", ["rebase", branch]),
+      Effect.mapError(e => new GitError(e.message))
+    );
+  }
+
+  getConflictFiles() {
+    return pipe(
+      GitManager.run("git", ["diff", "--name-only", "--diff-filter=U"]),
+      Effect.mapError(e => new GitError(e.message))
+    );
+  }
+  
+  abortRebase() {
+    return pipe(
+      GitManager.run("git", ["rebase", "--abort"]),
+      Effect.mapError(e => new GitError(e.message))
+    );
+  }
+  
+  continueRebase() {
+    return pipe(
+      GitManager.run("git", ["rebase", "--continue"])),
+      Effect.mapError(e => new GitError(e.message))
+    );
+  }
+}
