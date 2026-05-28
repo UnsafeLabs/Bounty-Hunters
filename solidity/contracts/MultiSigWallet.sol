@@ -11,11 +11,28 @@ contract MultiSigWallet {
         uint256 value;
         bytes data;
         bool executed;
+        uint256 confirmationCount; // snapshot of confirmations at execution time
     }
 
     mapping(uint256 => Transaction) public transactions;
     mapping(uint256 => mapping(address => bool)) public confirmations;
     mapping(address => bool) public isOwner;
+
+    // Reentrancy guard
+    uint256 private constant NOT_ENTERED = 1;
+    uint256 private constant ENTERED = 2;
+    uint256 private _status;
+
+    error NotOwner();
+    error ZeroAddress();
+    error InvalidRequired();
+    error NoOwners();
+    error AlreadyExecuted();
+    error AlreadyConfirmed();
+    error NotConfirmed();
+    error NotEnoughConfirmations();
+    error ExecutionFailed();
+    error ReentrantCall();
 
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
@@ -23,66 +40,108 @@ contract MultiSigWallet {
     event Revoked(uint256 indexed txId, address indexed owner);
 
     modifier onlyOwner() {
-        require(isOwner[msg.sender], "Not owner");
+        if (!isOwner[msg.sender]) {
+            revert NotOwner();
+        }
         _;
     }
 
+    modifier nonReentrant() {
+        if (_status == ENTERED) {
+            revert ReentrantCall();
+        }
+        _status = ENTERED;
+        _;
+        _status = NOT_ENTERED;
+    }
+
     constructor(address[] memory _owners, uint256 _required) {
-        require(_owners.length > 0, "No owners");
-        require(_required > 0 && _required <= _owners.length, "Invalid required");
+        if (_owners.length == 0) {
+            revert NoOwners();
+        }
+        if (_required == 0 || _required > _owners.length) {
+            revert InvalidRequired();
+        }
         for (uint256 i = 0; i < _owners.length; i++) {
             isOwner[_owners[i]] = true;
         }
         owners = _owners;
         required = _required;
+        _status = NOT_ENTERED;
     }
 
-    // BUG: No zero-address validation on `to`
+    // Fix: Add zero-address validation
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        if (to == address(0)) {
+            revert ZeroAddress();
+        }
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
             value: value,
             data: data,
-            executed: false
+            executed: false,
+            confirmationCount: 0
         });
         emit Submitted(txId);
         return txId;
     }
 
     function confirmTransaction(uint256 txId) external onlyOwner {
-        require(!transactions[txId].executed, "Already executed");
-        require(!confirmations[txId][msg.sender], "Already confirmed");
+        if (transactions[txId].executed) {
+            revert AlreadyExecuted();
+        }
+        if (confirmations[txId][msg.sender]) {
+            revert AlreadyConfirmed();
+        }
         confirmations[txId][msg.sender] = true;
+        transactions[txId].confirmationCount++;
         emit Confirmed(txId, msg.sender);
     }
 
     function revokeConfirmation(uint256 txId) external onlyOwner {
-        require(!transactions[txId].executed, "Already executed");
-        require(confirmations[txId][msg.sender], "Not confirmed");
+        if (transactions[txId].executed) {
+            revert AlreadyExecuted();
+        }
+        if (!confirmations[txId][msg.sender]) {
+            revert NotConfirmed();
+        }
         confirmations[txId][msg.sender] = false;
+        transactions[txId].confirmationCount--;
         emit Revoked(txId, msg.sender);
     }
 
-    function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
-        for (uint256 i = 0; i < owners.length; i++) {
-            if (confirmations[txId][owners[i]]) count++;
-        }
-    }
-
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
-        require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
-
+    // Fix: Use stored confirmation count instead of iterating owners
+    // Fix: Snapshot confirmation count before execution
+    // Fix: Add nonReentrant modifier to prevent race condition during callback
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         Transaction storage txn = transactions[txId];
+        if (txn.executed) {
+            revert AlreadyExecuted();
+        }
+
+        // Snapshot the confirmation count before execution
+        // This prevents race conditions where confirmations change during callback
+        uint256 confirmCount = txn.confirmationCount;
+        if (confirmCount < required) {
+            revert NotEnoughConfirmations();
+        }
+
+        // Mark as executed BEFORE external call (CEI pattern)
         txn.executed = true;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
-        require(success, "Execution failed");
+        if (!success) {
+            // Revert execution status on failure
+            txn.executed = false;
+            revert ExecutionFailed();
+        }
 
         emit Executed(txId);
+    }
+
+    function getConfirmationCount(uint256 txId) public view returns (uint256) {
+        return transactions[txId].confirmationCount;
     }
 
     receive() external payable {}
