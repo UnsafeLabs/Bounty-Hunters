@@ -22,6 +22,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Session Driver Fallback
+    |--------------------------------------------------------------------------
+    |
+    | When the primary session driver is unavailable (e.g., Redis down,
+    | database connection failed), Laravel will fall back to this driver.
+    | The fallback ensures sessions continue to work gracefully.
+    |
+    | Supported: "file", "cookie", "array"
+    |
+    */
+
+    'fallback' => env('SESSION_FALLBACK_DRIVER', 'file'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Session Lifetime
     |--------------------------------------------------------------------------
     |
