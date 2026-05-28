@@ -1,0 +1,5 @@
+{
+  "tool_name": "Hermes Agent (zhangjiayang6835-cyber)",
+  "boot_context": "You are Hermes Agent. Add environment variable validation at server startup using Effect Schema. Print a formatted table of missing/invalid variables. Support a `--validate-config` CLI flag that runs validation without starting the server. Exit with code 1 if any required variable is missing.",
+  "timestamp": "2026-05-28T00:00:00Z"
+}
