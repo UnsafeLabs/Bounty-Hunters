@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -126,6 +127,7 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onReturnFocusToComposer?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +157,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
+  onReturnFocusToComposer,
 }: MessagesTimelineProps) {
   const rawRows = useMemo(
     () =>
@@ -253,6 +256,48 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [],
   );
 
+  const handleTimelineKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const activeRow = target?.closest<HTMLElement>("[data-timeline-row-id]");
+
+      if (event.key === "Escape") {
+        onReturnFocusToComposer?.();
+        return;
+      }
+
+      if (!activeRow) {
+        return;
+      }
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const rows = Array.from(
+          event.currentTarget.querySelectorAll<HTMLElement>("[data-timeline-row-id]"),
+        );
+        const currentIndex = rows.indexOf(activeRow);
+        if (currentIndex === -1) {
+          return;
+        }
+        const offset = event.key === "ArrowDown" ? 1 : -1;
+        const nextRow = rows[Math.min(rows.length - 1, Math.max(0, currentIndex + offset))];
+        nextRow?.focus();
+        return;
+      }
+
+      if (event.key === "Enter") {
+        const expandableControl = activeRow.querySelector<HTMLButtonElement>(
+          "button[aria-expanded]",
+        );
+        if (expandableControl) {
+          event.preventDefault();
+          expandableControl.click();
+        }
+      }
+    },
+    [onReturnFocusToComposer],
+  );
+
   if (rows.length === 0 && !isWorking) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -266,21 +311,31 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <LegendList<MessagesTimelineRow>
-          ref={listRef}
-          data={rows}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          estimatedItemSize={90}
-          initialScrollAtEnd
-          maintainScrollAtEnd
-          maintainScrollAtEndThreshold={0.1}
-          maintainVisibleContentPosition
-          onScroll={handleScroll}
-          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-          ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={TIMELINE_LIST_FOOTER}
-        />
+        <div
+          id="chat-messages"
+          role="log"
+          aria-label="Chat messages"
+          aria-live="polite"
+          aria-relevant="additions text"
+          className="h-full"
+          onKeyDown={handleTimelineKeyDown}
+        >
+          <LegendList<MessagesTimelineRow>
+            ref={listRef}
+            data={rows}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            estimatedItemSize={90}
+            initialScrollAtEnd
+            maintainScrollAtEnd
+            maintainScrollAtEndThreshold={0.1}
+            maintainVisibleContentPosition
+            onScroll={handleScroll}
+            className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListFooterComponent={TIMELINE_LIST_FOOTER}
+          />
+        </div>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );
@@ -310,6 +365,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
+      role="listitem"
+      tabIndex={0}
+      aria-label={timelineRowAriaLabel(row)}
     >
       {row.kind === "work" ? <WorkGroupSection groupedEntries={row.groupedEntries} /> : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
@@ -388,6 +446,19 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   );
 }
 
+function timelineRowAriaLabel(row: TimelineRow): string {
+  if (row.kind === "message") {
+    return `${row.message.role === "user" ? "User" : "Assistant"} message`;
+  }
+  if (row.kind === "work") {
+    return `Work log with ${row.groupedEntries.length} entries`;
+  }
+  if (row.kind === "proposed-plan") {
+    return "Proposed plan";
+  }
+  return "Assistant working";
+}
+
 function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
   const ctx = use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);
@@ -400,6 +471,7 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
       disabled={activity.isRevertingCheckpoint || activity.isWorking}
       onClick={() => ctx.onRevertUserMessage(messageId)}
       title="Revert to this message"
+      aria-label="Revert to this message"
     >
       <Undo2Icon className="size-3" />
     </Button>
@@ -621,6 +693,10 @@ const WorkGroupSection = memo(function WorkGroupSection({
             <button
               type="button"
               className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
+              aria-expanded={isExpanded}
+              aria-label={
+                isExpanded ? "Collapse work log" : `Show ${hiddenCount} more work log entries`
+              }
               onClick={() => setIsExpanded((v) => !v)}
             >
               {isExpanded ? "Show less" : `Show ${hiddenCount} more`}

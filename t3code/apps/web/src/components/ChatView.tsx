@@ -3550,6 +3550,20 @@ export default function ChatView(props: ChatViewProps) {
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <nav
+            aria-label="Chat skip links"
+            className="sr-only focus-within:not-sr-only focus-within:absolute focus-within:z-50 focus-within:flex focus-within:gap-2 focus-within:rounded-md focus-within:border focus-within:border-border focus-within:bg-background focus-within:p-2"
+          >
+            <a href="#chat-sidebar" className="underline">
+              Skip to sidebar
+            </a>
+            <a href="#chat-messages" className="underline">
+              Skip to chat messages
+            </a>
+            <a href="#chat-composer" className="underline">
+              Skip to composer
+            </a>
+          </nav>
           {/* Messages Wrapper */}
           <div className="relative flex min-h-0 flex-1 flex-col">
             {/* Messages — LegendList handles virtualization and scrolling internally */}
@@ -3577,6 +3591,7 @@ export default function ChatView(props: ChatViewProps) {
               workspaceRoot={activeWorkspaceRoot}
               skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
               onIsAtEndChange={onIsAtEndChange}
+              onReturnFocusToComposer={focusComposer}
             />
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
@@ -3586,6 +3601,7 @@ export default function ChatView(props: ChatViewProps) {
                   type="button"
                   onClick={() => scrollToEnd(true)}
                   className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
+                  aria-label="Scroll to latest message"
                 >
                   <ChevronDownIcon className="size-3.5" />
                   Scroll to bottom
@@ -3605,7 +3621,7 @@ export default function ChatView(props: ChatViewProps) {
           >
             <div className="relative isolate">
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
-              <div className="relative z-10">
+              <div id="chat-composer" className="relative z-10" tabIndex={-1}>
                 <ChatComposer
                   composerRef={composerRef}
                   composerDraftTarget={composerDraftTarget}

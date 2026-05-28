@@ -133,6 +133,24 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
+  it("marks the message timeline as a live keyboard-navigable log", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildUserTimelineEntry("Keyboard reachable message.")]}
+      />,
+    );
+
+    expect(markup).toContain('id="chat-messages"');
+    expect(markup).toContain('role="log"');
+    expect(markup).toContain('aria-live="polite"');
+    expect(markup).toContain('aria-relevant="additions text"');
+    expect(markup).toContain('role="listitem"');
+    expect(markup).toContain('tabindex="0"');
+    expect(markup).toContain('aria-label="User message"');
+  });
+
   it("does not render collapse controls for short user messages", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
