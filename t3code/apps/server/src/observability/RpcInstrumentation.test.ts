@@ -1,4 +1,4 @@
-import { assert, describe, it } from "@effect/vitest";
+import { assert, it } from "@effect/vitest";
 import { WS_METHODS } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -14,6 +14,7 @@ import {
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./RpcInstrumentation.ts";
+import { makeMetricsAggregatorTestLayer } from "./MetricsAggregator.ts";
 
 const hasMetricSnapshot = (
   snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
@@ -64,7 +65,7 @@ const collectSpanNames = <A, E, R>(
     return spanNames;
   });
 
-describe("RpcInstrumentation", () => {
+it.layer(makeMetricsAggregatorTestLayer())("RpcInstrumentation", (it) => {
   it.effect("records success metrics for unary RPC handlers", () =>
     Effect.gen(function* () {
       yield* observeRpcEffect("rpc.instrumentation.success", Effect.succeed("ok"), {

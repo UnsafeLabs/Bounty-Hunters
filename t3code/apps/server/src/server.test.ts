@@ -88,6 +88,11 @@ import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
 } from "./observability/Services/BrowserTraceCollector.ts";
+import {
+  METRICS_AGGREGATED_PATH,
+  MetricsAggregator,
+  type MetricsAggregatorShape,
+} from "./observability/MetricsAggregator.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import {
   ProjectSetupScriptRunner,
@@ -333,6 +338,7 @@ const buildAppUnderTest = (options?: {
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
     browserTraceCollector?: Partial<BrowserTraceCollectorShape>;
+    metricsAggregator?: Partial<MetricsAggregatorShape>;
     serverLifecycleEvents?: Partial<ServerLifecycleEventsShape>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
     serverEnvironment?: Partial<ServerEnvironmentShape>;
@@ -723,6 +729,15 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provideMerge(makeAuthTestLayer()),
+      Layer.provide(
+        Layer.mock(MetricsAggregator)({
+          record: () => Effect.void,
+          recordAt: () => Effect.void,
+          rotate: Effect.void,
+          snapshot: Effect.succeed([]),
+          ...options?.layers?.metricsAggregator,
+        }),
+      ),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),
@@ -1289,6 +1304,52 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.status, 401);
       assertBrowserApiCorsHeaders(response.headers);
       assert.equal(body.error, "Authentication required.");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves authenticated aggregated metrics windows", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          metricsAggregator: {
+            snapshot: Effect.succeed([
+              {
+                timestamp: "1970-01-01T00:01:00.000Z",
+                windowStart: "1970-01-01T00:00:00.000Z",
+                windowEnd: "1970-01-01T00:01:00.000Z",
+                windowStartMs: 0,
+                windowEndMs: 60_000,
+                methods: [
+                  {
+                    method: "server.getConfig",
+                    requestCount: 2,
+                    errorCount: 1,
+                    errorRate: 50,
+                    throughput: 2 / 60,
+                    p50LatencyMs: 10,
+                    p95LatencyMs: 25,
+                    p99LatencyMs: 25,
+                  },
+                ],
+              },
+            ]),
+          },
+        },
+      });
+
+      const response = yield* HttpClient.get(METRICS_AGGREGATED_PATH, {
+        headers: {
+          cookie: yield* getAuthenticatedSessionCookieHeader(),
+        },
+      });
+      const body = (yield* response.json) as ReadonlyArray<{
+        readonly methods: ReadonlyArray<{ readonly method: string; readonly errorRate: number }>;
+      }>;
+
+      assert.equal(response.status, 200);
+      assert.equal(body.length, 1);
+      assert.equal(body[0]?.methods[0]?.method, "server.getConfig");
+      assert.equal(body[0]?.methods[0]?.errorRate, 50);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

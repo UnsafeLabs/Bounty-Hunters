@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Public task context for UnsafeLabs/Bounty-Hunters issue #856: add sliding-window RPC metrics aggregation in the T3 server observability layer with per-method p50/p95/p99 latency, error rate, throughput, bounded 60-window retention, an authenticated /metrics/aggregated JSON endpoint, focused tests, and safe public generation metadata. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "date": "2026-05-28T23:45:00Z"
+}
