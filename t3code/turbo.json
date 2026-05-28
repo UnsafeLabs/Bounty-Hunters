@@ -34,6 +34,14 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "dist-electron/**"]
     },
+    "apps/web#build": {
+      "dependsOn": ["packages/contracts#build", "packages/client-runtime#build"],
+      "outputs": ["dist/**"]
+    },
+    "apps/server#build": {
+      "dependsOn": ["packages/contracts#build"],
+      "outputs": ["dist/**"]
+    },
     "dev": {
       "dependsOn": ["@t3tools/contracts#build"],
       "cache": false,
