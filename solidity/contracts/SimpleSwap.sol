@@ -39,23 +39,25 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+    uint256 amountIn,
+    uint256 amountOut,
+    uint256 minAmountOut,
+    uint256 deadline,
+    uint256 constantProduct
+) public returns (uint256) {
+    require(block.timestamp <= deadline, "Deadline exceeded");
+    require(amountOut >= minAmountOut, "Slippage exceeded");
+    
+    // Transfer tokens from user to pool
+    tokenIn.transferFrom(msg.sender, address(this), amountIn);
 
-        // constant product formula: x * y = k
-        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+    // Calculate fee amount
+    uint256 feeAmount = (amountIn * fee) / 10000;
+    
+    return amountOut;
+}
 
-        outputToken.transfer(msg.sender, amountOut);
-    }
-
-    function swap(address tokenIn, uint amountIn, address tokenOut, uint minAmountOut, uint deadline) public {
-        require(block.timestamp <= deadline, "Transaction deadline exceeded");
-        uint256 amountOut = getAmountOut(tokenIn, tokenOut, amountIn);
-        require(amountOut >= minAmountOut, "Slippage exceeded");
-        require(amountOut > 0, "Amount out must be greater than zero");
-        require(IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn), "Transfer failed");
-        require(IERC20(tokenOut).transfer(msg.sender, amountOut), "Transfer failed");
-        }
+// Transfer tokens from pool to user
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
