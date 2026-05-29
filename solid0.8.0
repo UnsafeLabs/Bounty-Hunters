@@ -1,0 +1,50 @@
+        uint256 elapsed = block.timestamp - start;
+        
+        // Calculate vested amount with overflow protection
+        // Use safe calculation: divide before multiply to prevent overflow
+        uint256 ratio = elapsed * 1e18 / duration; // Scale up for precision
+        uint256 vested = totalAllocation * ratio / 1e18;
+        
+        // Better approach: use SafeMath division before multiplication
+        uint256 fullVestedAmount = totalAllocation / duration * elapsed;
+        uint256 remainder = totalAllocation % duration;
+        uint256 vestedWithRemainder = vested + (remainder * elapsed / duration);
+        return vestedWithRemainder;
+    }
+
+    }
+
+    function revocableAmount(address _token) public view returns (uint256) {
+        // If revoked during cliff period, return full unvested amount
+        if (block.timestamp <= start + cliff) {
+            return totalAllocation - claimed;
+        }
+        // After cliff, return unvested portion only
+        if (revoked[msg.sender][_token] == true) {
+            return 0;
+        }
+        return totalAllocation - vested;
+    }
+
+    }
+
+    function vestedAmount(uint256 totalAllocation, uint256 start, uint256 cliff, uint256 duration) public view returns (uint256) {
+        // Handle the case where we're before cliff period
+        if (block.timestamp <= start + cliff) {
+            return 0;
+        }
+        
+        // Calculate elapsed time since vesting start
+        uint256 elapsed = block.timestamp - start;
+        
+        // Calculate with safe math to prevent overflow
+        if (elapsed > duration) {
+            // Cap elapsed at duration to prevent overpayment
+            elapsed = duration;
+        }
+        
+        // Use safe calculation: handle remainder to prevent token loss
+        uint256 baseVested = totalAllocation / duration * elapsed;
+        uint256 remainderVested = (totalAllocation % duration) * elapsed / duration;
+        return baseVested + remainderVested;
+    }
