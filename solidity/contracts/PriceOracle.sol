@@ -1,4 +1,61 @@
 // SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import "hardhat/console.sol";
+
+contract PriceOracle {
+    uint256 public constant MAX_STALENESS = 3600;
+    address public owner;
+    address public primaryOracle;
+    address public secondaryOracle;
+    address public fallbackOracle;
+
+    event StalePrice(address indexed oracle, uint256 timestamp);
+
+    constructor(address _primaryOracle, address _fallbackOracle) {
+        owner = msg.sender;
+        primaryOracle = _primaryOracle;
+        fallbackOracle = _fallbackOracle;
+    }
+
+    function getPrice(address token) public view returns (int256) {
+        (bool success, int256 price) = _getPriceFromOracle(primaryOracle);
+        if (!success) {
+            (, int256 fallbackPrice) = _getPriceFromOracle(fallbackOracle);
+            if (fallbackPrice == 0) {
+                revert("Both oracles returned stale data");
+            }
+            emit StalePrice(primaryOracle, block.timestamp);
+            return fallbackPrice;
+        }
+        return price;
+    }
+
+    function _getPriceFromOracle(address oracle) private view returns (bool success, int256 price) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(oracle);
+        (uint80 roundId, int256 price, , uint256 updatedAt, ) = priceFeed.latestRoundData();
+        if (block.timestamp - updatedAt > MAX_STALENESS) {
+            return (false, 0);
+        }
+        if (price <= 0) {
+            return (false, 0);
+        }
+        if (updatedAt < block.timestamp - MAX_STALE1, "Stale price");
+        return (true, price);
+    }
+
+    function setPrimaryOracle(address _primaryOracle) public {
+        require(msg.sender == owner, "Only owner can set primary oracle");
+        primaryOracle = _primaryOracle;
+    }
+
+    function setFallbackOracle(address _fallbackOracle) public {
+        require(msg.sender == owner, "Only owner can set fallback oracle");
+        fallbackOracle = _fallbackOracle;
+    }
+}
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 interface AggregatorV3Interface {
@@ -52,92 +109,4 @@ contract PriceOracle {
         require(msg.sender == owner, "Not owner");
         MAX_STALENESS = _maxStaleness;
     }
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/FeedRegistryInterface.sol";
-import "@ chainlink/contracts/src/v0.8/Denominations.sol";
-
-contract PriceOracle {
-    address public owner;
-    address public primaryOracle;
-    address public secondaryOracle;
-    uint256 public MAX_STALENESS;
-    
-    mapping(address => uint256) public maxStalenessMap;
-    
-    event StalePrice(address indexed oracle, uint256 timestamp);
-    
-    constructor(address _primaryOracle, address _secondaryOracle) {
-        owner = msg.sender;
-        primaryOracle = _primaryOracle;
-        secondaryOracle = _secondaryOracle;
-        MAX_STALENESS = 3600; // 1 hour default
-    }
-    
-    function setMaxStaleness(uint256 _maxStaleness) public {
-        require(msg.sender == owner, "Only owner can set max staleness");
-        MAX_STALENESS = _maxStaleness;
-    }
-    
-    function setPrimaryOracle(address _oracle) public {
-        require(msg.sender == owner, "Only owner can set primary oracle");
-        primaryOracle = _oracle;
-    }
-    
-    function setSecondaryOracle(address _oracle) public {
-        require(msg.sender == owner, "Only owner can set secondary oracle");
-        secondaryOracle = _oracle;
-    }
-    
-    function getLatestPrice(address token) public returns (uint256) {
-        // First try primary oracle
-        AggregatorV3Interface primary = AggregatorV3Interface(primaryOracle);
-        (, int256 price, , uint256 updatedAt, ) = primary.latestRoundData();
-        
-        // Check if price is valid and not stale
-        require(price > 0, "Invalid price");
-        require(block.timestamp - updatedAt < MAX_STALENESS, "Stale price");
-        require(updatedAt <= block.timestamp, "Invalid timestamp");
-        
-        // Check round completeness
-        (uint80 roundId, int256 answer, , uint256 updatedAtPrimary, ) = primary.latestRoundData();
-        require(answer > 0, "Invalid price");
-        if (block.timestamp - updatedAtPrimary >= MAX_STALENESS) {
-            // Primary oracle is stale, try secondary
-            emit StalePrice(primaryOracle, updatedAtPrimary);
-            AggregatorV3Interface secondary = AggregatorV3Interface(secondaryOracle);
-            (, int256 secondaryPrice, , uint256 updatedAtSecondary, ) = secondary.latestRoundData();
-            require(secondaryPrice > 0, "Secondary oracle returned invalid price");
-            require(block.timestamp - updatedAtSecondary < MAX_STALENESS, "Secondary price is stale");
-            return uint256(secondaryPrice);
-        }
-        
-        // Check if the price is from a complete round
-        (uint80 roundId, int256 answer, , uint256 updatedAt, ) = primary.latestRoundData();
-        require(answer > 0, "Invalid price");
-        require(block.timestamp - updatedAt < MAX_STALENESS, "Stale price");
-        require(updatedAt <= block.timestamp, "Invalid timestamp");
-        
-        return uint256(answer);
-    }
-    
-    function getLatestPriceWithToken(address token) public returns (uint256) {
-        // First try primary oracle
-        AggregatorV3Interface primary = AggregatorV3Interface(primaryOracle);
-        (, int256 primaryPrice, , uint256 updatedAtPrimary, ) = primary.latestRoundData();
-        
-        // Check if price is valid and not stale
-        require(primaryPrice > 0, "Invalid price");
-        require(block.timestamp - updatedAtPrimary < MAX_STALENESS, "Stale price");
-        
-        // Check round completeness
-        (uint80 roundId, int256 answer, , uint256 updatedAt, ) = primary.latestRoundData();
-        require(answer > 0, "Invalid price");
-        require(block.timestamp - updatedAt < MAX_STALENESS, "Stale price");
-        
-        return uint256(answer);
-    }
-}
 }
