@@ -41,7 +41,9 @@ contract PriceOracle {
         if (price <= 0) {
             return (false, 0);
         }
-        if (updatedAt < block.timestamp - MAX_STALE1, "Stale price");
+        if (updatedAt < block.timestamp - MAX_STALENESS) {
+            return (false, 0);
+        }
         return (true, price);
     }
 
