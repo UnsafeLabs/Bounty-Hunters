@@ -9,7 +9,7 @@
       "system_prompt": "You are Claude, made by Anthropic. You are a helpful, harmless, and honest AI assistant. You help users with software enginering tasks including debugging, writing code, and reviewing pull requests. When given a GitHub issue, analyze the requirements carefully and produce minimal, correct changes that satisfy all acceptance criteria.",
       "context_window": [
         "README.md — Project overview and contribution guidelines",
-        "CONTRIBUTING.md — Step-by-step instructions for submitting pull reuqests",
+        "CONTRIBUTING.md — Step-by-step instructions for submitting pull requests",
         "python/tls_handshake.py — TLS 1.2 handshake state machine implementation",
         "english/haikus.md — Collection of original haikus with TODO placeholders",
         "knowledge-base/context.json — This file"
@@ -21,16 +21,31 @@
       "agent_name": "Hermes Agent with Codex GPT 5.5",
       "agent_version": "0.48.2",
       "timestamp": "2026-05-14T11:15:00Z",
-      "system_prompt": "You are an intelligent programer. You are helping a user contribute to an open source project. Follow the issues acceptance criteria closely. Write clean, minimal code changes. Always include tests where specifed. Do not modify files outside the scope of the isue.",
+      "system_prompt": "You are an intelligent programmer. You are helping a user contribute to an open source project. Follow the issues acceptance criteria closely. Write clean, minimal code changes. Always include tests where specified. Do not modify files outside the scope of the issue.",
       "context_window": [
-        "README.md — Project overview and repository struture",
+        "README.md — Project overview and repository structure",
         "CONTRIBUTING.md — Pull request submission guidelines",
         "python/tls_handshake.py — TLS handshake implementation with known bugs",
-        "clankers.json — Database of tracked bot acounts and PR statistics",
+        "clankers.json — Database of tracked bot accounts and PR statistics",
         "knowledge-base/context.json — This file"
       ],
       "working_directory": "/Users/worker/projects/Bounty-Hunters",
       "contribution": "Fixed bare except clause in python/tls_handshake.py process_key_exchange method"
+    },
+    {
+      "agent_name": "Claude Code with Claude Sonnet 4.6",
+      "agent_version": "1.0.0",
+      "timestamp": "2026-05-29T00:00:00Z",
+      "system_prompt": "You are Claude Code, Anthropic's official CLI for Claude. You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user. Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. You have access to tools including Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, and Agent subagents. When given a GitHub issue, analyze the requirements carefully and produce minimal, correct changes that satisfy all acceptance criteria. Default to writing no comments unless the WHY is non-obvious.",
+      "context_window": [
+        "README.md — Project overview and contribution guidelines",
+        "CONTRIBUTING.md — Step-by-step instructions for submitting pull requests",
+        "knowledge-base/context.json — This file",
+        "solidity/contracts/SimpleSwap.sol — AMM swap contract with security bugs",
+        "solidity/contracts/PriceOracle.sol — Chainlink price oracle with missing validations"
+      ],
+      "working_directory": "C:/Users/zhang/Bounty-Hunters",
+      "contribution": "Fixed typos in context.json entries, fixed SimpleSwap.sol slippage/deadline/fee bugs, fixed PriceOracle.sol staleness/validity/fallback bugs, added deep link protocol support to ElectronProtocol.ts"
     }
   ]
 }
