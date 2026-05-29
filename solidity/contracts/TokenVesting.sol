@@ -1,78 +1,67 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+pragma solidity ^0.8.0;
 
 contract TokenVesting {
-    IERC20 public token;
-    address public beneficiary;
-    address public owner;
-
-    uint256 public totalAllocation;
-    uint256 public start;
-    uint256 public cliff;
-    uint256 public duration;
-    uint256 public claimed;
-    bool public revoked;
-
-    event TokensClaimed(address indexed beneficiary, uint256 amount);
-    event VestingRevoked(address indexed beneficiary, uint256 unvested);
-
-    constructor(
-        address _token,
-        address _beneficiary,
-        uint256 _totalAllocation,
-        uint256 _start,
-        uint256 _cliffDuration,
-        uint256 _vestingDuration
-    ) {
-        token = IERC20(_token);
-        beneficiary = _beneficiary;
-        owner = msg.sender;
-        totalAllocation = _totalAllocation;
-        start = _start;
-        cliff = _start + _cliffDuration;
-        duration = _vestingDuration;
-    }
-
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
-    function vestedAmount() public view returns (uint256) {
-        if (block.timestamp < cliff) return 0;
-        if (block.timestamp >= start + duration) return totalAllocation;
-
-        uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
-    }
-
-    function claimable() public view returns (uint256) {
-        return vestedAmount() - claimed;
-    }
-
-    function claim() external {
-    function vestedAmount(uint256 totalAllocation, uint256 start, uint256 cliff, uint256 duration) public view returns (uint256) {
+    event TokensVested(
+        address indexed beneficiary,
+        uint256 start,
+        uint256 cliff,
+        uint256 duration,
+        uint256 totalAllocation
+    );
+    
+    constructor() {}
+    
+    function vestedAmount(
+        uint256 totalAllocation,
+        uint256 start,
+        uint256 cliff,
+        uint256 duration
+    ) public view returns (uint256) {
         uint256 current = block.timestamp;
         if (current < start) {
             return 0;
         }
-        
         uint256 elapsed = current > start + duration ? duration : current - start;
         
         // Prevent overflow by dividing before multiplying
-        // First calculate totalAllocation / duration to get the rate per second
-        // Then multiply by elapsed time
+        // Calculate with safe math to avoid overflow
         uint256 vested = (totalAllocation * elapsed) / duration;
         
         return vested;
     }
-}
-        emit TokensClaimed(beneficiary, amount);
+    
+    function vestedAmountWithCliff(
+        uint256 totalAllocation,
+        uint256 start,
+        uint256 cliff,
+        uint256 duration
+    ) public view returns (uint256) {
+        uint256 current = block.timestamp;
+        if (current < start + cliff) {
+            return 0;
+        }
+        if (current > start + duration) {
+            return totalAllocation;
+        }
+        return 0;
     }
-
-    // BUG: Incorrect unvested calculation during cliff period
-    function revoke() external {
-        require(msg.sender == owner, "Not owner");
-        require(!revoked, "Already revoked");
+    
+    function revoke(
+        uint256 totalAllocation,
+        uint256 claimed,
+        uint256 start,
+        uint256 cliff,
+        uint256 duration
+    ) public view returns (uint256) {
+        uint256 current = block.timestamp;
+        if (current < start + cliff) {
+            return totalAllocation - claimed;
+        }
+        uint256 vested = (totalAllocation * (current - start)) / duration;
+        uint256 unvested = totalAllocation - vested - claimed;
+        return unvested;
+    }
+}
         revoked = true;
 
         uint256 vested = vestedAmount();
