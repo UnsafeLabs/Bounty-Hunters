@@ -1,16 +1,97 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-// Flash loan contract with security fixes
-contract FlashLoan {
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-interface IFlashLoanReceiver {
-    function onFlashLoan(address token, uint256 amount, uint256 fee, bytes calldata data) external;
+/// @title FlashLoan
+/// @notice Contract for providing uncollateralized loans within a single transaction
+/// @dev Implements flash loan functionality with security measures
+contract FlashLoan is ReentrancyGuard, Ownable, Pausable {
+    mapping(address => uint256) private poolBalances;
+    mapping(address => uint256) public feesEarned;
+    uint256 public feeBPS = 30; // 0.3% fee
+    uint256 public maxLoanPercentage = 50; // 50% max loan cap
+    
+    // Events
+    event FlashLoanExecuted(address indexed receiver, uint256 amount, uint256 fee);
+    event FeeUpdated(uint256 newFeeBPS);
+    event MaxLoanPercentageUpdated(uint256 newMaxPercentage);
+    
+    constructor() {
+        // Initialize with zero values, mappings will be set up dynamically
+    }
+    
+    /// @notice Update fee basis points
+    /// @param newFeeBPS New fee in basis points
+    function setFeeBPS(uint256 newFeeBPS) external onlyOwner {
+        feeBPS = newFeeBPS;
+        emit FeeUpdated(newFeeBPS);
+    }
+    
+    /// @notice Update maximum loan percentage
+    /// @param newMaxLoanPercentage New maximum loan percentage (0-100)
+    function setMaxLoanPercentage(uint256 newMaxLoanPercentage) external onlyOwner {
+        maxLoanPercentage = newMaxLoanPercentage;
+        emit MaxLoanPercentageUpdated(newMaxLoanPercentage);
+    }
+    
+    /// @notice Execute a flash loan
+    /// @param tokenAddress Token to borrow
+    /// @param amount Amount to borrow
+    /// @param data Callback data
+    function flashLoan(
+        address tokenAddress,
+        uint256 amount,
+        bytes calldata data
+    ) external whenNotPaused nonReentrant {
+        require(amount > 0, "Amount must be greater than 0");
+        require(tokenAddress != address(0), "Invalid token address");
+        
+        // Check if loan amount exceeds max cap (50% of pool balance)
+        uint256 poolBalance = IERC20(tokenAddress).balanceOf(address(this));
+        require(amount <= (poolBalance * maxLoanPercentage) / 100, "Loan amount exceeds pool cap");
+        
+        // Calculate fee with minimum of 1
+        uint256 fee = (amount * feeBPS) / 10000;
+        if (fee == 0 && amount > 0) {
+            fee = 1; // Minimum fee of 1 token unit
+        }
+        
+        uint256 balanceBefore = IERC20(tokenAddress).balanceOf(address(this));
+        uint256 feeBalanceBefore = IERC20(tokenAddress).balanceOf(address(this));
+        
+        // Transfer tokens to borrower
+        IERC20(tokenAddress).transfer(msg.sender, amount);
+        
+        // Execute callback
+        (bool success, ) = msg.sender.call(data);
+        require(success, "Flash loan callback failed");
+        
+        // Check final balance includes fee
+        uint256 balanceAfter = IERC20(tokenAddress).balanceOf(address(this));
+        uint256 expectedBalance = balanceBefore + fee;
+        require(balanceAfter >= expectedBalance, "Insufficient fee paid");
+        
+        // Update fees earned
+        feesEarned[tokenAddress] += fee;
+        
+        // Record fee in pool
+        poolBalances[tokenAddress] = poolBalances[tokenAddress] + fee;
+    }
+    
+    /// @notice Set emergency pause state
+    /// @param paused Whether to pause or unpause
+    function setPaused(bool paused) external onlyOwner {
+        if (paused) {
+            _pause();
+        } else {
+            _unpause();
+        }
+    }
 }
-
-contract FlashLoan {
-    IERC20 public loanToken;
     uint256 public feeBPS; // fee in basis points
     uint256 public totalFees;
     address public owner;
