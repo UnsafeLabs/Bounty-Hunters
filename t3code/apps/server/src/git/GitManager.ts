@@ -20,6 +20,7 @@ import {
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
   GitPullRequestRefInput,
+  GitRebaseStateResult,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
   GitRunStackedActionResult,
@@ -80,6 +81,15 @@ export interface GitManagerShape {
   readonly preparePullRequestThread: (
     input: GitPreparePullRequestThreadInput,
   ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+  readonly getRebaseState: (
+    cwd: string,
+  ) => Effect.Effect<GitRebaseStateResult, GitManagerServiceError>;
+  readonly abortRebase: (
+    cwd: string,
+  ) => Effect.Effect<GitRebaseStateResult, GitManagerServiceError>;
+  readonly continueRebase: (
+    cwd: string,
+  ) => Effect.Effect<GitRebaseStateResult, GitManagerServiceError>;
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
@@ -1553,6 +1563,22 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     }).pipe(Effect.ensuring(invalidateStatus(input.cwd)));
   });
 
+  const getRebaseState: GitManagerShape["getRebaseState"] = Effect.fn("getRebaseState")(
+    function* (cwd) {
+      return yield* gitCore.getRebaseState(cwd);
+    },
+  );
+
+  const abortRebase: GitManagerShape["abortRebase"] = Effect.fn("abortRebase")(function* (cwd) {
+    return yield* gitCore.abortRebase(cwd).pipe(Effect.ensuring(invalidateStatus(cwd)));
+  });
+
+  const continueRebase: GitManagerShape["continueRebase"] = Effect.fn("continueRebase")(
+    function* (cwd) {
+      return yield* gitCore.continueRebase(cwd).pipe(Effect.ensuring(invalidateStatus(cwd)));
+    },
+  );
+
   const runFeatureBranchStep = Effect.fn("runFeatureBranchStep")(function* (
     modelSelection: ModelSelection,
     cwd: string,
@@ -1777,6 +1803,9 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     invalidateStatus,
     resolvePullRequest,
     preparePullRequestThread,
+    getRebaseState,
+    abortRebase,
+    continueRebase,
     runStackedAction,
   } satisfies GitManagerShape;
 });

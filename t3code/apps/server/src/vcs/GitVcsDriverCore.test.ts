@@ -57,6 +57,21 @@ const git = (
     return result.stdout.trim();
   });
 
+const gitAllowNonZero = (
+  cwd: string,
+  args: ReadonlyArray<string>,
+): Effect.Effect<GitVcsDriver.ExecuteGitResult, GitCommandError, GitVcsDriver.GitVcsDriver> =>
+  Effect.gen(function* () {
+    const driver = yield* GitVcsDriver.GitVcsDriver;
+    return yield* driver.execute({
+      operation: "GitVcsDriver.test.gitAllowNonZero",
+      cwd,
+      args,
+      allowNonZeroExit: true,
+      timeoutMs: 10_000,
+    });
+  });
+
 const initRepoWithCommit = (
   cwd: string,
 ): Effect.Effect<
@@ -127,6 +142,64 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(status.aheadCount, 0);
         assert.equal(status.behindCount, 0);
         assert.equal(status.aheadOfDefaultCount, 1);
+      }),
+    );
+
+    it.effect("detects conflicted files while a rebase is stopped", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "conflict.txt", "base\n");
+        yield* git(cwd, ["add", "conflict.txt"]);
+        yield* git(cwd, ["commit", "-m", "add conflict base"]);
+        yield* git(cwd, ["checkout", "-b", "feature/rebase-conflict"]);
+        yield* writeTextFile(cwd, "conflict.txt", "feature\n");
+        yield* git(cwd, ["commit", "-am", "feature change"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+        yield* writeTextFile(cwd, "conflict.txt", "main\n");
+        yield* git(cwd, ["commit", "-am", "main change"]);
+        yield* git(cwd, ["checkout", "feature/rebase-conflict"]);
+
+        const rebase = yield* gitAllowNonZero(cwd, ["rebase", initialBranch]);
+        assert.notEqual(rebase.exitCode, 0);
+
+        const state = yield* driver.getRebaseState(cwd);
+        assert.equal(state.inProgress, true);
+        assert.deepStrictEqual(state.conflictedFiles, ["conflict.txt"]);
+
+        const aborted = yield* driver.abortRebase(cwd);
+        assert.deepStrictEqual(aborted, { inProgress: false, conflictedFiles: [] });
+      }),
+    );
+
+    it.effect("continues a stopped rebase after conflicts are resolved", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "conflict.txt", "base\n");
+        yield* git(cwd, ["add", "conflict.txt"]);
+        yield* git(cwd, ["commit", "-m", "add conflict base"]);
+        yield* git(cwd, ["checkout", "-b", "feature/rebase-continue"]);
+        yield* writeTextFile(cwd, "conflict.txt", "feature\n");
+        yield* git(cwd, ["commit", "-am", "feature change"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+        yield* writeTextFile(cwd, "conflict.txt", "main\n");
+        yield* git(cwd, ["commit", "-am", "main change"]);
+        yield* git(cwd, ["checkout", "feature/rebase-continue"]);
+
+        const rebase = yield* gitAllowNonZero(cwd, ["rebase", initialBranch]);
+        assert.notEqual(rebase.exitCode, 0);
+
+        yield* writeTextFile(cwd, "conflict.txt", "feature\n");
+        yield* git(cwd, ["add", "conflict.txt"]);
+
+        const continued = yield* driver.continueRebase(cwd);
+        assert.deepStrictEqual(continued, { inProgress: false, conflictedFiles: [] });
+        assert.equal(yield* git(cwd, ["log", "-1", "--pretty=%s"]), "feature change");
       }),
     );
 

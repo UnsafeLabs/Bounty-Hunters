@@ -24,6 +24,8 @@ export const gitQueryKeys = {
     ["git", "refs", environmentId ?? null, cwd] as const,
   branchSearch: (environmentId: EnvironmentId | null, cwd: string | null, query: string) =>
     ["git", "refs", environmentId ?? null, cwd, "search", query] as const,
+  rebaseState: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "rebase-state", environmentId ?? null, cwd] as const,
 };
 
 export const gitMutationKeys = {
@@ -37,6 +39,10 @@ export const gitMutationKeys = {
     ["git", "mutation", "pull", environmentId ?? null, cwd] as const,
   preparePullRequestThread: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "mutation", "prepare-pull-request-thread", environmentId ?? null, cwd] as const,
+  abortRebase: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "abort-rebase", environmentId ?? null, cwd] as const,
+  continueRebase: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "continue-rebase", environmentId ?? null, cwd] as const,
   publishRepository: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "mutation", "publish-repository", environmentId ?? null, cwd] as const,
 };
@@ -124,6 +130,27 @@ export function gitResolvePullRequestQueryOptions(input: {
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+  });
+}
+
+export function gitRebaseStateQueryOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  enabled?: boolean;
+}) {
+  return queryOptions({
+    queryKey: gitQueryKeys.rebaseState(input.environmentId, input.cwd),
+    queryFn: async () => {
+      if (!input.cwd || !input.environmentId) {
+        throw new Error("Git rebase state is unavailable.");
+      }
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.git.getRebaseState({ cwd: input.cwd });
+    },
+    enabled: input.environmentId !== null && input.cwd !== null && (input.enabled ?? true),
+    staleTime: 2_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 }
 
@@ -227,6 +254,54 @@ export function gitPullMutationOptions(input: {
     },
     onSuccess: async () => {
       await invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd);
+    },
+  });
+}
+
+export function gitAbortRebaseMutationOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  queryClient: QueryClient;
+}) {
+  return mutationOptions({
+    mutationKey: gitMutationKeys.abortRebase(input.environmentId, input.cwd),
+    mutationFn: async () => {
+      if (!input.cwd || !input.environmentId) throw new Error("Git rebase abort is unavailable.");
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.git.abortRebase({ cwd: input.cwd });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd),
+        input.queryClient.invalidateQueries({
+          queryKey: gitQueryKeys.rebaseState(input.environmentId, input.cwd),
+        }),
+      ]);
+    },
+  });
+}
+
+export function gitContinueRebaseMutationOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  queryClient: QueryClient;
+}) {
+  return mutationOptions({
+    mutationKey: gitMutationKeys.continueRebase(input.environmentId, input.cwd),
+    mutationFn: async () => {
+      if (!input.cwd || !input.environmentId) {
+        throw new Error("Git rebase continue is unavailable.");
+      }
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.git.continueRebase({ cwd: input.cwd });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd),
+        input.queryClient.invalidateQueries({
+          queryKey: gitQueryKeys.rebaseState(input.environmentId, input.cwd),
+        }),
+      ]);
     },
   });
 }

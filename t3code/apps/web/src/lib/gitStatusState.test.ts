@@ -109,6 +109,9 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
       runStackedAction: vi.fn(async () => ({}) as any),
       resolvePullRequest: vi.fn(async () => undefined),
       preparePullRequestThread: vi.fn(async () => undefined),
+      getRebaseState: vi.fn(async () => ({ inProgress: false, conflictedFiles: [] })),
+      abortRebase: vi.fn(async () => ({ inProgress: false, conflictedFiles: [] })),
+      continueRebase: vi.fn(async () => ({ inProgress: false, conflictedFiles: [] })),
     },
     server: {
       getConfig: vi.fn(async () => ({

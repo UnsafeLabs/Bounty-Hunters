@@ -1066,6 +1066,24 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "git" },
           ),
+        [WS_METHODS.gitGetRebaseState]: (input) =>
+          observeRpcEffect(WS_METHODS.gitGetRebaseState, gitWorkflow.getRebaseState(input.cwd), {
+            "rpc.aggregate": "git",
+          }),
+        [WS_METHODS.gitAbortRebase]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitAbortRebase,
+            gitWorkflow.abortRebase(input.cwd).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitContinueRebase]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitContinueRebase,
+            gitWorkflow
+              .continueRebase(input.cwd)
+              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "git" },
+          ),
         [WS_METHODS.vcsListRefs]: (input) =>
           observeRpcEffect(WS_METHODS.vcsListRefs, gitWorkflow.listRefs(input), {
             "rpc.aggregate": "vcs",

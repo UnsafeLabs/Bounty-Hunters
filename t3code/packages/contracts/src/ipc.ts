@@ -4,6 +4,8 @@ import type {
   VcsCreateRefInput,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
+  GitRebaseInput,
+  GitRebaseStateResult,
   GitPullRequestRefInput,
   VcsCreateWorktreeInput,
   VcsCreateWorktreeResult,
@@ -543,6 +545,9 @@ export interface EnvironmentApi {
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Promise<GitPreparePullRequestThreadResult>;
+    getRebaseState: (input: GitRebaseInput) => Promise<GitRebaseStateResult>;
+    abortRebase: (input: GitRebaseInput) => Promise<GitRebaseStateResult>;
+    continueRebase: (input: GitRebaseInput) => Promise<GitRebaseStateResult>;
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;

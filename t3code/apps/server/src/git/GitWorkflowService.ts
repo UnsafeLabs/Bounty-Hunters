@@ -17,6 +17,7 @@ import {
   type GitPreparePullRequestThreadInput,
   type GitPreparePullRequestThreadResult,
   type GitPullRequestRefInput,
+  type GitRebaseStateResult,
   type VcsPullResult,
   type VcsRemoveWorktreeInput,
   type GitResolvePullRequestResult,
@@ -56,6 +57,15 @@ export interface GitWorkflowServiceShape {
   readonly preparePullRequestThread: (
     input: GitPreparePullRequestThreadInput,
   ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+  readonly getRebaseState: (
+    cwd: string,
+  ) => Effect.Effect<GitRebaseStateResult, GitManagerServiceError>;
+  readonly abortRebase: (
+    cwd: string,
+  ) => Effect.Effect<GitRebaseStateResult, GitManagerServiceError>;
+  readonly continueRebase: (
+    cwd: string,
+  ) => Effect.Effect<GitRebaseStateResult, GitManagerServiceError>;
   readonly listRefs: (input: VcsListRefsInput) => Effect.Effect<VcsListRefsResult, GitCommandError>;
   readonly createWorktree: (
     input: VcsCreateWorktreeInput,
@@ -284,6 +294,18 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
       "GitWorkflowService.preparePullRequestThread",
       gitManager.preparePullRequestThread,
     ),
+    getRebaseState: (cwd) =>
+      ensureGit("GitWorkflowService.getRebaseState", cwd).pipe(
+        Effect.andThen(gitManager.getRebaseState(cwd)),
+      ),
+    abortRebase: (cwd) =>
+      ensureGit("GitWorkflowService.abortRebase", cwd).pipe(
+        Effect.andThen(gitManager.abortRebase(cwd)),
+      ),
+    continueRebase: (cwd) =>
+      ensureGit("GitWorkflowService.continueRebase", cwd).pipe(
+        Effect.andThen(gitManager.continueRebase(cwd)),
+      ),
     listRefs: (input) =>
       detectGitRepositoryForCommand("GitWorkflowService.listRefs", input.cwd).pipe(
         Effect.flatMap((isGitRepository) =>

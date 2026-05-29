@@ -136,6 +136,13 @@ function parsePorcelainPath(line: string): string | null {
   return filePath.length > 0 ? filePath : null;
 }
 
+function parseRebaseConflictedFiles(stdout: string): string[] {
+  return stdout
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
 function parseBranchLine(line: string): { name: string; current: boolean } | null {
   const trimmed = line.trim();
   if (trimmed.length === 0) return null;
@@ -1586,6 +1593,77 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const getRebaseState: GitVcsDriver.GitVcsDriverShape["getRebaseState"] = Effect.fn(
+    "getRebaseState",
+  )(function* (cwd) {
+    const gitPathExists = (name: string) =>
+      runGitStdout("GitVcsDriver.getRebaseState.gitPath", cwd, [
+        "rev-parse",
+        "--git-path",
+        name,
+      ]).pipe(
+        Effect.map((stdout) => stdout.trim()),
+        Effect.flatMap((gitPath) => {
+          if (gitPath.length === 0) return Effect.succeed(false);
+          const filePath = path.isAbsolute(gitPath) ? gitPath : path.resolve(cwd, gitPath);
+          return fileSystem.exists(filePath).pipe(Effect.catch(() => Effect.succeed(false)));
+        }),
+      );
+    const [hasRebaseHead, hasRebaseMerge, hasRebaseApply] = yield* Effect.all(
+      [gitPathExists("REBASE_HEAD"), gitPathExists("rebase-merge"), gitPathExists("rebase-apply")],
+      { concurrency: "unbounded" },
+    );
+    const inProgress = hasRebaseHead && (hasRebaseMerge || hasRebaseApply);
+    if (!inProgress) {
+      return {
+        inProgress: false,
+        conflictedFiles: [],
+      };
+    }
+
+    const conflictedFiles = yield* runGitStdout(
+      "GitVcsDriver.getRebaseState.conflictedFiles",
+      cwd,
+      ["diff", "--name-only", "--diff-filter=U"],
+    ).pipe(Effect.map(parseRebaseConflictedFiles));
+    return {
+      inProgress,
+      conflictedFiles,
+    };
+  });
+
+  const abortRebase: GitVcsDriver.GitVcsDriverShape["abortRebase"] = Effect.fn("abortRebase")(
+    function* (cwd) {
+      const state = yield* getRebaseState(cwd);
+      if (!state.inProgress) {
+        return state;
+      }
+      yield* executeGit("GitVcsDriver.abortRebase", cwd, ["rebase", "--abort"], {
+        timeoutMs: 30_000,
+        fallbackErrorMessage: "git rebase --abort failed",
+      });
+      return yield* getRebaseState(cwd);
+    },
+  );
+
+  const continueRebase: GitVcsDriver.GitVcsDriverShape["continueRebase"] = Effect.fn(
+    "continueRebase",
+  )(function* (cwd) {
+    yield* executeGit(
+      "GitVcsDriver.continueRebase",
+      cwd,
+      ["-c", "core.editor=true", "rebase", "--continue"],
+      {
+        env: {
+          GIT_EDITOR: "true",
+        },
+        timeoutMs: 30_000,
+        fallbackErrorMessage: "git rebase --continue failed",
+      },
+    );
+    return yield* getRebaseState(cwd);
+  });
+
   const readRangeContext: GitVcsDriver.GitVcsDriverShape["readRangeContext"] = Effect.fn(
     "readRangeContext",
   )(function* (cwd, baseRef) {
@@ -2123,6 +2201,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     commit,
     pushCurrentBranch,
     pullCurrentBranch,
+    getRebaseState,
+    abortRebase,
+    continueRebase,
     readRangeContext,
     readConfigValue,
     listRefs,
