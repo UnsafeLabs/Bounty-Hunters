@@ -26,4 +26,15 @@ export function resolveAttachmentRelativePath(input: {
     return null;
   }
   return filePath;
+import { HttpBodyLimit } from "effect/unstable/http";
+import { FILE_UPLOAD_BODY_LIMIT } from "./httpCors.ts";
+
+export const ATTACHMENTS_ROUTE_PREFIX = "/attachments";
+
+export const attachmentUploadBodyLimitLayer = HttpBodyLimit.make({
+  maxBytes: FILE_UPLOAD_BODY_LIMIT,
+});
+
+export function normalizeAttachmentRelativePath(path: string): string { return path; }
+export function resolveAttachmentRelativePath(path: string): string { return path; }
 }
