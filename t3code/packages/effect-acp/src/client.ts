@@ -1,15 +1,22 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Stdio from "effect/Stdio";
-import * * as Layer from "effect/Layer";
-import * as Schema from "effect/Schema";
+import * as Schedule from "effect/Schedule";
+import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
+import * as Schema from "effect/Schema";
+import * as Stdio from "effect/Stdio";
+import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as RpcClient from "effect/unstable/rpc/RpcClient";
 import * as RpcServer from "effect/unstable/rpc/RpcServer";
-import * * as Scope from "effect/Scope";
-import * * as Stream from "effect/Stream";
-import * * as RpcClient from "effect/unstable/rpc/RpcClient";
+
+import * as Deferred from "effect/Deferred";
+import * as Ref from "effect/Ref";
+
+import { ChildProcessSpawner } from "effect/unstable/process";
+
+// Add the following to existing file content
+import * as AcpError from "./errors.ts";
 import * as AcpProtocol from "./protocol.ts";
 import * as AcpRpcs from "./rpc.ts";
 import * as AcpSchema from "./_generated/schema.gen.ts";
@@ -18,14 +25,69 @@ import {
   callRpc,
   decodeExtNotificationRegistration,
   decodeExtRequestRegistration,
+  runHandler,
+} from "./_internal/shared.ts";
+import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
+
+export interface AcpClientOptions {
+  readonly logIncoming?: boolean;
+  readonly logOutgoing?: boolean;
+  readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, AcpError.AcpError>;
+}
+
+export interface AcpClientSession {
+  readonly id: string;
+  readonly accessToken: string;
+  readonly refreshToken: string;
+  readonly expiresAt: number;
+}
+
+export interface AcpClientState {
+  session: AcpClientSession | null;
+  isRefreshing: boolean;
+  pendingRequests: Array<{
+    method: string;
+    payload: unknown;
+    deferred: Deferred.Deferred<unknown, AcpError.AcpError>;
+  }>;
+}
+
+export interface AcpClient {
+  // ... existing types
+}
+
+// Add token refresh functionality
+export interface AcpClientWithTokenRefresh {
+  readonly state: Ref.Ref<AcpClientState>;
+  readonly refreshSemaphore: Semaphore;
+}
+
+export class AuthenticationError {
+  readonly _tag = "AuthenticationError";
+  constructor(readonly message: string) {}
+}
+
+export interface AcpClientOptions {
+  readonly logIncoming?: boolean;
+  readonly logOutg
+import * as AcpError from "./errors.ts";
+import * as AcpProtocol from "./protocol.ts";
+import * as AcpRpcs from "./rpc.ts";
+import * as AcpSchema from "./_generated/schema.gen.ts";
+import { AGENT_METHODS, CLIENT_METHODS } from "./_generated/meta.gen.ts";
 import {
   callRpc,
   decodeExtNotificationRegistration,
   decodeExtRequestRegistration,
   runHandler,
 } from "./_internal/shared.ts";
-
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
+
+export interface AcpClientOptions {
+  readonly logIncoming?: boolean;
+  readonly logOutgoing?: boolean;
+  readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
 }
 
 type AcpClientRaw = {
