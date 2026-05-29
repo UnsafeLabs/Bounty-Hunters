@@ -27,6 +27,7 @@ const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
+const SIDEBAR_RESIZE_DEFAULT_WIDTH = 280;
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed";
@@ -525,6 +526,24 @@ function SidebarRail({
     [endResizeInteraction, onPointerCancel],
   );
 
+  const handleDoubleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      if (!resolvedResizable) return;
+      const rail = railRef.current;
+      if (!rail) return;
+      const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
+      if (!wrapper) return;
+
+      const defaultWidth = clampSidebarWidth(SIDEBAR_RESIZE_DEFAULT_WIDTH, resolvedResizable);
+      wrapper.style.setProperty("--sidebar-width", `${defaultWidth}px`);
+      if (resolvedResizable.storageKey && typeof window !== "undefined") {
+        setLocalStorageItem(resolvedResizable.storageKey, defaultWidth, Schema.Finite);
+      }
+      resolvedResizable.onResize?.(defaultWidth);
+    },
+    [resolvedResizable],
+  );
+
   const handleClick = React.useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       onClick?.(event);
@@ -587,6 +606,7 @@ function SidebarRail({
       data-sidebar="rail"
       data-slot="sidebar-rail"
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       onPointerCancel={handlePointerCancel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
