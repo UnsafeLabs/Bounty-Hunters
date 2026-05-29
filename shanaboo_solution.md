@@ -1,60 +1,34 @@
-Looking at the issue description, I need to implement automatic token refresh functionality in the ACP client. Let me analyze what's needed:
+Looking at the issue description and the provided code, I need to implement automatic token refresh functionality in the ACP client. Let me analyze what's needed:
 
-1. Add token expiry detection for 401 Unauthorized responses
-2. Implement automatic re-authentication with Effect retry logic
-3. Store refresh token separately 
-4. Add onSessionExpired callback
-5. Use Effect.acquireRelease for proper cleanup
-6. Handle concurrent request queuing during re-auth
+1. Token expiry detection for 401 Unauthorized responses
+2. Automatic re-authentication with Effect.retry 
+3. Store refresh token separately
+4. onSessionExpired callback
+5. Effect.acquireRelease for cleanup
+6. Proper queuing of concurrent requests during re-auth
 
-Let me implement these changes in the client.ts file:
+Let me create the implementation:
 
 ```diff
 --- a/t3code/packages/effect-acp/src/client.ts
 +++ b/t3code/packages/effect-acp/src/client.ts
-@@ -1,159 +1,326 @@
--import * as Context from "effect/Context";
--import * as Effect from "effect/Effect";
--import * as Stdio from "effect/Stdio";
--import * as Layer from "effect/Layer";
--import * as Schema from "effect/Schema";
--import * as Scope from "effect/Scope";
--import * as Stream from "effect/Stream";
--import * * as RpcClient from "effect/unstable/rpc/RpcClient";
--import * * as RpcServer from "effect/unstable/rpc/RpcServer";
--import { ChildProcessSpawner } from "effect/unstable/process";
--
--import * * as AcpError from "./errors.ts";
--import * * as AcpProtocol from "./protocol.ts";
--import * * as AcpRpcs from "./rpc.ts";
--import * * as AcpSchema from "./_generated/schema.gen.ts";
--import { AGENT_METHODS, CLIENT_METHODS } from "./_generated/meta.gen.ts";
--import {
--  callRpc,
--  decodeExtNotificationRegistration,
--  decodeExtRequestRegistration,
--  runHandler,
--} from "./_internal/shared.ts";
--import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
++++ b/t3code/packages/effect-acp/src/client.ts
+@@ -0,0 +1,230 @@
 +import * as Context from "effect/Context";
-+import * Effect from "effect/Effect";
-+import * Stdio from "effect/Stdio";
-+import * Layer from "effect/Layer";
-+import * Schema from "effect/Schema";
-+import * Scope from "effect/Scope";
-+import * Stream from "effect/Stream";
-+import * Schedule from "effect/Schedule";
-+import * Fiber from "effect/Fiber";
-+import * Queue from "effect/Queue";
-+import * Rc from "effect/Rc";
-+import * RpcClient from "effect/unstable/rpc/RpcClient";
-+import * RpcServer from "effect/unstable/rpc/RpcServer";
++import * as Effect from "effect/Effect";
++import * as Stdio from "effect/Stdio";
++import * as Layer from "effect/Layer";
++import * as Schema from "effect/Schema";
++import * as Scope from "effect/Scope";
++import * as Stream from "effect/Stream";
++import * as RpcClient from "effect/unstable/rpc/RpcClient";
++import * as RpcServer from "effect/unstable/rpc/RpcServer";
 +import { ChildProcessSpawner } from "effect/unstable/process";
 +
-+import * * as AcpError from "./errors.ts";
-+import * * as AcpProtocol from "./protocol.ts";
-+import * * as AcpRpcs from "./rpc.ts";
-+import * * as AcpSchema from "./_generated/schema.gen.ts";
++import * as AcpError from "./errors.ts";
++import * as AcpProtocol from "./protocol.ts";
++import * as AcpRpcs from "./rpc.ts";
++import * as AcpSchema from "./_generated/schema.gen.ts";
 +import { AGENT_METHODS, CLIENT_METHODS } from "./_generated/meta.gen.ts";
 +import {
 +  callRpc,
@@ -67,27 +41,8 @@ Let me implement these changes in the client.ts file:
 +export interface AcpClientOptions {
 +  readonly logIncoming?: boolean;
 +  readonly logOutgoing?: boolean;
-+  readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never, never>;
-+  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, AcpError.AcpError>;
-+}
-+
-+interface SessionState {
-+  readonly accessToken: string;
-+  readonly refreshToken: string;
-+  readonly sessionId: string;
-+}
-+
-+interface AcpClientState {
-+  readonly session: SessionState | null;
-+  readonly isRefreshing: boolean;
-+  readonly refreshQueue: Effect.Effect<any, any, any>[];
-+}
-+
-+export interface AcpClientOptions {
-+  readonly logIncoming?: boolean;
-+  readonly logOutgoing?: boolean;
 +  readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
-+  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, AcpError.AcpError>;
++  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, never>;
 +}
 +
 +type AcpClientRaw = {
@@ -145,4 +100,54 @@ Let me implement these changes in the client.ts file:
 +     * Forks an ACP session.
 +     * @see https://agentclientprotocol.com/protocol/schema#session/fork
 +     */
-+    readonly forkSession
++    readonly forkSession: (
++      payload: AcpSchema.ForkSessionRequest,
++    ) => Effect.Effect<AcpSchema.ForkSessionResponse, AcpError.AcpError>;
++    /**
++     * Resumes an ACP session.
++     * @see https://agentclientprotocol.com/protocol/schema#session/resume
++     */
++    readonly resumeSession: (
++      payload: AcpSchema.ResumeSessionRequest,
++    ) => Effect.Effect<AcpSchema.ResumeSessionResponse, AcpError.AcpError>;
++    /**
++     * Closes an ACP session.
++     * @see https://agentclientprotocol.com/protocol/schema#session/close
++     */
++    readonly closeSession: (
++      payload: AcpSchema.CloseSessionRequest,
++    ) => Effect.Effect<AcpSchema.CloseSessionResponse, AcpError.AcpError>;
++    /**
++     * Sends a message to the ACP agent.
++     * @see https://agentclientprotocol.com/protocol/schema#session/message
++     */
++    readonly sendMessage: (
++      payload: AcpSchema.MessageRequest,
++    ) => Effect.Effect<AcpSchema.MessageResponse, AcpError.AcpError>;
++  };
++}
++
++interface AcpClientState {
++  accessToken: string | null;
++  refreshToken: string | null;
++  sessionId: string | null;
++  isRefreshing: boolean;
++}
++
++const makeAcpClient = (options: AcpClientOptions = {}) =>
++  Effect.gen(function* () {
++    const state: AcpClientState = {
++      accessToken: null,
++      refreshToken: null,
++      sessionId: null,
++      isRefreshing: false
++    };
++
++    const requestWithAuth = (method: string, payload: unknown) =>
++      Effect.gen(function* () {
++        if (state.isRefreshing) {
++          // If we're already refreshing, queue the request
++          return yield* waitForRefresh(method, payload);
++        }
++
++        const result = yield
