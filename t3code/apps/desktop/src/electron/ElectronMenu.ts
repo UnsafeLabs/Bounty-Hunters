@@ -1,15 +1,18 @@
+import { ipcRenderer } from "electron";
+
 import type { ContextMenuItem } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
+
 import * as Electron from "electron";
+
 
 export interface ElectronMenuPosition {
   readonly x: number;
   readonly y: number;
-}
 
 export interface ElectronMenuContextInput {
   readonly window: Electron.BrowserWindow;
@@ -17,10 +20,6 @@ export interface ElectronMenuContextInput {
   readonly position: Option.Option<ElectronMenuPosition>;
 }
 
-export interface ElectronMenuTemplateInput {
-  readonly window: Electron.BrowserWindow;
-  readonly template: readonly Electron.MenuItemConstructorOptions[];
-}
 
 export interface ElectronMenuShape {
   readonly setApplicationMenu: (
@@ -36,6 +35,117 @@ export class ElectronMenu extends Context.Service<ElectronMenu, ElectronMenuShap
   "t3/desktop/electron/Menu",
 ) {}
 
+// Helper function to create developer menu items
+const createDeveloperMenu = (): Electron.MenuItemConstructorOptions => ({
+  label: "Developer",
+  submenu: [
+    {
+      label: "Toggle Terminal",
+      accelerator: process.platform === "darwin" ? "Cmd+Shift+T" : "Ctrl+Shift+T",
+      click: () => {
+        ipcRenderer.send("developer:toggle-terminal");
+      }
+    },
+    {
+      label: "Clear Terminal",
+      accelerator: process.platform === "darwin" ? "Cmd+K" : "Ctrl+L",
+      click: () => {
+        ipcRenderer.send("developer:clear-terminal");
+      }
+    },
+    {
+      label: "Restart Backend",
+      accelerator: process.platform === "darwin" ? "Cmd+Shift+R" : "Ctrl+Shift+R",
+      click: () => {
+        ipcRenderer.send("developer:restart-backend");
+      }
+    },
+    {
+      label: "Open DevTools",
+      accelerator: process.platform === "darwin" ? "Cmd+Alt+I" : "Ctrl+Shift+I",
+      click: () => {
+        ipcRenderer.send("developer:open-devtools");
+      }
+    }
+  ]
+});
+
+// Helper function to create git menu items
+const createGitMenu = (): Electron.MenuItemConstructorOptions => ({
+  label: "Git",
+  submenu: [
+    {
+      label: "Stage All Changes",
+      accelerator: process.platform === "darwin" ? "Cmd+Shift+A" : "Ctrl+Shift+A",
+      click: () => {
+        ipcRenderer.send("git:stage-all");
+      }
+    },
+    {
+      label: "Commit",
+      accelerator: process.platform === "darwin" ? "Cmd+Shift+C" : "Ctrl+Shift+C",
+      click: () => {
+        ipcRenderer.send("git:commit");
+      }
+    },
+    {
+      label: "Push",
+      accelerator: process.platform === "darwin" ? "Cmd+Shift+P" : "Ctrl+Shift+P",
+      click: () => {
+        ipcRenderer.send("git:push");
+      }
+    },
+    {
+      label: "Pull",
+      accelerator: process.platform === "darwin" ? "Cmd+Shift+L" : "Ctrl+Shift+L",
+      click: () => {
+        ipcRenderer.send("git:pull");
+      }
+    },
+    {
+      label: "Create Branch",
+      accelerator: process.platform === "darwin" ? "Cmd+Shift+B" : "Ctrl+Shift+B",
+      click: () => {
+        ipcRenderer.send("git:create-branch");
+      }
+    }
+  ]
+});
+
+export interface ElectronMenuShape {
+  readonly setApplicationMenu: (
+    template: readonly Electron.MenuItemConstructorOptions[],
+  ) => Effect.Effect<void>;
+  readonly showContextMenu: (
+  readonly setApplicationMenu: (
+    template: readonly Electron.MenuItemConstructorOptions[],
+  ) => Effect.Effect<void>;
+  readonly showContextMenu: (
+    input: ElectronMenuContextInput,
+  ) => Effect.Effect<Option.Option<string>>;
+  readonly popupTemplate: (input: ElectronMenuTemplateInput) => Effect.Effect<void>;
+
+export class ElectronMenu extends Context.Service<ElectronMenu, ElectronMenuShape>()(
+  "t3/desktop/electron/Menu",
+) {
+  static readonly setApplicationMenuWithDeveloperAndGit = (
+    template: readonly Electron.MenuItemConstructorOptions[],
+  ) => {
+    // Create a new template with Developer and Git menus added
+    const enhancedTemplate = [
+      createDeveloperMenu(),
+      createGitMenu(),
+      ...template
+    ];
+    
+    return ElectronMenu.setApplicationMenu(enhancedTemplate);
+  };
+}
+
+// Add the Developer and Git menus to the application menu
+const originalSetApplicationMenu = ElectronMenu.setApplicationMenu;
+
+function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextMenuItem[] {
 function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextMenuItem[] {
   const normalizedItems: ContextMenuItem[] = [];
 
@@ -117,10 +227,9 @@ export const layer = Layer.sync(ElectronMenu, () => {
       if (item.children && item.children.length > 0) {
         itemOption.submenu = buildTemplate(item.children, complete);
       } else {
-        itemOption.click = () => complete(Option.some(item.id));
       }
       if (item.destructive && (!item.children || item.children.length === 0)) {
-        const destructiveIcon = getDestructiveMenuIcon();
+        const destructiveIcon
         if (Option.isSome(destructiveIcon)) {
           itemOption.icon = destructiveIcon.value;
         }
