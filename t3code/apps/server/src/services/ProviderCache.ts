@@ -10,14 +10,9 @@ const ProviderCache = Context.GenericTag<ProviderCacheService>("@services/Provid
 
 interface ProviderCacheService {
   config: ProviderCacheConfig;
-  getModelList: (providerId: string) => Effect.Effect<readonly string[], never, never>;
-  getCapability: (providerId: string) => Effect.Effect<readonly string[], never, never>;
-}
-
-export class ProviderCache extends Map {
-  constructor() {
-    super();
-  }
+  modelListTTL: number;
+  capabilityQueryTTL: number;
+  maxCacheEntries: number;
 }
 
 export const makeProviderCache = (config: ProviderCacheConfig) => 
@@ -33,7 +28,7 @@ export const makeProviderCache = (config: ProviderCacheConfig) =>
       getModelList,
       getCapability
     };
-  });
+  })
 
 export const makeProviderCache = (config: ProviderCacheConfig) => 
   Effect.gen(function*(_) {
@@ -48,56 +43,4 @@ export const makeProviderCache = (config: ProviderCacheConfig) =>
       getModelList,
       getCapability
     };
-  });
-
-export const makeProviderCache = (config: ProviderCacheConfig) => 
-  Effect.gen(function*(_) {
-    const modelListTTL = config.modelListTTL;
-    const capabilityQueryTTL = config.capabilityQueryTTL;
-    const maxCacheEntries = config.maxCacheEntries;
-    
-    return {
-      modelListTTL,
-      capabilityQueryTTL,
-      maxCacheEntries,
-      getModelList: (providerId: string) => Effect.gen(function*(_) {
-        const modelListTTL = config.modelListTTL;
-        const capabilityQueryTTL = config.capabilityQueryTTL;
-        const maxCacheEntries = config.maxCacheEntries;
-        
-        return {
-          modelListTTL,
-          capabilityQueryTTL,
-          maxCacheEntries,
-          getModelList,
-          getCapability
-        };
-      })
-    };
-  });
-
-export const makeProviderCache = (config: ProviderCacheConfig) => 
-  Effect.gen(function*(_) {
-    const modelListTTL = config.modelListTTL;
-    const capabilityQueryTTL = config.capabilityQueryTTL;
-    const maxCacheEntries = config.maxCacheEntries;
-    
-    return {
-      modelListTTL,
-      capabilityQueryTTL,
-      maxCacheEntries,
-      getModelList: (providerId: string) => Effect.gen(function*(_) {
-        const modelListTTL = config.modelListTTL;
-        const capabilityQueryTTL = config.capabilityQueryTTL;
-        const maxCacheEntries = config.maxCacheEntries;
-        
-        return {
-          modelListTTL,
-          capabilityQueryTTL,
-          maxCacheEntries,
-          getModelList,
-          getCapability
-        };
-      })
-    };
-  });
+  })
