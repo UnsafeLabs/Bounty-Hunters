@@ -35,14 +35,20 @@ contract TokenVesting {
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
     function vestedAmount() public view returns (uint256) {
         if (block.timestamp < cliff) return 0;
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+        // Divide before multiply to prevent intermediate overflow
+        // Use full precision: (totalAllocation * elapsed) / duration
+        // Safe because totalAllocation <= uint256 and elapsed < duration,
+        // so totalAllocation * elapsed can overflow only for extreme values.
+        // Use divWad pattern: multiply then divide, but with overflow check.
+        // In Solidity 0.8+, overflow reverts automatically, so we need to
+        // restructure to avoid the intermediate product.
+        // Solution: totalAllocation / duration * elapsed + (totalAllocation % duration * elapsed) / duration
+        return totalAllocation / duration * elapsed + (totalAllocation % duration * elapsed) / duration;
     }
 
     function claimable() public view returns (uint256) {
@@ -58,20 +64,20 @@ contract TokenVesting {
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
+        // Unvested = total allocation minus what has already vested
         uint256 unvested = totalAllocation - vested;
 
+        // Transfer any remaining vested-but-unclaimed tokens to beneficiary
         if (vested > claimed) {
             token.transfer(beneficiary, vested - claimed);
         }
+        // Return unvested tokens to owner
         token.transfer(owner, unvested);
         emit VestingRevoked(beneficiary, unvested);
     }
