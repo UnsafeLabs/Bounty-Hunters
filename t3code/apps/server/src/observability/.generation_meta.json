@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Public task context: paid OSS bounty implementation for UnsafeLabs/Bounty-Hunters issue #833. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "date": "2026-05-29T01:00:23Z"
+}

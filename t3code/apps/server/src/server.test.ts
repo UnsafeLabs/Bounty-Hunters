@@ -924,6 +924,28 @@ const assertBrowserApiCorsHeaders = (headers: Headers) => {
 };
 const crossOriginClientOrigin = "http://remote-client.test:3773";
 
+const withMetricsAuthEnv = <A, E, R>(value: string | undefined, effect: Effect.Effect<A, E, R>) => {
+  const previous = process.env.METRICS_AUTH_DISABLED;
+  return Effect.sync(() => {
+    if (value === undefined) {
+      delete process.env.METRICS_AUTH_DISABLED;
+    } else {
+      process.env.METRICS_AUTH_DISABLED = value;
+    }
+  }).pipe(
+    Effect.andThen(effect),
+    Effect.ensuring(
+      Effect.sync(() => {
+        if (previous === undefined) {
+          delete process.env.METRICS_AUTH_DISABLED;
+        } else {
+          process.env.METRICS_AUTH_DISABLED = previous;
+        }
+      }),
+    ),
+  );
+};
+
 const getWsServerUrl = (
   pathname = "",
   options?: { authenticated?: boolean; credential?: string },
@@ -1065,6 +1087,38 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertBrowserApiCorsHeaders(response.headers);
       assert.deepEqual(body, testEnvironmentDescriptor);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves Prometheus metrics when metrics auth is disabled", () =>
+    withMetricsAuthEnv(
+      "true",
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+
+        const url = yield* getHttpServerUrl("/metrics");
+        const response = yield* Effect.promise(() => fetch(url));
+        const text = yield* Effect.promise(() => response.text());
+
+        assert.equal(response.status, 200);
+        assert.include(response.headers.get("content-type") ?? "", "text/plain");
+        assert.include(text, "# TYPE active_sessions gauge");
+        assert.include(text, "# TYPE memory_usage_bytes gauge");
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("requires auth for Prometheus metrics by default", () =>
+    withMetricsAuthEnv(
+      undefined,
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+
+        const url = yield* getHttpServerUrl("/metrics");
+        const response = yield* Effect.promise(() => fetch(url));
+
+        assert.equal(response.status, 401);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("reports unauthenticated session state without requiring auth", () =>

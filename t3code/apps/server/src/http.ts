@@ -22,12 +22,14 @@ import {
   resolveAttachmentRelativePath,
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
-import { resolveStaticDir, ServerConfig } from "./config.ts";
-import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
-import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
+import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { respondToAuthError } from "./auth/http.ts";
+import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
+import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
+import { collectPrometheusMetrics } from "./observability/PrometheusMetrics.ts";
+import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import {
   browserApiCorsAllowedHeaders,
   browserApiCorsAllowedMethods,
@@ -66,6 +68,30 @@ const requireAuthenticatedRequest = Effect.gen(function* () {
   const serverAuth = yield* ServerAuth;
   yield* serverAuth.authenticateHttpRequest(request);
 });
+
+const readConnectedSessionCount = Effect.gen(function* () {
+  const sessions = yield* SessionCredentialService;
+  const activeSessions = yield* sessions.listActive();
+  return activeSessions.filter((session) => session.connected).length;
+}).pipe(Effect.catch(() => Effect.succeed(0)));
+
+export const metricsRouteLayer = HttpRouter.add(
+  "GET",
+  "/metrics",
+  Effect.gen(function* () {
+    if (process.env.METRICS_AUTH_DISABLED !== "true") {
+      yield* requireAuthenticatedRequest;
+    }
+
+    const activeSessions = yield* readConnectedSessionCount;
+    const metrics = yield* collectPrometheusMetrics({ activeSessions });
+    return HttpServerResponse.text(metrics, {
+      status: 200,
+      contentType: "text/plain; version=0.0.4; charset=utf-8",
+      headers: browserApiCorsHeaders,
+    });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
 
 export const serverEnvironmentRouteLayer = HttpRouter.add(
   "GET",
