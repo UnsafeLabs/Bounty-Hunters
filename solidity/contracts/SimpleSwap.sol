@@ -1,25 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-// ... (contract would have actual implementation)
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-contract SimpleSwap {
-    // Add slippage and deadline protection to swap function
-    function swap(
-        address tokenIn,
-        address tokenOut, 
-        uint256 amountIn,
-        uint256 minAmountOut,
-        uint256 deadline
-    ) public returns (bool) {
-        require(block.timestamp <= deadline, "Deadline exceeded");
-        require(amountOut >= minAmountOut, "Slippage exceeded");
-        
-        // Original swap logic with slippage protection
-        // ... swap implementation
-    }
-}
 
 contract SimpleSwap {
     IERC20 public tokenA;
@@ -84,4 +66,40 @@ contract SimpleSwap {
         uint256 amountInAfterFee = amountIn - feeAmount;
         return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
     }
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract SimpleSwap {
+    // Token contract addresses
+    address public tokenA;
+    address public tokenB;
+    
+    // Fee parameters (in basis points)
+    uint256 public constant FEE_DENOMINATOR = 10000;
+    uint256 public fee = 30; // 0.3% fee
+    
+    constructor(address _tokenA, address _tokenB) {
+        tokenA = _tokenA;
+        tokenB = _tokenB;
+    }
+    
+    // Simple swap function with slippage and deadline protection
+    function swap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) public returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Transaction expired");
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+        
+        // Calculate output amount with proper fee calculation
+        // Fixed point math: amountIn * (10000 - fee) / 10000
+        uint256 feeAmount = (amountIn * fee) / FEE_DENOMINATOR;
+        uint256 amountAfterFee = amountIn - feeAmount;
+        
+        return amountAfterFee;
+    }
+}
 }
