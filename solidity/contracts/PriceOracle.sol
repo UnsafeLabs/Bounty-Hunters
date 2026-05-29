@@ -14,34 +14,50 @@ interface AggregatorV3Interface {
 
 contract PriceOracle {
     AggregatorV3Interface public primaryFeed;
+    AggregatorV3Interface public secondaryFeed;
     address public owner;
     uint256 public MAX_STALENESS = 3600;
 
     event PriceQueried(int256 price, uint256 timestamp);
+    event StalePrice(address feed, uint256 updatedAt, address fallbackFeed);
 
-    constructor(address _primaryFeed) {
+    constructor(address _primaryFeed, address _secondaryFeed) {
         primaryFeed = AggregatorV3Interface(_primaryFeed);
+        secondaryFeed = AggregatorV3Interface(_secondaryFeed);
         owner = msg.sender;
     }
 
-    // BUG: No staleness check on updatedAt
-    // BUG: No check for negative/zero price
-    // BUG: No round completeness validation
-    // BUG: No fallback oracle
-    function getLatestPrice() external view returns (int256) {
-        (
+    function getLatestPrice() external returns (int256) {
+        (bool primaryOk, int256 primaryPrice) = _tryGetPrice(primaryFeed);
+        if (primaryOk) {
+            emit PriceQueried(primaryPrice, block.timestamp);
+            return primaryPrice;
+        }
+
+        emit StalePrice(address(primaryFeed), block.timestamp, address(secondaryFeed));
+
+        (bool secondaryOk, int256 secondaryPrice) = _tryGetPrice(secondaryFeed);
+        require(secondaryOk, "Both oracles returned stale or invalid data");
+
+        emit PriceQueried(secondaryPrice, block.timestamp);
+        return secondaryPrice;
+    }
+
+    function _tryGetPrice(AggregatorV3Interface feed) internal view returns (bool ok, int256 price) {
+        try feed.latestRoundData() returns (
             uint80 roundId,
-            int256 price,
-            ,
+            int256 answer,
+            uint256,
             uint256 updatedAt,
             uint80 answeredInRound
-        ) = primaryFeed.latestRoundData();
-
-        // Missing: require(price > 0)
-        // Missing: require(answeredInRound >= roundId)
-        // Missing: require(block.timestamp - updatedAt < MAX_STALENESS)
-
-        return price;
+        ) {
+            if (answer <= 0) return (false, 0);
+            if (answeredInRound < roundId) return (false, 0);
+            if (block.timestamp - updatedAt >= MAX_STALENESS) return (false, 0);
+            return (true, answer);
+        } catch {
+            return (false, 0);
+        }
     }
 
     function getDecimals() external view returns (uint8) {
