@@ -126,6 +126,12 @@
     "last_pr": "2026-05-22T00:03:22.963Z"
   },
   {
+    "username": "zhangjiayang6835-cyber",
+    "total_prs": 29,
+    "first_pr": "2026-05-27T17:38:55.381Z",
+    "last_pr": "2026-05-28T22:00:51.878Z"
+  },
+  {
     "username": "Sasidhar-Sunkesula",
     "total_prs": 27,
     "first_pr": "2026-05-13T07:00:24Z",
@@ -174,6 +180,12 @@
     "last_pr": "2026-05-22T18:47:29.993Z"
   },
   {
+    "username": "unsiqasik",
+    "total_prs": 21,
+    "first_pr": "2026-05-28T21:16:17.694Z",
+    "last_pr": "2026-05-29T00:01:41.087Z"
+  },
+  {
     "username": "MizuCiaossu",
     "total_prs": 20,
     "first_pr": "2026-05-14T09:05:33.518Z",
@@ -216,6 +228,18 @@
     "last_pr": "2026-05-21T22:20:05.506Z"
   },
   {
+    "username": "oocheol",
+    "total_prs": 16,
+    "first_pr": "2026-05-19T00:08:49.379Z",
+    "last_pr": "2026-05-28T23:53:45.904Z"
+  },
+  {
+    "username": "Davidrsdiaz",
+    "total_prs": 16,
+    "first_pr": "2026-05-28T22:07:39.551Z",
+    "last_pr": "2026-05-29T00:10:54.375Z"
+  },
+  {
     "username": "callmekidz",
     "total_prs": 14,
     "first_pr": "2026-05-13T19:54:10Z",
@@ -250,12 +274,6 @@
     "total_prs": 14,
     "first_pr": "2026-05-25T03:45:15.005Z",
     "last_pr": "2026-05-27T11:32:50.051Z"
-  },
-  {
-    "username": "oocheol",
-    "total_prs": 14,
-    "first_pr": "2026-05-19T00:08:49.379Z",
-    "last_pr": "2026-05-28T07:55:38.766Z"
   },
   {
     "username": "MNgaminhhh",
@@ -298,12 +316,6 @@
     "total_prs": 13,
     "first_pr": "2026-05-22T13:48:14.824Z",
     "last_pr": "2026-05-24T00:08:52.314Z"
-  },
-  {
-    "username": "zhangjiayang6835-cyber",
-    "total_prs": 13,
-    "first_pr": "2026-05-27T17:38:55.381Z",
-    "last_pr": "2026-05-28T16:35:27.667Z"
   },
   {
     "username": "zeppnyc",
@@ -1116,6 +1128,12 @@
     "last_pr": "2026-05-27T20:44:41.974Z"
   },
   {
+    "username": "JirA44",
+    "total_prs": 2,
+    "first_pr": "2026-05-28T22:18:22.987Z",
+    "last_pr": "2026-05-28T23:16:46.746Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -1558,5 +1576,11 @@
     "total_prs": 1,
     "first_pr": "2026-05-28T07:19:05.261Z",
     "last_pr": "2026-05-28T07:19:05.261Z"
+  },
+  {
+    "username": "microfixlab91",
+    "total_prs": 1,
+    "first_pr": "2026-05-28T21:08:18.870Z",
+    "last_pr": "2026-05-28T21:08:18.870Z"
   }
 ]
