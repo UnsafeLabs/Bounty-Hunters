@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent (unsiqasik)",
+  "initial_directives": "Autonomous bounty hunter. Fix PriceOracle.sol: add staleness check, fallback oracle, round completeness validation, zero/negative price checks, StalePrice event, configurable MAX_STALENESS. Write Foundry tests. Create .generation_meta.json.",
+  "date": "2026-05-29T00:00:00Z"
+}
