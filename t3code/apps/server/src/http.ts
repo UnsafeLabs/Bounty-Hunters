@@ -1,4 +1,3 @@
-import * as Metric from "effect/Metric";
 import Mime from "@effect/platform-node/Mime";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
@@ -21,69 +20,24 @@ import {
   ATTACHMENTS_ROUTE_PREFIX,
   normalizeAttachmentRelativePath,
   resolveAttachmentRelativePath,
+} from "./attachmentPaths.ts";
+import { resolveAttachmentPathById } from "./attachmentStore.ts";
+import { resolveStaticDir, ServerConfig } from "./config.ts";
+import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
-import { respondToAuthError } from "./auth/http.ts";
-import { ServerConfig } from "./config.ts";
-import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
-import {
-  browserApiCorsAllowedHeaders,
 import { respondToAuthError } from "./auth/http.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import {
   browserApiCorsAllowedHeaders,
   browserApiCorsAllowedMethods,
   browserApiCorsHeaders,
+} from "./httpCors.ts";
+
+const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
-const METRICS_PATH = "/metrics";
-
-// Prometheus metric definitions
-export const activeSessionsGauge = Metric.gauge("active_sessions");
-export const rpcRequestsTotalCounter = Metric.counter("rpc_requests_total", {
-  description: "Total number of RPC requests",
-  tagKeys: ["method"],
-});
-export const rpcDurationSecondsHistogram = Metric.histogram(
-  "rpc_duration_seconds",
-  {
-    description: "RPC request duration in seconds",
-    boundaries: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
-  },
-);
-export const gitOperationsTotalCounter = Metric.counter("git_operations_total", {
-  description: "Total number of git operations",
-  tagKeys: ["operation"],
-});
-export const memoryUsageBytesGauge = Metric.gauge("memory_usage_bytes", {
-  description: "Current memory usage in bytes",
-});
-
-// Snapshot all registered metrics and format as Prometheus exposition text
-const renderMetrics = Effect.gen(function* () {
-  const snapshot = yield* Metric.snapshot;
-  const lines: string[] = [];
-  for (const [key, metricState] of Object.entries(snapshot)) {
-    const name = key;
-    const value = metricState.value;
-    if (typeof value === "number") {
-      lines.push(`${name} ${value}`);
-    } else if (typeof value === "object" && value !== null) {
-      for (const [tagString, count] of Object.entries(value)) {
-        if (tagString === "count" || tagString === "sum") {
-          lines.push(`${name}_${tagString} ${count}`);
-        } else {
-          lines.push(`${name}{${tagString}} ${count}`);
-        }
-      }
-    }
-  }
-  return lines.join("\n") + "\n";
-});
-
-export const browserApiCorsLayer = HttpRouter.cors({
-  allowedMethods: [...browserApiCorsAllowedMethods],
 
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: [...browserApiCorsAllowedMethods],
@@ -106,36 +60,12 @@ export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
   redirectUrl.hash = requestUrl.hash;
   return redirectUrl.toString();
 }
+
+const requireAuthenticatedRequest = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const serverAuth = yield* ServerAuth;
   yield* serverAuth.authenticateHttpRequest(request);
 });
-
-export const metricsRouteLayer = HttpRouter.add(
-  "GET",
-  METRICS_PATH,
-  Effect.gen(function* () {
-    const config = yield* ServerConfig;
-    const metricsAuthDisabled = config.metricsAuthDisabled ?? false;
-
-    if (!metricsAuthDisabled) {
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      const serverAuth = yield* ServerAuth;
-      const authResult = yield* Effect.either(
-        serverAuth.authenticateHttpRequest(request),
-      );
-      if (authResult._tag === "Left") {
-        return yield* respondToAuthError(authResult.left);
-      }
-    }
-
-    const body = yield* renderMetrics;
-    return HttpServerResponse.text(body, {
-      status: 200,
-      headers: { "content-type": "text/plain; version=0.0.4" },
-    });
-  }),
-export const serverEnvironmentRouteLayer = HttpRouter.add(
-  "GET",
-  "/.well-known/t3/environment",
 
 export const serverEnvironmentRouteLayer = HttpRouter.add(
   "GET",
