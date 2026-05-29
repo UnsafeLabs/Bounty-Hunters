@@ -1,46 +1,31 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Stdio from "effect/Stdio";
-import * as Layer from "effect/Layer";
+import * * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * Scope from "effect/Scope";
-import * Stream from "effect/Stream";
-import * RpcClient from "effect/unstable/rpc/RpcClient";
-import * RpcServer from "effect/unstable/rpc/RpcServer";
-import { ChildProcessSpawner } from "effect/unstable/process";
-
-import * as AcpError from "./errors.ts";
-import * AcpProtocol from "./protocol.ts";
-import * AcpRpcs from "./rpc.ts";
-import * AcpSchema from "./_generated/schema.gen.ts";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
+import * as RpcClient from "effect/unstable/rpc/RpcClient";
+import * as RpcServer from "effect/unstable/rpc/RpcServer";
+import * * as Scope from "effect/Scope";
+import * * as Stream from "effect/Stream";
+import * * as RpcClient from "effect/unstable/rpc/RpcClient";
+import * as AcpProtocol from "./protocol.ts";
+import * as AcpRpcs from "./rpc.ts";
+import * as AcpSchema from "./_generated/schema.gen.ts";
 import { AGENT_METHODS, CLIENT_METHODS } from "./_generated/meta.gen.ts";
+import {
+  callRpc,
+  decodeExtNotificationRegistration,
+  decodeExtRequestRegistration,
 import {
   callRpc,
   decodeExtNotificationRegistration,
   decodeExtRequestRegistration,
   runHandler,
 } from "./_internal/shared.ts";
+
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
-
-export interface AcpClientOptions {
-  readonly logIncoming?: boolean;
-  readonly logOutgoing?: boolean;
-  readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
-  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, any>;
-}
-
-export interface AcpClientState {
-  refreshToken: string | null;
-  accessToken: string | null;
-  sessionQueue: Array<Effect.Effect<any, any>>;
-  isRefreshing: boolean;
-}
-
-export interface AcpClientOptions {
-  readonly logIncoming?: boolean;
-  readonly logOutgoing?: boolean;
-  readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
-  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, any>;
 }
 
 type AcpClientRaw = {
@@ -71,7 +56,6 @@ export interface AcpClientShape {
      * @see https://agentclientprotocol.com/protocol/schema#logout
      */
     readonly logout: (
-      payload: AcpSchema.Log
       payload: AcpSchema.LogoutRequest,
     ) => Effect.Effect<AcpSchema.LogoutResponse, AcpError.AcpError>;
     /**
