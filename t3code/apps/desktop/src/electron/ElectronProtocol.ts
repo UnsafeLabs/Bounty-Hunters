@@ -13,6 +13,7 @@ import * as Electron from "electron";
 import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/DesktopEnvironment.ts";
 
 export const DESKTOP_SCHEME = "t3";
+export const DEEPLINK_SCHEME = "t3code";
 
 export class ElectronProtocolRegistrationError extends Data.TaggedError(
   "ElectronProtocolRegistrationError",
@@ -270,3 +271,136 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(ElectronProtocol, make);
+
+// ---------------------------------------------------------------------------
+// Deep link protocol — t3code://
+// ---------------------------------------------------------------------------
+
+export type DeepLinkAction =
+  | { readonly type: "open-project"; readonly path: string }
+  | { readonly type: "chat-thread"; readonly id: string }
+  | { readonly type: "settings" };
+
+export class ElectronDeepLinkInvalidUrlError extends Data.TaggedError(
+  "ElectronDeepLinkInvalidUrlError",
+)<{ readonly url: string }> {
+  override get message() {
+    return `Invalid deep link URL: ${this.url}`;
+  }
+}
+
+export function parseDeepLinkUrl(
+  rawUrl: string,
+): Option.Option<DeepLinkAction> {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return Option.none();
+  }
+
+  if (url.protocol !== `${DEEPLINK_SCHEME}:`) return Option.none();
+
+  const host = url.hostname;
+  const pathname = url.pathname.replace(/^\//, "");
+
+  if (host === "open" && pathname === "project") {
+    const rawPath = url.searchParams.get("path");
+    if (!rawPath) return Option.none();
+    // Reject path traversal attempts
+    if (rawPath.includes("..")) return Option.none();
+    return Option.some({ type: "open-project", path: rawPath });
+  }
+
+  if (host === "chat" && pathname === "thread") {
+    const id = url.searchParams.get("id");
+    if (!id) return Option.none();
+    return Option.some({ type: "chat-thread", id });
+  }
+
+  if (host === "settings" && pathname === "") {
+    return Option.some({ type: "settings" });
+  }
+
+  return Option.none();
+}
+
+function dispatchDeepLinkAction(action: DeepLinkAction): void {
+  const windows = Electron.BrowserWindow.getAllWindows();
+  if (windows.length === 0) return;
+
+  const target = windows.find((w) => w.isFocused()) ?? windows[0]!;
+  if (target.isMinimized()) target.restore();
+  target.focus();
+  target.webContents.send("deep-link:navigate", action);
+}
+
+const registerDeepLinkSchemePrivileges = Effect.sync(() => {
+  Electron.protocol.registerSchemesAsPrivileged([
+    {
+      scheme: DEEPLINK_SCHEME,
+      privileges: { standard: false, secure: true },
+    },
+  ]);
+}).pipe(Effect.withSpan("desktop.electron.protocol.registerDeepLinkSchemePrivileges"));
+
+export const layerDeepLinkSchemePrivileges = Layer.effectDiscard(
+  registerDeepLinkSchemePrivileges,
+);
+
+export const registerDeepLinkProtocol: Effect.Effect<
+  void,
+  never,
+  Scope.Scope
+> = Effect.acquireRelease(
+  Effect.sync(() => {
+    const handleUrl = (url: string) => {
+      const action = parseDeepLinkUrl(url);
+      if (Option.isSome(action)) {
+        dispatchDeepLinkAction(action.value);
+      } else {
+        const windows = Electron.BrowserWindow.getAllWindows();
+        const target = windows[0];
+        if (target) {
+          target.webContents.send("deep-link:error", {
+            url,
+            message: `Invalid deep link: ${url}`,
+          });
+        }
+      }
+    };
+
+    // macOS: open-url event fires when the app is already running
+    Electron.app.on("open-url", (event, url) => {
+      event.preventDefault();
+      handleUrl(url);
+    });
+
+    // Windows / Linux: second-instance argv contains the URL
+    Electron.app.on("second-instance", (_event, argv) => {
+      const url = argv.find((arg) => arg.startsWith(`${DEEPLINK_SCHEME}://`));
+      if (url) handleUrl(url);
+
+      // Focus the existing window
+      const windows = Electron.BrowserWindow.getAllWindows();
+      const target = windows[0];
+      if (target) {
+        if (target.isMinimized()) target.restore();
+        target.focus();
+      }
+    });
+
+    if (!Electron.app.isDefaultProtocolClient(DEEPLINK_SCHEME)) {
+      Electron.app.setAsDefaultProtocolClient(DEEPLINK_SCHEME);
+    }
+  }),
+  () =>
+    Effect.sync(() => {
+      Electron.app.removeAsDefaultProtocolClient(DEEPLINK_SCHEME);
+    }),
+).pipe(
+  Effect.asVoid,
+  Effect.withSpan("desktop.electron.protocol.registerDeepLinkProtocol"),
+);
+
+export const layerDeepLinkProtocol = Layer.scopedDiscard(registerDeepLinkProtocol);
