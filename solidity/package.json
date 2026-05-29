@@ -1,0 +1,14 @@
+{
+  "name": "unsafelabs-solidity-validation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:cross-chain-bridge": "node test/crossChainBridge.test.mjs"
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "^5.0.0",
+    "ethers": "^6.0.0",
+    "ganache": "^7.0.0",
+    "solc": "^0.8.20"
+  }
+}
