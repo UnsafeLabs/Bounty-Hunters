@@ -10,6 +10,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, assert } from "@effect/vitest";
@@ -22,11 +23,39 @@ import { makeInMemoryStdio } from "./_internal/stdio.ts";
 
 const InitializeRequest = jsonRpcRequest("initialize", AcpSchema.InitializeRequest);
 const InitializeResponse = jsonRpcResponse(AcpSchema.InitializeResponse);
+const AuthenticateRequest = jsonRpcRequest("authenticate", AcpSchema.AuthenticateRequest);
+const AuthenticateResponse = jsonRpcResponse(AcpSchema.AuthenticateResponse);
+const LogoutRequest = jsonRpcRequest("logout", AcpSchema.LogoutRequest);
+const LogoutResponse = jsonRpcResponse(AcpSchema.LogoutResponse);
+const PromptRequest = jsonRpcRequest("session/prompt", AcpSchema.PromptRequest);
+const PromptResponse = jsonRpcResponse(AcpSchema.PromptResponse);
 const ExtRequest = jsonRpcRequest("x/test", Schema.Struct({ hello: Schema.String }));
 const ExtResponse = jsonRpcResponse(Schema.Struct({ ok: Schema.Boolean }));
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/acp-mock-peer.ts"),
 );
+const rpcParser = RpcSerialization.ndJsonRpc().makeUnsafe();
+
+const encodeRpcError = (id: string | number, error: AcpSchema.Error) =>
+  Effect.sync(() => {
+    const encoded = rpcParser.encode({
+      _tag: "Exit",
+      requestId: String(id),
+      exit: {
+        _tag: "Failure",
+        cause: [
+          {
+            _tag: "Fail",
+            error,
+          },
+        ],
+      },
+    });
+    if (encoded === undefined) {
+      throw new Error("Failed to encode ACP error response");
+    }
+    return typeof encoded === "string" ? new TextEncoder().encode(encoded) : encoded;
+  });
 
 it.layer(NodeServices.layer)("effect-acp client", (it) => {
   const makeHandle = (env?: Record<string, string>) =>
@@ -443,6 +472,193 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
 
       yield* Fiber.join(initializeFiber);
       assert.deepEqual(yield* Fiber.join(extFiber), { ok: true });
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
+  it.effect("reauthenticates once and replays concurrent requests after session expiry", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const expiredSessions = yield* Ref.make<ReadonlyArray<string>>([]);
+      const scope = yield* Scope.make();
+      const acp = yield* AcpClient.make(stdio, {
+        onSessionExpired: (sessionId) =>
+          Ref.update(expiredSessions, (current) => [...current, sessionId]),
+      }).pipe(Effect.provideService(Scope.Scope, scope));
+
+      const authFiber = yield* acp.agent
+        .authenticate({ methodId: "cursor_login" })
+        .pipe(Effect.forkScoped);
+      const authenticateRequest = yield* Schema.decodeEffect(
+        Schema.fromJsonString(AuthenticateRequest),
+      )(yield* Queue.take(output));
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(AuthenticateResponse, {
+          jsonrpc: "2.0",
+          id: authenticateRequest.id,
+          result: {
+            _meta: {
+              accessToken: "access-1",
+              refreshToken: "refresh-1",
+            },
+          },
+        }),
+      );
+      yield* Fiber.join(authFiber);
+
+      const promptPayload = {
+        sessionId: "expired-session",
+        prompt: [{ type: "text" as const, text: "hello" }],
+      };
+      const firstPromptFiber = yield* acp.agent.prompt(promptPayload).pipe(Effect.forkScoped);
+      const secondPromptFiber = yield* acp.agent.prompt(promptPayload).pipe(Effect.forkScoped);
+      const decodePromptRequest = Schema.decodeEffect(Schema.fromJsonString(PromptRequest));
+      const firstPromptRequest = yield* decodePromptRequest(yield* Queue.take(output));
+      const secondPromptRequest = yield* decodePromptRequest(yield* Queue.take(output));
+
+      const expiredError = AcpError.AcpRequestError.authRequired("Session expired", {
+        sessionId: "expired-session",
+      }).toProtocolError();
+      yield* Queue.offer(input, yield* encodeRpcError(firstPromptRequest.id, expiredError));
+      yield* Queue.offer(input, yield* encodeRpcError(secondPromptRequest.id, expiredError));
+
+      const logoutRequest = yield* Schema.decodeEffect(Schema.fromJsonString(LogoutRequest))(
+        yield* Queue.take(output),
+      );
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(LogoutResponse, {
+          jsonrpc: "2.0",
+          id: logoutRequest.id,
+          result: {},
+        }),
+      );
+
+      const refreshRequest = yield* Schema.decodeEffect(Schema.fromJsonString(AuthenticateRequest))(
+        yield* Queue.take(output),
+      );
+      assert.equal(refreshRequest.params.methodId, "cursor_login");
+      assert.equal(refreshRequest.params._meta?.refreshToken, "refresh-1");
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(AuthenticateResponse, {
+          jsonrpc: "2.0",
+          id: refreshRequest.id,
+          result: {
+            _meta: {
+              accessToken: "access-2",
+              refreshToken: "refresh-2",
+            },
+          },
+        }),
+      );
+
+      const replayedFirst = yield* decodePromptRequest(yield* Queue.take(output));
+      const replayedSecond = yield* decodePromptRequest(yield* Queue.take(output));
+      assert.deepEqual([replayedFirst.params.sessionId, replayedSecond.params.sessionId].sort(), [
+        "expired-session",
+        "expired-session",
+      ]);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(PromptResponse, {
+          jsonrpc: "2.0",
+          id: replayedFirst.id,
+          result: { stopReason: "end_turn" },
+        }),
+      );
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(PromptResponse, {
+          jsonrpc: "2.0",
+          id: replayedSecond.id,
+          result: { stopReason: "end_turn" },
+        }),
+      );
+
+      assert.equal((yield* Fiber.join(firstPromptFiber)).stopReason, "end_turn");
+      assert.equal((yield* Fiber.join(secondPromptFiber)).stopReason, "end_turn");
+      assert.deepEqual(yield* Ref.get(expiredSessions), ["expired-session"]);
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
+  it.effect("fails queued requests with a typed authentication error when refresh fails", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      const acp = yield* AcpClient.make(stdio).pipe(Effect.provideService(Scope.Scope, scope));
+
+      const authFiber = yield* acp.agent
+        .authenticate({ methodId: "cursor_login" })
+        .pipe(Effect.forkScoped);
+      const authenticateRequest = yield* Schema.decodeEffect(
+        Schema.fromJsonString(AuthenticateRequest),
+      )(yield* Queue.take(output));
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(AuthenticateResponse, {
+          jsonrpc: "2.0",
+          id: authenticateRequest.id,
+          result: {
+            _meta: {
+              refreshToken: "refresh-1",
+            },
+          },
+        }),
+      );
+      yield* Fiber.join(authFiber);
+
+      const promptFiber = yield* acp.agent
+        .prompt({
+          sessionId: "expired-session",
+          prompt: [{ type: "text", text: "hello" }],
+        })
+        .pipe(Effect.exit, Effect.forkScoped);
+      const promptRequest = yield* Schema.decodeEffect(Schema.fromJsonString(PromptRequest))(
+        yield* Queue.take(output),
+      );
+      yield* Queue.offer(
+        input,
+        yield* encodeRpcError(
+          promptRequest.id,
+          AcpError.AcpRequestError.authRequired("Token expired", {
+            sessionId: "expired-session",
+          }).toProtocolError(),
+        ),
+      );
+
+      const logoutRequest = yield* Schema.decodeEffect(Schema.fromJsonString(LogoutRequest))(
+        yield* Queue.take(output),
+      );
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(LogoutResponse, {
+          jsonrpc: "2.0",
+          id: logoutRequest.id,
+          result: {},
+        }),
+      );
+
+      const refreshRequest = yield* Schema.decodeEffect(Schema.fromJsonString(AuthenticateRequest))(
+        yield* Queue.take(output),
+      );
+      yield* Queue.offer(
+        input,
+        yield* encodeRpcError(
+          refreshRequest.id,
+          AcpError.AcpRequestError.authRequired("Refresh failed").toProtocolError(),
+        ),
+      );
+
+      const exit = yield* Fiber.join(promptFiber);
+      if (exit._tag !== "Failure") {
+        assert.fail("Expected prompt to fail when re-authentication fails");
+      }
+      const rendered = Cause.pretty(exit.cause);
+      assert.include(rendered, "AcpAuthenticationError");
+      assert.include(rendered, "ACP re-authentication failed after session expiry.");
       yield* Scope.close(scope, Exit.void);
     }),
   );

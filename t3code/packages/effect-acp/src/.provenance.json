@@ -1,0 +1,5 @@
+{
+  "agent_name": "OpenAI Codex",
+  "config_snapshot": "Public task context for UnsafeLabs/Bounty-Hunters issue #829: implement automatic ACP client re-authentication for auth-expired responses with one serialized refresh attempt, refresh-token metadata handling, queued concurrent request replay, typed authentication failure, focused tests, and safe public provenance. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "created": "2026-05-29T00:25:00Z"
+}
