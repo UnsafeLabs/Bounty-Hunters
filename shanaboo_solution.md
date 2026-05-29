@@ -1,154 +1,166 @@
-Looking at the issue, I need to create a caching system for provider API responses using Effect.Cache with TTL functionality. Let me analyze what's needed:
+Looking at the issue, I need to create a ProviderCache.ts file that implements Effect.Cache-based caching for provider API responses with TTL functionality. Let me analyze the requirements:
 
-1. Create a ProviderCache service with Effect.Cache
-2. Cache model lists with 5-minute TTL
-3. Cache capability queries with 15-minute TTL
-4. Handle cache invalidation via Effect.Hub subscription
-5. Add metrics tracking
-6. Implement concurrent request deduplication
+1. Create `t3code/apps/server/src/services/ProviderCache.ts`
+2. Use Effect.Cache with configurable TTL (5min for models, 15min for capabilities)
+3. Cache invalidation on provider config changes via Effect.Hub
+4. Cache hit/miss metrics
+5. Deduplication of concurrent lookups
 
-Let me create the ProviderCache.ts file:
+Let me create the implementation:
 
 ```diff
 --- /dev/null
 +++ b/t3code/apps/server/src/services/ProviderCache.ts
-@@ -0,0 +1,269 @@
-+import { Cache, Effect, Layer, Metric, Context, Hub, Duration, Option, pipe } from "@effect/effect"
-+import type { ProviderModelList, ProviderCapability } from "../types/provider"
+@@ -0,0 +1,184 @@
++import { Cache, Effect, Duration, Layer, Context, Ref, Hub, Queue, Metric, pipe } from "effect"
++import type { ProviderId } from "../types/provider"
 +
-+// Cache configuration
-+interface CacheConfig {
++// Service interface
++export interface ProviderCacheService {
++  readonly getModelList: (providerId: ProviderId) => Effect.Effect<unknown, unknown, unknown>
++  readonly getCapabilities: (providerId: ProviderId, modelId: string) => Effect.Effect<unknown, unknown, unknown>
++  readonly invalidateProvider: (providerId: ProviderId) => Effect.Effect<void, never, never>
++  readonly getStats: () => Effect.Effect<{
++    modelListHits: number
++    modelListMisses: number
++    capabilityHits: number
++    capabilityMisses: number
++  }, never, never>
++}
++
++// Configuration
++interface ProviderCacheConfig {
 +  modelListTTL: Duration.Duration
-+  capabilityQueryTTL: Duration.Duration
++  capabilitiesTTL: Duration.Duration
 +  maxEntries: number
 +}
 +
-+const defaultConfig: CacheConfig = {
++const defaultConfig: ProviderCacheConfig = {
 +  modelListTTL: Duration.minutes(5),
-+  capabilityQueryTTL: Duration.minutes(15),
++  capabilitiesTTL: Duration.minutes(15),
 +  maxEntries: 1000
 +}
 +
-+// Metrics for cache performance tracking
-+const CacheMetrics = {
-+  hitCount: Metric.counter("provider_cache_hits", { description: "Number of cache hits" }),
-+  missCount: Metric.counter("provider_cache_misses", { description: "Number of cache misses" }),
-+  cacheSize: Metric.gauge("provider_cache_size", { description: "Current cache size" }),
-+  cacheInvalidations: Metric.counter("provider_cache_invalidations", { description: "Number of cache invalidations" })
-+}
++// Metrics
++const modelListHits = Metric.counter("provider_cache_model_list_hits")
++const modelListMisses = Metric.counter("provider_cache_model_list_misses")
++const capabilityHits = Metric.counter("provider_cache_capability_hits")
++const capabilityMisses = Metric.counter("provider_cache_capability_misses")
 +
-+// Cache key types
-+type CacheKey = 
-+  | { _tag: "modelList"; providerId: string }
-+  | { _tag: "capability"; providerId: string; modelId: string }
++// Context tag for the service
++export class ProviderCache extends Context.Tag("ProviderCache")<
++  ProviderCache,
++  ProviderCacheService
++>() {}
 +
-+// Create cache instances
-+const modelListCache = Cache.make<ReadonlyArray<ProviderModelList>, CacheKey>({
-+  lookup: (key: CacheKey) => {
-+    if (key._tag === "modelList") {
-+      return Effect.succeed([] as ReadonlyArray<ProviderModelList>)
-+    }
-+    return Effect.succeed({} as ProviderCapability)
-+  },
-+  capacity: defaultConfig.maxEntries,
-+  timeToLive: (key: CacheKey) => {
-+    if (key._tag === "modelList") {
-+      return defaultConfig.modelListTTL
-+    }
-+    return defaultConfig.capabilityQueryTTL
-+  }
-+})
++// Internal cache keys
++type ModelListKey = `model-list:${ProviderId}`
++type CapabilityKey = `capability:${ProviderId}:${string}`
++type CacheKey = ModelListKey | CapabilityKey
 +
-+// Capability cache
-+const capabilityCache = Cache.make<ProviderCapability, CacheKey>({
-+  lookup: () => Effect.succeed({} as ProviderCapability),
-+  capacity: defaultConfig.maxEntries,
-+  timeToLive: defaultConfig.capabilityQueryTTL
-+})
-+
-+// Cache service context
-+export interface ProviderCacheService {
-+  readonly modelListCache: Cache.Cache<ReadonlyArray<ProviderModelList>, CacheKey>
-+  readonly capabilityCache: Cache.Cache<ProviderCapability, CacheKey>
-+  readonly cacheMetrics: typeof CacheMetrics
-+  readonly config: CacheConfig
-+}
-+
-+export const ProviderCacheService = Context.GenericTag<ProviderCacheService>("@services/ProviderCacheService")
-+
-+// Effect to get model list with caching
-+export const getModelListWithCache = (providerId: string) => 
-+  Effect.gen(function*(_) {
-+    const service = yield* _(ProviderCacheService)
-+    const key: CacheKey = { _tag: "modelList", providerId }
-+    
-+    // Check if we have a cached value
-+    const cached = yield* _(Cache.get(service.modelListCache, key))
-+    if (Option.isSome(cached)) {
-+      yield* _(CacheMetrics.hitCount)
-+      return cached.value
-+    }
-+    
-+    // Cache miss - increment metric and fetch
-+    yield* _(CacheMetrics.missCount)
-+    // Simulate API call - in real implementation this would call the actual provider API
-+    const result = [] as ReadonlyArray<ProviderModelList>
-+    yield* _(Cache.set(service.modelListCache, key, result))
-+    return result
-+  })
-+
-+// Effect to get capability with caching
-+export const getCapabilityWithCache = (providerId: string, modelId: string) => 
-+  Effect.gen(function*(_) {
-+    const service = yield* _(ProviderCacheService)
-+    const key: CacheKey = { _tag: "capability", providerId, modelId }
-+    
-+    // Check if we have a cached value
-+    const cached = yield* _(Cache.get(service.capabilityCache, key))
-+    if (Option.isSome(cached)) {
-+      yield* _(CacheMetrics.hitCount)
-+      return cached.value
-+    }
-+    
-+    // Cache miss - increment metric and fetch
-+    yield* _(CacheMetrics.missCount)
-+    // Simulate API call - in real implementation this would call the actual provider API
-+    const result = {} as ProviderCapability
-+    yield* _(Cache.set(service.capabilityCache, key, result))
-+    return result
-+  })
-+
-+// Cache invalidation hub for provider config changes
-+export const ProviderConfigChange = Hub.unsafeMake<{ providerId: string } | "all">("provider-config-change")
-+
-+// Effect to invalidate cache entries for a provider
-+export const invalidateProviderCache = (providerId: string) => 
-+  Effect.gen(function*(_) {
-+    const service = yield* _(ProviderCacheService)
-+    yield* _(CacheMetrics.cacheInvalidations)
-+    
-+    // Invalidate specific provider or all entries
-+    if (providerId === "all") {
-+      yield* _(Cache.invalidateAll(service.modelListCache))
-+      yield* _(Cache.invalidateAll(service.capabilityCache))
-+    } else {
-+      // Find and remove entries for specific provider
-+      const modelListKey: CacheKey = { _tag: "modelList", providerId: providerId as string }
-+      const entries = yield* _(Cache.entries(service.modelListCache))
-+      for (const [key, _value] of entries) {
-+        if (key._tag === "modelList" && key.providerId === providerId) {
-+          yield* _(Cache.remove(service.modelListCache, key))
-+        }
-+      }
-+    }
-+  })
-+
-+// Listen for provider config changes and invalidate cache
-+export const cacheInvalidationListener = Effect.gen(function*(_) {
-+  const changes = yield* _(ProviderConfigChange)
-+  yield* _(Hub.subscribe(changes, (update) => 
-+    Effect.gen(function*(__) {
-+      if (update === "all") {
-+        yield* __(ProviderCacheService)
-+        yield* __(Cache.invalidateAll(modelListCache))
-+       
++// Create the cache layer
++export const makeLayer = (config?: Partial<ProviderCacheConfig>) => 
++  Layer.effect(
++    ProviderCache,
++    Effect.gen(function* (_) {
++      const fullConfig = { ...defaultConfig, ...config }
++      
++      // Stats tracking
++      const stats = yield* _(Ref.make({
++        modelListHits: 0,
++        modelListMisses: 0,
++        capabilityHits: 0,
++        capabilityMisses: 0
++      }))
++      
++      // Create caches with TTL
++      const modelListCache = yield* _(Cache.make({
++        capacity: fullConfig.maxEntries,
++        timeToLive: fullConfig.modelListTTL,
++        lookup: (key: ModelListKey) => 
++          pipe(
++            Effect.sync(() => {
++              const providerId = key.split(":")[1] as ProviderId
++              return providerId
++            }),
++            Effect.flatMap(fetchModelListFromProvider),
++            Effect.tap(() => 
++              Ref.update(stats, s => ({ ...s, modelListMisses: s.modelListMisses + 1 }))
++            ),
++            Effect.tapError(() => 
++              Ref.update(stats, s => ({ ...s, modelListMisses: s.modelListMisses + 1 }))
++            )
++          )
++      }))
++      
++      const capabilitiesCache = yield* _(Cache.make({
++        capacity: fullConfig.maxEntries,
++        timeToLive: fullConfig.capabilitiesTTL,
++        lookup: (key: CapabilityKey) => 
++          pipe(
++            Effect.sync(() => {
++              const parts = key.split(":")
++              const providerId = parts[1] as ProviderId
++              const modelId = parts[2]
++              return { providerId, modelId }
++            }),
++            Effect.flatMap(({ providerId, modelId }) => 
++              fetchCapabilitiesFromProvider(providerId, modelId)
++            ),
++            Effect.tap(() => 
++              Ref.update(stats, s => ({ ...s, capabilityMisses: s.capabilityMisses + 1 }))
++            ),
++            Effect.tapError(() => 
++              Ref.update(stats, s => ({ ...s, capabilityMisses: s.capabilityMisses + 1 }))
++            )
++          )
++      }))
++      
++      // Subscribe to config changes for invalidation
++      const hub = yield* _(Hub.make<void>())
++      const queue = yield* _(Queue.unbounded<ProviderId>())
++      yield* _(Hub.subscribe(hub, queue))
++      
++      // Process invalidation events
++      yield* _(
++        Queue.take(queue),
++        Effect.flatMap((providerId) => 
++          Effect.all([
++            Cache.invalidateWhen(modelListCache, (key: CacheKey) => 
++              key.startsWith(`model-list:${providerId}`)
++            ),
++            Cache.invalidateWhen(capabilitiesCache, (key: CacheKey) => 
++              key.startsWith(`capability:${providerId}`)
++            )
++          ])
++        ),
++        Effect.forever,
++        Effect.fork
++      )
++      
++      // Service implementation
++      const service: ProviderCacheService = {
++        getModelList: (providerId) => 
++          pipe(
++            Cache.get(modelListCache, `model-list:${providerId}` as ModelListKey),
++            Effect.tap(() => 
++              Ref.update(stats, s => ({ ...s, modelListHits: s.modelListHits + 1 }))
++            ),
++            Effect.orElse(() => 
++              pipe(
++                Ref.update(stats, s => ({ ...s, modelListMisses: s.modelListMisses + 1 })),
++                Effect.zipRight(Effect.fail("Cache miss"))
++              )
++            )
++          ),
++          
++        getCapabilities: (providerId, modelId) => 
++          pipe(
++            Cache.get(capabilitiesCache, `capability:${providerId}:${modelId}` as CapabilityKey),
++            Effect.tap(() => 
++              Ref.update(stats, s => ({ ...s, capabilityHits: s.capabilityHits + 1 }))
++            ),
++            Effect.orElse(() => 
++              pipe(
++                Ref.update(stats, s => ({ ...s, capabilityMisses: s.capabilityMisses + 1 })),
++                Effect.zipRight(Effect
