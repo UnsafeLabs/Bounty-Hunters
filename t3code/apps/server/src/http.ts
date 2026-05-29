@@ -38,6 +38,34 @@ const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+const REQUEST_BODY_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+export const DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES = 10 * 1024 * 1024;
+export const FILE_UPLOAD_REQUEST_BODY_SIZE_LIMIT_BYTES = 50 * 1024 * 1024;
+export const REQUEST_BODY_SIZE_LIMIT_HEADER = "X-Max-Body-Size";
+
+export interface RequestBodySizeLimitRouteOverride {
+  readonly method?: "*" | "POST" | "PUT" | "PATCH" | "DELETE";
+  readonly path: string;
+  readonly limitBytes: number;
+}
+
+export interface RequestBodySizeLimitOptions {
+  readonly defaultLimitBytes?: number;
+  readonly fileUploadLimitBytes?: number;
+  readonly routeOverrides?: ReadonlyArray<RequestBodySizeLimitRouteOverride>;
+}
+
+export interface ResolvedRequestBodySizeLimit {
+  readonly limitBytes: number;
+  readonly routeKind: "default" | "file-upload" | "override";
+}
+
+export interface RequestBodySizeLimitInput {
+  readonly method: string;
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string | undefined>>;
+}
 
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: [...browserApiCorsAllowedMethods],
@@ -60,6 +88,169 @@ export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
   redirectUrl.hash = requestUrl.hash;
   return redirectUrl.toString();
 }
+
+function resolveRequestPathname(url: string): string {
+  return new URL(url, "http://localhost").pathname;
+}
+
+function routeOverrideMatches(
+  override: RequestBodySizeLimitRouteOverride,
+  method: string,
+  pathname: string,
+): boolean {
+  if (override.method && override.method !== "*" && override.method !== method) {
+    return false;
+  }
+  if (override.path === "*") {
+    return true;
+  }
+  if (override.path.endsWith("/*")) {
+    const prefix = override.path.slice(0, -2);
+    return pathname === prefix || pathname.startsWith(`${prefix}/`);
+  }
+  return pathname === override.path;
+}
+
+function isFileUploadRequest(pathname: string, headers: RequestBodySizeLimitInput["headers"]) {
+  const contentType = headers["content-type"]?.toLowerCase() ?? "";
+  return (
+    contentType.includes("multipart/form-data") ||
+    pathname.includes("/upload") ||
+    pathname.includes("/uploads") ||
+    pathname.startsWith(`${ATTACHMENTS_ROUTE_PREFIX}/upload`)
+  );
+}
+
+export function resolveRequestBodySizeLimit(
+  input: RequestBodySizeLimitInput,
+  options: RequestBodySizeLimitOptions = {},
+): ResolvedRequestBodySizeLimit | undefined {
+  const method = input.method.toUpperCase();
+  if (!REQUEST_BODY_METHODS.has(method)) {
+    return undefined;
+  }
+
+  const pathname = resolveRequestPathname(input.url);
+  const override = options.routeOverrides?.find((candidate) =>
+    routeOverrideMatches(candidate, method, pathname),
+  );
+  if (override) {
+    return { limitBytes: override.limitBytes, routeKind: "override" };
+  }
+
+  if (isFileUploadRequest(pathname, input.headers)) {
+    return {
+      limitBytes: options.fileUploadLimitBytes ?? FILE_UPLOAD_REQUEST_BODY_SIZE_LIMIT_BYTES,
+      routeKind: "file-upload",
+    };
+  }
+
+  return {
+    limitBytes: options.defaultLimitBytes ?? DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES,
+    routeKind: "default",
+  };
+}
+
+export function parseContentLengthHeader(contentLength: string | undefined): number | undefined {
+  if (!contentLength) {
+    return undefined;
+  }
+  const trimmed = contentLength.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function causeIncludesMaxBytesExceeded(value: unknown, seen = new Set<unknown>()): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (seen.has(value)) {
+    return false;
+  }
+  seen.add(value);
+  if (value instanceof Error && value.message.includes("maxBytes exceeded")) {
+    return true;
+  }
+  if (typeof value !== "object") {
+    return String(value).includes("maxBytes exceeded");
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    causeIncludesMaxBytesExceeded(record.cause, seen) ||
+    causeIncludesMaxBytesExceeded(record.reason, seen) ||
+    causeIncludesMaxBytesExceeded(record.error, seen)
+  );
+}
+
+function payloadTooLargeResponse(input: {
+  readonly limitBytes: number;
+  readonly receivedBytes: number;
+}) {
+  return HttpServerResponse.jsonUnsafe(
+    {
+      error: "Payload Too Large",
+      limit: input.limitBytes,
+      received: input.receivedBytes,
+    },
+    {
+      status: 413,
+      headers: {
+        ...browserApiCorsHeaders,
+        [REQUEST_BODY_SIZE_LIMIT_HEADER]: String(input.limitBytes),
+      },
+    },
+  );
+}
+
+export const makeRequestBodySizeLimitLayer = (options: RequestBodySizeLimitOptions = {}) =>
+  HttpRouter.middleware(
+    <E, R>(httpApp: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const resolved = resolveRequestBodySizeLimit(
+          {
+            method: request.method,
+            url: request.url,
+            headers: request.headers,
+          },
+          options,
+        );
+        if (!resolved) {
+          return yield* httpApp;
+        }
+
+        const receivedBytes = parseContentLengthHeader(request.headers["content-length"]);
+        if (receivedBytes !== undefined && receivedBytes > resolved.limitBytes) {
+          return payloadTooLargeResponse({
+            limitBytes: resolved.limitBytes,
+            receivedBytes,
+          });
+        }
+
+        return yield* Effect.provideService(
+          httpApp,
+          HttpServerRequest.MaxBodySize,
+          FileSystem.Size(resolved.limitBytes),
+        ).pipe(
+          Effect.catch((cause) =>
+            causeIncludesMaxBytesExceeded(cause)
+              ? Effect.succeed(
+                  payloadTooLargeResponse({
+                    limitBytes: resolved.limitBytes,
+                    receivedBytes: receivedBytes ?? resolved.limitBytes + 1,
+                  }),
+                )
+              : Effect.fail(cause),
+          ),
+        );
+      }),
+    { global: true },
+  );
+
+export const requestBodySizeLimitLayer = makeRequestBodySizeLimitLayer();
 
 const requireAuthenticatedRequest = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
