@@ -50,12 +50,23 @@ contract TokenVesting {
     }
 
     function claim() external {
-    uint256 private _cliff;
-    uint256 private _totalAllocation;
-    bool private _revoked;
-
-    function isRevoked() public view returns (bool) {
-        return _revoked;
+    function vestedAmount(uint256 totalAllocation, uint256 start, uint256 cliff, uint256 duration) public view returns (uint256) {
+        uint256 current = block.timestamp;
+        if (current < start) {
+            return 0;
+        }
+        
+        uint256 elapsed = current > start + duration ? duration : current - start;
+        
+        // Prevent overflow by dividing before multiplying
+        // First calculate totalAllocation / duration to get the rate per second
+        // Then multiply by elapsed time
+        uint256 vested = (totalAllocation * elapsed) / duration;
+        
+        return vested;
+    }
+}
+        emit TokensClaimed(beneficiary, amount);
     }
 
     // BUG: Incorrect unvested calculation during cliff period
