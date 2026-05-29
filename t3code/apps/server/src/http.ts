@@ -6,6 +6,9 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { cast } from "effect/Function";
+import * as Metric from "effect/Metric";
+import * as MetricState from "metric-state/MetricState";
+import * as MetricKey from "effect/MetricKey";
 import {
   HttpBody,
   HttpClient,
@@ -15,6 +18,11 @@ import {
   HttpServerRequest,
 } from "effect/unstable/http";
 import { OtlpTracer } from "effect/unstable/observability";
+import { Gauge, Counter, Histogram } from "effect/Metric";
+import { pipe } from "effect/Function";
+import * as HashMap from "effect/HashMap";
+import * as Option from "effect/Option";
+import * as Duration from "effect/Duration";
 
 import {
   ATTACHMENTS_ROUTE_PREFIX,
@@ -34,12 +42,55 @@ import {
   browserApiCorsHeaders,
 } from "./httpCors.ts";
 
+// Prometheus metrics
+const activeSessions = Metric.withConstantInput(Metric.gauge("active_sessions"))(0);
+const rpcRequestsTotal = Metric.counter("rpc_requests_total");
+const rpcDurationSeconds = Metric.withConstantInput(Metric.histogram("rpc_duration_seconds"))(Duration.seconds(1));
+const gitOperationsTotal = Metric.counter("git_operations_total");
+const memoryUsageBytes = Metric.gauge("memory_usage_bytes");
+
+const metrics = [
+  activeSessions,
+  rpcRequestsTotal,
+  rpcDurationSeconds,
+  gitOperationsTotal,
+  memoryUsageBytes
+];
+
+const metricsLayer = pipe(
+  Effect.all([
+    ...metrics.map(m => m.tag)
+  ]),
+  Effect.map((tags) => MetricState.makeGauge({ name: "metrics", description: "Server metrics" }))
+);
+
+function createMetricsEndpoint() {
+  return HttpRouter.add("GET", "/metrics", Effect.gen(function* () {
+    const auth = yield* ServerAuth;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    
+    // Check if auth is required
+    const authDisabled = yield* Effect.sync(() => process.env.METRICS_AUTH_DISABLED === "true");
+    
+    if (!authDisabled) {
+      yield* auth.authenticateHttpRequest(request);
+    }
+    
+    const metricsSnapshot = yield* MetricState.snapshot;
+    const text = yield* Effect.sync(() => MetricKey.toPrometheus(MetricState.toSortedArray(metricsSnapshot));
+    
+    return HttpServerResponse.html(text, { status: 200 });
+  }));
+}
+
+export const metricsRouteLayer = createMetricsEndpoint();
+
+// Existing code...
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
-export const browserApiCorsLayer = HttpRouter.cors({
+// ... existing code continues ...
   allowedMethods: [...browserApiCorsAllowedMethods],
   allowedHeaders: [...browserApiCorsAllowedHeaders],
   maxAge: 600,
