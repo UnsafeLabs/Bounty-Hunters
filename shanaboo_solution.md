@@ -1,171 +1,117 @@
 ```diff
 --- a/t3code/apps/server/src/http.ts
 +++ b/t3code/apps/server/src/http.ts
-@@ -1,3 +1,5 @@
-+import { createMiddleware } from "effect/HttpApp";
-+import { HttpBody, HttpClient, HttpClientRequest, HttpClientResponse, HttpMiddleware, HttpRouter, HttpServerResponse, HttpServerRequest } from "effect/unstable/http";
- import Mime from "@effect/platform-node/Mime";
+@@ -1,4 +1,4 @@
+-import Mime from "@effect/platform-node/Mime";
++import Mime from "@effect/platform-node/Mime";
  import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
  import * as Data from "effect/Data";
-@@ -9,6 +11,8 @@ import * as Option from "effect/Option";
- import * as Path from "effect/Path";
- import { cast } from "effect/Function";
- import {
-+  HttpBody,
-+  HttpClient,
-   HttpClientResponse,
-   HttpRouter,
-   HttpServerResponse,
-@@ -16,6 +20,7 @@ import {
- } from "effect/unstable/http";
- import { OtlpTracer } from "effect/unstable/observability";
- 
-+// ... existing code ...
- 
- import {
-   ATTACHMENTS_ROUTE_PREFIX,
-@@ -33,6 +39,137 @@ import {
- } from "./attachmentPaths.ts";
- import { resolveAttachmentPathById } from "./attachmentStore.ts";
+ import * as Effect from "effect/Effect";
+@@ -13,4 +13,4 @@ import {
  import { resolveStaticDir, ServerConfig } from "./config.ts";
-+import { createHttpBodySizeLimiter } from "./httpMiddleware.ts";
+ import { BrowserTraceCollector end
+ import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
+-import { respondToAuthError } from "./auth/http.ts";
++import { respondToAuthError } from "./auth/http.ts";
+ 
+@@ -21,4 +21,22 @@ import { respondToAuthError } from "./auth/http.ts";
+ 
+ const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 +
-+export const browserApiCorsLayer = HttpRouter.cors({
++// Request size limits
++const DEFAULT_BODY_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
++const FILE_UPLOAD_SIZE_LIMIT = 50 * 1024 * 1024; // 50MB
++
++// Middleware to limit request body size
++const withBodySizeLimit = (limit: number) => HttpServerRequest.withMiddleware(
++  HttpServerRequest.HttpServerRequest,
++  (req) => {
++    const contentLength = req.headers.get("content-length");
++    if (contentLength && parseInt(contentLength) > limit) {
++      return HttpServerResponse.empty({
++        status: 413,
++        headers: {
++          "X-Max-Body-Size": limit.toString(),
++        }
++      });
++    }
++    return req;
++  }
++);
++
+ const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
+@@ -28,4 +46,4 @@ const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+ 
+ export const browserApiCorsLayer = HttpRouter.cors({
+-  allowedMethods: [...browserApiCorsAllowedMethods],
+-  allowedHeaders: [...browserApiCorsAllowedHeaders],
+-  maxAge: 600,
+-});
 +  allowedMethods: [...browserApiCorsAllowedMethods],
 +  allowedHeaders: [...browserApiCorsAllowedHeaders],
 +  maxAge: 600,
 +});
+ 
+@@ -33,4 +51,12 @@ export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
+   return redirectUrl.toString();
+ }
+ 
++// Add body size limiting middleware
++const withBodySizeLimit = (limit: number) => {
++  return (req: HttpServerRequest.HttpServerRequest) => {
++    const contentLength = req.headers.get("content-length");
++    if (contentLength && parseInt(contentLength) > limit) {
++      return HttpServerResponse.empty({ status: 413, headers: { "X-Max-Body-Size": limit.toString() } });
++    }
++    return req;
++  };
++};
 +
-+class RequireAuthenticatedRequestError extends Data.TaggedError("RequireAuthenticatedRequestError")<{
-+  readonly cause: unknown;
-+  readonly bodyJson: OtlpTracer.TraceData;
-+}> {}
-+
-+export const serverEnvironmentRouteLayer = HttpRouter.add(
-+  "GET",
-+  "/.well-known/t3/environment",
-+  Effect.gen(function* () {
-+    const descriptor = yield* Effect.service(ServerEnvironment).pipe(
-+      Effect.flatMap((serverEnvironment) => serverEnvironment.getDescriptor),
-+    );
-+    return HttpServerResponse.jsonUnsafe(descriptor, {
-+      status: 200,
-+      headers: browserApiCorsHeaders,
-+    });
-+  }),
-+);
-+
-+export const otlpTracesProxyRouteLayer = HttpRouter.add(
+ const requireAuthenticatedRequest = Effect.gen(function* () {
+   const request = yield* HttpServerRequest.HttpServerRequest;
+@@ -40,4 +68,4 @@ const requireAuthenticatedRequest = Effect.gen(function* () {
+     yield* serverAuth.authenticateHttpRequest(request);
+   });
+-}
++}
+ 
+ class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
+   readonly cause: unknown;
+@@ -48,2 +76,2 @@ class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecor
+ export const otlpTracesProxyRouteLayer = HttpRouter.add(
+-  "POST",
+-  OTLP_TRACES_PROXY_PATH,
 +  "POST",
 +  OTLP_TRACES_PROXY_PATH,
-+  Effect.gen(function* () {
-+    yield* requireAuthenticatedRequest;
-+    const request = yield* HttpServerRequest.HttpServerRequest;
-+    const config = yield* ServerConfig;
-+    const otlpTracesUrl = config.otlpTracesUrl;
-+    const browserTraceCollector = yield* BrowserTraceCollector;
-+    const httpClient = yield* HttpClient.HttpClient;
-+    const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
-+
-+    yield* Effect.try({
-+      try: () => decodeOtlpTraceRecords(bodyJson),
-+      catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson }),
-+    });
-+
-+    return HttpServerResponse.jsonUnsafe(bodyJson, {
-+      status: 200,
-+      headers: browserApiCorsHeaders,
-+    });
-+  }),
-+);
-+
-+export const browserApiCorsLayer = HttpRouter.cors({
-+  allowedMethods: [...browserApiCorsAllowedMethods],
-+  allowedHeaders: [...browserApiCorsAllowedHeaders],
-+  maxAge: 600,
-+});
-+
-+export function isLoopbackHostname(hostname: string): boolean {
-+  const normalizedHostname = hostname
-+    .trim()
-+    .toLowerCase()
-+    .replace(/^\[(.*)\]$/, "$1");
-+  return LOOPBACK_HOSTNAMES.has(normalizedHostname);
-+}
-+
-+export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
-+  const redirectUrl = new URL(devUrl.toString());
-+  redirectUrl.pathname = requestUrl.pathname;
-+  redirectUrl.search = requestUrl.search;
-+  redirectUrl.hash = requestUrl.hash;
-+  return redirectUrl.toString();
-+}
-+
-+const requireAuthenticatedRequest = Effect.gen(function* () {
-+  const request = yield* HttpServerRequest.HttpServerRequest;
-+  const serverAuth = yield* ServerAuth;
-+  yield* serverAuth.authenticateHttpRequest(request);
-+});
-+
-+export function serverEnvironmentRouteLayer = HttpRouter.add(
-+  "GET",
-+  "/.well-known/t3/environment",
-+  Effect.gen(function* () {
-+    const descriptor = yield* Effect.service(ServerEnvironment).pipe(
-+      Effect.flatMap((serverEnvironment) => serverEnvironment.getDescriptor),
-+    );
-+    return HttpServerResponse.jsonUnsafe(descriptor, {
-+      status: 200,
-+      headers: browserApiCorsHeaders,
-+    });
-+  }),
-+);
-+
-+class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
-+  readonly cause: unknown;
-+  readonly bodyJson: OtlpTracer.TraceData;
-+}> {}
-+
-+export const otlpTracesProxyRouteLayer = HttpRouter.add(
+   Effect.gen(function* () {
+@@ -51,3 +79,3 @@ class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecor
+ export const otlpTracesProxyRouteLayer = HttpRouter.add(
+-  "POST",
+-  OTLP_TRACES_PROXY_PATH,
 +  "POST",
 +  OTLP_TRACES_PROXY_PATH,
-+  Effect.gen(function* () {
-+    yield* requireAuthenticatedRequest;
-+    const request = yield* HttpServerRequest.HttpServerRequest;
-+    const config = yield* ServerConfig;
-+    const otlpTracesUrl = config.otlpTracesUrl;
-+    const browserTraceCollector = yield* BrowserTraceCollector;
-+    const httpClient = yield* HttpClient.HttpClient;
-+    const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
-+
+   Effect.gen(function* () {
+@@ -55,2 +83,2 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
+   const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
+-    yield* Effect.try({
+-      try: () => decodeOtlpTraceRecords(bodyJson),
++    const maxSizeLimit = withBodySizeLimit(DEFAULT_BODY_SIZE_LIMIT);
 +    yield* Effect.try({
 +      try: () => decodeOtlpTraceRecords(bodyJson),
-+      catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson }),
-+    });
-+
-+    return HttpServerResponse.jsonUnsafe(bodyJson, {
-+      status: 200,
-+      headers: browserApiCorsHeaders,
-+    });
-+  }),
-+);
-+
-+export const browserApiCorsLayer = HttpRouter.cors({
-+  allowedMethods: [...browserApiCorsAllowedMethods],
-+  allowedHeaders: [...browserApiCorsAllowedHeaders],
-+  maxAge: 600,
-+});
-+
-+function isLoopbackHostname(hostname: string): boolean {
-+  const normalizedHostname = hostname
-+    .trim()
-+    .toLowerCase()
-+    .replace(/^\[(.*)\]$/, "$1");
-+  return LOOPBACK_HOSTNAMES.has(normalizedHostname);
-+}
-+
-+function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
-+  const redirectUrl = new URL(devUrl.toString());
-+  redirectUrl.pathname = requestUrl.pathname;
-+  redirectUrl.search = requestUrl.search;
-+  redirectUrl.hash = request
+       catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson })
+@@ -58,2 +86,2 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
+   const browserTraceCollector = yield* BrowserTraceCollector;
+-  const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
++  const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
+ 
+@@ -60,3 +88,3 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
+   const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
+-    yield* Effect.try({
+-      try: () => decodeOtlpTraceRecords(bodyJson),
+-      catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson })
++    const maxSizeLimit = withBodySizeLimit(DEFAULT_BODY_SIZE_LIMIT);
++    yield* Effect.try({
++      try: () => decodeOtlpTraceRecords(bodyJson),
++      catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson })
+     })
+@@ -64,3 +9
