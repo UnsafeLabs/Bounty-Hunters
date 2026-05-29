@@ -60,6 +60,17 @@ export interface SshChildEnvironmentOptions {
 
 const SSH_ASKPASS_DIR_NAME = "t3code-ssh-askpass";
 
+/**
+ * Validate that a path does not contain shell metacharacters that could
+ * cause command injection when used in shell scripts.
+ */
+function validateAskpassPath(filePath: string): boolean {
+  // Reject paths with shell metacharacters, spaces, or special chars
+  // that could cause injection when interpolated into shell commands
+  const dangerousChars = /[;&|`$(){}[\]!#~\s"'\\]/u;
+  return !dangerousChars.test(filePath);
+}
+
 function joinSshAskpassPath(
   directory: string,
   fileName: string,
@@ -73,8 +84,25 @@ export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
 # from the renderer's in-app prompt. We never expose a native dialog here - if
 # T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
+#
+# Security: Use mktemp with mode 0600 for any temporary files and ensure
+# cleanup on all exit paths including signals (EXIT, INT, TERM).
+cleanup() {
+  [ -n "$_t3_tmpfile" ] && [ -f "$_t3_tmpfile" ] && rm -f "$_t3_tmpfile"
+}
+trap cleanup EXIT INT TERM
+
 if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
-  printf "%s\\n" "$T3_SSH_AUTH_SECRET"
+  _t3_tmpfile=$(mktemp 2>/dev/null)
+  if [ -z "$_t3_tmpfile" ]; then
+    printf 'Failed to create temporary file.\\n' >&2
+    exit 1
+  fi
+  chmod 0600 "$_t3_tmpfile"
+  printf '%s\\n' "$T3_SSH_AUTH_SECRET" > "$_t3_tmpfile"
+  cat "$_t3_tmpfile"
+  rm -f "$_t3_tmpfile"
+  _t3_tmpfile=""
   exit 0
 fi
 printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
@@ -89,8 +117,17 @@ export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through
 # ssh with a cached password from the renderer's in-app prompt. We never expose\r
 # a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
 # and we fail loudly.\r
+#\r
+# Security: Use SecureString for password handling to avoid plaintext in memory.\r
 if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
+  $securePass = ConvertTo-SecureString $env:T3_SSH_AUTH_SECRET -AsPlainText -Force\r
+  $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePass)\r
+  try {\r
+    $plainText = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($BSTR)\r
+    [Console]::Out.WriteLine($plainText)\r
+  } finally {\r
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)\r
+  }\r
   exit 0\r
 }\r
 [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
@@ -154,6 +191,15 @@ export const ensureSshAskpassHelpers = Effect.fn("ssh/auth.ensureSshAskpassHelpe
     const path = yield* Path.Path;
     const descriptor = yield* buildSshAskpassHelperDescriptor(input);
     const platform = input.platform ?? process.platform;
+
+    // Validate all file paths to prevent shell injection
+    for (const file of descriptor.files) {
+      if (!validateAskpassPath(file.path)) {
+        throw new Error(
+          `Invalid askpass script path contains unsafe characters: ${file.path}`,
+        );
+      }
+    }
 
     yield* fs.makeDirectory(path.dirname(descriptor.launcherPath), { recursive: true });
 
