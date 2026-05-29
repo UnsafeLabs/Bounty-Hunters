@@ -3549,9 +3549,9 @@ export default function ChatView(props: ChatViewProps) {
       {/* Main content area with optional plan sidebar */}
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Chat conversation">
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <section className="relative flex min-h-0 flex-1 flex-col" aria-label="Message timeline">
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}
@@ -3585,6 +3585,7 @@ export default function ChatView(props: ChatViewProps) {
                 <button
                   type="button"
                   onClick={() => scrollToEnd(true)}
+                  aria-label="Scroll conversation to latest message"
                   className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
                 >
                   <ChevronDownIcon className="size-3.5" />
@@ -3592,16 +3593,17 @@ export default function ChatView(props: ChatViewProps) {
                 </button>
               </div>
             )}
-          </div>
+          </section>
 
           {/* Input bar */}
-          <div
+          <section
             className={cn(
               "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
               isGitRepo
                 ? "pb-[calc(env(safe-area-inset-bottom)+0.25rem)]"
                 : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
             )}
+            aria-label="Message composer"
           >
             <div className="relative isolate">
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
@@ -3701,7 +3703,7 @@ export default function ChatView(props: ChatViewProps) {
                 availableEnvironments={logicalProjectEnvironments}
               />
             )}
-          </div>
+          </section>
 
           {pullRequestDialogState ? (
             <PullRequestThreadDialog
@@ -3719,7 +3721,7 @@ export default function ChatView(props: ChatViewProps) {
               onPrepared={handlePreparedPullRequestThread}
             />
           ) : null}
-        </div>
+        </main>
         {/* end chat column */}
 
         {/* Plan sidebar */}

@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -156,6 +157,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
 }: MessagesTimelineProps) {
+  const timelineRootRef = useRef<HTMLDivElement>(null);
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -189,6 +191,89 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onIsAtEndChange(state.isAtEnd);
     }
   }, [listRef, onIsAtEndChange]);
+
+  const focusTimelineRow = useCallback((row: HTMLElement) => {
+    row.focus({ preventScroll: true });
+    row.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, []);
+
+  const focusVisibleRowAt = useCallback(
+    (index: number) => {
+      const root = timelineRootRef.current;
+      if (!root) {
+        return;
+      }
+      const rowElements = getVisibleTimelineRowElements(root);
+      const clampedIndex = Math.max(0, Math.min(index, rowElements.length - 1));
+      const target = rowElements[clampedIndex];
+      if (!target) {
+        return;
+      }
+      focusTimelineRow(target);
+    },
+    [focusTimelineRow],
+  );
+
+  const handleTimelineKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (isInteractiveTimelineKeyboardTarget(event.target)) {
+        return;
+      }
+      const root = timelineRootRef.current;
+      if (!root) {
+        return;
+      }
+
+      const rowElements = getVisibleTimelineRowElements(root);
+      if (rowElements.length === 0) {
+        return;
+      }
+
+      const activeRow = document.activeElement?.closest<HTMLElement>("[data-timeline-row-id]");
+      const activeIndex = activeRow ? rowElements.indexOf(activeRow) : -1;
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        focusVisibleRowAt(activeIndex === -1 ? 0 : activeIndex + 1);
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        focusVisibleRowAt(activeIndex === -1 ? rowElements.length - 1 : activeIndex - 1);
+        return;
+      }
+
+      if (event.key === "Home") {
+        event.preventDefault();
+        focusVisibleRowAt(0);
+        return;
+      }
+
+      if (event.key === "End") {
+        event.preventDefault();
+        void listRef.current?.scrollToEnd?.({ animated: false });
+        window.requestAnimationFrame(() => focusVisibleRowAt(Number.POSITIVE_INFINITY));
+        return;
+      }
+
+      if (event.key === "PageDown" || event.key === "PageUp") {
+        const scrollParent = findTimelineScrollParent(root);
+        if (!scrollParent) {
+          return;
+        }
+        event.preventDefault();
+        scrollParent.scrollBy({
+          top: (event.key === "PageDown" ? 1 : -1) * scrollParent.clientHeight * 0.85,
+          behavior: "smooth",
+        });
+        window.setTimeout(() => {
+          focusVisibleRowAt(event.key === "PageDown" ? rowElements.length - 1 : 0);
+        }, 80);
+      }
+    },
+    [focusVisibleRowAt, listRef],
+  );
 
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {
@@ -266,21 +351,33 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <LegendList<MessagesTimelineRow>
-          ref={listRef}
-          data={rows}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          estimatedItemSize={90}
-          initialScrollAtEnd
-          maintainScrollAtEnd
-          maintainScrollAtEndThreshold={0.1}
-          maintainVisibleContentPosition
-          onScroll={handleScroll}
-          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-          ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={TIMELINE_LIST_FOOTER}
-        />
+        <div
+          ref={timelineRootRef}
+          role="log"
+          aria-label="Conversation messages"
+          aria-live={activeTurnInProgress ? "polite" : "off"}
+          aria-relevant="additions text"
+          aria-busy={activeTurnInProgress}
+          tabIndex={0}
+          onKeyDown={handleTimelineKeyDown}
+          className="h-full focus:outline-none"
+        >
+          <LegendList<MessagesTimelineRow>
+            ref={listRef}
+            data={rows}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            estimatedItemSize={90}
+            initialScrollAtEnd
+            maintainScrollAtEnd
+            maintainScrollAtEndThreshold={0.1}
+            maintainVisibleContentPosition
+            onScroll={handleScroll}
+            className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListFooterComponent={TIMELINE_LIST_FOOTER}
+          />
+        </div>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );
@@ -288,6 +385,35 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
 function keyExtractor(item: MessagesTimelineRow) {
   return item.id;
+}
+
+function getVisibleTimelineRowElements(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>("[data-timeline-row-id]"));
+}
+
+function isInteractiveTimelineKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return (
+    target.isContentEditable ||
+    target.closest(
+      'button,a,input,textarea,select,[role="button"],[role="menuitem"],[role="option"],[data-scroll-anchor-ignore]',
+    ) !== null
+  );
+}
+
+function findTimelineScrollParent(root: HTMLElement): HTMLElement | null {
+  const candidates = [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))];
+  return (
+    candidates.find((candidate) => {
+      const overflowY = window.getComputedStyle(candidate).overflowY;
+      return (
+        candidate.scrollHeight > candidate.clientHeight &&
+        (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay")
+      );
+    }) ?? null
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -299,13 +425,61 @@ type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
+function timelineRowRole(row: TimelineRow): "article" | "status" {
+  return row.kind === "working" ? "status" : "article";
+}
+
+function timelineRowAriaLive(row: TimelineRow): "polite" | undefined {
+  return row.kind === "working" || (row.kind === "message" && row.message.streaming)
+    ? "polite"
+    : undefined;
+}
+
+function timelineRowAriaLabel(row: TimelineRow): string {
+  if (row.kind === "message") {
+    const speaker = row.message.role === "assistant" ? "Assistant" : "You";
+    const text = normalizeTimelineLabelText(row.message.text);
+    const streaming = row.message.streaming ? " streaming" : "";
+    return text ? `${speaker} message${streaming}: ${text}` : `${speaker} message${streaming}`;
+  }
+
+  if (row.kind === "work") {
+    const groupLabel = row.groupedEntries.every((entry) => entry.tone === "tool")
+      ? "Tool calls"
+      : "Work log";
+    const firstEntry = row.groupedEntries[0];
+    const firstEntryLabel = firstEntry ? toolWorkEntryHeading(firstEntry) : null;
+    return firstEntryLabel
+      ? `${groupLabel}, ${row.groupedEntries.length} entries. First entry: ${firstEntryLabel}`
+      : `${groupLabel}, ${row.groupedEntries.length} entries`;
+  }
+
+  if (row.kind === "proposed-plan") {
+    return "Proposed plan";
+  }
+
+  return row.createdAt ? `Working for ${formatWorkingTimerNow(row.createdAt)}` : "Working";
+}
+
+function normalizeTimelineLabelText(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 180) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 177)}...`;
+}
+
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
       className={cn(
-        "pb-4",
+        "pb-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
+      role={timelineRowRole(row)}
+      aria-label={timelineRowAriaLabel(row)}
+      aria-live={timelineRowAriaLive(row)}
+      tabIndex={-1}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
@@ -507,7 +681,7 @@ function ProposedPlanTimelineRow({
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
   return (
-    <div className="py-0.5 pl-1.5">
+    <div className="py-0.5 pl-1.5" role="status" aria-live="polite">
       <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
         <span className="inline-flex items-center gap-[3px]">
           <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />

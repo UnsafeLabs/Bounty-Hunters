@@ -1615,6 +1615,9 @@ function ComposerPromptEditorInner({
                 className,
               )}
               data-testid="composer-editor"
+              role="textbox"
+              aria-label="Message prompt"
+              aria-multiline="true"
               aria-placeholder={placeholder}
               placeholder={<span />}
               onPaste={onPaste}

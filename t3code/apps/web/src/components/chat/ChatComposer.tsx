@@ -1944,6 +1944,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onSubmit={submitComposer}
       className="mx-auto w-full min-w-0 max-w-208"
       data-chat-composer-form="true"
+      aria-label="Message composer"
     >
       <div
         className={cn(
