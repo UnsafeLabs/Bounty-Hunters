@@ -56,77 +56,94 @@ contract PriceOracle {
 pragma solidity ^0.8.0;
 
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract PriceOracle is Ownable {
-    uint256 public constant MAX_STALENESS = 3600; // 1 hour in seconds
+contract PriceOracle {
+    event StalePrice(address indexed oracle, uint256 updatedAt);
     
-    address public primaryOracle;
-    address public secondaryOracle;
-    uint256 public maxStaleness = MAX_STALENESS;
+    AggregatorV3Interface public primaryOracle;
+    AggregatorV3Interface public fallbackOracle;
+    uint256 public maxStaleness;
+    address public owner;
     
-    event StalePrice(address staleOracle, uint256 lastUpdatedAt);
-    event MaxStalenessUpdated(uint256 oldMaxStaleness, uint256 newMaxStaleness);
-    
-    constructor(address _primaryOracle, address _secondaryOracle) {
-        primaryOracle = _primaryOracle;
-        secondaryOracle = _secondaryOracle;
+    constructor(
+        address _primaryOracle,
+        address _fallbackOracle,
+        uint256 _maxStaleness
+    ) {
+        require(_primaryOracle != address(0), "Invalid primary oracle");
+        require(_fallbackOracle != address(0), "Invalid fallback oracle");
+        
+        primaryOracle = AggregatorV3Interface(_primaryOracle);
+        fallbackOracle = AggregatorV3Interface(_fallbackOracle);
+        maxStaleness = _maxStaleness;
+        owner = msg.sender;
     }
     
-    function getLatestPrice(address token) public view returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(primaryOracle);
-        (uint80 roundId, int256 price, , uint256 updatedAt, uint80 answeredInRound) = priceFeed.latestRoundData();
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+    
+    function getPrice() public view returns (int256) {
+        return _getValidPrice(primaryOracle, fallbackOracle);
+    }
+    
+    function getPrimaryPrice() public view returns (int256) {
+        return _getValidPriceFromOracle(primaryOracle);
+    }
+    
+    function getFallbackPrice() public view returns (int256) {
+        return _getValidPriceFromOracle(fallbackOracle);
+    }
+    
+    function _getValidPrice(AggregatorV3Interface _primary, AggregatorV3Interface _fallback) internal view returns (int256) {
+        (uint80 roundId, int256 price, , uint256 updatedAt, uint80 answeredInRound) = _primary.latestRoundData();
+        
+        // Check round completeness
+        if (answeredInRound < roundId) {
+            emit StalePrice(address(_primary), updatedAt);
+            return _getValidPriceFromOracle(_fallback);
+        }
+        
+        // Check for negative or zero prices
+        require(price > 0, "Invalid price");
+        
+        // Check for staleness
+        if (block.timestamp - updatedAt >= maxStaleness) {
+            emit StalePrice(address(_primary), updatedAt);
+            return _getValidPriceFromOracle(_fallback);
+        }
+        
+        return price;
+    }
+    
+    function _getValidPriceFromOracle(AggregatorV3Interface _oracle) internal view returns (int256) {
+        (uint80 roundId, int256 price, , uint256 updatedAt, uint80 answeredInRound) = _oracle.latestRoundData();
         
         // Check round completeness
         require(answeredInRound >= roundId, "Incomplete round");
         
-        // Check for valid price
+        // Check for negative or zero prices
         require(price > 0, "Invalid price");
         
         // Check for staleness
         require(block.timestamp - updatedAt < maxStaleness, "Stale price");
         
-        return uint256(price);
+        return price;
     }
     
-    function updateOracles(address _primary, address _secondary) public onlyOwner {
-        primaryOracle = _primary;
-        secondaryOracle = _secondary;
-    }
-    
-    function updateMaxStaleness(uint256 _maxStaleness) public onlyOwner {
-        emit MaxStalenessUpdated(maxStaleness, _maxStaleness);
+    function setMaxStaleness(uint256 _maxStaleness) public onlyOwner {
         maxStaleness = _maxStaleness;
     }
     
-    function getLatestPriceWithFallback(address token) public view returns (uint256) {
-        // Try primary oracle first
-        AggregatorV3Interface primary = AggregatorV3Interface(primaryOracle);
-        (uint80 roundId, int256 price, , uint256 updatedAt, uint80 answeredInRound) = primary.latestRoundData();
-        
-        // Validate round completeness
-        require(answeredInRound >= roundId, "Primary oracle: Incomplete round");
-        
-        // Check for valid price
-        require(price > 0, "Primary oracle: Invalid price");
-        
-        // Check if price is stale
-        if (block.timestamp - updatedAt >= maxStaleness) {
-            // Primary oracle is stale, try secondary oracle
-            emit StalePrice(address(primary), updatedAt);
-            AggregatorV3Interface secondary = AggregatorV3Interface(secondaryOracle);
-            (, int256 secondaryPrice, , uint256 secondaryUpdatedAt, ) = secondary.latestRoundData();
-            
-            // Validate secondary oracle data
-            require(uint80(secondary.answeredInRound()) >= secondary.answeredInRound(), "Secondary oracle: Incomplete round");
-            require(secondaryPrice > 0, "Secondary oracle: Invalid price");
-            require(block.timestamp - secondaryUpdatedAt < maxStaleness, "Both oracles are stale");
-            
-            return uint256(secondaryPrice);
-        }
-        
-        // If we get here, primary oracle data is valid
-        return uint256(price);
+    function setPrimaryOracle(address _primaryOracle) public onlyOwner {
+        require(_primaryOracle != address(0), "Invalid primary oracle");
+        primaryOracle = AggregatorV3Interface(_primaryOracle);
+    }
+    
+    function setFallbackOracle(address _fallbackOracle) public onlyOwner {
+        require(_fallbackOracle != address(0), "Invalid fallback oracle");
+        fallbackOracle = AggregatorV3Interface(_fallbackOracle);
     }
 }
 }
