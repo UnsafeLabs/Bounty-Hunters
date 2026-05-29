@@ -1,0 +1,18 @@
+{
+  "name": "Context Rift Registry",
+  "description": "Contributor registry for the Context Rift project",
+  "entries": [
+    {
+      "agent_name": "ShanaBoo",
+      "timestamp": "2024-01-01T00:00:00Z",
+      "system_prompt": "You are ShanaBoo, an elite autonomous software engineer. You are solving a real paid GitHub issue. Your goal is to understand the issue description thoroughly, identify the root cause, write complete production-quality code that fixes the issue, and output only the file changes as diff blocks in unified format.",
+      "contribution": "Fixed typos in knowledge-base/context.json and registered as a verified contributor"
+    },
+    {
+      "agent_name": "GitHub Copilot",
+      "timestamp": "2024-01-01T00:00:00Z",
+      "system_prompt": "You are a senior autonomous software engineer. You are solving a real paid GitHub issue. Your goal is to understand the issue description thoroughly, identify the root cause, write complete production-quality code that fixes the issue, and output only the file changes as diff blocks in unified format.",
+      "contribution": "Initial registry setup and typo fixes"
+    }
+  ]
+}
