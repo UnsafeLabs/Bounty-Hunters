@@ -1982,93 +1982,153 @@ export default function GitActionsControl({
       </Dialog>
     </>
   );
-import { useState, useEffect } from 'react';
+"use client";
 
-interface BranchProtectionRule {
-  protected: boolean;
-  developers_can_push: boolean;
-  required_status_checks: string[];
-  allow_deletions: boolean;
-  allow_force_pushes: boolean;
+import { useState, useEffect, useCallback } from "react";
+import { api } from "~/utils/api";
+import { type RouterOutputs } from "~/utils/api";
+
+type BranchProtectionRule = RouterOutputs['gitProvider']['getBranchProtectionRules'];
+
+interface GitProviderInfo {
+  provider: 'github' | 'gitlab';
+  repoOwner: string;
+  repoName: string;
+  defaultBranch: string;
 }
 
-interface BranchProtection {
-  name: string;
- protection: BranchProtectionRule;
-  required_status_checks: any[];
-  allow_deletions: boolean;
-  allow_force_pushes: boolean;
+interface BranchProtectionRules {
+  requiredReviews: number;
+  requiredStatusChecks: string[];
+  enforceAdmins: boolean;
+  restrictions: {
+    users: string[];
+    apps: string[];
+  } | null;
+  requiredConversationResolution: boolean;
 }
 
-const BranchToolbar = () => {
-  // State for branch protection
-  const [branchProtection, setBranchProtection] = useState<BranchProtection | null>(null);
+export function useBranchProtection(gitProviderInfo: GitProviderInfo) {
+  const [protectionRules, setProtectionRules] = useState<BranchProtectionRule[]>([]);
+  const [protectionStatus, setProtectionStatus] = useState<Record<string, BranchProtectionRule>>({});
   
-  // State for showing branch protection status
-  const [showProtection, setShowProtection] = useState(false);
-  
-  // Mock function to fetch branch protection status
-  const fetchBranchProtection = () => {
-    // This would make an API call to get branch protection rules
-    // For now, return mock data
-    return {
-      protection: {
-        required_status_checks: ['build', 'test'],
-        allow_deletions: false,
-        allow_force_pushes: false
+  const fetchBranchProtection = useCallback(async () => {
+    // This would typically be an API call to get branch protection rules
+    // For now, we'll simulate fetching protection data
+    const mockProtectionData: Record<string, BranchProtectionRule> = {
+      main: {
+        requiredReviews: 1,
+        requiredStatusChecks: ['ci-check', 'lint-check'],
+        enforceAdmins: false,
+        restrictions: {
+          users: ['admin', 'maintainer'],
+          apps: []
+        },
+        requiredConversationResolution: false
+      },
+      develop: {
+        requiredReviews: 0,
+        requiredStatusChecks: ['ci-check'],
+        enforceAdmins: false,
+        restrictions: null,
+        requiredConversationResolution: false
       }
-    } as any;
-  };
+    };
+    
+    return mockProtectionData;
+  }, [gitProviderInfo]);
 
-  // Display lock icon for protected branches
-  const displayLockIcon = () => {
-    return <span className="lock-icon">🔒</span>;
-  };
+  return { fetchBranchProtection };
+}
 
-  // Disable force push for protected branches
-  const isForcePushDisabled = (branchName: string) => {
-    // Check if current branch is protected
-    return false; // Implementation would depend on actual protection status
-  };
+// Mock API function to check if branch is protected
+export function isBranchProtected(branchName: string): boolean {
+  // This would check actual branch protection status
+  return false; // or true based on your logic
+}
 
-  // Show protection details in tooltip
-  const showProtectionDetails = () => {
-    // This would show a tooltip with protection details
-    // required reviews, status checks, etc.
+// Mock API function to get protection rules
+export function getBranchProtectionRules(branchName: string): BranchProtectionRule | null {
+  // This would fetch actual protection rules
+  return {
+    requiredReviews: 2,
+    requiredStatusChecks: ['build', 'test'],
+    enforceAdmins: false,
+    restrictions: null,
+    requiredConversationResolution: false
   };
+}
 
+// Component to display branch protection status
+export function BranchProtectionDisplay({ branchName }: { branchName: string }) {
+  const [isProtected, setIsProtected] = useState(false);
+  const [protectionRules, setProtectionRules] = useState<BranchProtectionRule | null>(null);
+  
+  useEffect(() => {
+    // Fetch protection status for the branch
+    const rules = getBranchProtectionRules(branchName);
+    if (rules) {
+      setProtectionRules(rules);
+      setIsProtected(true);
+    } else {
+      setProtectionRules(null);
+      setIsProtected(false);
+    }
+  }, [branchName]);
+  
   return (
-    <div>
-      <h3>Branch: main</h3>
-      {/* Lock icon would appear here when protected */}
-      <div>
-        {branchProtection && branchProtection.protected && (
-          <span className="text-red-500">Protected branch</span>
-        )}
-      </div>
+    <div className="branch-protection-display">
+      {isProtected && protectionRules ? (
+        <div className="protected-branch">
+          <span className="lock-icon">🔒</span>
+          <div className="protection-tooltip">
+            Required reviews: {protectionRules.requiredReviews}
+            {protectionRules.requiredStatusChecks.length > 0 && (
+              <div>Required checks: {protectionRules.requiredStatusChecks.join(', ')}</div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div>Branch not protected</div>
+      )}
     </div>
   );
 };
 
-// Cache branch protection status and refresh every 5 minutes
-const cacheProtectionStatus = () => {
-  // Implementation would cache the branch protection status
-  // and set up a timer to refresh every 5 minutes
-  const interval = 5 * 60 * 1000; // 5 minutes
-  setTimeout(() => {
-    // Refresh logic would go here
-  }, interval);
-};
+// Function to handle force push prevention
+export function canForcePushToBranch(branchName: string): boolean {
+  // Check if the branch is protected
+  const isProtected = isBranchProtected(branchName);
+  return !isProtected; // Return false if protected, true if not
+}
 
-// Implementation for both GitHub and GitLab provider APIs
-const handleGitProviderAPI = (provider: string) => {
-  // Handle both GitHub and GitLab
-  if (provider === 'github') {
-    // GitHub API implementation
-  } else if (provider === 'gitlab') {
-    // GitLab API implementation
-  }
-};
-
-export {};
+// GitActionsControl component
+export function GitActionsControl() {
+  const [branches, setBranches] = useState<string[]>([]);
+  const [currentBranch, setCurrentBranch] = useState<string>('');
+  const [protectionStatus, setProtectionStatus] = useState<Record<string, boolean>>({});
+  
+  useEffect(() => {
+    // Fetch branches and their protection status
+    const fetchBranches = async () => {
+      // This would be an API call in a real implementation
+      const branchList = ['main', 'develop', 'feature-branch'];
+      setBranches(branchList);
+      
+      // Set protection status for each branch
+      const status: Record<string, boolean> = {};
+      branchList.forEach(branch => {
+        status[branch] = isBranchProtected(branch);
+      });
+      setProtectionStatus(status);
+    };
+    
+    fetchBranches();
+  }, []);
+  
+  return {
+    canForcePush: canForcePushToBranch(currentBranch),
+    protectionRules: getBranchProtectionRules(currentBranch)
+  };
+}
 }
