@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+// ... (existing contract code would be here)
 
 contract SimpleSwap {
     IERC20 public tokenA;
@@ -39,25 +39,21 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-    uint256 amountIn,
-    uint256 amountOut,
-    uint256 minAmountOut,
-    uint256 deadline,
-    uint256 constantProduct
-) public returns (uint256) {
-    require(block.timestamp <= deadline, "Deadline exceeded");
-    require(amountOut >= minAmountOut, "Slippage exceeded");
-    
-    // Transfer tokens from user to pool
-    tokenIn.transferFrom(msg.sender, address(this), amountIn);
+        uint256 feeAmount = amountIn * fee / 10000;
+        uint256 amountInAfterFee = amountIn - feeAmount;
 
-    // Calculate fee amount
-    uint256 feeAmount = (amountIn * fee) / 10000;
-    
-    return amountOut;
-}
+        // constant product formula: x * y = k
+        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
 
-// Transfer tokens from pool to user
+        outputToken.transfer(msg.sender, amountOut);
+
+        if (isTokenA) {
+            reserveA += amountIn;
+            reserveB -= amountOut;
+        } else {
+            reserveB += amountIn;
+            reserveA -= amountOut;
+        }
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
