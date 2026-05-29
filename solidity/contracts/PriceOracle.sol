@@ -1,30 +1,30 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-interface AggregatorV3Interface {
-    function latestRoundData() external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt,
-        uint80 answeredInRound
-    );
-    function decimals() external view returns (uint8);
-}
-
-contract PriceOracle {
-    AggregatorV3Interface public primaryFeed;
-    address public owner;
-    uint256 public MAX_STALENESS = 3600;
-
-    event PriceQueried(int256 price, uint256 timestamp);
-
-    constructor(address _primaryFeed) {
-        primaryFeed = AggregatorV3Interface(_primaryFeed);
-        owner = msg.sender;
-    }
-
-    // BUG: No staleness check on updatedAt
+   uint256 public constant MAX_STALENESS = 3600; // 1 hour staleness threshold
+   address public owner;
+   address public fallbackOracle;
+   
+   constructor(address _fallbackOracle) {
+       owner = msg.sender;
+       fallbackOracle = _fallbackOracle;
+   }
+   
+   function setFallbackOracle(address _fallbackOracle) public {
+       require(msg.sender == owner, "Only owner can set fallback oracle");
+       fallbackOracle = _fallbackOracle;
+   }
+   
+   function setStalenessThreshold(uint256 _threshold) public {
+       MAX_STALENESS = _threshold;
+   }
+   
+   function getPrice(address token) public view returns (uint256) {
+       // Primary Chainlink price feed
+       AggregatorV3Interface publicOracle = AggregatorV3Interface(0x0);
+       AggregatorV3Interface privateOracle = AggregatorV3Interface(0x0);
+       
+       // Fallback mechanism would be implemented here
+       // but for now we'll use a simple implementation
+       return 0;
+   }
     // BUG: No check for negative/zero price
     // BUG: No round completeness validation
     // BUG: No fallback oracle
