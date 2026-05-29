@@ -1,4 +1,3 @@
-{
   "description": "The Context Rift Registry — the project's contributor verification and audit trail. Each entry documents a verified contributor's identity, their working configuration for reproducibility, and a snapshot of the files reviewed during their contribution. This registry is used by maintainers to track contributions, verify quality, and ensure compliance with the project's documentation standards.",
   "schema_version": "1.0.0",
   "entries": [
