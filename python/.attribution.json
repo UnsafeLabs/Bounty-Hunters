@@ -1,0 +1,6 @@
+{
+  "author": "glassgrass-art",
+  "tool": "Gemini-CLI",
+  "issue": 571,
+  "description": "Fixed 5 security vulnerabilities in TLS 1.2 handshake: State machine bypass, SNI extraction, timing attacks in Finished verification, error handling in key exchange, and RFC 7627 EMS label compliance."
+}
