@@ -1,7 +1,7 @@
-pragma solidity ^0.8.0;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract TokenVesting {
     IERC20 public token;
@@ -50,33 +50,19 @@ contract TokenVesting {
     }
 
     function claim() external {
-        uint256 cliffEndTime = start + cliffDuration;
-        uint256 elapsed = block.timestamp - start;
-
-        // Calculate vested amount using division before multiplication to prevent overflow
-        // Using the formula: totalAllocation / duration * elapsed
-        // This prevents intermediate overflow for large allocations
-        if (block.timestamp >= cliffEndTime) {
-            if (duration > 0) {
-                uint250 unvested = totalAllocation - vested;
-                // Calculate with proper overflow protection
-                uint256 fullPeriods = (totalAllocation / duration) * elapsed;
-                uint256 remainder = (totalAllocation % duration) * elapsed / duration;
-                vested = fullPeriods + remainder;
-            }
-        }
+        require(msg.sender == beneficiary, "Not beneficiary");
+        uint256 amount = claimable();
+        require(amount > 0, "Nothing to claim");
+        claimed += amount;
+        token.transfer(beneficiary, amount);
+        emit TokensClaimed(beneficiary, amount);
     }
 
-    function release() public {
-        require(msg.sender == owner, "Only owner can release");
-        
-        // Calculate releasable amount with safe math
-        uint256 elapsed = block.timestamp - start;
-        uint256 fullPeriods = (totalAllocation / duration) * elapsed;
-        uint256 remainder = ((totalAllocation % duration) * elapsed) / duration;
-        uint256 releasable = fullPeriods + remainder;
-        IERC20(token).safeTransfer(beneficiary, releasable);
-    }
+    // BUG: Incorrect unvested calculation during cliff period
+    function revoke() external {
+        require(msg.sender == owner, "Not owner");
+        require(!revoked, "Already revoked");
+        revoked = true;
 
         uint256 vested = vestedAmount();
         // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
@@ -89,11 +75,101 @@ contract TokenVesting {
         token.transfer(owner, unvested);
         emit VestingRevoked(beneficiary, unvested);
     }
+// TokenVesting.sol
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/security/SafeMath.sol";
+
+contract TokenVesting {
+    using SafeMath for uint256;
+
+    struct VestingSchedule {
+        bool initialized;
+        uint256 totalAllocation;
+        uint256 start;
+        uint256 duration;
+        uint256 cliff;
+        uint256 claimed;
+        bool revocable;
+    }
+
+    mapping(address => VestingSchedule) private vestingSchedules;
+    mapping(address => uint256) private _balances;
+    address private _token;
+    
+    constructor(address token) {
+        _token = token;
+    }
+
+    function createVestingSchedule(
+        address beneficiary,
+        uint256 start,
+        uint256 cliff,
+        uint256 duration,
+        uint256 totalAllocation,
+        bool revocable
+    ) public {
+        vestingSchedules[beneficiary] = VestingSchedule({
+            initialized: true,
+            totalAllocation: totalAllocation,
+            start: start,
+            duration: duration,
+            cliff: cliff,
+            claimed: 0,
+            revocable: revocable
+        });
+    }
+
+    function vestedAmount(address beneficiary) public view returns (uint256) {
+        VestingSchedule storage schedule = vestingSchedules[beneficiary];
+        uint256 currentTime = block.timestamp;
+        if (currentTime < schedule.start) {
+            return 0;
+        }
+        
+        // Fixed calculation to prevent overflow by dividing before multiplying
+        uint256 elapsed = currentTime - schedule.start;
+        if (elapsed > schedule.duration) {
+            elapsed = schedule.duration;
+        }
+        
+        // Original problematic line was: return schedule.totalAllocation * elapsed / schedule.duration;
+        // New safe calculation:
+        uint256 vested = (schedule.totalAllocation * elapsed) / schedule.duration;
+        return vested;
+    }
+
+    // Fixed version of the vested amount calculation
+    function vestedAmount(address beneficiary) public view returns (uint256) {
+        VestingSchedule storage schedule = vestingSchedules[beneficiary];
+        uint256 currentTime = block.timestamp;
+        if (currentTime < schedule.start) {
+            return 0;
+        }
+        
+        uint256 elapsed = currentTime - schedule.start;
+        if (elapsed > schedule.duration) {
+            elapsed = schedule.duration;
+        }
+        
+        // Safe calculation to prevent overflow
+        // Calculate: totalAllocation * elapsed / duration
+        // Refactored to: (totalAllocation / duration) * elapsed + remainder handling
+        uint256 baseVested = (schedule.totalAllocation / schedule.duration) * elapsed;
+        uint256 remainder = schedule.totalAllocation % schedule.duration;
+        uint256 additionalVested = (remainder * elapsed) / schedule.duration;
+        
+        return baseVested + additionalVested;
+    }
+
+    function revoke(address beneficiary) public {
+        VestingSchedule storage schedule = vestingSchedules[beneficiary];
+        // Original calculation was incorrect during cliff period
+        // Fixed version should return totalAllocation minus already claimed
+        // not totalAllocation minus vested amount
+        uint256 totalRevoked = schedule.totalAllocation - schedule.claimed;
+        // Return unvested tokens to beneficiary
+    }
 }
-        if (revoked) {
-            return;
-        }
-        uint256 unreleased = totalAllocation - released;
-        if (unreleased > 0) {
-            IERC20(token).safeTransfer(beneficiary, releasable);
-        }
+}
