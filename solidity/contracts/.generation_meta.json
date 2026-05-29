@@ -1,0 +1,5 @@
+{
+  "agent": "Codex",
+  "initial_directives": "Redacted: contains private system/developer instructions. Public task context: harden PriceOracle staleness, fallback, round completeness, and price validation for UnsafeLabs/Bounty-Hunters issue #915.",
+  "date": "2026-05-29T00:00:00-06:00"
+}
