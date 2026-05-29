@@ -3,9 +3,9 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, RotateCcwIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -19,6 +19,30 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+
+const STORAGE_KEY = "t3code:provider-model-selection";
+
+function readPersistedSelection(): { instanceId: string; model: string } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function persistSelection(instanceId: string, model: string): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ instanceId, model }));
+  } catch { /* quota exceeded, silently ignore */ }
+}
+
+function clearPersistedSelection(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch { /* ignore */ }
+}
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -45,6 +69,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+  const initialRestoreDone = useRef(false);
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -91,6 +116,48 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
   };
+
+  // Restore persisted selection on mount
+  useEffect(() => {
+    if (initialRestoreDone.current) return;
+    initialRestoreDone.current = true;
+
+    const persisted = readPersistedSelection();
+    if (!persisted) return;
+
+    const entryExists = props.instanceEntries.some(
+      (e) => e.instanceId === persisted.instanceId,
+    );
+    if (!entryExists) return;
+
+    const instanceOptions = props.modelOptionsByInstance.get(persisted.instanceId as ProviderInstanceId);
+    const modelExists = instanceOptions?.some((m) => m.slug === persisted.model);
+    if (!modelExists) return;
+
+    props.onInstanceModelChange(
+      persisted.instanceId as ProviderInstanceId,
+      persisted.model,
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist selection whenever it changes (skip initial restore cycle)
+  useEffect(() => {
+    if (!initialRestoreDone.current) return;
+    if (props.lockedProvider) return;
+    persistSelection(props.activeInstanceId, props.model);
+  }, [props.activeInstanceId, props.model, props.lockedProvider]);
+
+  const handleResetToDefault = useCallback(() => {
+    clearPersistedSelection();
+    const firstEntry = props.instanceEntries[0];
+    if (!firstEntry) return;
+    const firstOptions = props.modelOptionsByInstance.get(firstEntry.instanceId);
+    const firstModel = firstOptions?.[0];
+    if (firstModel) {
+      props.onInstanceModelChange(firstEntry.instanceId, firstModel.slug);
+    }
+  }, [props.instanceEntries, props.modelOptionsByInstance, props.onInstanceModelChange]);
 
   return (
     <Popover
@@ -181,6 +248,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
         />
+        <div className="border-border/50 border-t px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => { handleResetToDefault(); setIsMenuOpen(false); }}
+            className="text-muted-foreground/60 hover:text-foreground flex w-full items-center gap-2 rounded px-2 py-1 text-xs transition-colors"
+          >
+            <RotateCcwIcon className="size-3" />
+            Reset to default
+          </button>
+        </div>
       </PopoverPopup>
     </Popover>
   );
