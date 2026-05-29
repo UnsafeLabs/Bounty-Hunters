@@ -39,24 +39,25 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-
-    uint256 amountIn,
-    uint256 minAmountOut,
-    uint256 deadline
-  ) external nonReentrant returns (uint256) {
-    require(block.timestamp <= deadline, "Transaction expired");
-    
-    // Calculate output amount
-    uint256 amountOut = (amountIn * (10000 - fee)) / 10000;
-    
-    uint256 expectedAmountOut = amountOut;
+    uint25ageOut = (reserveIn * amountIn) / reserveOut;
     
     // Add slippage protection
-    require(amountOut >= minAmountOut, "Slippage exceeded");
+    amountOut = (reserveIn * amountIn) / reserveOut;
     
-  }
+    // Add deadline protection
+    require(block.timestamp <= deadline, "Transaction expired");
+    // Fix fee calculation to use proper fixed-point math
+    uint256 feeAmount = (amount * fee) / 10000;
+    
+    function swap(uint256 amountIn, uint256 minAmountOut, uint256 deadline) public returns (uint256) {
+        require(block.timestamp <= deadline, "Transaction expired");
+        uint256 amountOut = (reserveIn * amountIn) / reserveOut;
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+        uint256 feeAmount = (amount * fee) / 10000;
+        // Fixed fee calculation using proper fixed-point math
+        uint256 feeAmount = (amount * fee * 100) / 10000 / 100; 
+        
+    }
 }
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
