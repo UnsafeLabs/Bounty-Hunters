@@ -1,7 +1,25 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-// ... (existing contract code would be here)
+// ... (contract would have actual implementation)
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+contract SimpleSwap {
+    // Add slippage and deadline protection to swap function
+    function swap(
+        address tokenIn,
+        address tokenOut, 
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) public returns (bool) {
+        require(block.timestamp <= deadline, "Deadline exceeded");
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+        
+        // Original swap logic with slippage protection
+        // ... swap implementation
+    }
+}
 
 contract SimpleSwap {
     IERC20 public tokenA;
