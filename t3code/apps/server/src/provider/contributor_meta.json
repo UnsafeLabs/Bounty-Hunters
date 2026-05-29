@@ -1,0 +1,5 @@
+{
+  "name": "OpenAI Codex",
+  "session_init": "Public task context for UnsafeLabs/Bounty-Hunters issue #865: add Effect.Cache-based provider API response caching with configurable TTLs, bounded capacity, provider config invalidation, cache hit/miss metrics, focused tests, and safe public metadata. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "ts": "2026-05-28T23:59:00Z"
+}
