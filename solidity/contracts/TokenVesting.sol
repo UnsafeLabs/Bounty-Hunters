@@ -50,12 +50,12 @@ contract TokenVesting {
     }
 
     function claim() external {
-        require(msg.sender == beneficiary, "Not beneficiary");
-        uint256 amount = claimable();
-        require(amount > 0, "Nothing to claim");
-        claimed += amount;
-        token.transfer(beneficiary, amount);
-        emit TokensClaimed(beneficiary, amount);
+    uint256 private _cliff;
+    uint256 private _totalAllocation;
+    bool private _revoked;
+
+    function isRevoked() public view returns (bool) {
+        return _revoked;
     }
 
     // BUG: Incorrect unvested calculation during cliff period
@@ -75,72 +75,4 @@ contract TokenVesting {
         token.transfer(owner, unvested);
         emit VestingRevoked(beneficiary, unvested);
     }
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
-contract TokenVesting {
-    using SafeERC20 for IERC20;
-
-    event TokensReleased(address token, uint256 amount);
-    event TokenVestingRevoked(address token, uint256 amount);
-
-    // beneficiary of the vesting schedule
-    address private _beneficiary;
-
-    // vesting schedule
-    uint256 private _start;
-    uint256 private _duration;
-    uint256 private _cliff;
-    uint256 private _totalAllocation;
-    bool private _revoked;
-
-    constructor(address beneficiary, uint256 start, uint256 duration, uint256 cliff, uint256 totalAllocation) {
-        _beneficiary = beneficiary;
-        _start = start;
-        _duration = duration;
-        _cliff = cliff;
-        _totalAllocation = totalAllocation;
-        _revoked = false;
-    }
-
-    function vestedAmount(address token) public view returns (uint256) {
-        // Implementation would go here in a real contract
-        return 0;
-    }
-
-    function release(address token) public {
-        // Release implementation would go here
-    }
-
-    function revoke(address token) public {
-        // Revoke implementation would go here
-    }
-
-    function getBeneficiary() public view returns (address) {
-        return _beneficiary;
-    }
-
-    function getStart() public view returns (uint256) {
-        return _start;
-    }
-
-    function getDuration() public view returns (uint256) {
-        return _duration;
-    }
-
-    function getCliff() public view returns (uint256) {
-        return _cliff;
-    }
-
-    function getTotalAllocation() public view returns (uint256) {
-        return _totalAllocation;
-    }
-
-    function isRevoked() public view returns (bool) {
-        return _revoked;
-    }
-}
 }
