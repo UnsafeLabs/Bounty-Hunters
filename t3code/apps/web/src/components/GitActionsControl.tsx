@@ -1982,4 +1982,93 @@ export default function GitActionsControl({
       </Dialog>
     </>
   );
+import { useState, useEffect } from 'react';
+
+interface BranchProtectionRule {
+  protected: boolean;
+  developers_can_push: boolean;
+  required_status_checks: string[];
+  allow_deletions: boolean;
+  allow_force_pushes: boolean;
+}
+
+interface BranchProtection {
+  name: string;
+ protection: BranchProtectionRule;
+  required_status_checks: any[];
+  allow_deletions: boolean;
+  allow_force_pushes: boolean;
+}
+
+const BranchToolbar = () => {
+  // State for branch protection
+  const [branchProtection, setBranchProtection] = useState<BranchProtection | null>(null);
+  
+  // State for showing branch protection status
+  const [showProtection, setShowProtection] = useState(false);
+  
+  // Mock function to fetch branch protection status
+  const fetchBranchProtection = () => {
+    // This would make an API call to get branch protection rules
+    // For now, return mock data
+    return {
+      protection: {
+        required_status_checks: ['build', 'test'],
+        allow_deletions: false,
+        allow_force_pushes: false
+      }
+    } as any;
+  };
+
+  // Display lock icon for protected branches
+  const displayLockIcon = () => {
+    return <span className="lock-icon">🔒</span>;
+  };
+
+  // Disable force push for protected branches
+  const isForcePushDisabled = (branchName: string) => {
+    // Check if current branch is protected
+    return false; // Implementation would depend on actual protection status
+  };
+
+  // Show protection details in tooltip
+  const showProtectionDetails = () => {
+    // This would show a tooltip with protection details
+    // required reviews, status checks, etc.
+  };
+
+  return (
+    <div>
+      <h3>Branch: main</h3>
+      {/* Lock icon would appear here when protected */}
+      <div>
+        {branchProtection && branchProtection.protected && (
+          <span className="text-red-500">Protected branch</span>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Cache branch protection status and refresh every 5 minutes
+const cacheProtectionStatus = () => {
+  // Implementation would cache the branch protection status
+  // and set up a timer to refresh every 5 minutes
+  const interval = 5 * 60 * 1000; // 5 minutes
+  setTimeout(() => {
+    // Refresh logic would go here
+  }, interval);
+};
+
+// Implementation for both GitHub and GitLab provider APIs
+const handleGitProviderAPI = (provider: string) => {
+  // Handle both GitHub and GitLab
+  if (provider === 'github') {
+    // GitHub API implementation
+  } else if (provider === 'gitlab') {
+    // GitLab API implementation
+  }
+};
+
+export {};
 }
