@@ -1,0 +1,5 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Public task context: paid OSS bounty implementation for UnsafeLabs/Bounty-Hunters issue #841. Hidden system, developer, runtime, credential, memory, and private session instructions are intentionally not reproduced.",
+  "timestamp": "2026-05-29T00:51:50Z"
+}

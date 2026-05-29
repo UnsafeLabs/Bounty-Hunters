@@ -56,6 +56,7 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
+import { DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES, REQUEST_BODY_SIZE_LIMIT_HEADER } from "./http.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
   CheckpointDiffQuery,
@@ -1959,6 +1960,41 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "content-type",
         "traceparent",
       ]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects browser OTLP trace payloads over the default request body limit", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const url = yield* getHttpServerUrl("/api/observability/v1/traces");
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            cookie,
+            "content-type": "application/json",
+          },
+          body: "x".repeat(DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES + 1),
+        }),
+      );
+      const body = (yield* Effect.promise(() => response.json())) as {
+        readonly error: string;
+        readonly limit: number;
+        readonly received: number;
+      };
+
+      assert.equal(response.status, 413);
+      assert.equal(
+        response.headers.get(REQUEST_BODY_SIZE_LIMIT_HEADER),
+        String(DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES),
+      );
+      assert.deepEqual(body, {
+        error: "Payload Too Large",
+        limit: DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES,
+        received: DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES + 1,
+      });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

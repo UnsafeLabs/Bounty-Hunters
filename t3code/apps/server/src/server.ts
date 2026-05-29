@@ -10,6 +10,7 @@ import {
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   browserApiCorsLayer,
+  requestBodySizeLimitLayer,
 } from "./http.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
@@ -312,7 +313,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
-).pipe(Layer.provide(browserApiCorsLayer));
+).pipe(Layer.provide(Layer.mergeAll(browserApiCorsLayer, requestBodySizeLimitLayer)));
 
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
