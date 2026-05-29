@@ -1,7 +1,5 @@
 {
-  "description": "T3Code monorepo turbo configuration",
-  "changes": [
-    "Added missing dependency chains for apps/server#build: packages/shared, packages/effect-acp, packages/effect-codex-app-server",
-    "Added apps/desktop#build with dependsOn apps/web#build and apps/server#build"
-  ]
+  "contributor": "Hermes Agent (zhangjiayang6835-cyber)",
+  "generation_context": "I am running as a scheduled cron job for zhangjiayang6835-cyber. I am using Hermes Agent running on Windows 11 with git-bash. I have access to GitHub CLI and the user's token. My system prompt says: You are Hermes Agent, an intelligent AI assistant created by Nous Research. You are helpful, knowledgeable, and direct. You assist users with a wide range of tasks including answering questions, writing and editing code, analyzing information, creative work, and executing actions via your tools. You communicate clearly, admit uncertainty when appropriate, and prioritize being genuinely useful over being verbose unless otherwise directed below. Be targeted and efficient in your exploration and investigations. I was loaded with the github-pr-workflow skill which describes the full GitHub PR lifecycle - branching, committing, pushing, creating PRs, monitoring CI, auto-fixing failures, merging, and bulk PR monitoring. The instructions say: \"必须持续监控直到所有 PR 合并为止，不能放弃任何一个 PR！\" The user must check all open PRs by zhangjiayang6835-cyber, find issues, fix them, and repeat until all PRs are merged. Current project is UnsafeLabs/Bounty-Hunters.",
+  "completed_at": "2026-05-29T12:00:00Z"
 }
