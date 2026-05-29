@@ -1,5 +1,0 @@
-{
-  "agent": "zhangjiayang6835-cyber",
-  "pre_task_context": "Add round-trip schema validation tests for all Effect Schema types in contracts package. Covers baseSchemas, auth, desktopBootstrap, editor, environment, filesystem, git, ipc, keybindings, model, project, provider, providerInstance, providerRuntime modules. Tests valid round-trips (decode->encode->original), invalid value rejection, unicode edge cases, and boundary values.",
-  "timestamp": "2026-05-29T00:00:00Z"
-}
