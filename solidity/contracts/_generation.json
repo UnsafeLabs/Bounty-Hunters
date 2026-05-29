@@ -1,0 +1,5 @@
+{
+  "agent": "Codex",
+  "pre_task_context": "Redacted: contains private system/developer instructions. Public task context: implement minimum liquidity lock, reserve-based removals, and sync recovery for UnsafeLabs/Bounty-Hunters issue #918.",
+  "timestamp": "2026-05-29T00:00:00-06:00"
+}
