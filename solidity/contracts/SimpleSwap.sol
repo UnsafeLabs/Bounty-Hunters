@@ -69,37 +69,64 @@ contract SimpleSwap {
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 contract SimpleSwap {
-    // Token contract addresses
-    address public tokenA;
-    address public tokenB;
-    
-    // Fee parameters (in basis points)
-    uint256 public constant FEE_DENOMINATOR = 10000;
-    uint256 public fee = 30; // 0.3% fee
-    
-    constructor(address _tokenA, address _tokenB) {
-        tokenA = _tokenA;
-        tokenB = _tokenB;
+    using SafeERC20 for IERC20;
+
+    uint256 public fee; // fee in basis points (e.g., 30 = 0.30%)
+    address public token0;
+    address public token1;
+
+    event Swap(
+        address indexed sender,
+        uint256 amountIn,
+        uint256 amountOut,
+        address indexed to
+    );
+
+    constructor(address _token0, address _token1, uint256 _fee) {
+        token0 = _token0;
+        token1 = _token1;
+        fee = _fee;
     }
-    
-    // Simple swap function with slippage and deadline protection
+
+    function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) public view returns (uint256) {
+        uint256 amountInWithFee = amountIn * (10000 - fee);
+        uint256 numerator = amountInWithFee * reserveOut;
+        uint256 denominator = reserveIn * 10000 + amountInWithFee;
+        return numerator / denominator;
+    }
+
     function swap(
         address tokenIn,
-        address tokenOut,
         uint256 amountIn,
+        address to,
         uint256 minAmountOut,
         uint256 deadline
     ) public returns (uint256 amountOut) {
         require(block.timestamp <= deadline, "Transaction expired");
+        
+        IERC20 token = IERC20(tokenIn);
+        uint256 reserveIn = token.balanceOf(tokenIn == token0 ? address(this) : token0);
+        uint256 reserveOut = token.balanceOf(tokenIn == token0 ? token1 : address(this));
+        
+        // Calculate amount out using proper AMM formula
+        amountOut = getAmountOut(amountIn, reserveIn, reserveOut);
+        
         require(amountOut >= minAmountOut, "Slippage exceeded");
+        require(amountOut > 0, "Insufficient output amount");
         
-        // Calculate output amount with proper fee calculation
-        // Fixed point math: amountIn * (10000 - fee) / 10000
-        uint256 feeAmount = (amountIn * fee) / FEE_DENOMINATOR;
-        uint256 amountAfterFee = amountIn - feeAmount;
+        // Transfer tokens in
+        token.safeTransferFrom(msg.sender, address(this), amountIn);
         
-        return amountAfterFee;
+        // Transfer tokens out
+        IERC20(tokenIn == token0 ? token1 : token0).safeTransfer(to, amountOut);
+        
+        emit Swap(msg.sender, amountIn, amountOut, to);
+        
+        return amountOut;
     }
 }
 }
