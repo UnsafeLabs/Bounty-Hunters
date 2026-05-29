@@ -1,5 +1,5 @@
 {
   "contributor": "ShanaBoo",
-  "environment_config": "Agent solving TokenVesting overflow issue with focus on preventing integer overflow in large allocations",
-  "completed_at": "2023-12-07T10:30:00Z"
+  "environment_config": "Complete the vesting calculation overflow fix with proper remainder handling",
+  "completed_at": "2024-01-01T00:00:00.000Z"
 }
