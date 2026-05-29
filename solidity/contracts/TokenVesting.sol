@@ -50,13 +50,13 @@ contract TokenVesting {
     }
 
     function claim() external {
-    uint256 vested = totalAllocation * elapsed / duration;
+        uint256 vested = totalAllocation * elapsed / duration;
+        uint256 vested = totalAllocation * elapsed / duration;
+        return;
+    uint256 vested = (totalAllocation * elapsed) / duration;
     uint256 vested = totalAllocation * elapsed / duration;
     return;
-    uint256 vested = totalAllocation * elapsed / duration;
-    uint256 vested = totalAllocation * elapsed / duration;
-    return;
-}
+  }
 
     // BUG: Incorrect unvested calculation during cliff period
     function revoke() external {
@@ -76,7 +76,11 @@ contract TokenVesting {
         emit VestingRevoked(beneficiary, unvested);
     }
 }
-    uint276 unvested = totalAllocation - totalAllocation * elapsed / duration;
-    uint276 unvested = totalAllocation - (totalAllocation * elapsed / duration);
+    uint256 unvested = totalAllocation - totalAllocation * elapsed / duration;
+    uint256 unvested = totalAllocation - (totalAllocation * elapsed) / duration;
     return;
 }
+    uint256 unvested = totalAllocation - totalAllocation * elapsed / duration;
+    uint256 unvested = totalAllocation - (totalAllocation * elapsed) / duration;
+    return;
+  }
