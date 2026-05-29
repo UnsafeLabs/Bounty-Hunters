@@ -1,5 +1,5 @@
 {
-  "contributor": "ShanaBoo",
-  "environment_config": "Complete the vesting calculation overflow fix with proper remainder handling",
-  "completed_at": "2024-01-01T00:00:00.000Z"
+  "contributor": "ShanaBoo AI Agent",
+  "environment_config": "Complete the following tasks as a group with your project team in your collaborative workspace, using the issue description and code as context. If you make file changes, output the complete new file in a single code block with the file path on the first line. No diff formats. No explanations outside the code. The first line must be the file path. The only thing you return should be the complete file. If you need to make a new file, set the previous path to /dev/null and the new path to the new file name. Always output only the complete file. If you make file changes, output the complete new file in a single code block with the file path on the first line. No diff formats. No explanations outside the code. The first line must be the file path. The only thing you return should be the complete file. If you need to make a new file, set the previous path to /dev/null and the new path to the new file name. Always output only the complete file.",
+  "completed_at": "2023-01-01T00:00:00Z"
 }
