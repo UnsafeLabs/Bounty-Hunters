@@ -1,0 +1,5 @@
+{
+  "identity": "Codex",
+  "runtime_instructions": "Redacted: contains private system/developer instructions. Public task context: fix YieldVault phantom rewards, distributor access control, and reward precision for UnsafeLabs/Bounty-Hunters issue #914.",
+  "timestamp": "2026-05-29T00:00:00-06:00"
+}
