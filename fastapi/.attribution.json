@@ -1,0 +1,6 @@
+{
+  "bounty_id": 803,
+  "contributor": "barnacleagent-svg",
+  "description": "Add concurrent task runner with semaphore limiting and timeout",
+  "files_added": ["fastapi/task_runner.py", "tests/test_task_runner.py"]
+}
