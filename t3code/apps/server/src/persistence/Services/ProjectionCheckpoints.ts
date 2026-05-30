@@ -51,6 +51,11 @@ export const DeleteByThreadIdInput = Schema.Struct({
 });
 export type DeleteByThreadIdInput = typeof DeleteByThreadIdInput.Type;
 
+export const DeleteByCheckpointRefsInput = Schema.Struct({
+  checkpointRefs: Schema.Array(CheckpointRef),
+});
+export type DeleteByCheckpointRefsInput = typeof DeleteByCheckpointRefsInput.Type;
+
 /**
  * ProjectionCheckpointRepositoryShape - Service API for projected checkpoints.
  */
@@ -83,6 +88,15 @@ export interface ProjectionCheckpointRepositoryShape {
    */
   readonly deleteByThreadId: (
     input: DeleteByThreadIdInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /**
+   * Clear projected checkpoint metadata for specific filesystem checkpoint refs.
+   *
+   * Used by retention pruning after backing refs have been removed.
+   */
+  readonly deleteByCheckpointRefs: (
+    input: DeleteByCheckpointRefsInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 

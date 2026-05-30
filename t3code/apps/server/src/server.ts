@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schedule from "effect/Schedule";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 
 import { ServerConfig } from "./config.ts";
@@ -15,6 +16,7 @@ import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
+import { ProjectionCheckpointRepositoryLive } from "./persistence/Layers/ProjectionCheckpoints.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
@@ -25,7 +27,12 @@ import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import { OpenCodeRuntimeLive } from "./provider/opencodeRuntime.ts";
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery.ts";
+import { CheckpointPrunerLive } from "./checkpointing/Layers/CheckpointPruner.ts";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore.ts";
+import {
+  CheckpointPruner,
+  DEFAULT_CHECKPOINT_RETENTION_DAYS,
+} from "./checkpointing/Services/CheckpointPruner.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
@@ -213,6 +220,28 @@ const CheckpointingLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
 );
 
+const CheckpointPruningSchedulerLive = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const pruner = yield* CheckpointPruner;
+    yield* Effect.forkScoped(
+      pruner
+        .prune({
+          retentionDays: DEFAULT_CHECKPOINT_RETENTION_DAYS,
+        })
+        .pipe(
+          Effect.repeat(Schedule.fixed("1 hour")),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("checkpoint pruning scheduler stopped", { cause }),
+          ),
+        ),
+    );
+  }),
+);
+
+const CheckpointPruningLayerLive = CheckpointPruningSchedulerLive.pipe(
+  Layer.provide(CheckpointPrunerLive),
+);
+
 const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
 
 const WorkspaceEntriesLayerLive = WorkspaceEntriesLive.pipe(
@@ -241,9 +270,14 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+const RuntimeCoreCheckpointDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
+  Layer.provideMerge(CheckpointPruningLayerLive),
   Layer.provideMerge(CheckpointingLayerLive),
+  Layer.provideMerge(ProjectionCheckpointRepositoryLive),
+);
+
+const RuntimeCoreDependenciesLive = RuntimeCoreCheckpointDependenciesLive.pipe(
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),

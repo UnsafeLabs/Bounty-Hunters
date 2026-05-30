@@ -1,4 +1,4 @@
-import { OrchestrationCheckpointFile } from "@t3tools/contracts";
+import { CheckpointRef, OrchestrationCheckpointFile } from "@t3tools/contracts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import * as Effect from "effect/Effect";
@@ -9,6 +9,7 @@ import * as Struct from "effect/Struct";
 
 import { toPersistenceDecodeError, toPersistenceSqlError } from "../Errors.ts";
 import {
+  DeleteByCheckpointRefsInput,
   DeleteByThreadIdInput,
   GetByThreadAndTurnCountInput,
   ListByThreadIdInput,
@@ -148,6 +149,22 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
       `,
   });
 
+  const deleteProjectionCheckpointRowByRef = SqlSchema.void({
+    Request: Schema.Struct({
+      checkpointRef: CheckpointRef,
+    }),
+    execute: ({ checkpointRef }) =>
+      sql`
+        UPDATE projection_turns
+        SET
+          checkpoint_turn_count = NULL,
+          checkpoint_ref = NULL,
+          checkpoint_status = NULL,
+          checkpoint_files_json = '[]'
+        WHERE checkpoint_ref = ${checkpointRef}
+      `,
+  });
+
   const upsertCheckpointRow = (row: Schema.Schema.Type<typeof ProjectionCheckpointDbRowSchema>) =>
     sql.withTransaction(
       clearCheckpointConflict({
@@ -203,11 +220,28 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
       ),
     );
 
+  const deleteByCheckpointRefs: ProjectionCheckpointRepositoryShape["deleteByCheckpointRefs"] = (
+    input,
+  ) =>
+    Effect.forEach(
+      input.checkpointRefs,
+      (checkpointRef) => deleteProjectionCheckpointRowByRef({ checkpointRef }),
+      { discard: true },
+    ).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionCheckpointRepository.deleteByCheckpointRefs:query",
+          "ProjectionCheckpointRepository.deleteByCheckpointRefs:encodeRequest",
+        ),
+      ),
+    );
+
   return {
     upsert,
     listByThreadId,
     getByThreadAndTurnCount,
     deleteByThreadId,
+    deleteByCheckpointRefs,
   } satisfies ProjectionCheckpointRepositoryShape;
 });
 
