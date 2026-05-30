@@ -11,11 +11,16 @@ contract LiquidityPool is ERC20 {
     uint256 public reserveA;
     uint256 public reserveB;
 
-    // BUG: No MINIMUM_LIQUIDITY lock — first depositor can manipulate LP price
+    // Minimum liquidity permanently locked on the first deposit so that
+    // totalSupply can never be dust, which defeats first-depositor share
+    // price manipulation. OZ ERC20 forbids minting to address(0), so the
+    // shares are sent to a permanent dead address instead (same guarantee).
     uint256 public constant MINIMUM_LIQUIDITY = 1000;
+    address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
+    event Sync(uint256 reserveA, uint256 reserveB);
 
     constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") {
         tokenA = IERC20(_tokenA);
@@ -27,8 +32,12 @@ contract LiquidityPool is ERC20 {
         tokenB.transferFrom(msg.sender, address(this), amountB);
 
         if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
-            lpTokens = sqrt(amountA * amountB);
+            uint256 liquidity = sqrt(amountA * amountB);
+            require(liquidity > MINIMUM_LIQUIDITY, "Insufficient liquidity");
+            // Permanently lock MINIMUM_LIQUIDITY so the pool can never be
+            // drained to a tiny totalSupply that enables price manipulation.
+            _mint(DEAD, MINIMUM_LIQUIDITY);
+            lpTokens = liquidity - MINIMUM_LIQUIDITY;
         } else {
             uint256 lpFromA = amountA * totalSupply() / reserveA;
             uint256 lpFromB = amountB * totalSupply() / reserveB;
@@ -44,27 +53,31 @@ contract LiquidityPool is ERC20 {
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
     }
 
-    // BUG: Uses balanceOf instead of internal reserves — manipulable via direct transfer
     function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
         require(lpTokens > 0, "Must burn > 0");
         require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
 
-        // BUG: Should use reserveA/reserveB, not balanceOf
-        uint256 balA = tokenA.balanceOf(address(this));
-        uint256 balB = tokenB.balanceOf(address(this));
-
-        amountA = lpTokens * balA / totalSupply();
-        amountB = lpTokens * balB / totalSupply();
+        // Use internal reserves, not balanceOf, so tokens donated directly to
+        // the pool cannot inflate withdrawal amounts.
+        amountA = lpTokens * reserveA / totalSupply();
+        amountB = lpTokens * reserveB / totalSupply();
 
         _burn(msg.sender, lpTokens);
-
-        tokenA.transfer(msg.sender, amountA);
-        tokenB.transfer(msg.sender, amountB);
 
         reserveA -= amountA;
         reserveB -= amountB;
 
+        tokenA.transfer(msg.sender, amountA);
+        tokenB.transfer(msg.sender, amountB);
+
         emit LiquidityRemoved(msg.sender, amountA, amountB, lpTokens);
+    }
+
+    // Force reserves to match actual balances after a direct token transfer.
+    function sync() external {
+        reserveA = tokenA.balanceOf(address(this));
+        reserveB = tokenB.balanceOf(address(this));
+        emit Sync(reserveA, reserveB);
     }
 
     function sqrt(uint256 y) internal pure returns (uint256 z) {
