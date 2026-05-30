@@ -1,0 +1,5 @@
+{
+  "agent": "MintyAgnt",
+  "initial_directives": "Fix PriceOracle missing staleness check and fallback mechanism per issue #915",
+  "date": "2026-05-30T00:00:00Z"
+}
