@@ -4,18 +4,13 @@ import * as Net from "node:net";
 import * as readline from "node:readline";
 import type { Readable } from "node:stream";
 
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
-
-class BootstrapError extends Data.TaggedError("BootstrapError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+import { ConfigError, type ConfigError as BootstrapError } from "./errors.ts";
 
 export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function* <A, I>(
   schema: Schema.Codec<A, I>,
@@ -52,7 +47,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
       }
       resume(
         Effect.fail(
-          new BootstrapError({
+          ConfigError({
             message: "Failed to read bootstrap envelope.",
             cause: error,
           }),
@@ -67,9 +62,12 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
       } else {
         resume(
           Effect.fail(
-            new BootstrapError({
+            ConfigError({
               message: "Failed to decode bootstrap envelope.",
               cause: parsed.failure,
+              details: {
+                source: "bootstrap-envelope",
+              },
             }),
           ),
         );
@@ -97,7 +95,7 @@ const isFdReady = (fd: number) =>
   Effect.try({
     try: () => NFS.fstatSync(fd),
     catch: (error) =>
-      new BootstrapError({
+      ConfigError({
         message: "Failed to stat bootstrap fd.",
         cause: error,
       }),
@@ -136,7 +134,7 @@ const makeBootstrapInputStream = (fd: number) =>
       }
     },
     catch: (error) =>
-      new BootstrapError({
+      ConfigError({
         message: "Failed to duplicate bootstrap fd.",
         cause: error,
       }),

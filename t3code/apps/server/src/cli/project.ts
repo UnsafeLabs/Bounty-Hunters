@@ -5,7 +5,6 @@ import {
   type ClientOrchestrationCommand,
 } from "@t3tools/contracts";
 import * as Console from "effect/Console";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -41,6 +40,7 @@ import {
 import { WorkspacePathsLive } from "../workspace/Layers/WorkspacePaths.ts";
 import { WorkspacePaths } from "../workspace/Services/WorkspacePaths.ts";
 import { type CliAuthLocationFlags, projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
+import { ValidationError, type ValidationError as ProjectCommandError } from "../errors.ts";
 
 type ProjectMutationTarget = {
   readonly id: ProjectId;
@@ -53,10 +53,6 @@ type ProjectCliDispatchCommand = Extract<
   ClientOrchestrationCommand,
   { type: "project.create" | "project.meta.update" | "project.delete" }
 >;
-
-class ProjectCommandError extends Data.TaggedError("ProjectCommandError")<{
-  readonly message: string;
-}> {}
 
 const ProjectCliRuntimeLive = Layer.mergeAll(
   WorkspacePathsLive,
@@ -128,7 +124,7 @@ const resolveProjectTitle = Effect.fn("resolveProjectTitle")(function* (
     if (trimmed.length > 0) {
       return trimmed;
     }
-    return yield* new ProjectCommandError({ message: "Project title cannot be empty." });
+    return yield* Effect.fail(ValidationError({ message: "Project title cannot be empty." }));
   }
 
   const path = yield* Path.Path;
@@ -142,7 +138,7 @@ const findActiveProjectTarget = Effect.fn("findActiveProjectTarget")(function* (
 }) {
   const trimmedIdentifier = input.identifier.trim();
   if (trimmedIdentifier.length === 0) {
-    return yield* new ProjectCommandError({ message: "Project identifier cannot be empty." });
+    return yield* Effect.fail(ValidationError({ message: "Project identifier cannot be empty." }));
   }
 
   const activeProjects = input.snapshot.projects.filter((project) => project.deletedAt === null);
@@ -169,9 +165,11 @@ const findActiveProjectTarget = Effect.fn("findActiveProjectTarget")(function* (
 
   const resolved = exactWorkspaceMatch;
   if (!resolved) {
-    return yield* new ProjectCommandError({
-      message: `No active project found for '${trimmedIdentifier}'.`,
-    });
+    return yield* Effect.fail(
+      ValidationError({
+        message: `No active project found for '${trimmedIdentifier}'.`,
+      }),
+    );
   }
 
   return {
@@ -191,7 +189,7 @@ const fetchLiveOrchestrationSnapshot = (origin: string, bearerToken: string) =>
       "2xx": decodeOrchestrationReadModelResponse,
       orElse: (response) =>
         readErrorMessageFromResponse(response).pipe(
-          Effect.flatMap((message) => Effect.fail(new ProjectCommandError({ message }))),
+          Effect.flatMap((message) => Effect.fail(ValidationError({ message }))),
         ),
     }),
   );
@@ -212,7 +210,7 @@ const dispatchLiveOrchestrationCommand = (
           "2xx": () => Effect.void,
           orElse: (response) =>
             readErrorMessageFromResponse(response).pipe(
-              Effect.flatMap((message) => Effect.fail(new ProjectCommandError({ message }))),
+              Effect.flatMap((message) => Effect.fail(ValidationError({ message }))),
             ),
         }),
       ),
@@ -337,9 +335,11 @@ const projectAddCommand = Command.make("add", {
           (project) => project.deletedAt === null && project.workspaceRoot === workspaceRoot,
         );
         if (existingProject) {
-          return yield* new ProjectCommandError({
-            message: `An active project already exists for '${workspaceRoot}'.`,
-          });
+          return yield* Effect.fail(
+            ValidationError({
+              message: `An active project already exists for '${workspaceRoot}'.`,
+            }),
+          );
         }
 
         const title = yield* resolveProjectTitle(workspaceRoot, Option.getOrUndefined(flags.title));
