@@ -2,7 +2,7 @@ import math
 import time
 from collections.abc import Callable, Sequence
 from threading import Lock
-from typing import Annotated
+from typing import Annotated, cast
 
 from annotated_doc import Doc
 from fastapi.openapi.models import APIKey, APIKeyIn
@@ -245,6 +245,8 @@ class APIKeyWithRateLimit(APIKeyHeader):
     deprecated-key warning support without changing existing API key classes.
     """
 
+    deprecated_key_warning = '299 - "API key is deprecated and will be deactivated"'
+
     def __init__(
         self,
         *,
@@ -267,6 +269,16 @@ class APIKeyWithRateLimit(APIKeyHeader):
                 """
             ),
         ] = None,
+        max_tracked_keys: Annotated[
+            int,
+            Doc(
+                """
+                Maximum number of API key buckets retained in memory. When the limit is
+                reached, expired buckets are pruned first and the oldest remaining
+                bucket is evicted if necessary.
+                """
+            ),
+        ] = 10000,
         scheme_name: Annotated[
             str | None,
             Doc(
@@ -306,21 +318,27 @@ class APIKeyWithRateLimit(APIKeyHeader):
         self.rate_limit_count, self.rate_limit_window_seconds = self._parse_rate_limit(
             rate_limit
         )
+        if max_tracked_keys <= 0:
+            raise ValueError("max_tracked_keys must be greater than 0")
+        if isinstance(deprecated_keys, (str, bytes)):
+            raise TypeError("deprecated_keys must be a sequence of strings")
         self.deprecated_keys = set(deprecated_keys or ())
         self._request_timestamps: dict[str, list[float]] = {}
+        self.max_tracked_keys = max_tracked_keys
         self._lock = Lock()
         self._time_provider: Callable[[], float] = time.monotonic
 
-    async def __call__(self, request: Request, response: Response) -> str | None:
+    async def __call__(
+        self, request: Request, response: Response = cast(Response, None)
+    ) -> str | None:
         api_key = self.check_api_key(request.headers.get(self.model.name))
         if api_key is None:
             return None
 
-        self._check_rate_limit(api_key)
-        if api_key in self.deprecated_keys:
-            response.headers["Warning"] = (
-                '299 - "API key is deprecated and will be deactivated"'
-            )
+        warning_headers = self._warning_headers(api_key)
+        self._check_rate_limit(api_key, exception_headers=warning_headers)
+        if response is not None:
+            response.headers.update(warning_headers)
         return api_key
 
     @staticmethod
@@ -349,11 +367,15 @@ class APIKeyWithRateLimit(APIKeyHeader):
             raise ValueError("rate_limit period must be one of: second, minute, hour")
         return count, period_seconds
 
-    def _check_rate_limit(self, api_key: str) -> None:
-        now = self._time_provider()
-        window_start = now - self.rate_limit_window_seconds
-
+    def _check_rate_limit(
+        self, api_key: str, exception_headers: dict[str, str] | None = None
+    ) -> None:
         with self._lock:
+            now = self._time_provider()
+            window_start = now - self.rate_limit_window_seconds
+            if api_key not in self._request_timestamps:
+                self._prune_or_evict_key_bucket(window_start)
+
             timestamps = [
                 timestamp
                 for timestamp in self._request_timestamps.get(api_key, [])
@@ -364,15 +386,44 @@ class APIKeyWithRateLimit(APIKeyHeader):
             if len(timestamps) >= self.rate_limit_count:
                 retry_after = max(
                     1,
-                    math.ceil(self.rate_limit_window_seconds - (now - timestamps[0])),
+                    math.ceil(self.rate_limit_window_seconds - (now - min(timestamps))),
                 )
+                headers = {"Retry-After": str(retry_after)}
+                if exception_headers:
+                    headers.update(exception_headers)
                 raise HTTPException(
                     status_code=HTTP_429_TOO_MANY_REQUESTS,
                     detail="Rate limit exceeded",
-                    headers={"Retry-After": str(retry_after)},
+                    headers=headers,
                 )
 
             timestamps.append(now)
+
+    def _warning_headers(self, api_key: str) -> dict[str, str]:
+        if api_key not in self.deprecated_keys:
+            return {}
+        return {"Warning": self.deprecated_key_warning}
+
+    def _prune_or_evict_key_bucket(self, window_start: float) -> None:
+        if len(self._request_timestamps) < self.max_tracked_keys:
+            return
+
+        expired_keys = [
+            key
+            for key, timestamps in self._request_timestamps.items()
+            if not any(timestamp > window_start for timestamp in timestamps)
+        ]
+        for key in expired_keys:
+            del self._request_timestamps[key]
+
+        if len(self._request_timestamps) < self.max_tracked_keys:
+            return
+
+        oldest_key = min(
+            self._request_timestamps,
+            key=lambda key: min(self._request_timestamps[key], default=window_start),
+        )
+        del self._request_timestamps[oldest_key]
 
 
 class APIKeyCookie(APIKeyBase):
