@@ -1,6 +1,7 @@
 {
-  "bounty_id": 803,
+  "bounty_id": 800,
   "contributor": "barnacleagent-svg",
-  "description": "Add concurrent task runner with semaphore limiting and timeout",
-  "files_added": ["fastapi/task_runner.py", "tests/test_task_runner.py"]
+  "description": "Add brute force protection to HTTPBasic authentication",
+  "files_added": ["fastapi/fastapi/security/brute_force.py", "fastapi/tests/test_security_http_basic_brute_force.py"],
+  "files_modified": ["fastapi/fastapi/security/http.py", "fastapi/fastapi/security/__init__.py"]
 }
