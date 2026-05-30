@@ -38,12 +38,123 @@ const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+export const DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES = 10 * 1024 * 1024;
+export const UPLOAD_REQUEST_BODY_SIZE_LIMIT_BYTES = 50 * 1024 * 1024;
+export const MAX_BODY_SIZE_RESPONSE_HEADER = "X-Max-Body-Size";
+
+export interface RequestBodySizeLimitOverride {
+  readonly path: string | RegExp;
+  readonly limitBytes: number;
+}
+
+export function parseContentLength(value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const trimmedValue = value.trim();
+  if (!/^\d+$/.test(trimmedValue)) {
+    return undefined;
+  }
+
+  const contentLength = Number(trimmedValue);
+  return Number.isSafeInteger(contentLength) ? contentLength : undefined;
+}
+
+export function isUploadRequestPath(pathname: string): boolean {
+  const normalizedPathname = pathname.toLowerCase();
+  return (
+    normalizedPathname.includes("upload") ||
+    normalizedPathname.startsWith("/attachments/") ||
+    normalizedPathname.startsWith("/api/attachments/")
+  );
+}
+
+function requestBodySizeLimitOverrideMatches(
+  override: RequestBodySizeLimitOverride,
+  pathname: string,
+): boolean {
+  if (typeof override.path === "string") {
+    return override.path === pathname;
+  }
+
+  override.path.lastIndex = 0;
+  return override.path.test(pathname);
+}
+
+export function resolveRequestBodySizeLimitBytes(
+  pathname: string,
+  overrides: ReadonlyArray<RequestBodySizeLimitOverride> = [],
+): number {
+  const override = overrides.find((candidate) =>
+    requestBodySizeLimitOverrideMatches(candidate, pathname),
+  );
+  if (override) {
+    return override.limitBytes;
+  }
+
+  return isUploadRequestPath(pathname)
+    ? UPLOAD_REQUEST_BODY_SIZE_LIMIT_BYTES
+    : DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES;
+}
+
+export function makePayloadTooLargeResponse(input: {
+  readonly limitBytes: number;
+  readonly receivedBytes: number;
+}) {
+  return HttpServerResponse.jsonUnsafe(
+    {
+      error: "Payload Too Large",
+      limit: input.limitBytes,
+      received: input.receivedBytes,
+    },
+    {
+      status: 413,
+      headers: {
+        ...browserApiCorsHeaders,
+        [MAX_BODY_SIZE_RESPONSE_HEADER]: String(input.limitBytes),
+      },
+    },
+  );
+}
 
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: [...browserApiCorsAllowedMethods],
   allowedHeaders: [...browserApiCorsAllowedHeaders],
   maxAge: 600,
 });
+
+export const makeRequestBodySizeLimitLayer = (
+  overrides: ReadonlyArray<RequestBodySizeLimitOverride> = [],
+) =>
+  HttpRouter.middleware(
+    (handler) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const url = HttpServerRequest.toURL(request);
+        const pathname = Option.isSome(url)
+          ? url.value.pathname
+          : (request.url.split("?")[0] ?? "/");
+        const limitBytes = resolveRequestBodySizeLimitBytes(pathname, overrides);
+        const receivedBytes = parseContentLength(request.headers["content-length"]);
+
+        if (receivedBytes !== undefined && receivedBytes > limitBytes) {
+          return makePayloadTooLargeResponse({
+            limitBytes,
+            receivedBytes,
+          });
+        }
+
+        return yield* Effect.provideService(
+          handler,
+          HttpServerRequest.MaxBodySize,
+          FileSystem.Size(limitBytes),
+        );
+      }),
+    { global: true },
+  );
+
+export const requestBodySizeLimitLayer = makeRequestBodySizeLimitLayer();
 
 export function isLoopbackHostname(hostname: string): boolean {
   const normalizedHostname = hostname
