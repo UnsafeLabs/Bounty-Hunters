@@ -1,0 +1,18 @@
+{
+  "bounty_id": 912,
+  "contributor": "barnacleagent-svg",
+  "fix_description": "Replace tx.origin with msg.sender in GovernanceToken delegation and admin logic to prevent phishing attacks via malicious contracts",
+  "files_changed": [
+    "solidity/contracts/GovernanceToken.sol",
+    "solidity/test/GovernanceToken.test.js",
+    "solidity/contracts/MaliciousDelegate.sol",
+    "solidity/contracts/MaliciousSnapshot.sol"
+  ],
+  "acceptance_criteria": {
+    "tx.origin_replaced_with_msg_sender": true,
+    "delegation_uses_msg_sender": true,
+    "snapshot_admin_check_uses_msg_sender": true,
+    "phishing_attack_prevented": true,
+    "tests_added": true
+  }
+}
