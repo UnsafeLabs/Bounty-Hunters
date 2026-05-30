@@ -4,6 +4,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
+import { randomUUID } from "node:crypto";
 
 import { SshPasswordPromptError } from "./errors.ts";
 
@@ -59,6 +60,12 @@ export interface SshChildEnvironmentOptions {
 }
 
 const SSH_ASKPASS_DIR_NAME = "t3code-ssh-askpass";
+const SSH_ASKPASS_SECRET_FILE_PREFIX = "ssh-auth-secret";
+const SSH_ASKPASS_SECRET_FILE_MODE = 0o600;
+const SSH_ASKPASS_SCRIPT_MODE = 0o700;
+
+const POSIX_SAFE_ASKPASS_PATH = /^(?!-)[A-Za-z0-9_./-]+$/u;
+const WINDOWS_UNSAFE_ASKPASS_PATH_CHARS = ["\u0000", "\r", "\n", '"', "&", "|", "<", ">"] as const;
 
 function joinSshAskpassPath(
   directory: string,
@@ -69,15 +76,60 @@ function joinSshAskpassPath(
   return platform === "win32" ? `${trimmed}\\${fileName}` : `${trimmed}/${fileName}`;
 }
 
+export function isSafeSshAskpassPath(
+  scriptPath: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (scriptPath.length === 0) {
+    return false;
+  }
+  return platform === "win32"
+    ? !WINDOWS_UNSAFE_ASKPASS_PATH_CHARS.some((char) => scriptPath.includes(char))
+    : POSIX_SAFE_ASKPASS_PATH.test(scriptPath);
+}
+
+function unsafeSshAskpassPathError(scriptPath: string): PlatformError.PlatformError {
+  return PlatformError.badArgument({
+    module: "ssh/auth",
+    method: "isSafeSshAskpassPath",
+    description: `Refusing to use unsafe ssh-askpass path: ${scriptPath}`,
+  });
+}
+
 export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
-# from the renderer's in-app prompt. We never expose a native dialog here - if
-# T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
+# from the renderer's in-app prompt. We never expose a native dialog here.
+secret_file=
+cleanup() {
+  if [ -n "\${secret_file:-}" ]; then
+    rm -f -- "$secret_file"
+  fi
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
+
+if [ "\${T3_SSH_AUTH_SECRET_FILE+x}" = "x" ]; then
+  secret_file=$T3_SSH_AUTH_SECRET_FILE
+  case "$secret_file" in
+    ""|-*|*[!A-Za-z0-9_./-]*)
+      printf 'T3 Code ssh-askpass refused unsafe T3_SSH_AUTH_SECRET_FILE.\\n' >&2
+      exit 1
+      ;;
+  esac
+  if [ ! -f "$secret_file" ]; then
+    printf 'T3 Code ssh-askpass secret file is missing.\\n' >&2
+    exit 1
+  fi
+  secret=$(cat "$secret_file") || exit 1
+  printf "%s\\n" "$secret"
+  exit 0
+fi
+
 if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
   printf "%s\\n" "$T3_SSH_AUTH_SECRET"
   exit 0
 fi
-printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
+printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET_FILE.\\n' >&2
 exit 1
 `;
 
@@ -87,14 +139,38 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ssh-askpass.ps1" %*\r
 
 export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through ssh-askpass.cmd) when T3 Code re-runs\r
 # ssh with a cached password from the renderer's in-app prompt. We never expose\r
-# a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
-# and we fail loudly.\r
-if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
-  exit 0\r
+# a native dialog here.\r
+$ErrorActionPreference = "Stop"\r
+$plainSecret = $null\r
+\r
+if ($null -ne $env:T3_SSH_AUTH_SECRET_FILE -and $env:T3_SSH_AUTH_SECRET_FILE.Length -gt 0) {\r
+  if ($env:T3_SSH_AUTH_SECRET_FILE -match '[\\x00\\r\\n"&|<>]') {\r
+    [Console]::Error.WriteLine("T3 Code ssh-askpass refused unsafe T3_SSH_AUTH_SECRET_FILE.")\r
+    exit 1\r
+  }\r
+  try {\r
+    $plainSecret = Get-Content -LiteralPath $env:T3_SSH_AUTH_SECRET_FILE -Raw\r
+    $plainSecret = $plainSecret -replace '\\r?\\n$',''\r
+  } finally {\r
+    Remove-Item -LiteralPath $env:T3_SSH_AUTH_SECRET_FILE -Force -ErrorAction SilentlyContinue\r
+  }\r
+} elseif ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
+  $plainSecret = $env:T3_SSH_AUTH_SECRET\r
+} else {\r
+  [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET_FILE.")\r
+  exit 1\r
 }\r
-[Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
-exit 1\r
+\r
+$secureSecret = ConvertTo-SecureString -String $plainSecret -AsPlainText -Force\r
+$secretBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureSecret)\r
+try {\r
+  [Console]::Out.WriteLine([Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretBstr))\r
+  exit 0\r
+} finally {\r
+  [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretBstr)\r
+  $secureSecret.Dispose()\r
+  $plainSecret = $null\r
+}\r
 `;
 
 export const getDefaultSshAskpassDirectory = Effect.fn("ssh/auth.getDefaultSshAskpassDirectory")(
@@ -139,7 +215,7 @@ export const buildSshAskpassHelperDescriptor = Effect.fn(
       {
         path: path.join(directory, "ssh-askpass.sh"),
         contents: ASKPASS_POSIX_SCRIPT,
-        mode: 0o700,
+        mode: SSH_ASKPASS_SCRIPT_MODE,
       },
     ],
   };
@@ -154,6 +230,15 @@ export const ensureSshAskpassHelpers = Effect.fn("ssh/auth.ensureSshAskpassHelpe
     const path = yield* Path.Path;
     const descriptor = yield* buildSshAskpassHelperDescriptor(input);
     const platform = input.platform ?? process.platform;
+
+    for (const scriptPath of [
+      descriptor.launcherPath,
+      ...descriptor.files.map((file) => file.path),
+    ]) {
+      if (!isSafeSshAskpassPath(scriptPath, platform)) {
+        return yield* unsafeSshAskpassPathError(scriptPath);
+      }
+    }
 
     yield* fs.makeDirectory(path.dirname(descriptor.launcherPath), { recursive: true });
 
@@ -184,15 +269,36 @@ export const buildSshChildEnvironment = Effect.fn("ssh/auth.buildSshChildEnviron
     return baseEnv;
   }
 
+  const fs = yield* FileSystem.FileSystem;
   const platform = input.platform ?? process.platform;
   const directory = input.askpassDirectory ?? (yield* getDefaultSshAskpassDirectory());
   const sshAskpass = yield* ensureSshAskpassHelpers({ directory, platform });
+  const secretEnvironment: NodeJS.ProcessEnv = {};
+
+  if (input.authSecret !== undefined) {
+    const secretFilePath = joinSshAskpassPath(
+      directory,
+      `${SSH_ASKPASS_SECRET_FILE_PREFIX}-${randomUUID().replaceAll("-", "")}`,
+      platform,
+    );
+    if (!isSafeSshAskpassPath(secretFilePath, platform)) {
+      return yield* unsafeSshAskpassPathError(secretFilePath);
+    }
+    yield* fs.writeFileString(secretFilePath, input.authSecret ?? "", {
+      flag: "wx",
+      mode: SSH_ASKPASS_SECRET_FILE_MODE,
+    });
+    if (platform !== "win32") {
+      yield* fs.chmod(secretFilePath, SSH_ASKPASS_SECRET_FILE_MODE);
+    }
+    secretEnvironment.T3_SSH_AUTH_SECRET_FILE = secretFilePath;
+  }
 
   return {
     ...baseEnv,
     SSH_ASKPASS: sshAskpass,
     SSH_ASKPASS_REQUIRE: "force",
-    ...(input.authSecret === undefined ? {} : { T3_SSH_AUTH_SECRET: input.authSecret ?? "" }),
+    ...secretEnvironment,
     ...(platform === "win32" || baseEnv.DISPLAY ? {} : { DISPLAY: "t3code" }),
   };
 });
