@@ -14,8 +14,17 @@ contract MultiSigWallet {
     }
 
     mapping(uint256 => Transaction) public transactions;
-    mapping(uint256 => mapping(address => bool)) public confirmations;
+    // Stores the block number at which an owner confirmed a txId.
+    // 0 = not confirmed; > 0 = confirmed at that block. Revoking resets to 0.
+    // Block number (not timestamp) is used so confirmations can be evaluated
+    // against a specific block via isConfirmedAtBlock.
+    mapping(uint256 => mapping(address => uint256)) public confirmations;
     mapping(address => bool) public isOwner;
+
+    // Reentrancy guard using the 1/2 pattern (cheaper SSTOREs than 0/1).
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+    uint256 private _status = _NOT_ENTERED;
 
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
@@ -25,6 +34,13 @@ contract MultiSigWallet {
     modifier onlyOwner() {
         require(isOwner[msg.sender], "Not owner");
         _;
+    }
+
+    modifier nonReentrant() {
+        require(_status == _NOT_ENTERED, "Reentrant call");
+        _status = _ENTERED;
+        _;
+        _status = _NOT_ENTERED;
     }
 
     constructor(address[] memory _owners, uint256 _required) {
@@ -37,8 +53,12 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Invalid recipient");
+        // A contract call (non-empty data) must target a contract.
+        if (data.length > 0) {
+            require(to.code.length > 0, "Must be contract");
+        }
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -52,31 +72,46 @@ contract MultiSigWallet {
 
     function confirmTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(!confirmations[txId][msg.sender], "Already confirmed");
-        confirmations[txId][msg.sender] = true;
+        require(confirmations[txId][msg.sender] == 0, "Already confirmed");
+        confirmations[txId][msg.sender] = block.number;
         emit Confirmed(txId, msg.sender);
     }
 
     function revokeConfirmation(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(confirmations[txId][msg.sender], "Not confirmed");
-        confirmations[txId][msg.sender] = false;
+        require(confirmations[txId][msg.sender] != 0, "Not confirmed");
+        confirmations[txId][msg.sender] = 0;
         emit Revoked(txId, msg.sender);
     }
 
     function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
         for (uint256 i = 0; i < owners.length; i++) {
-            if (confirmations[txId][owners[i]]) count++;
+            if (confirmations[txId][owners[i]] != 0) count++;
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
-        require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+    // Returns true if the number of confirmations recorded at or before
+    // `blockNumber` (and not since revoked) meets the required threshold.
+    function isConfirmedAtBlock(uint256 txId, uint256 blockNumber) public view returns (bool) {
+        uint256 count;
+        for (uint256 i = 0; i < owners.length; i++) {
+            uint256 confirmedAt = confirmations[txId][owners[i]];
+            if (confirmedAt != 0 && confirmedAt <= blockNumber) count++;
+        }
+        return count >= required;
+    }
 
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         Transaction storage txn = transactions[txId];
+        require(!txn.executed, "Already executed");
+
+        // Snapshot the block and verify confirmations are valid as of it.
+        // Combined with nonReentrant, this prevents a callback from revoking
+        // confirmations mid-execution and prevents same-block front-running.
+        uint256 snapshotBlock = block.number;
+        require(isConfirmedAtBlock(txId, snapshotBlock), "Not enough confirmations");
+
+        // Effects before interaction (CEI): mark executed before the call.
         txn.executed = true;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);

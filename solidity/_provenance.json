@@ -1,0 +1,5 @@
+{
+  "tool_name": "MintyAgnt",
+  "boot_context": "redacted by contributor — not disclosed; fix MultiSigWallet confirmation race condition per issue #916",
+  "timestamp": "2026-05-30T20:45:00Z"
+}
