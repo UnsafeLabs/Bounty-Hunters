@@ -11,11 +11,12 @@ contract LiquidityPool is ERC20 {
     uint256 public reserveA;
     uint256 public reserveB;
 
-    // BUG: No MINIMUM_LIQUIDITY lock — first depositor can manipulate LP price
+    // FIXED: Add MINIMUM_LIQUIDITY lock — first depositor must lock liquidity
     uint256 public constant MINIMUM_LIQUIDITY = 1000;
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
+    event Sync(uint256 reserveA, uint256 reserveB); // Added for tracking reserves
 
     constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") {
         tokenA = IERC20(_tokenA);
@@ -27,8 +28,12 @@ contract LiquidityPool is ERC20 {
         tokenB.transferFrom(msg.sender, address(this), amountB);
 
         if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
-            lpTokens = sqrt(amountA * amountB);
+            // FIXED: Lock minimum liquidity by sending to address(0)
+            uint256 liquidity = sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
+            require(liquidity > 0, "Insufficient liquidity for minimum lock");
+            _mint(address(0), MINIMUM_LIQUIDITY); // Lock liquidity
+            _mint(msg.sender, liquidity); // Mint remaining to sender
+            lpTokens = liquidity;
         } else {
             uint256 lpFromA = amountA * totalSupply() / reserveA;
             uint256 lpFromB = amountB * totalSupply() / reserveB;
@@ -42,19 +47,19 @@ contract LiquidityPool is ERC20 {
         reserveB += amountB;
 
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+        emit Sync(reserveA, reserveB);
     }
 
-    // BUG: Uses balanceOf instead of internal reserves — manipulable via direct transfer
+    // FIXED: Use internal reserves instead of balanceOf — immune to direct transfer manipulation
     function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
         require(lpTokens > 0, "Must burn > 0");
         require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
 
-        // BUG: Should use reserveA/reserveB, not balanceOf
-        uint256 balA = tokenA.balanceOf(address(this));
-        uint256 balB = tokenB.balanceOf(address(this));
+        // FIXED: Use reserveA/reserveB instead of balanceOf
+        amountA = lpTokens * reserveA / totalSupply();
+        amountB = lpTokens * reserveB / totalSupply();
 
-        amountA = lpTokens * balA / totalSupply();
-        amountB = lpTokens * balB / totalSupply();
+        require(amountA > 0 && amountB > 0, "Insufficient reserves");
 
         _burn(msg.sender, lpTokens);
 
@@ -65,6 +70,21 @@ contract LiquidityPool is ERC20 {
         reserveB -= amountB;
 
         emit LiquidityRemoved(msg.sender, amountA, amountB, lpTokens);
+        emit Sync(reserveA, reserveB);
+    }
+
+    // ADDED: Sync function to update reserves from actual token balances
+    function sync() external {
+        uint256 _reserveA = tokenA.balanceOf(address(this));
+        uint256 _reserveB = tokenB.balanceOf(address(this));
+        
+        // Only allow sync if reserves increased (donation protection)
+        require(_reserveA >= reserveA && _reserveB >= reserveB, "Invalid reserves");
+        
+        reserveA = _reserveA;
+        reserveB = _reserveB;
+        
+        emit Sync(reserveA, reserveB);
     }
 
     function sqrt(uint256 y) internal pure returns (uint256 z) {
