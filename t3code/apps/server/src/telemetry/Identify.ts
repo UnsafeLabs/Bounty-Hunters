@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 import * as Crypto from "node:crypto";
 import { homedir } from "node:os";
 import { ServerConfig } from "../config.ts";
+import { ConfigError } from "../errors.ts";
 
 const CodexAuthJsonSchema = Schema.Struct({
   tokens: Schema.Struct({
@@ -17,16 +18,11 @@ const ClaudeJsonSchema = Schema.Struct({
   userID: Schema.String,
 });
 
-class IdentifyUserError extends Schema.TaggedErrorClass<IdentifyUserError>()("IdentifyUserError", {
-  message: Schema.String,
-  cause: Schema.optional(Schema.Defect),
-}) {}
-
 const hash = (value: string) =>
   Effect.try({
     try: () => Crypto.createHash("sha256").update(value).digest("hex"),
     catch: (error) =>
-      new IdentifyUserError({
+      ConfigError({
         message: "Failed to hash identifier",
         cause: error,
       }),
