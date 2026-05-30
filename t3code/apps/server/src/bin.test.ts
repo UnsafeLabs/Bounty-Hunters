@@ -158,6 +158,15 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     runCliWithRuntime(["--no-log-websocket-events", "--version"]),
   );
 
+  it.effect("prints detailed version information", () =>
+    Effect.gen(function* () {
+      const { output } = yield* captureStdout(runCli(["version"]));
+
+      assert.isTrue(output.startsWith("t3code v0.0.24 ("));
+      assert.match(output, /(bun|node) .+, (aix|darwin|freebsd|linux|openbsd|sunos|win32) /);
+    }),
+  );
+
   it.effect("rejects invalid log-level casing before launching the server", () =>
     Effect.gen(function* () {
       const error = yield* runCliWithRuntime(["--log-level", "Debug"]).pipe(Effect.flip);
