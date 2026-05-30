@@ -21,6 +21,7 @@ import {
   normalizeAttachmentRelativePath,
   resolveAttachmentRelativePath,
 } from "./attachmentPaths.ts";
+import { ServerError } from "./errors.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
@@ -81,10 +82,7 @@ export const serverEnvironmentRouteLayer = HttpRouter.add(
   }),
 );
 
-class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
-  readonly cause: unknown;
-  readonly bodyJson: OtlpTracer.TraceData;
-}> {}
+// Removed DecodeOtlpTraceRecordsError - using NetworkError from ServerError instead
 
 export const otlpTracesProxyRouteLayer = HttpRouter.add(
   "POST",
@@ -100,7 +98,7 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
 
     yield* Effect.try({
       try: () => decodeOtlpTraceRecords(bodyJson),
-      catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson }),
+      catch: (cause) => ServerError.NetworkError({ message: "Failed to decode OTLP trace records", cause, timestamp: Date.now() }),
     }).pipe(
       Effect.flatMap((records) => browserTraceCollector.record(records)),
       Effect.catch((cause) =>

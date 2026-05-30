@@ -11,11 +11,9 @@ import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
+import { ServerError } from "./errors.ts";
 
-class BootstrapError extends Data.TaggedError("BootstrapError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+// Removed BootstrapError - using ConfigError from ServerError instead
 
 export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function* <A, I>(
   schema: Schema.Codec<A, I>,
@@ -23,7 +21,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
   options?: {
     timeoutMs?: number;
   },
-): Effect.fn.Return<Option.Option<A>, BootstrapError> {
+): Effect.fn.Return<Option.Option<A>, ServerError> {
   const fdReady = yield* isFdReady(fd);
   if (!fdReady) return Option.none();
 
@@ -31,7 +29,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
 
   const timeoutMs = options?.timeoutMs ?? 1000;
 
-  return yield* Effect.callback<Option.Option<A>, BootstrapError>((resume) => {
+  return yield* Effect.callback<Option.Option<A>, ServerError>((resume) => {
     const input = readline.createInterface({
       input: stream,
       crlfDelay: Infinity,
@@ -52,9 +50,10 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
       }
       resume(
         Effect.fail(
-          new BootstrapError({
+          ServerError.ConfigError({
             message: "Failed to read bootstrap envelope.",
             cause: error,
+            timestamp: Date.now(),
           }),
         ),
       );
@@ -67,9 +66,10 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
       } else {
         resume(
           Effect.fail(
-            new BootstrapError({
+            ServerError.ConfigError({
               message: "Failed to decode bootstrap envelope.",
               cause: parsed.failure,
+              timestamp: Date.now(),
             }),
           ),
         );
@@ -97,9 +97,10 @@ const isFdReady = (fd: number) =>
   Effect.try({
     try: () => NFS.fstatSync(fd),
     catch: (error) =>
-      new BootstrapError({
+      ServerError.ConfigError({
         message: "Failed to stat bootstrap fd.",
         cause: error,
+        timestamp: Date.now(),
       }),
   }).pipe(
     Effect.as(true),
@@ -110,7 +111,7 @@ const isFdReady = (fd: number) =>
   );
 
 const makeBootstrapInputStream = (fd: number) =>
-  Effect.try<Readable, BootstrapError>({
+  Effect.try<Readable, ServerError>({
     try: () => {
       const fdPath = resolveFdPath(fd);
       if (fdPath === undefined) {
@@ -136,9 +137,10 @@ const makeBootstrapInputStream = (fd: number) =>
       }
     },
     catch: (error) =>
-      new BootstrapError({
+      ServerError.ConfigError({
         message: "Failed to duplicate bootstrap fd.",
         cause: error,
+        timestamp: Date.now(),
       }),
   });
 

@@ -21,8 +21,8 @@ import {
   makeCommandGate,
   resolveAutoBootstrapWelcomeTargets,
   resolveWelcomeBase,
-  ServerRuntimeStartupError,
 } from "./serverRuntimeStartup.ts";
+import { ServerError } from "./errors.ts";
 
 it("uses the canonical Codex default for auto-bootstrapped model selection", () => {
   assert.deepStrictEqual(getAutoBootstrapDefaultModelSelection(), {
@@ -64,8 +64,9 @@ it.effect("enqueueCommand fails queued work when readiness fails", () =>
         .pipe(Effect.forkScoped);
 
       yield* commandGate.failCommandReady(
-        new ServerRuntimeStartupError({
+        ServerError.ConfigError({
           message: "startup failed",
+          timestamp: Date.now(),
         }),
       );
 

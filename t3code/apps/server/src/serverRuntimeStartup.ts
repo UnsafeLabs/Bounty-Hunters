@@ -8,6 +8,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Data from "effect/Data";
+import { ServerError } from "./errors.ts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -40,17 +41,14 @@ import {
   issueHeadlessServeAccessInfo,
 } from "./startupAccess.ts";
 
-export class ServerRuntimeStartupError extends Data.TaggedError("ServerRuntimeStartupError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+// Removed ServerRuntimeStartupError - using ConfigError from ServerError instead
 
 export interface ServerRuntimeStartupShape {
-  readonly awaitCommandReady: Effect.Effect<void, ServerRuntimeStartupError>;
+  readonly awaitCommandReady: Effect.Effect<void, ServerError>;
   readonly markHttpListening: Effect.Effect<void>;
   readonly enqueueCommand: <A, E>(
     effect: Effect.Effect<A, E>,
-  ) => Effect.Effect<A, E | ServerRuntimeStartupError>;
+  ) => Effect.Effect<A, E | ServerError>;
 }
 
 export class ServerRuntimeStartup extends Context.Service<
@@ -62,15 +60,15 @@ interface QueuedCommand {
   readonly run: Effect.Effect<void, never>;
 }
 
-type CommandReadinessState = "pending" | "ready" | ServerRuntimeStartupError;
+type CommandReadinessState = "pending" | "ready" | ServerError;
 
 interface CommandGate {
-  readonly awaitCommandReady: Effect.Effect<void, ServerRuntimeStartupError>;
+  readonly awaitCommandReady: Effect.Effect<void, ServerError>;
   readonly signalCommandReady: Effect.Effect<void>;
-  readonly failCommandReady: (error: ServerRuntimeStartupError) => Effect.Effect<void>;
+  readonly failCommandReady: (error: ServerError) => Effect.Effect<void>;
   readonly enqueueCommand: <A, E>(
     effect: Effect.Effect<A, E>,
-  ) => Effect.Effect<A, E | ServerRuntimeStartupError>;
+  ) => Effect.Effect<A, E | ServerError>;
 }
 
 const settleQueuedCommand = <A, E>(deferred: Deferred.Deferred<A, E>, exit: Exit.Exit<A, E>) =>
@@ -79,7 +77,7 @@ const settleQueuedCommand = <A, E>(deferred: Deferred.Deferred<A, E>, exit: Exit
     : Deferred.failCause(deferred, exit.cause);
 
 export const makeCommandGate = Effect.gen(function* () {
-  const commandReady = yield* Deferred.make<void, ServerRuntimeStartupError>();
+  const commandReady = yield* Deferred.make<void, ServerError>();
   const commandQueue = yield* Queue.unbounded<QueuedCommand>();
   const commandReadinessState = yield* Ref.make<CommandReadinessState>("pending");
 
@@ -106,10 +104,10 @@ export const makeCommandGate = Effect.gen(function* () {
           return yield* effect;
         }
         if (readinessState !== "pending") {
-          return yield* readinessState;
+          return yield* Effect.fail(readinessState);
         }
 
-        const result = yield* Deferred.make<A, E | ServerRuntimeStartupError>();
+        const result = yield* Deferred.make<A, E | ServerError>();
         yield* Queue.offer(commandQueue, {
           run: Deferred.await(commandReady).pipe(
             Effect.flatMap(() => effect),
@@ -402,9 +400,10 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
     Effect.gen(function* () {
       const startupExit = yield* Effect.exit(startup);
       if (Exit.isFailure(startupExit)) {
-        const error = new ServerRuntimeStartupError({
+        const error = ServerError.ConfigError({
           message: "Server runtime startup failed before command readiness.",
           cause: startupExit.cause,
+          timestamp: Date.now(),
         });
         yield* Effect.logError("server runtime startup failed", { cause: startupExit.cause });
         yield* commandGate.failCommandReady(error);
