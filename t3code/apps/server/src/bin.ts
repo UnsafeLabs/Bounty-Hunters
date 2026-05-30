@@ -1,5 +1,6 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { Command } from "effect/unstable/cli";
@@ -13,10 +14,25 @@ import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
+const getRuntimeLabel = () => {
+  if (typeof Bun !== "undefined") {
+    return `bun ${Bun.version}`;
+  }
+  return `node ${process.versions.node}`;
+};
+
+export const formatVersionInfo = () =>
+  `t3code v${packageJson.version} (${getRuntimeLabel()}, ${process.platform} ${process.arch})`;
+
+export const versionCommand = Command.make("version").pipe(
+  Command.withDescription("Print version, runtime, platform, and architecture information."),
+  Command.withHandler(() => Console.log(formatVersionInfo())),
+);
+
 export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),
   Command.withHandler((flags) => runServerCommand(flags)),
-  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
+  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand, versionCommand]),
 );
 
 if (import.meta.main) {
