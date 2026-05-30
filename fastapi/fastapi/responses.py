@@ -1,4 +1,7 @@
+import csv
 import importlib
+import io
+from collections.abc import AsyncIterable, Mapping, Sequence
 from typing import Any, Protocol, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
@@ -11,6 +14,8 @@ from starlette.responses import RedirectResponse as RedirectResponse  # noqa
 from starlette.responses import Response as Response  # noqa
 from starlette.responses import StreamingResponse as StreamingResponse  # noqa
 from typing_extensions import deprecated
+
+CSVRow = Mapping[str, Any] | Sequence[Any]
 
 
 class _UjsonModule(Protocol):
@@ -34,6 +39,71 @@ try:
     orjson = cast(_OrjsonModule, importlib.import_module("orjson"))
 except ModuleNotFoundError:  # pragma: nocover
     orjson = None  # type: ignore[assignment]
+
+
+class StreamingCSVResponse(StreamingResponse):
+    """
+    Stream CSV rows without materializing the whole response body in memory.
+    """
+
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        content: AsyncIterable[CSVRow],
+        *,
+        headers: Sequence[str] | None = None,
+        filename: str = "export.csv",
+        delimiter: str = ",",
+        status_code: int = 200,
+    ) -> None:
+        response_headers = {
+            "Content-Disposition": f'attachment; filename="{self._safe_filename(filename)}"'
+        }
+        super().__init__(
+            self._stream_rows(content, headers=headers, delimiter=delimiter),
+            status_code=status_code,
+            headers=response_headers,
+            media_type=self.media_type,
+        )
+
+    @staticmethod
+    def _safe_filename(filename: str) -> str:
+        return (
+            filename.replace("\\", "_")
+            .replace("/", "_")
+            .replace('"', "_")
+            .replace("\r", "_")
+            .replace("\n", "_")
+        )
+
+    @classmethod
+    async def _stream_rows(
+        cls,
+        rows: AsyncIterable[CSVRow],
+        *,
+        headers: Sequence[str] | None,
+        delimiter: str,
+    ) -> AsyncIterable[str]:
+        if headers is not None:
+            yield cls._render_row(headers, delimiter)
+        async for row in rows:
+            yield cls._render_row(cls._row_values(row, headers), delimiter)
+
+    @staticmethod
+    def _row_values(row: CSVRow, headers: Sequence[str] | None) -> Sequence[Any]:
+        if isinstance(row, Mapping):
+            if headers is None:
+                return list(row.values())
+            return [row.get(header, "") for header in headers]
+        return row
+
+    @staticmethod
+    def _render_row(row: Sequence[Any], delimiter: str) -> str:
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, delimiter=delimiter)
+        writer.writerow(row)
+        return buffer.getvalue()
 
 
 @deprecated(
