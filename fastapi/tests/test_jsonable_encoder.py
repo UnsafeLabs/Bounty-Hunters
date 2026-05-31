@@ -66,6 +66,10 @@ class ModelWithAlias(BaseModel):
     foo: str = Field(alias="Foo")
 
 
+class ModelWithBytes(BaseModel):
+    payload: bytes
+
+
 class ModelWithDefault(BaseModel):
     foo: str = ...  # type: ignore
     bar: str = "bar"
@@ -182,6 +186,43 @@ def test_encode_model_with_alias_raises():
 def test_encode_model_with_alias():
     model = ModelWithAlias(Foo="Bar")
     assert jsonable_encoder(model) == {"Foo": "Bar"}
+
+
+def test_encode_bytes_defaults_to_base64():
+    assert jsonable_encoder(b"\x00\xffhello") == "AP9oZWxsbw=="
+
+
+def test_encode_bytes_as_hex():
+    assert jsonable_encoder(b"\x00\xffhello", bytes_encoding="hex") == "00ff68656c6c6f"
+
+
+def test_encode_memoryview_defaults_to_base64():
+    assert jsonable_encoder(memoryview(b"hello")) == "aGVsbG8="
+
+
+def test_encode_memoryview_as_hex():
+    assert jsonable_encoder(memoryview(b"hello"), bytes_encoding="hex") == "68656c6c6f"
+
+
+def test_encode_nested_bytes_and_memoryview_uses_selected_encoding():
+    encoded = jsonable_encoder(
+        {"file": b"\x00\xff", "items": [memoryview(b"ok")]},
+        bytes_encoding="hex",
+    )
+
+    assert encoded == {"file": "00ff", "items": ["6f6b"]}
+
+
+def test_encode_model_with_bytes_uses_selected_encoding():
+    model = ModelWithBytes(payload=b"\x00\xff")
+
+    assert jsonable_encoder(model) == {"payload": "AP8="}
+    assert jsonable_encoder(model, bytes_encoding="hex") == {"payload": "00ff"}
+
+
+def test_encode_bytes_rejects_unknown_encoding():
+    with pytest.raises(ValueError, match="bytes_encoding must be 'base64' or 'hex'"):
+        jsonable_encoder(b"hello", bytes_encoding="utf-8")
 
 
 def test_encode_model_with_default():
