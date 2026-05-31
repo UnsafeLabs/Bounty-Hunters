@@ -41,8 +41,9 @@ contract TokenVesting {
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+        uint256 base = totalAllocation / duration;
+        uint256 remainder = totalAllocation % duration;
+        return (base * elapsed) + (remainder * elapsed / duration);
     }
 
     function claimable() public view returns (uint256) {
@@ -51,28 +52,28 @@ contract TokenVesting {
 
     function claim() external {
         require(msg.sender == beneficiary, "Not beneficiary");
+        require(!revoked, "Revoked");
         uint256 amount = claimable();
         require(amount > 0, "Nothing to claim");
         claimed += amount;
-        token.transfer(beneficiary, amount);
+        require(token.transfer(beneficiary, amount), "Transfer failed");
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        uint256 claimableVested = vested > claimed ? vested - claimed : 0;
+        uint256 unvested = totalAllocation - claimed - claimableVested;
 
-        if (vested > claimed) {
-            token.transfer(beneficiary, vested - claimed);
+        if (claimableVested > 0) {
+            claimed += claimableVested;
+            require(token.transfer(beneficiary, claimableVested), "Transfer failed");
         }
-        token.transfer(owner, unvested);
+        require(token.transfer(owner, unvested), "Transfer failed");
         emit VestingRevoked(beneficiary, unvested);
     }
 }
