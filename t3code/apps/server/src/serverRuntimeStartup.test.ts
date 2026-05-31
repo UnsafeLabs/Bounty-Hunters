@@ -4,6 +4,7 @@ import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
@@ -66,7 +67,7 @@ it.effect("enqueueCommand fails queued work when readiness fails", () =>
       yield* commandGate.failCommandReady(
         ServerError.ConfigError({
           message: "startup failed",
-          timestamp: Date.now(),
+          timestamp: DateTime.toEpochMillis(DateTime.nowUnsafe()),
         }),
       );
 

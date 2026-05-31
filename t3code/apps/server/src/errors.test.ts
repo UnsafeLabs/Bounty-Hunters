@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ServerError, errorToResponse, errorToLog } from "./errors";
+import { ServerError, errorToResponse, errorToLog } from "./errors.ts";
 
 describe("errors", () => {
   it("should map AuthError to 401", () => {

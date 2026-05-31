@@ -2,6 +2,7 @@ import Mime from "@effect/platform-node/Mime";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -98,7 +99,7 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
 
     yield* Effect.try({
       try: () => decodeOtlpTraceRecords(bodyJson),
-      catch: (cause) => ServerError.NetworkError({ message: "Failed to decode OTLP trace records", cause, timestamp: Date.now() }),
+      catch: (cause) => ServerError.NetworkError({ message: "Failed to decode OTLP trace records", cause, timestamp: DateTime.toEpochMillis(DateTime.nowUnsafe()) }),
     }).pipe(
       Effect.flatMap((records) => browserTraceCollector.record(records)),
       Effect.catch((cause) =>

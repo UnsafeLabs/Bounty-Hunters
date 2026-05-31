@@ -6,6 +6,7 @@ import type { Readable } from "node:stream";
 
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
@@ -53,7 +54,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
           ServerError.ConfigError({
             message: "Failed to read bootstrap envelope.",
             cause: error,
-            timestamp: Date.now(),
+            timestamp: DateTime.toEpochMillis(DateTime.nowUnsafe()),
           }),
         ),
       );
@@ -69,7 +70,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
             ServerError.ConfigError({
               message: "Failed to decode bootstrap envelope.",
               cause: parsed.failure,
-              timestamp: Date.now(),
+              timestamp: DateTime.toEpochMillis(DateTime.nowUnsafe()),
             }),
           ),
         );
@@ -100,7 +101,7 @@ const isFdReady = (fd: number) =>
       ServerError.ConfigError({
         message: "Failed to stat bootstrap fd.",
         cause: error,
-        timestamp: Date.now(),
+        timestamp: DateTime.toEpochMillis(DateTime.nowUnsafe()),
       }),
   }).pipe(
     Effect.as(true),
@@ -140,7 +141,7 @@ const makeBootstrapInputStream = (fd: number) =>
       ServerError.ConfigError({
         message: "Failed to duplicate bootstrap fd.",
         cause: error,
-        timestamp: Date.now(),
+        timestamp: DateTime.toEpochMillis(DateTime.nowUnsafe()),
       }),
   });
 

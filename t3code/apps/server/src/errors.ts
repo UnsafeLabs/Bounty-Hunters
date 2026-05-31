@@ -1,4 +1,5 @@
-import { Data, Match } from "effect";
+import * as Data from "effect/Data";
+import * as Match from "effect/Match";
 
 export type ServerError = Data.TaggedEnum<{
   NetworkError: { readonly message: string; readonly cause?: unknown; readonly timestamp: number };

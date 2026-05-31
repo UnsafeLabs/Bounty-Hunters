@@ -403,7 +403,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
         const error = ServerError.ConfigError({
           message: "Server runtime startup failed before command readiness.",
           cause: startupExit.cause,
-          timestamp: Date.now(),
+          timestamp: DateTime.toEpochMillis(DateTime.nowUnsafe()),
         });
         yield* Effect.logError("server runtime startup failed", { cause: startupExit.cause });
         yield* commandGate.failCommandReady(error);
