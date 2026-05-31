@@ -19,6 +19,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cache Health Checks
+    |--------------------------------------------------------------------------
+    |
+    | These options control whether the application validates the configured
+    | cache store before reporting health, and how long a fresh result can be
+    | reused before probing the cache store again.
+    |
+    */
+
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+
+    'health_check_interval' => (int) env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
+    /*
+    |--------------------------------------------------------------------------
     | Cache Stores
     |--------------------------------------------------------------------------
     |
