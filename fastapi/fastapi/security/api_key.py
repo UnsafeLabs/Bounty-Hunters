@@ -1,3 +1,5 @@
+from collections import deque
+from time import monotonic
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -5,7 +7,7 @@ from fastapi.openapi.models import APIKey, APIKeyIn
 from fastapi.security.base import SecurityBase
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class APIKeyBase(SecurityBase):
@@ -18,8 +20,14 @@ class APIKeyBase(SecurityBase):
         description: str | None,
         scheme_name: str | None,
         auto_error: bool,
+        rate_limit: int | None,
+        rotate_keys: list[str] | None,
     ):
         self.auto_error = auto_error
+        self.rate_limit = rate_limit
+        self.rotate_keys = tuple(dict.fromkeys(rotate_keys or ()))
+        self._allowed_keys = frozenset(self.rotate_keys)
+        self._rate_limit_hits: dict[str, deque[float]] = {}
 
         self.model: APIKey = APIKey(
             **{"in": location},  # ty: ignore[invalid-argument-type]
@@ -44,12 +52,43 @@ class APIKeyBase(SecurityBase):
             headers={"WWW-Authenticate": "APIKey"},
         )
 
+    def make_rate_limit_error(self) -> HTTPException:
+        return HTTPException(
+            status_code=HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests",
+        )
+
+    def validate_api_key(self, api_key: str) -> str | None:
+        if not self._allowed_keys:
+            return api_key
+        if api_key in self._allowed_keys:
+            return api_key
+        if self.auto_error:
+            raise self.make_not_authenticated_error()
+        return None
+
+    def enforce_rate_limit(self, api_key: str) -> str:
+        if self.rate_limit is None:
+            return api_key
+        now = monotonic()
+        window_start = now - 1
+        hits = self._rate_limit_hits.setdefault(api_key, deque())
+        while hits and hits[0] <= window_start:
+            hits.popleft()
+        if len(hits) >= self.rate_limit:
+            raise self.make_rate_limit_error()
+        hits.append(now)
+        return api_key
+
     def check_api_key(self, api_key: str | None) -> str | None:
         if not api_key:
             if self.auto_error:
                 raise self.make_not_authenticated_error()
             return None
-        return api_key
+        validated_api_key = self.validate_api_key(api_key)
+        if validated_api_key is None:
+            return None
+        return self.enforce_rate_limit(validated_api_key)
 
 
 class APIKeyQuery(APIKeyBase):
@@ -130,6 +169,28 @@ class APIKeyQuery(APIKeyBase):
                 """
             ),
         ] = True,
+        rate_limit: Annotated[
+            int | None,
+            Doc(
+                """
+                Maximum number of accepted requests per API key per second.
+
+                If the limit is exceeded, FastAPI returns a `429 Too Many Requests`
+                response.
+                """
+            ),
+        ] = None,
+        rotate_keys: Annotated[
+            list[str] | None,
+            Doc(
+                """
+                Additional valid API keys accepted during key rotation.
+
+                This is useful when rolling credentials and temporarily accepting
+                both old and new keys.
+                """
+            ),
+        ] = None,
     ):
         super().__init__(
             location=APIKeyIn.query,
@@ -137,6 +198,8 @@ class APIKeyQuery(APIKeyBase):
             scheme_name=scheme_name,
             description=description,
             auto_error=auto_error,
+            rate_limit=rate_limit,
+            rotate_keys=rotate_keys,
         )
 
     async def __call__(self, request: Request) -> str | None:
@@ -218,6 +281,28 @@ class APIKeyHeader(APIKeyBase):
                 """
             ),
         ] = True,
+        rate_limit: Annotated[
+            int | None,
+            Doc(
+                """
+                Maximum number of accepted requests per API key per second.
+
+                If the limit is exceeded, FastAPI returns a `429 Too Many Requests`
+                response.
+                """
+            ),
+        ] = None,
+        rotate_keys: Annotated[
+            list[str] | None,
+            Doc(
+                """
+                Additional valid API keys accepted during key rotation.
+
+                This is useful when rolling credentials and temporarily accepting
+                both old and new keys.
+                """
+            ),
+        ] = None,
     ):
         super().__init__(
             location=APIKeyIn.header,
@@ -225,6 +310,8 @@ class APIKeyHeader(APIKeyBase):
             scheme_name=scheme_name,
             description=description,
             auto_error=auto_error,
+            rate_limit=rate_limit,
+            rotate_keys=rotate_keys,
         )
 
     async def __call__(self, request: Request) -> str | None:
@@ -306,6 +393,28 @@ class APIKeyCookie(APIKeyBase):
                 """
             ),
         ] = True,
+        rate_limit: Annotated[
+            int | None,
+            Doc(
+                """
+                Maximum number of accepted requests per API key per second.
+
+                If the limit is exceeded, FastAPI returns a `429 Too Many Requests`
+                response.
+                """
+            ),
+        ] = None,
+        rotate_keys: Annotated[
+            list[str] | None,
+            Doc(
+                """
+                Additional valid API keys accepted during key rotation.
+
+                This is useful when rolling credentials and temporarily accepting
+                both old and new keys.
+                """
+            ),
+        ] = None,
     ):
         super().__init__(
             location=APIKeyIn.cookie,
@@ -313,6 +422,8 @@ class APIKeyCookie(APIKeyBase):
             scheme_name=scheme_name,
             description=description,
             auto_error=auto_error,
+            rate_limit=rate_limit,
+            rotate_keys=rotate_keys,
         )
 
     async def __call__(self, request: Request) -> str | None:
