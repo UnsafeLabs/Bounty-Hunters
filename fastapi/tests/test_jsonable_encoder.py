@@ -329,3 +329,26 @@ def test_encode_color(module_path):
 
     data = {"color": Color("blue")}
     assert jsonable_encoder(data) == {"color": "blue"}
+
+
+def test_encode_bytes_as_base64_by_default():
+    assert jsonable_encoder(b"hello") == "aGVsbG8="
+
+
+def test_encode_memoryview_as_base64_by_default():
+    assert jsonable_encoder(memoryview(b"hello")) == "aGVsbG8="
+
+
+def test_encode_bytes_as_hex():
+    assert jsonable_encoder(b"hello", bytes_encoding="hex") == "68656c6c6f"
+
+
+def test_encode_nested_bytes_and_memoryview():
+    data = {"raw": b"\x00\xff", "items": [memoryview(b"ok")]}
+
+    assert jsonable_encoder(data) == {"raw": "AP8=", "items": ["b2s="]}
+
+
+def test_encode_bytes_rejects_unknown_encoding():
+    with pytest.raises(ValueError, match="bytes_encoding"):
+        jsonable_encoder(b"hello", bytes_encoding="utf-8")
