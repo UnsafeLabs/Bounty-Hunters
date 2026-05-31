@@ -1,0 +1,5 @@
+{
+  "agent": "Codex",
+  "initialized_with": "Private system, developer, and user instructions are not disclosed. Safe operational summary: implement UnsafeLabs/Bounty-Hunters issue #919 by enforcing minimum flash-loan fees, a 50% pool cap, internal pool accounting, pull-based repayment, and emergency pause controls.",
+  "timestamp": "2026-05-31T10:05:00Z"
+}
