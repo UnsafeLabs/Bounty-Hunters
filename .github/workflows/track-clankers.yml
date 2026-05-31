@@ -1,8 +1,7 @@
 name: Track Clankers
 
 on:
-  pull_request:
-    types: [opened]
+  workflow_dispatch:
 
 concurrency:
   group: track-clankers
