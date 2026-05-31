@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError, WebSocketRequestValidationError
 from fastapi.utils import is_body_allowed_for_status_code
@@ -6,6 +8,24 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.status import WS_1008_POLICY_VIOLATION
+
+
+SENSITIVE_BODY_FIELDS = {"api_key", "password", "secret", "token"}
+
+
+def _redact_sensitive_body_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: "***REDACTED***"
+            if str(key).lower() in SENSITIVE_BODY_FIELDS
+            else _redact_sensitive_body_fields(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_sensitive_body_fields(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_sensitive_body_fields(item) for item in value)
+    return value
 
 
 async def http_exception_handler(request: Request, exc: HTTPException) -> Response:
@@ -20,9 +40,16 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> Respon
 async def request_validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    content = {
+        "detail": jsonable_encoder(exc.errors()),
+        "path": request.url.path,
+        "method": request.method,
+    }
+    if getattr(request.app, "debug", False):
+        content["body"] = jsonable_encoder(_redact_sensitive_body_fields(exc.body))
     return JSONResponse(
         status_code=422,
-        content={"detail": jsonable_encoder(exc.errors())},
+        content=content,
     )
 
 
