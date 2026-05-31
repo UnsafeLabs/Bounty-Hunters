@@ -10,6 +10,8 @@ contract SimpleSwap {
     uint256 public reserveB;
     uint256 public fee; // basis points, e.g. 30 = 0.3%
 
+    uint256 public constant BPS_DENOMINATOR = 10_000;
+
     event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
 
     constructor(address _tokenA, address _tokenB, uint256 _fee) {
@@ -25,10 +27,13 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Deadline expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
@@ -39,11 +44,9 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-
-        // constant product formula: x * y = k
-        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        amountOut = _getAmountOut(reserveIn, reserveOut, amountIn);
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+        require(amountOut > 0, "Insufficient output");
 
         outputToken.transfer(msg.sender, amountOut);
 
@@ -59,11 +62,24 @@ contract SimpleSwap {
     }
 
     function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
+        require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
+        require(amountIn > 0, "Amount must be > 0");
+
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-        return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        return _getAmountOut(reserveIn, reserveOut, amountIn);
+    }
+
+    function _getAmountOut(
+        uint256 reserveIn,
+        uint256 reserveOut,
+        uint256 amountIn
+    ) internal view returns (uint256) {
+        require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
+        require(fee <= BPS_DENOMINATOR, "Invalid fee");
+
+        uint256 amountInWithFee = amountIn * (BPS_DENOMINATOR - fee);
+        return (reserveOut * amountInWithFee) / (reserveIn * BPS_DENOMINATOR + amountInWithFee);
     }
 }
