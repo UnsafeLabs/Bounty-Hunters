@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
+    "test:e2e": "playwright test",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:browser:install": "playwright install --with-deps chromium"
   },
@@ -44,6 +45,7 @@
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
+    "@playwright/test": "^1.58.2",
     "@rolldown/plugin-babel": "^0.2.0",
     "@tailwindcss/vite": "^4.0.0",
     "@tanstack/router-plugin": "^1.161.0",
