@@ -3,6 +3,26 @@ import inspect
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 
 
+def test_default_swagger_asset_urls_are_pinned_to_stable_versions():
+    sig = inspect.signature(get_swagger_ui_html)
+    assert (
+        sig.parameters["swagger_js_url"].default
+        == "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.6/swagger-ui-bundle.js"
+    )
+    assert (
+        sig.parameters["swagger_css_url"].default
+        == "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.6/swagger-ui.css"
+    )
+
+
+def test_default_redoc_asset_url_is_pinned_to_stable_version():
+    sig = inspect.signature(get_redoc_html)
+    assert (
+        sig.parameters["redoc_js_url"].default
+        == "https://cdn.jsdelivr.net/npm/redoc@2.5.3/bundles/redoc.standalone.js"
+    )
+
+
 def test_strings_in_generated_swagger():
     sig = inspect.signature(get_swagger_ui_html)
     swagger_js_url = sig.parameters.get("swagger_js_url").default  # type: ignore
