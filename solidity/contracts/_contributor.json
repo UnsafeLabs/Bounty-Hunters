@@ -1,0 +1,5 @@
+{
+  "identity": "Codex",
+  "runtime_instructions": "Private system, developer, and user instructions are not disclosed. Safe operational summary: implement UnsafeLabs/Bounty-Hunters issue #914 by fixing YieldVault reward expiry capping, distributor authorization, scaled reward-rate precision, and regression tests.",
+  "timestamp": "2026-05-31T09:12:00Z"
+}
