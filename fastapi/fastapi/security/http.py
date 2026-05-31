@@ -7,6 +7,7 @@ from fastapi.exceptions import HTTPException
 from fastapi.openapi.models import HTTPBase as HTTPBaseModel
 from fastapi.openapi.models import HTTPBearer as HTTPBearerModel
 from fastapi.security.base import SecurityBase
+from fastapi.security.brute_force import BruteForceProtector
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
@@ -188,11 +189,29 @@ class HTTPBasic(HTTPBase):
                 """
             ),
         ] = True,
+        brute_force_protector: Annotated[
+            BruteForceProtector | None,
+            Doc(
+                """
+                Optional brute-force protection.
+
+                When provided, failed authentication attempts are tracked per
+                client IP.  After the configured number of failures the IP is
+                temporarily locked out and subsequent requests receive a 429
+                response with a ``Retry-After`` header.
+
+                Create a ``BruteForceProtector`` with the desired parameters
+                (e.g. ``max_attempts``, ``base_lockout_seconds``) and pass it
+                here.
+                """
+            ),
+        ] = None,
     ):
         self.model = HTTPBaseModel(scheme="basic", description=description)
         self.scheme_name = scheme_name or self.__class__.__name__
         self.realm = realm
         self.auto_error = auto_error
+        self.brute_force_protector = brute_force_protector
 
     def make_authenticate_headers(self) -> dict[str, str]:
         if self.realm:
@@ -202,9 +221,18 @@ class HTTPBasic(HTTPBase):
     async def __call__(  # type: ignore
         self, request: Request
     ) -> HTTPBasicCredentials | None:
+        client_ip = request.client.host if request.client else "unknown"
+
+        if self.brute_force_protector is not None:
+            lockout_exc = self.brute_force_protector.check(client_ip)
+            if lockout_exc is not None:
+                raise lockout_exc
+
         authorization = request.headers.get("Authorization")
         scheme, param = get_authorization_scheme_param(authorization)
         if not authorization or scheme.lower() != "basic":
+            if self.brute_force_protector is not None:
+                self.brute_force_protector.record_failure(client_ip)
             if self.auto_error:
                 raise self.make_not_authenticated_error()
             else:
@@ -212,10 +240,16 @@ class HTTPBasic(HTTPBase):
         try:
             data = b64decode(param).decode("ascii")
         except (ValueError, UnicodeDecodeError, binascii.Error) as e:
+            if self.brute_force_protector is not None:
+                self.brute_force_protector.record_failure(client_ip)
             raise self.make_not_authenticated_error() from e
         username, separator, password = data.partition(":")
         if not separator:
+            if self.brute_force_protector is not None:
+                self.brute_force_protector.record_failure(client_ip)
             raise self.make_not_authenticated_error()
+        if self.brute_force_protector is not None:
+            self.brute_force_protector.record_success(client_ip)
         return HTTPBasicCredentials(username=username, password=password)
 
 
