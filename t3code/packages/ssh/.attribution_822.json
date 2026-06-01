@@ -1,0 +1,1 @@
+{"tool": "Hermes (Nous Research)", "platform_config": "Fix SSH askpass script leaking password via insecure temp", "date": "2026-06-02T06:40:00Z"}
