@@ -1,4 +1,4 @@
-import type { DesktopBridge } from "@t3tools/contracts";
+import type { DesktopBridge, DesktopDeepLinkPayload } from "@t3tools/contracts";
 import { contextBridge, ipcRenderer } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
@@ -17,6 +17,31 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
     throw new Error(message);
   }
   return result as Awaited<ReturnType<DesktopBridge["ensureSshEnvironment"]>>;
+}
+
+function isDesktopDeepLinkPayload(payload: unknown): payload is DesktopDeepLinkPayload {
+  if (typeof payload !== "object" || payload === null) {
+    return false;
+  }
+  if (!("kind" in payload) || typeof payload.kind !== "string") {
+    return false;
+  }
+  if (!("rawUrl" in payload) || typeof payload.rawUrl !== "string") {
+    return false;
+  }
+
+  switch (payload.kind) {
+    case "settings":
+      return true;
+    case "chat-thread":
+      return "threadId" in payload && typeof payload.threadId === "string";
+    case "open-project":
+      return "path" in payload && typeof payload.path === "string";
+    case "error":
+      return "message" in payload && typeof payload.message === "string";
+    default:
+      return false;
+  }
 }
 
 contextBridge.exposeInMainWorld("desktopBridge", {
@@ -105,6 +130,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.on(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener);
     return () => {
       ipcRenderer.removeListener(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener);
+    };
+  },
+  onDeepLink: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      if (!isDesktopDeepLinkPayload(payload)) return;
+      listener(payload);
+    };
+
+    ipcRenderer.on(IpcChannels.DEEP_LINK_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.DEEP_LINK_CHANNEL, wrappedListener);
     };
   },
   getUpdateState: () => ipcRenderer.invoke(IpcChannels.UPDATE_GET_STATE_CHANNEL),

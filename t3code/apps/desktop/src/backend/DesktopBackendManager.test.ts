@@ -136,6 +136,7 @@ function makeManagerLayer(input: {
           createMainIfBackendReady: Effect.void,
           handleBackendReady: Effect.void,
           dispatchMenuAction: () => Effect.void,
+          dispatchDeepLink: () => Effect.void,
           syncAppearance: Effect.void,
           ...input.desktopWindow,
         } satisfies DesktopWindow.DesktopWindowShape),
