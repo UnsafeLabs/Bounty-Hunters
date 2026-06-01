@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title LiquidityPool
@@ -11,10 +13,12 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * @dev Fixes:
  *   - MINIMUM_LIQUIDITY lock at address(0) prevents first-depositor manipulation
  *   - Internal reserves instead of balanceOf for removeLiquidity
- *   - sync() function for recovery from donation attacks
+ *   - sync() restricted to owner for controlled recovery from donation attacks
  *   - SafeERC20 for checked transfers
+ *   - ReentrancyGuard on add/remove liquidity
+ *   - Ownership for administrative control
  */
-contract LiquidityPool is ERC20 {
+contract LiquidityPool is ERC20, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     IERC20 public tokenA;
@@ -29,8 +33,9 @@ contract LiquidityPool is ERC20 {
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event Sync(uint256 reserveA, uint256 reserveB);
 
-    constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") {
+    constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") Ownable(msg.sender) {
         require(_tokenA != address(0) && _tokenB != address(0), "Invalid tokens");
+        require(_tokenA != _tokenB, "Tokens must be different");
         tokenA = IERC20(_tokenA);
         tokenB = IERC20(_tokenB);
     }
@@ -41,7 +46,7 @@ contract LiquidityPool is ERC20 {
      * @param amountB Amount of token B to deposit
      * @return lpTokens Amount of LP tokens minted
      */
-    function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
+    function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant returns (uint256 lpTokens) {
         require(amountA > 0 && amountB > 0, "Amounts must be > 0");
 
         tokenA.safeTransferFrom(msg.sender, address(this), amountA);
@@ -76,7 +81,7 @@ contract LiquidityPool is ERC20 {
      * @return amountA Amount of token A returned
      * @return amountB Amount of token B returned
      */
-    function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
+    function removeLiquidity(uint256 lpTokens) external nonReentrant returns (uint256 amountA, uint256 amountB) {
         require(lpTokens > 0, "Must burn > 0");
         require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
 
@@ -99,9 +104,10 @@ contract LiquidityPool is ERC20 {
 
     /**
      * @notice Sync internal reserves with actual token balances
-     * @dev Recovery from donation attacks — owner can call after direct transfers
+     * @dev Owner only — recovery from donation attacks. Requires permission to
+     *      prevent malicious actors from triggering sync during LP operations.
      */
-    function sync() external {
+    function sync() external onlyOwner {
         reserveA = tokenA.balanceOf(address(this));
         reserveB = tokenB.balanceOf(address(this));
         emit Sync(reserveA, reserveB);
