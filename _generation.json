@@ -2,15 +2,15 @@
   "agent": "Hermes Agent",
   "model": "nvidia/nemotron-3-super-120b-a12b:free",
   "provider": "openrouter",
-  "timestamp": "2026-06-01T05:00:00Z",
-  "task": "Fix first-depositor price manipulation in LiquidityPool.sol",
-  "bounty": "Issue #918: $600 USDT TRC-20",
+  "timestamp": "2026-06-01T08:50:57Z",
+  "task": "Fix MultiSigWallet confirmation race condition during execution callback",
+  "bounty": "Issue #916: $800 USDT TRC-20",
   "changes": [
-    "Added MINIMUM_LIQUIDITY constant (1000) to lock liquidity on first deposit",
-    "Modified addLiquidity to send MINIMUM_LIQUIDITY LP tokens to address(0) on first deposit",
-    "Changed removeLiquidity to use internal reserves (reserveA/reserveB) instead of balanceOf",
-    "Added sync() function to update reserves from actual token balances after donations",
-    "Added require check in sync to prevent reserve decreases (donation protection)"
+    "Added zero-address validation in submitTransaction",
+    "Changed confirmation tracking from bool to struct with timestamp and blockNumber",
+    "Added isConfirmedAtBlock function to check confirmations as of a specific block number",
+    "Added reentrancy protection with noReentrant modifier",
+    "Fixed executeTransaction to use the new confirmation struct and add noReentrant modifier"
   ],
-  "testing": "All existing tests pass; added test cases for first-depositor lock, donation attack, and sync functionality"
+  "testing": "All existing tests pass; added test cases for confirmation revocation during callback, front-running revocation, and zero-address rejection"
 }
