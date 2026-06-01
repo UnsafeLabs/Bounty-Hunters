@@ -57,6 +57,7 @@ import {
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
+import { useMessageKeyboardNavigation } from "./useMessageKeyboardNavigation";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
 
@@ -126,6 +127,7 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  composerRef?: React.RefObject<{ focusAtEnd: () => void } | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +157,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
+  composerRef,
 }: MessagesTimelineProps) {
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  useMessageKeyboardNavigation({
+    containerRef: messagesContainerRef,
+    composerRef,
+  });
+
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -246,7 +255,23 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div
+        className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        data-timeline-root="true"
+        role="listitem"
+        tabIndex={-1}
+        aria-label={
+          item.kind === "message"
+            ? item.message.role === "user"
+              ? "User message"
+              : "Assistant message"
+            : item.kind === "work"
+              ? "Work log"
+              : item.kind === "proposed-plan"
+                ? "Proposed plan"
+                : "Working"
+        }
+      >
         <TimelineRowContent row={item} />
       </div>
     ),
@@ -266,21 +291,31 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <LegendList<MessagesTimelineRow>
-          ref={listRef}
-          data={rows}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          estimatedItemSize={90}
-          initialScrollAtEnd
-          maintainScrollAtEnd
-          maintainScrollAtEndThreshold={0.1}
-          maintainVisibleContentPosition
-          onScroll={handleScroll}
-          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-          ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={TIMELINE_LIST_FOOTER}
-        />
+        <div
+          ref={messagesContainerRef}
+          id="chat-messages"
+          role="log"
+          aria-live="polite"
+          aria-label="Chat messages"
+          className="h-full"
+          data-messages-container="true"
+        >
+          <LegendList<MessagesTimelineRow>
+            ref={listRef}
+            data={rows}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            estimatedItemSize={90}
+            initialScrollAtEnd
+            maintainScrollAtEnd
+            maintainScrollAtEndThreshold={0.1}
+            maintainVisibleContentPosition
+            onScroll={handleScroll}
+            className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListFooterComponent={TIMELINE_LIST_FOOTER}
+          />
+        </div>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );

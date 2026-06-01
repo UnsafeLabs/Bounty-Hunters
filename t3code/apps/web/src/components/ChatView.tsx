@@ -3550,11 +3550,25 @@ export default function ChatView(props: ChatViewProps) {
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* Skip links for keyboard navigation */}
+          <a
+            href="#chat-messages"
+            className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:rounded focus:bg-card focus:px-3 focus:py-1.5 focus:text-sm focus:text-foreground focus:shadow-lg focus:outline-none"
+          >
+            Skip to chat messages
+          </a>
+          <a
+            href="#chat-composer"
+            className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:rounded focus:bg-card focus:px-3 focus:py-1.5 focus:text-sm focus:text-foreground focus:shadow-lg focus:outline-none"
+          >
+            Skip to composer
+          </a>
           {/* Messages Wrapper */}
           <div className="relative flex min-h-0 flex-1 flex-col">
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}
+              composerRef={composerRef}
               isWorking={isWorking}
               activeTurnInProgress={isWorking || !latestTurnSettled}
               activeTurnId={activeLatestTurn?.turnId ?? null}
@@ -3605,7 +3619,7 @@ export default function ChatView(props: ChatViewProps) {
           >
             <div className="relative isolate">
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
-              <div className="relative z-10">
+              <div className="relative z-10" id="chat-composer">
                 <ChatComposer
                   composerRef={composerRef}
                   composerDraftTarget={composerDraftTarget}
