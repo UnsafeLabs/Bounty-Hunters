@@ -43,9 +43,13 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // FIXED: Add zero-address validation
+    // FIXED: Add zero-address validation and code-size check for contract targets
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
         require(to != address(0), "Zero address");
+        // If data is provided, target must be a contract (have code)
+        if (data.length > 0) {
+            require(extcodesize(to) > 0, "Target must be a contract when data is provided");
+        }
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
