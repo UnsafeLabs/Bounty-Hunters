@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface IFlashLoanReceiver {
     function onFlashLoan(address token, uint256 amount, uint256 fee, bytes calldata data) external;
@@ -12,15 +13,18 @@ interface IFlashLoanReceiver {
 
 /**
  * @title FlashLoan
- * @notice Uncollateralized flash loans with security hardening
+ * @notice Uncollateralized flash loans with comprehensive security hardening
  * @dev Fixes:
+ *   - ReentrancyGuard: prevents re-entrant flash loans during receiver callback
  *   - Minimum fee of 1 token unit prevents zero-fee loans
  *   - Max loan cap at 50% of tracked pool balance prevents drainage
  *   - Internal accounting replaces balanceOf to prevent rebasing token exploits
+ *   - poolBalance decremented before external call (CEI pattern)
  *   - Emergency pause via OpenZeppelin Pausable
  *   - SafeERC20 for checked transfers
+ *   - Zero-address token validation in constructor
  */
-contract FlashLoan is Pausable, Ownable {
+contract FlashLoan is Pausable, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     IERC20 public loanToken;
@@ -43,11 +47,11 @@ contract FlashLoan is Pausable, Ownable {
     }
 
     /**
-     * @notice Execute a flash loan
+     * @notice Execute a flash loan with reentrancy protection
      * @param amount Amount to borrow
      * @param data Arbitrary data passed to the receiver callback
      */
-    function flashLoan(uint256 amount, bytes calldata data) external whenNotPaused {
+    function flashLoan(uint256 amount, bytes calldata data) external whenNotPaused nonReentrant {
         require(amount > 0, "Amount must be > 0");
 
         // Use internal accounting instead of balanceOf
@@ -64,17 +68,21 @@ contract FlashLoan is Pausable, Ownable {
             fee = MIN_FEE;
         }
 
+        // CEI: Decrement pool balance BEFORE external call
+        poolBalance -= (amount + fee);
+
         // Transfer tokens out using SafeERC20
         loanToken.safeTransfer(msg.sender, amount);
 
-        // Call receiver
+        // Call receiver (reentrancy protected by nonReentrant)
         IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
 
         // Verify repayment via internal accounting (not balanceOf)
         // Borrower must have approved this contract to pull amount + fee
         loanToken.safeTransferFrom(msg.sender, address(this), amount + fee);
 
-        // Update internal accounting
+        // Restore pool balance with repayment
+        poolBalance += (amount + fee);
         totalFees += fee;
 
         emit FlashLoanExecuted(msg.sender, amount, fee);
@@ -136,7 +144,7 @@ contract FlashLoan is Pausable, Ownable {
 
     /**
      * @notice Sync internal balance with actual token balance
-     * @dev Use only if balance drifts due to direct transfers
+     * @dev Owner only — use only if balance drifts due to direct transfers
      */
     function syncBalance() external onlyOwner {
         poolBalance = loanToken.balanceOf(address(this));
