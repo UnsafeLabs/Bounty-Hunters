@@ -391,16 +391,22 @@ const make = Effect.gen(function* () {
       const runPromise = Effect.runPromiseWith(context);
       const registrationArgs = getProtocolClientRegistrationArgs(argv);
 
-      yield* electronApp
-        .setAsDefaultProtocolClient(
-          DEEP_LINK_SCHEME,
-          registrationArgs ? process.execPath : undefined,
-          registrationArgs,
-        )
-        .pipe(Effect.asVoid);
-
       const dispatchDeepLinkUrl = (rawUrl: string) =>
         dispatch(parseT3CodeDeepLink(rawUrl)).pipe(Effect.catchCause(() => Effect.void));
+
+      const didRegister = yield* electronApp.setAsDefaultProtocolClient(
+        DEEP_LINK_SCHEME,
+        registrationArgs ? process.execPath : undefined,
+        registrationArgs,
+      );
+      if (!didRegister) {
+        yield* dispatch(
+          deepLinkError(
+            `${DEEP_LINK_SCHEME}://registration`,
+            "T3 Code could not register t3code:// deep links with the operating system.",
+          ),
+        ).pipe(Effect.catchCause(() => Effect.void));
+      }
 
       const handleArgv = (nextArgv: readonly string[]) => {
         const rawUrl = findT3CodeDeepLinkArg(nextArgv);

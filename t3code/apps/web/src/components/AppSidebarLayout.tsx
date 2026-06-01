@@ -1,6 +1,6 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import { DEFAULT_MODEL, ProviderInstanceId, type DesktopDeepLinkPayload } from "@t3tools/contracts";
-import { useCallback, useEffect, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 
@@ -65,6 +65,29 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const { handleNewThread } = useHandleNewThread();
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const projectsInPrimaryEnvironment = useMemo(
+    () =>
+      primaryEnvironmentId
+        ? projects.filter((project) => project.environmentId === primaryEnvironmentId)
+        : [],
+    [primaryEnvironmentId, projects],
+  );
+  const threadsByEnvironment = useMemo(() => {
+    const nextThreads = new Map<string, Array<(typeof threads)[number]>>();
+    for (const thread of threads) {
+      const environmentThreads = nextThreads.get(thread.environmentId);
+      if (environmentThreads) {
+        environmentThreads.push(thread);
+      } else {
+        nextThreads.set(thread.environmentId, [thread]);
+      }
+    }
+    return nextThreads;
+  }, [threads]);
+  const threadById = useMemo(
+    () => new Map<string, (typeof threads)[number]>(threads.map((thread) => [thread.id, thread])),
+    [threads],
+  );
 
   const openProjectDeepLink = useCallback(
     async (rawPath: string) => {
@@ -93,13 +116,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         return;
       }
 
-      const existing = findProjectByPath(
-        projects.filter((project) => project.environmentId === primaryEnvironmentId),
-        cwd,
-      );
+      const existing = findProjectByPath(projectsInPrimaryEnvironment, cwd);
       if (existing) {
         const latestThread = getLatestThreadForProject(
-          threads.filter((thread) => thread.environmentId === existing.environmentId),
+          threadsByEnvironment.get(existing.environmentId) ?? [],
           existing.id,
           sidebarThreadSortOrder,
         );
@@ -146,9 +166,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       handleNewThread,
       navigate,
       primaryEnvironmentId,
-      projects,
+      projectsInPrimaryEnvironment,
       sidebarThreadSortOrder,
-      threads,
+      threadsByEnvironment,
     ],
   );
 
@@ -165,7 +185,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       }
 
       if (payload.kind === "chat-thread") {
-        const thread = threads.find((candidate) => candidate.id === payload.threadId);
+        const thread = threadById.get(payload.threadId);
         if (!thread) {
           showDeepLinkError(`Thread ${payload.threadId} was not found.`);
           return;
@@ -179,7 +199,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
       await openProjectDeepLink(payload.path);
     },
-    [navigate, openProjectDeepLink, threads],
+    [navigate, openProjectDeepLink, threadById],
   );
 
   useEffect(() => {
