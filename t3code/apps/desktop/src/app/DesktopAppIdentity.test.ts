@@ -43,6 +43,8 @@ const makeElectronAppLayer = (calls: ElectronAppCalls) =>
     quit: Effect.void,
     exit: () => Effect.void,
     relaunch: () => Effect.void,
+    requestSingleInstanceLock: () => Effect.succeed(true),
+    setAsDefaultProtocolClient: () => Effect.succeed(true),
     setPath: () => Effect.void,
     setName: (name) =>
       Effect.sync(() => {

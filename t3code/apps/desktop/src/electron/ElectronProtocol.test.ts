@@ -37,6 +37,50 @@ describe("ElectronProtocol", () => {
     assert.isTrue(Option.isNone(ElectronProtocol.normalizeDesktopProtocolPathname("/../secret")));
   });
 
+  it("parses supported t3code deep links", () => {
+    assert.deepEqual(ElectronProtocol.parseT3CodeDeepLink("t3code://settings"), {
+      kind: "settings",
+      rawUrl: "t3code://settings",
+    });
+    assert.deepEqual(ElectronProtocol.parseT3CodeDeepLink("t3code://chat/thread?id=abc-123"), {
+      kind: "chat-thread",
+      rawUrl: "t3code://chat/thread?id=abc-123",
+      threadId: "abc-123",
+    });
+    assert.deepEqual(
+      ElectronProtocol.parseT3CodeDeepLink("t3code://open/project?path=%2Ftmp%2Frepo"),
+      {
+        kind: "open-project",
+        rawUrl: "t3code://open/project?path=%2Ftmp%2Frepo",
+        path: "/tmp/repo",
+      },
+    );
+  });
+
+  it("rejects invalid and unsafe t3code deep links", () => {
+    assert.equal(ElectronProtocol.parseT3CodeDeepLink("https://example.com").kind, "error");
+    assert.equal(
+      ElectronProtocol.parseT3CodeDeepLink("t3code://chat/thread?id=../../secret").kind,
+      "error",
+    );
+    assert.equal(
+      ElectronProtocol.parseT3CodeDeepLink("t3code://open/project?path=%2Ftmp%2F..%2Fsecret").kind,
+      "error",
+    );
+    assert.equal(
+      ElectronProtocol.parseT3CodeDeepLink("t3code://open/project?path=relative%2Frepo").kind,
+      "error",
+    );
+  });
+
+  it("finds t3code deep link launch arguments", () => {
+    assert.equal(
+      ElectronProtocol.findT3CodeDeepLinkArg(["electron", ".", "--flag", "t3code://settings"]),
+      "t3code://settings",
+    );
+    assert.equal(ElectronProtocol.findT3CodeDeepLinkArg(["electron", "."]), null);
+  });
+
   it.effect("registers desktop scheme privileges through a layer", () =>
     Effect.scoped(
       Layer.build(ElectronProtocol.layerSchemePrivileges).pipe(

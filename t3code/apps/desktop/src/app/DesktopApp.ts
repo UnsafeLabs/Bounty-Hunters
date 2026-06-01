@@ -21,6 +21,7 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
+import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
 const MAX_TCP_PORT = 65_535;
@@ -189,10 +190,12 @@ const startup = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
   const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+  const shutdown = yield* DesktopLifecycle.DesktopShutdown;
   const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const updates = yield* DesktopUpdates.DesktopUpdates;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
 
   yield* shellEnvironment.installIntoProcess;
   const userDataPath = yield* appIdentity.resolveUserDataPath;
@@ -205,6 +208,17 @@ const startup = Effect.gen(function* () {
   }
 
   yield* appIdentity.configure;
+  const hasSingleInstanceLock = yield* electronApp.requestSingleInstanceLock();
+  if (!hasSingleInstanceLock) {
+    yield* shutdown.request;
+    yield* electronApp.quit;
+    return;
+  }
+  yield* electronProtocol.registerDeepLinkProtocol({
+    argv: process.argv,
+    dispatch: (payload) => desktopWindow.dispatchDeepLink(payload),
+    reveal: desktopWindow.activate,
+  });
   yield* lifecycle.register;
 
   yield* electronApp.whenReady.pipe(
