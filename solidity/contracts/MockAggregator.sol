@@ -42,4 +42,23 @@ contract MockAggregator is AggregatorV3Interface {
     function decimals() external view returns (uint8) {
         return decs;
     }
+
+    function description() external pure returns (string memory) {
+        return "MockAggregator";
+    }
+
+    function version() external pure returns (uint256) {
+        return 1;
+    }
+
+    function getRoundData(uint80 _roundId) external view returns (
+        uint80,
+        int256,
+        uint256,
+        uint256,
+        uint80
+    ) {
+        require(_roundId == roundId, "No data");
+        return (roundId, answer, startedAt, updatedAt, answeredInRound);
+    }
 }

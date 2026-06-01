@@ -28,7 +28,6 @@ describe("PriceOracle", function () {
     // roundId, answer, startedAt, updatedAt, answeredInRound
     await primaryFeed.setMockData(1, 1000, now - 100, now - 10, 1);
 
-    const tx = await priceOracle.getLatestPrice();
     const price = await priceOracle.getLatestPrice.staticCall();
     expect(price).to.equal(1000);
   });
@@ -67,6 +66,7 @@ describe("PriceOracle", function () {
     expect(price).to.equal(2000);
 
     const tx = await priceOracle.getLatestPrice();
+    await tx.wait(); // wait for the transaction
     await expect(tx).to.emit(priceOracle, "StalePrice").withArgs(staleTime);
   });
 
