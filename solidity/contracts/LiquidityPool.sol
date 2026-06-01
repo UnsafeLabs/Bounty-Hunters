@@ -77,13 +77,13 @@ contract LiquidityPool is ERC20 {
     function sync() external {
         uint256 _reserveA = tokenA.balanceOf(address(this));
         uint256 _reserveB = tokenB.balanceOf(address(this));
-        
+
         // Only allow sync if reserves increased (donation protection)
         require(_reserveA >= reserveA && _reserveB >= reserveB, "Invalid reserves");
-        
+
         reserveA = _reserveA;
         reserveB = _reserveB;
-        
+
         emit Sync(reserveA, reserveB);
     }
 
