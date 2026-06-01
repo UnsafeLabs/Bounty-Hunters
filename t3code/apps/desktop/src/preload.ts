@@ -20,25 +20,26 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
 }
 
 function isDesktopDeepLinkPayload(payload: unknown): payload is DesktopDeepLinkPayload {
-  if (typeof payload !== "object" || payload === null) {
+  const p = payload as Record<string, unknown>;
+  if (typeof p !== "object" || p === null) {
     return false;
   }
-  if (!("kind" in payload) || typeof payload.kind !== "string") {
+  if (!("kind" in p) || typeof p.kind !== "string") {
     return false;
   }
-  if (!("rawUrl" in payload) || typeof payload.rawUrl !== "string") {
+  if (!("rawUrl" in p) || typeof p.rawUrl !== "string") {
     return false;
   }
 
-  switch (payload.kind) {
+  switch (p.kind) {
     case "settings":
       return true;
     case "chat-thread":
-      return "threadId" in payload && typeof payload.threadId === "string";
+      return "threadId" in p && typeof p.threadId === "string";
     case "open-project":
-      return "path" in payload && typeof payload.path === "string";
+      return "path" in p && typeof p.path === "string";
     case "error":
-      return "message" in payload && typeof payload.message === "string";
+      return "message" in p && typeof p.message === "string";
     default:
       return false;
   }

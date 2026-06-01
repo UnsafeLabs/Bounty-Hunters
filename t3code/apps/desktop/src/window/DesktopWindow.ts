@@ -331,7 +331,10 @@ const make = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ kind: payload.kind });
     const backendReady = yield* Ref.get(state.backendReady);
     if (!backendReady) {
-      yield* Ref.update(pendingDeepLinks, (pending) => [...pending, payload]);
+      yield* Ref.update(pendingDeepLinks, (pending) => {
+        const next = [...pending, payload];
+        return next.length > 10 ? next.slice(next.length - 10) : next;
+      });
       return;
     }
 
