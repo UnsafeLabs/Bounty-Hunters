@@ -4,21 +4,18 @@ const { ethers } = pkg;
 
 describe("PriceOracle", function () {
   let primaryFeed, fallbackFeed, priceOracle;
-  let owner;
-
   beforeEach(async function () {
-    [owner] = await ethers.getSigners();
 
     const MockAggregator = await ethers.getContractFactory("MockAggregator");
     primaryFeed = await MockAggregator.deploy();
-    await primaryFeed.waitForDeployment();
+    await primaryFeed.deployed();
 
     fallbackFeed = await MockAggregator.deploy();
-    await fallbackFeed.waitForDeployment();
+    await fallbackFeed.deployed();
 
     const PriceOracle = await ethers.getContractFactory("PriceOracle");
-    priceOracle = await PriceOracle.deploy(primaryFeed.target, fallbackFeed.target);
-    await priceOracle.waitForDeployment();
+    priceOracle = await PriceOracle.deploy(primaryFeed.address, fallbackFeed.address);
+    await priceOracle.deployed();
   });
 
   it("should return valid price from primary oracle", async function () {
@@ -28,7 +25,7 @@ describe("PriceOracle", function () {
     // roundId, answer, startedAt, updatedAt, answeredInRound
     await primaryFeed.setMockData(1, 1000, now - 100, now - 10, 1);
 
-    const price = await priceOracle.getLatestPrice.staticCall();
+    const price = await priceOracle.callStatic.getLatestPrice();
     expect(price).to.equal(1000);
   });
 
@@ -37,10 +34,10 @@ describe("PriceOracle", function () {
     const now = latestBlock.timestamp;
 
     await primaryFeed.setMockData(1, 0, now - 100, now - 10, 1);
-    await expect(priceOracle.getLatestPrice.staticCall()).to.be.revertedWith("Invalid price");
+    await expect(priceOracle.callStatic.getLatestPrice()).to.be.revertedWith("Invalid price");
 
     await primaryFeed.setMockData(1, -10, now - 100, now - 10, 1);
-    await expect(priceOracle.getLatestPrice.staticCall()).to.be.revertedWith("Invalid price");
+    await expect(priceOracle.callStatic.getLatestPrice()).to.be.revertedWith("Invalid price");
   });
 
   it("should revert on incomplete round from primary", async function () {
@@ -49,7 +46,7 @@ describe("PriceOracle", function () {
 
     // answeredInRound (0) < roundId (1)
     await primaryFeed.setMockData(1, 1000, now - 100, now - 10, 0);
-    await expect(priceOracle.getLatestPrice.staticCall()).to.be.revertedWith("Incomplete round");
+    await expect(priceOracle.callStatic.getLatestPrice()).to.be.revertedWith("Incomplete round");
   });
 
   it("should fallback to secondary oracle if primary is stale and emit StalePrice", async function () {
@@ -62,11 +59,10 @@ describe("PriceOracle", function () {
     // secondary is valid
     await fallbackFeed.setMockData(1, 2000, now - 100, now - 10, 1);
 
-    const price = await priceOracle.getLatestPrice.staticCall();
+    const price = await priceOracle.callStatic.getLatestPrice();
     expect(price).to.equal(2000);
 
-    const tx = await priceOracle.getLatestPrice();
-    await tx.wait(); // wait for the transaction
+    const tx = await priceOracle.getLatestPriceAndEmit();
     await expect(tx).to.emit(priceOracle, "StalePrice").withArgs(staleTime);
   });
 
@@ -78,6 +74,6 @@ describe("PriceOracle", function () {
     await primaryFeed.setMockData(1, 1000, staleTime - 100, staleTime, 1);
     await fallbackFeed.setMockData(1, 2000, staleTime - 100, staleTime, 1);
 
-    await expect(priceOracle.getLatestPrice.staticCall()).to.be.revertedWith("Stale price");
+    await expect(priceOracle.callStatic.getLatestPrice()).to.be.revertedWith("Stale price");
   });
 });
