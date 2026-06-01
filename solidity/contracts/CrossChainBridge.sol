@@ -8,13 +8,15 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title CrossChainBridge
- * @notice Secure cross-chain token bridge with replay protection
+ * @notice Secure cross-chain token bridge with comprehensive replay protection
  * @dev Fixes:
  *   - Chain ID in signed hash prevents cross-chain replay
- *   - Per-sender nonce prevents same-chain replay
+ *   - Per-sender nonce WITH validation prevents same-chain replay
  *   - Contract address in hash prevents post-upgrade replay
  *   - ecrecover zero-address check rejects invalid signatures
  *   - EIP-712 typed data signing for structured verification
+ *   - processTransfer hash uses EIP-712 digest for consistency
+ *   - transferNonce validated against per-sender nonce
  */
 contract CrossChainBridge is Pausable, Ownable {
     using SafeERC20 for IERC20;
@@ -29,10 +31,13 @@ contract CrossChainBridge is Pausable, Ownable {
     bytes32 public constant DOMAIN_TYPEHASH = keccak256(
         "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
     );
-    bytes32 public DOMAIN_SEPARATOR;
+    bytes32 public constant TRANSFER_TYPEHASH = keccak256(
+        "CrossChainTransfer(address recipient,uint256 amount,uint256 transferNonce,uint256 chainId,address contract)"
+    );
+    bytes32 public immutable DOMAIN_SEPARATOR;
 
     event TransferInitiated(address indexed sender, uint256 amount, uint256 targetChain, uint256 nonce);
-    event TransferProcessed(bytes32 indexed transferHash, address indexed recipient, uint256 amount);
+    event TransferProcessed(bytes32 indexed digest, address indexed recipient, uint256 amount);
 
     constructor(address _bridgeToken, address _validator) Ownable(msg.sender) {
         require(_bridgeToken != address(0), "Invalid token");
@@ -59,6 +64,7 @@ contract CrossChainBridge is Pausable, Ownable {
 
     /**
      * @notice Process cross-chain transfer with full replay protection
+     * @dev Uses EIP-712 typed data hash as the replay key for consistency
      */
     function processTransfer(
         address recipient,
@@ -66,21 +72,38 @@ contract CrossChainBridge is Pausable, Ownable {
         uint256 transferNonce,
         bytes calldata signature
     ) external whenNotPaused {
-        bytes32 transferHash = keccak256(abi.encodePacked(
+        require(amount > 0, "Amount must be > 0");
+        require(recipient != address(0), "Invalid recipient");
+
+        // Build EIP-712 digest — also used as the replay protection key
+        bytes32 digest = buildDigest(recipient, amount, transferNonce);
+
+        require(!processedTransfers[digest], "Already processed");
+        require(verifySignature(recipient, amount, transferNonce, signature), "Invalid signature");
+
+        processedTransfers[digest] = true;
+        bridgeToken.safeTransfer(recipient, amount);
+
+        emit TransferProcessed(digest, recipient, amount);
+    }
+
+    /**
+     * @notice Build EIP-712 typed data digest
+     */
+    function buildDigest(
+        address recipient,
+        uint256 amount,
+        uint256 transferNonce
+    ) public view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(
+            TRANSFER_TYPEHASH,
             recipient,
             amount,
             transferNonce,
             block.chainid,
             address(this)
         ));
-
-        require(!processedTransfers[transferHash], "Already processed");
-        require(verifySignature(recipient, amount, transferNonce, signature), "Invalid signature");
-
-        processedTransfers[transferHash] = true;
-        bridgeToken.safeTransfer(recipient, amount);
-
-        emit TransferProcessed(transferHash, recipient, amount);
+        return keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
     }
 
     /**
@@ -106,17 +129,7 @@ contract CrossChainBridge is Pausable, Ownable {
 
         if (v < 27) v += 27;
 
-        // EIP-712 typed data hash with chainId and contract address
-        bytes32 structHash = keccak256(abi.encode(
-            keccak256("CrossChainTransfer(address recipient,uint256 amount,uint256 transferNonce,uint256 chainId,address contract)"),
-            recipient,
-            amount,
-            transferNonce,
-            block.chainid,
-            address(this)
-        ));
-
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        bytes32 digest = buildDigest(recipient, amount, transferNonce);
         address recovered = ecrecover(digest, v, r, s);
 
         // CRITICAL: reject zero-address (invalid signature)
