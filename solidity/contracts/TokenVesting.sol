@@ -2,12 +2,24 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract TokenVesting {
+/**
+ * @title TokenVesting
+ * @notice Linear token vesting with cliff period
+ * @dev Fixes:
+ *   - Added SafeERC20 for all transfers
+ *   - Added ReentrancyGuard
+ *   - Added Ownable access control
+ *   - Divide-before-multiply pattern for overflow protection
+ */
+contract TokenVesting is Ownable, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     IERC20 public token;
     address public beneficiary;
-    address public owner;
-
     uint256 public totalAllocation;
     uint256 public start;
     uint256 public cliff;
@@ -25,54 +37,87 @@ contract TokenVesting {
         uint256 _start,
         uint256 _cliffDuration,
         uint256 _vestingDuration
-    ) {
+    ) Ownable(msg.sender) {
+        require(_token != address(0), "Invalid token");
+        require(_beneficiary != address(0), "Invalid beneficiary");
+        require(_totalAllocation > 0, "Invalid allocation");
+        require(_cliffDuration <= _vestingDuration, "Cliff > duration");
+        
         token = IERC20(_token);
         beneficiary = _beneficiary;
-        owner = msg.sender;
         totalAllocation = _totalAllocation;
         start = _start;
         cliff = _start + _cliffDuration;
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
+    /**
+     * @notice Get vested amount with overflow protection
+     * @return Vested amount
+     */
     function vestedAmount() public view returns (uint256) {
         if (block.timestamp < cliff) return 0;
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+        
+        // Divide-before-multiply to prevent overflow
+        uint256 basePerSecond = totalAllocation / duration;
+        uint256 remainder = totalAllocation % duration;
+        
+        return basePerSecond * elapsed + (remainder * elapsed / duration);
     }
 
-    function claimable() public view returns (uint256) {
-        return vestedAmount() - claimed;
-    }
-
-    function claim() external {
-        require(msg.sender == beneficiary, "Not beneficiary");
-        uint256 amount = claimable();
-        require(amount > 0, "Nothing to claim");
-        claimed += amount;
-        token.transfer(beneficiary, amount);
-        emit TokensClaimed(beneficiary, amount);
-    }
-
-    // BUG: Incorrect unvested calculation during cliff period
-    function revoke() external {
-        require(msg.sender == owner, "Not owner");
-        require(!revoked, "Already revoked");
-        revoked = true;
-
+    /**
+     * @notice Claim vested tokens
+     */
+    function claim() external nonReentrant {
+        require(!revoked, "Vesting revoked");
+        require(block.timestamp >= cliff, "Before cliff");
+        
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        uint256 claimable = vested - claimed;
+        require(claimable > 0, "Nothing to claim");
+        
+        claimed += claimable;
+        token.safeTransfer(beneficiary, claimable);
+        
+        emit TokensClaimed(beneficiary, claimable);
+    }
 
-        if (vested > claimed) {
-            token.transfer(beneficiary, vested - claimed);
+    /**
+     * @notice Revoke vesting (owner only)
+     */
+    function revoke() external onlyOwner nonReentrant {
+        require(!revoked, "Already revoked");
+        
+        uint256 vested = vestedAmount();
+        uint256 claimable = vested - claimed;
+        uint256 unvested = totalAllocation - vested;
+        
+        revoked = true;
+        
+        // Transfer claimed but not yet transferred to beneficiary
+        if (claimable > 0) {
+            claimed = vested;
+            token.safeTransfer(beneficiary, claimable);
         }
-        token.transfer(owner, unvested);
+        
+        // Return unvested tokens to owner
+        if (unvested > 0) {
+            token.safeTransfer(owner(), unvested);
+        }
+        
         emit VestingRevoked(beneficiary, unvested);
+    }
+
+    /**
+     * @notice Get claimable amount
+     * @return Claimable tokens
+     */
+    function claimable() external view returns (uint256) {
+        if (revoked) return 0;
+        uint256 vested = vestedAmount();
+        return vested - claimed;
     }
 }

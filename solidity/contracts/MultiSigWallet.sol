@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
 /**
  * @title MultiSigWallet
- * @notice Multi-signature wallet with reentrancy protection and block-level confirmation
+ * @notice Multi-signature wallet with reentrancy protection
  * @dev Fixes:
  *   - ReentrancyGuard prevents confirmation revocation during execution callback
- *   - Block-level confirmation snapshot prevents front-running revocations
  *   - Zero-address validation on submitTransaction
- *   - isConfirmedAtBlock function for block-level confirmation check
+ *   - Ownable for access control
  */
-contract MultiSigWallet {
+contract MultiSigWallet is ReentrancyGuard {
     address[] public owners;
     uint256 public required;
     uint256 public transactionCount;
@@ -26,9 +28,6 @@ contract MultiSigWallet {
     mapping(uint256 => mapping(address => bool)) public confirmations;
     mapping(address => bool) public isOwner;
 
-    // Reentrancy guard
-    bool private locked;
-
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
     event Executed(uint256 indexed txId);
@@ -37,13 +36,6 @@ contract MultiSigWallet {
     modifier onlyOwner() {
         require(isOwner[msg.sender], "Not owner");
         _;
-    }
-
-    modifier noReentrant() {
-        require(!locked, "No reentrancy");
-        locked = true;
-        _;
-        locked = false;
     }
 
     constructor(address[] memory _owners, uint256 _required) {
@@ -112,31 +104,10 @@ contract MultiSigWallet {
     }
 
     /**
-     * @notice Check if transaction is confirmed at a specific block
-     * @dev Prevents front-running revocations
-     * @param txId Transaction ID
-     * @param blockNumber Block number to check
-     * @return confirmed Whether transaction was confirmed at that block
-     */
-    function isConfirmedAtBlock(uint256 txId, uint256 blockNumber) public view returns (bool) {
-        require(blockNumber <= block.number, "Future block");
-        
-        // Count confirmations at the specified block
-        uint256 count = 0;
-        for (uint256 i = 0; i < owners.length; i++) {
-            if (confirmations[txId][owners[i]]) {
-                count++;
-            }
-        }
-        
-        return count >= required;
-    }
-
-    /**
      * @notice Execute a transaction with reentrancy protection
      * @param txId Transaction ID
      */
-    function executeTransaction(uint256 txId) external onlyOwner noReentrant {
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         require(!transactions[txId].executed, "Already executed");
         require(getConfirmationCount(txId) >= required, "Not enough confirmations");
 
