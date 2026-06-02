@@ -92,10 +92,18 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         require(!revoked, "Already revoked");
         
         uint256 vested = vestedAmount();
+        uint256 claimable = vested - claimed;
         uint256 unvested = totalAllocation - vested;
         
         revoked = true;
         
+        // Transfer claimed but not yet transferred to beneficiary
+        if (claimable > 0) {
+            claimed = vested;
+            token.safeTransfer(beneficiary, claimable);
+        }
+        
+        // Return unvested tokens to owner
         if (unvested > 0) {
             token.safeTransfer(owner(), unvested);
         }
