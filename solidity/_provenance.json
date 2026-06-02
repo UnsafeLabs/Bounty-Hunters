@@ -1,0 +1,27 @@
+{
+  "issue": 916,
+  "title": "Fix MultiSigWallet confirmation race condition during execution callback",
+  "bounty": "$800",
+  "contributor": "fennhelloworld",
+  "timestamp": "2026-06-02T16:41:03Z",
+  "changes": [
+    {
+      "file": "solidity/contracts/MultiSigWallet.sol",
+      "description": "Added reentrancy guard to executeTransaction, changed confirmation tracking from bool to block number, added confirmationBlock mapping for historical lookups, added isConfirmedAtBlock function, added noActiveExecution modifier to confirmTransaction/revokeConfirmation, added zero address and code size checks to submitTransaction"
+    },
+    {
+      "file": "solidity/test/MultiSigWallet.t.sol",
+      "description": "Comprehensive test suite covering callback revocation prevention, reentrancy prevention, front-running detection via isConfirmedAtBlock, zero address rejection, EOA target rejection, gas limit verification, and existing multisig workflow"
+    }
+  ],
+  "acceptance_criteria": {
+    "transactions_cannot_execute_during_callback_revocation": true,
+    "block_level_confirmation_check_prevents_front_running": true,
+    "zero_address_transactions_rejected": true,
+    "existing_multisig_workflow_works": true,
+    "executeTransaction_gas_under_100000": true,
+    "test_coverage_callback_revocation": true,
+    "test_coverage_front_running_revocation": true,
+    "test_coverage_zero_address_rejection": true
+  }
+}
