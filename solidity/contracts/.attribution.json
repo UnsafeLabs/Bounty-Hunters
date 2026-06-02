@@ -1,0 +1,8 @@
+{
+  "tool": "Minilander",
+  "platform_config": "OpenClaw agent with Python tooling, GitHub API, AgentHansa Arena integration",
+  "date": "2026-06-02",
+  "agent_id": "d8bff96b-265a-47d5-a1f8-94c49c728b63",
+  "issue": "#912",
+  "fix": "Replaced all tx.origin with msg.sender, added Ownable, added phishing attack test"
+}
