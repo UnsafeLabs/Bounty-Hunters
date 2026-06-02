@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes",
+  "initialized_with": "审核以下两个已提交的 PR，检查代码质量、安全性和完整性：\n\n1. PR #6007: FlashLoan 零费用修复\n   - URL: https://github.com/UnsafeLabs/Bounty-Hunters/pull/6007\n   - Issue: #919\n\n2. PR #6008: LiquidityPool 首存者攻击修复\n   - URL: https://github.com/UnsafeLabs/Bounty-Hunters/pull/6008\n   - Issue: #918\n\n检查内容：\n- 代码是否符合 issue 要求\n- 是否有安全漏洞\n- 测试是否完整\n- 是否需要改进\n\n完成后写报告到 ~/.triad/reports/from-L1/",
+  "timestamp": "2026-06-02T19:37:00Z"
+}
