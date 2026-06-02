@@ -202,3 +202,158 @@ contract MockERC20 {
         return true;
     }
 }
+
+    // Test: Ecrecover zero address
+    function test_EcrecoverZeroAddress() public {
+        // Initiate transfer
+        vm.prank(user1);
+        token.approve(address(bridge), TRANSFER_AMOUNT);
+        
+        vm.prank(user1);
+        bridge.initiateTransfer(TRANSFER_AMOUNT, TARGET_CHAIN);
+        
+        // Create signature that will cause ecrecover to return address(0)
+        uint256 nonce = bridge.getNonce(user1) - 1;
+        
+        // Use invalid signature (all zeros)
+        bytes memory invalidSignature = new bytes(65);
+        
+        // Should revert with invalid signature
+        vm.prank(user1);
+        vm.expectRevert("Invalid signature: zero address");
+        bridge.processTransfer(user2, TRANSFER_AMOUNT, nonce, invalidSignature);
+    }
+    
+    // Test: Post-upgrade replay prevention
+    function test_PostUpgradeReplayPrevention() public {
+        // Initiate transfer
+        vm.prank(user1);
+        token.approve(address(bridge), TRANSFER_AMOUNT);
+        
+        vm.prank(user1);
+        bridge.initiateTransfer(TRANSFER_AMOUNT, TARGET_CHAIN);
+        
+        // Create signature
+        uint256 nonce = bridge.getNonce(user1) - 1;
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("CrossChainTransfer(address recipient,uint256 amount,uint256 transferNonce,uint256 chainId,address contract)"),
+            user2,
+            TRANSFER_AMOUNT,
+            nonce,
+            block.chainid,
+            address(bridge)
+        ));
+        
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", bridge.DOMAIN_SEPARATOR(), structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(validator, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        // Process transfer
+        vm.prank(user1);
+        bridge.processTransfer(user2, TRANSFER_AMOUNT, nonce, signature);
+        
+        // Deploy new bridge (simulating upgrade)
+        vm.prank(owner);
+        CrossChainBridge newBridge = new CrossChainBridge(address(token), validator);
+        
+        // Try to replay on new bridge (should fail because address(this) changed)
+        vm.prank(user1);
+        vm.expectRevert("Already processed");
+        newBridge.processTransfer(user2, TRANSFER_AMOUNT, nonce, signature);
+    }
+    
+    // Test: Process transfer when paused
+    function test_ProcessTransferWhenPaused() public {
+        // Pause the bridge
+        vm.prank(owner);
+        bridge.pause();
+        
+        // Initiate transfer
+        vm.prank(user1);
+        token.approve(address(bridge), TRANSFER_AMOUNT);
+        
+        vm.prank(user1);
+        vm.expectRevert("Pausable: paused");
+        bridge.initiateTransfer(TRANSFER_AMOUNT, TARGET_CHAIN);
+    }
+    
+    // Test: Invalid signature length
+    function test_InvalidSigLength() public {
+        // Initiate transfer
+        vm.prank(user1);
+        token.approve(address(bridge), TRANSFER_AMOUNT);
+        
+        vm.prank(user1);
+        bridge.initiateTransfer(TRANSFER_AMOUNT, TARGET_CHAIN);
+        
+        uint256 nonce = bridge.getNonce(user1) - 1;
+        
+        // Create signature with wrong length
+        bytes memory shortSignature = new bytes(32);
+        
+        // Should revert with invalid signature length
+        vm.prank(user1);
+        vm.expectRevert("Invalid signature length");
+        bridge.processTransfer(user2, TRANSFER_AMOUNT, nonce, shortSignature);
+    }
+    
+    // Test: Constructor validation
+    function test_ConstructorValidation() public {
+        // Zero address token
+        vm.prank(owner);
+        vm.expectRevert("Invalid token");
+        new CrossChainBridge(address(0), validator);
+        
+        // Zero address validator
+        vm.prank(owner);
+        vm.expectRevert("Invalid validator");
+        new CrossChainBridge(address(token), address(0));
+    }
+    
+    // Test: Non-owner access control
+    function test_NonOwnerAccess() public {
+        // Non-owner pause
+        vm.prank(user1);
+        vm.expectRevert("Ownable: caller is not the owner");
+        bridge.pause();
+        
+        // Non-owner unpause
+        vm.prank(user1);
+        vm.expectRevert("Ownable: caller is not the owner");
+        bridge.unpause();
+    }
+    
+    // Test: Successful transfer end-to-end
+    function test_SuccessfulTransfer() public {
+        // Initiate transfer
+        vm.prank(user1);
+        token.approve(address(bridge), TRANSFER_AMOUNT);
+        
+        vm.prank(user1);
+        bridge.initiateTransfer(TRANSFER_AMOUNT, TARGET_CHAIN);
+        
+        // Create signature
+        uint256 nonce = bridge.getNonce(user1) - 1;
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("CrossChainTransfer(address recipient,uint256 amount,uint256 transferNonce,uint256 chainId,address contract)"),
+            user2,
+            TRANSFER_AMOUNT,
+            nonce,
+            block.chainid,
+            address(bridge)
+        ));
+        
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", bridge.DOMAIN_SEPARATOR(), structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(validator, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        uint256 user2BalanceBefore = token.balanceOf(user2);
+        
+        // Process transfer
+        vm.prank(user1);
+        bridge.processTransfer(user2, TRANSFER_AMOUNT, nonce, signature);
+        
+        // Verify recipient received tokens
+        assertEq(token.balanceOf(user2), user2BalanceBefore + TRANSFER_AMOUNT, "Recipient should receive tokens");
+    }
+}
