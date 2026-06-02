@@ -56,7 +56,7 @@ contract YieldVault is Ownable, ReentrancyGuard {
         uint256 currentTime = block.timestamp > periodFinish ? periodFinish : block.timestamp;
         
         return rewardPerTokenStored + (
-            (currentTime - lastUpdateTime) * rewardRate * PRECISION / totalSupply
+            (currentTime - lastUpdateTime) * rewardRate / totalSupply
         );
     }
 
