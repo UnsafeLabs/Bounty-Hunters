@@ -9,6 +9,8 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
+import type * as RpcMessage from "effect/unstable/rpc/RpcMessage";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -22,11 +24,42 @@ import { makeInMemoryStdio } from "./_internal/stdio.ts";
 
 const InitializeRequest = jsonRpcRequest("initialize", AcpSchema.InitializeRequest);
 const InitializeResponse = jsonRpcResponse(AcpSchema.InitializeResponse);
+const AuthenticateRequest = jsonRpcRequest("authenticate", AcpSchema.AuthenticateRequest);
+const AuthenticateResponse = jsonRpcResponse(AcpSchema.AuthenticateResponse);
+const LogoutRequest = jsonRpcRequest("logout", AcpSchema.LogoutRequest);
+const LogoutResponse = jsonRpcResponse(AcpSchema.LogoutResponse);
+const PromptRequest = jsonRpcRequest("session/prompt", AcpSchema.PromptRequest);
+const PromptResponse = jsonRpcResponse(AcpSchema.PromptResponse);
+const decodeAuthenticateRequest = Schema.decodeEffect(Schema.fromJsonString(AuthenticateRequest));
+const decodeLogoutRequest = Schema.decodeEffect(Schema.fromJsonString(LogoutRequest));
+const decodePromptRequest = Schema.decodeEffect(Schema.fromJsonString(PromptRequest));
 const ExtRequest = jsonRpcRequest("x/test", Schema.Struct({ hello: Schema.String }));
 const ExtResponse = jsonRpcResponse(Schema.Struct({ ok: Schema.Boolean }));
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/acp-mock-peer.ts"),
 );
+const encoder = new TextEncoder();
+const protocolParser = RpcSerialization.ndJsonRpc().makeUnsafe();
+
+const encodeProtocolError = (id: string | number, error: AcpSchema.Error) => {
+  const encoded = protocolParser.encode({
+    _tag: "Exit",
+    requestId: String(id),
+    exit: {
+      _tag: "Failure",
+      cause: [
+        {
+          _tag: "Fail",
+          error,
+        },
+      ],
+    },
+  } satisfies RpcMessage.ResponseExitEncoded);
+  if (encoded === undefined) {
+    throw new Error("Expected encoded protocol error");
+  }
+  return typeof encoded === "string" ? encoder.encode(encoded) : encoded;
+};
 
 it.layer(NodeServices.layer)("effect-acp client", (it) => {
   const makeHandle = (env?: Record<string, string>) =>
@@ -443,6 +476,101 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
 
       yield* Fiber.join(initializeFiber);
       assert.deepEqual(yield* Fiber.join(extFiber), { ok: true });
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
+  it.effect("refreshes authentication once before replaying an expired session request", () =>
+    Effect.gen(function* () {
+      const expiredSessions = yield* Ref.make<Array<string>>([]);
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      const acp = yield* AcpClient.make(stdio, {
+        onSessionExpired: (sessionId) =>
+          Ref.update(expiredSessions, (current) => [...current, sessionId]),
+      }).pipe(Effect.provideService(Scope.Scope, scope));
+
+      const authFiber = yield* acp.agent
+        .authenticate({
+          methodId: "cursor_login",
+          _meta: {
+            refreshToken: "refresh-1",
+          },
+        })
+        .pipe(Effect.forkScoped);
+
+      const authOutbound = yield* Queue.take(output);
+      const authenticateRequest = yield* decodeAuthenticateRequest(authOutbound);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(AuthenticateResponse, {
+          jsonrpc: "2.0",
+          id: authenticateRequest.id,
+          result: {},
+        }),
+      );
+      yield* Fiber.join(authFiber);
+
+      const promptFiber = yield* acp.agent
+        .prompt({
+          sessionId: "expired-session",
+          prompt: [{ type: "text", text: "hello after expiry" }],
+        })
+        .pipe(Effect.forkScoped);
+
+      const firstPromptOutbound = yield* Queue.take(output);
+      const firstPromptRequest = yield* decodePromptRequest(firstPromptOutbound);
+      assert.equal(firstPromptRequest.params.sessionId, "expired-session");
+      yield* Queue.offer(
+        input,
+        encodeProtocolError(
+          firstPromptRequest.id,
+          AcpError.AcpRequestError.authRequired("401 Unauthorized").toProtocolError(),
+        ),
+      );
+
+      const logoutOutbound = yield* Queue.take(output);
+      const logoutRequest = yield* decodeLogoutRequest(logoutOutbound);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(LogoutResponse, {
+          jsonrpc: "2.0",
+          id: logoutRequest.id,
+          result: {},
+        }),
+      );
+
+      const refreshAuthOutbound = yield* Queue.take(output);
+      const refreshAuthRequest = yield* decodeAuthenticateRequest(refreshAuthOutbound);
+      assert.equal(refreshAuthRequest.params.methodId, "cursor_login");
+      assert.equal(refreshAuthRequest.params._meta?.refreshToken, "refresh-1");
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(AuthenticateResponse, {
+          jsonrpc: "2.0",
+          id: refreshAuthRequest.id,
+          result: {},
+        }),
+      );
+
+      const retryPromptOutbound = yield* Queue.take(output);
+      const retryPromptRequest = yield* decodePromptRequest(retryPromptOutbound);
+      assert.equal(retryPromptRequest.params.sessionId, "expired-session");
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(PromptResponse, {
+          jsonrpc: "2.0",
+          id: retryPromptRequest.id,
+          result: {
+            stopReason: "end_turn",
+          },
+        }),
+      );
+
+      const promptResponse = yield* Fiber.join(promptFiber);
+      assert.equal(promptResponse.stopReason, "end_turn");
+      assert.deepEqual(yield* Ref.get(expiredSessions), ["expired-session"]);
+
       yield* Scope.close(scope, Exit.void);
     }),
   );
