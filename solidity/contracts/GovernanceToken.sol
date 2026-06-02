@@ -8,6 +8,13 @@ contract GovernanceToken is ERC20 {
     mapping(address => uint256) public delegatedPower;
     mapping(uint256 => mapping(address => bool)) public hasVoted;
 
+    // EIP-712 typed delegation
+    bytes32 public constant DELEGATION_TYPEHASH =
+        keccak256("Delegation(address delegatee,uint256 nonce,uint256 expiry)");
+    bytes32 public constant DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,uint256 chainId,address verifyingContract)");
+    mapping(address => uint256) public nonces;
+
     struct Proposal {
         string description;
         uint256 forVotes;
@@ -28,45 +35,79 @@ contract GovernanceToken is ERC20 {
         admin = msg.sender;
     }
 
-    // BUG: Uses tx.origin instead of msg.sender — phishing vulnerability
+    /// @notice Delegate voting power to another address (called by the delegator directly)
+    /// @param to The address to delegate voting power to
     function delegateVote(address to) external {
-        require(tx.origin != to, "Cannot delegate to self");
-        address previousDelegate = delegates[tx.origin];
-        if (previousDelegate != address(0)) {
-            delegatedPower[previousDelegate] -= balanceOf(tx.origin);
-        }
-        delegates[tx.origin] = to;
-        delegatedPower[to] += balanceOf(tx.origin);
-        emit DelegateChanged(tx.origin, to);
+        require(msg.sender != to, "Cannot delegate to self");
+        _delegate(msg.sender, to);
     }
 
-    // BUG: Same tx.origin issue
+    /// @notice Revoke any active delegation (called by the delegator directly)
     function revokeDelegate() external {
-        address currentDelegate = delegates[tx.origin];
+        address currentDelegate = delegates[msg.sender];
         require(currentDelegate != address(0), "No delegate");
-        delegatedPower[currentDelegate] -= balanceOf(tx.origin);
-        delegates[tx.origin] = address(0);
-        emit DelegateChanged(tx.origin, address(0));
+        delegatedPower[currentDelegate] -= balanceOf(msg.sender);
+        delegates[msg.sender] = address(0);
+        emit DelegateChanged(msg.sender, address(0));
     }
 
-    // BUG: tx.origin for admin check
+    /// @notice Delegate voting power via EIP-712 signed message (gasless delegation)
+    /// @param delegatee The address to delegate to
+    /// @param nonce The signer's current nonce
+    /// @param expiry Timestamp after which the signature is invalid
+    /// @param v,r,s ECDSA signature components
+    function delegateBySig(
+        address delegatee,
+        uint256 nonce,
+        uint256 expiry,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external {
+        require(block.timestamp <= expiry, "Signature expired");
+        require(nonce == nonces[msg.sender], "Invalid nonce");
+
+        // EIP-712 domain separator
+        bytes32 domainSeparator = keccak256(
+            abi.encode(DOMAIN_TYPEHASH, keccak256(bytes("Governance")), block.chainid, address(this))
+        );
+
+        // Struct hash
+        bytes32 structHash = keccak256(abi.encode(DELEGATION_TYPEHASH, delegatee, nonce, expiry));
+
+        // Final hash
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+
+        // Recover signer — the signer is the delegator
+        address signer = ecrecover(digest, v, r, s);
+        require(signer != address(0), "Invalid signature");
+        require(signer != delegatee, "Cannot delegate to self");
+
+        nonces[signer]++;
+        _delegate(signer, delegatee);
+    }
+
+    /// @notice Admin-only snapshot function
     function snapshot() external {
-        require(tx.origin == admin, "Not admin");
+        require(msg.sender == admin, "Not admin");
         // snapshot logic placeholder
     }
 
+    /// @notice Get the total voting power of an account (own balance + delegated power)
     function getVotingPower(address account) public view returns (uint256) {
         return balanceOf(account) + delegatedPower[account];
     }
 
     function createProposal(string calldata description, uint256 duration) external returns (uint256) {
-        proposals.push(Proposal({
-            description: description,
-            forVotes: 0,
-            againstVotes: 0,
-            endTime: block.timestamp + duration,
-            executed: false
-        }));
+        proposals.push(
+            Proposal({
+                description: description,
+                forVotes: 0,
+                againstVotes: 0,
+                endTime: block.timestamp + duration,
+                executed: false
+            })
+        );
         uint256 proposalId = proposals.length - 1;
         emit ProposalCreated(proposalId, description);
         return proposalId;
@@ -87,5 +128,16 @@ contract GovernanceToken is ERC20 {
             proposal.againstVotes += power;
         }
         emit VoteCast(proposalId, msg.sender, support);
+    }
+
+    /// @dev Internal delegation logic shared by delegateVote and delegateBySig
+    function _delegate(address delegator, address to) internal {
+        address previousDelegate = delegates[delegator];
+        if (previousDelegate != address(0)) {
+            delegatedPower[previousDelegate] -= balanceOf(delegator);
+        }
+        delegates[delegator] = to;
+        delegatedPower[to] += balanceOf(delegator);
+        emit DelegateChanged(delegator, to);
     }
 }
