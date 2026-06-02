@@ -11,7 +11,6 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  *   - Replaced tx.origin with msg.sender for all authorization
  *   - Added onlyOwner modifier for admin functions
  *   - Added msg.sender != address(0) guard
- *   - Delegated voting works correctly through legitimate contract interactions
  */
 contract GovernanceToken is ERC20, Ownable {
     mapping(address => address) public delegates;
