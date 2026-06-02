@@ -27,7 +27,7 @@ contract PriceOracle {
         owner = msg.sender;
     }
 
-    function getLatestPrice() external returns (int256) {
+    function getLatestPrice() external view returns (int256) {
         (
             uint80 roundId,
             int256 price,
@@ -36,12 +36,7 @@ contract PriceOracle {
             uint80 answeredInRound
         ) = primaryFeed.latestRoundData();
 
-        require(price > 0, "Invalid price");
-        require(answeredInRound >= roundId, "Incomplete round");
-
         if (block.timestamp - updatedAt >= MAX_STALENESS) {
-            emit StalePrice(updatedAt);
-
             (
                 uint80 fbRoundId,
                 int256 fbPrice,
@@ -50,12 +45,15 @@ contract PriceOracle {
                 uint80 fbAnsweredInRound
             ) = fallbackFeed.latestRoundData();
 
+            require(block.timestamp - fbUpdatedAt < MAX_STALENESS, "Stale price");
             require(fbPrice > 0, "Invalid price");
             require(fbAnsweredInRound >= fbRoundId, "Incomplete round");
-            require(block.timestamp - fbUpdatedAt < MAX_STALENESS, "Stale price");
 
             return fbPrice;
         }
+
+        require(price > 0, "Invalid price");
+        require(answeredInRound >= roundId, "Incomplete round");
 
         return price;
     }
@@ -64,8 +62,12 @@ contract PriceOracle {
         return primaryFeed.decimals();
     }
 
-    function setMaxStaleness(uint256 _maxStaleness) external {
+    modifier onlyOwner() {
         require(msg.sender == owner, "Not owner");
+        _;
+    }
+
+    function setMaxStaleness(uint256 _maxStaleness) external onlyOwner {
         MAX_STALENESS = _maxStaleness;
     }
 }
