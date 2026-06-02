@@ -32,6 +32,11 @@ export interface ElectronAppShape {
   readonly setDesktopName: (desktopName: string) => Effect.Effect<void>;
   readonly setDockIcon: (iconPath: string) => Effect.Effect<void>;
   readonly appendCommandLineSwitch: (switchName: string, value?: string) => Effect.Effect<void>;
+  readonly setAsDefaultProtocolClient: (
+    protocol: string,
+    path?: string,
+    args?: string[],
+  ) => Effect.Effect<boolean>;
   readonly on: <Args extends ReadonlyArray<unknown>>(
     eventName: string,
     listener: (...args: Args) => void,
@@ -111,6 +116,10 @@ const make = ElectronApp.of({
         return;
       }
       Electron.app.commandLine.appendSwitch(switchName, value);
+    }),
+  setAsDefaultProtocolClient: (protocol, path, args) =>
+    Effect.sync(() => {
+      return Electron.app.setAsDefaultProtocolClient(protocol, path, args);
     }),
   on: addScopedAppListener,
 });

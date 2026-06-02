@@ -24,6 +24,7 @@ import * as ElectronShell from "./electron/ElectronShell.ts";
 import * as ElectronTheme from "./electron/ElectronTheme.ts";
 import * as ElectronUpdater from "./electron/ElectronUpdater.ts";
 import * as ElectronWindow from "./electron/ElectronWindow.ts";
+import * as DesktopDeepLinkProtocol from "./electron/protocol.ts";
 import * as DesktopApp from "./app/DesktopApp.ts";
 import * as DesktopAppIdentity from "./app/DesktopAppIdentity.ts";
 import * as DesktopApplicationMenu from "./window/DesktopApplicationMenu.ts";
@@ -103,6 +104,7 @@ const electronLayer = Layer.mergeAll(
   ElectronTheme.layer,
   ElectronUpdater.layer,
   ElectronWindow.layer,
+  DesktopDeepLinkProtocol.layer,
   Layer.succeed(DesktopIpc.DesktopIpc, DesktopIpc.make(Electron.ipcMain)),
 );
 

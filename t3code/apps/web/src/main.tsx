@@ -18,6 +18,25 @@ const router = getRouter(history);
 
 if (isElectron) {
   syncDocumentWindowControlsOverlayClass();
+
+  window.desktopBridge?.onNavigateUrl((urlStr) => {
+    try {
+      const url = new URL(urlStr);
+      if (url.hostname === "settings") {
+        void router.navigate({ to: "/settings" });
+      } else if (url.hostname === "chat" && url.pathname.startsWith("/thread")) {
+        const id = url.searchParams.get("id");
+        if (id) {
+          void router.navigate({ to: ("/default/" + id) as any });
+        }
+      } else if (url.hostname === "open" && url.pathname.startsWith("/project")) {
+        // Navigate to the root view; opening a project dynamically requires backend support
+        void router.navigate({ to: "/" });
+      }
+    } catch (e) {
+      console.error("Failed to route deep link:", e);
+    }
+  });
 }
 
 document.title = APP_DISPLAY_NAME;

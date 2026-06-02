@@ -107,6 +107,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener);
     };
   },
+  onNavigateUrl: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, url: unknown) => {
+      if (typeof url !== "string") return;
+      listener(url);
+    };
+
+    ipcRenderer.on(IpcChannels.NAVIGATE_URL_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.NAVIGATE_URL_CHANNEL, wrappedListener);
+    };
+  },
   getUpdateState: () => ipcRenderer.invoke(IpcChannels.UPDATE_GET_STATE_CHANNEL),
   setUpdateChannel: (channel) =>
     ipcRenderer.invoke(IpcChannels.UPDATE_SET_CHANNEL_CHANNEL, channel),
