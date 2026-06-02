@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title LiquidityPool
@@ -13,8 +14,9 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  *   - Internal reserves instead of balanceOf for removeLiquidity
  *   - sync() function for recovery from donation attacks
  *   - SafeERC20 for checked transfers
+ *   - ReentrancyGuard on all external functions
  */
-contract LiquidityPool is ERC20 {
+contract LiquidityPool is ERC20, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     IERC20 public tokenA;
@@ -41,7 +43,7 @@ contract LiquidityPool is ERC20 {
      * @param amountB Amount of token B to deposit
      * @return lpTokens Amount of LP tokens minted
      */
-    function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
+    function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant returns (uint256 lpTokens) {
         require(amountA > 0 && amountB > 0, "Amounts must be > 0");
 
         tokenA.safeTransferFrom(msg.sender, address(this), amountA);
@@ -76,7 +78,7 @@ contract LiquidityPool is ERC20 {
      * @return amountA Amount of token A returned
      * @return amountB Amount of token B returned
      */
-    function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
+    function removeLiquidity(uint256 lpTokens) external nonReentrant returns (uint256 amountA, uint256 amountB) {
         require(lpTokens > 0, "Must burn > 0");
         require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
 
