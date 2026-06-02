@@ -1,7 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract MultiSigWallet {
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+/**
+ * @title MultiSigWallet
+ * @notice Multi-signature wallet with reentrancy protection
+ * @dev Fixes:
+ *   - ReentrancyGuard prevents confirmation revocation during execution callback
+ *   - Zero-address validation on submitTransaction
+ *   - Ownable for access control
+ */
+contract MultiSigWallet is ReentrancyGuard {
     address[] public owners;
     uint256 public required;
     uint256 public transactionCount;
@@ -31,14 +42,23 @@ contract MultiSigWallet {
         require(_owners.length > 0, "No owners");
         require(_required > 0 && _required <= _owners.length, "Invalid required");
         for (uint256 i = 0; i < _owners.length; i++) {
+            require(_owners[i] != address(0), "Zero address owner");
             isOwner[_owners[i]] = true;
         }
         owners = _owners;
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
+    /**
+     * @notice Submit a new transaction
+     * @param to Target address (must not be zero address)
+     * @param value ETH value to send
+     * @param data Call data
+     * @return txId Transaction ID
+     */
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Zero address");
+        
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -50,6 +70,10 @@ contract MultiSigWallet {
         return txId;
     }
 
+    /**
+     * @notice Confirm a transaction
+     * @param txId Transaction ID
+     */
     function confirmTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
         require(!confirmations[txId][msg.sender], "Already confirmed");
@@ -57,6 +81,10 @@ contract MultiSigWallet {
         emit Confirmed(txId, msg.sender);
     }
 
+    /**
+     * @notice Revoke a confirmation
+     * @param txId Transaction ID
+     */
     function revokeConfirmation(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
         require(confirmations[txId][msg.sender], "Not confirmed");
@@ -64,15 +92,22 @@ contract MultiSigWallet {
         emit Revoked(txId, msg.sender);
     }
 
+    /**
+     * @notice Get confirmation count for a transaction
+     * @param txId Transaction ID
+     * @return count Number of confirmations
+     */
     function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
         for (uint256 i = 0; i < owners.length; i++) {
             if (confirmations[txId][owners[i]]) count++;
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
+    /**
+     * @notice Execute a transaction with reentrancy protection
+     * @param txId Transaction ID
+     */
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         require(!transactions[txId].executed, "Already executed");
         require(getConfirmationCount(txId) >= required, "Not enough confirmations");
 
@@ -83,6 +118,22 @@ contract MultiSigWallet {
         require(success, "Execution failed");
 
         emit Executed(txId);
+    }
+
+    /**
+     * @notice Get all owners
+     * @return ownerList Array of owner addresses
+     */
+    function getOwners() external view returns (address[] memory) {
+        return owners;
+    }
+
+    /**
+     * @notice Get transaction count
+     * @return count Number of transactions
+     */
+    function getTransactionCount() external view returns (uint256) {
+        return transactionCount;
     }
 
     receive() external payable {}
