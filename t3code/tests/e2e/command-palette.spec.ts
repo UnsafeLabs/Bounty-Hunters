@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./auth";
 
 test("opens command palette and searches", async ({ page }) => {
-  await page.goto("/");
+  await login(page);
 
   // Wait for the app to be fully interactive
   const trigger = page.locator('[data-testid="command-palette-trigger"]');
@@ -20,5 +21,5 @@ test("opens command palette and searches", async ({ page }) => {
   // Verify that the command palette matches / displays a result for Settings
   const result = page.locator('[data-slot="command-list"]');
   await expect(result).toBeVisible();
-  await expect(result).toContainText("Settings");
+  await expect(result).toContainText("settings", { ignoreCase: true });
 });

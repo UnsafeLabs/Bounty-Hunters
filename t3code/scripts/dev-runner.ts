@@ -32,7 +32,7 @@ const MODE_ARGS = {
   dev: [
     "run",
     "dev",
-    "--ui=tui",
+    ...(process.stdout.isTTY ? ["--ui=tui"] : []),
     "--filter=@t3tools/contracts",
     "--filter=@t3tools/web",
     "--filter=t3",

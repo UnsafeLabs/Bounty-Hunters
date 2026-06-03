@@ -6,10 +6,10 @@ export default defineConfig({
   expect: {
     timeout: 5000,
   },
-  fullyParallel: true,
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: "html",
   use: {
     baseURL: "http://localhost:5733",
@@ -23,9 +23,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "bun run dev:web",
+    command: "npx bun scripts/dev-runner.ts dev",
     url: "http://localhost:5733",
     reuseExistingServer: !process.env.CI,
     timeout: 120000,
+    stdout: "pipe",
+    stderr: "pipe",
   },
 });
