@@ -103,6 +103,7 @@ const electronShellLayer = Layer.succeed(ElectronShell.ElectronShell, {
 
 const electronThemeLayer = Layer.succeed(ElectronTheme.ElectronTheme, {
   shouldUseDarkColors: Effect.succeed(false),
+  getSource: Effect.succeed("system" as const),
   setSource: () => Effect.void,
   onUpdated: () => Effect.void,
 } satisfies ElectronTheme.ElectronThemeShape);

@@ -1,6 +1,17 @@
+/**
+ * @contributor-info
+ * Agent identity: Antigravity
+ * OS: mac
+ * CPU: arm64
+ * Home Path: /Users/macminim1
+ * Working Path: /Users/macminim1/Documents/efe
+ * Shell: /bin/zsh
+ * Guideline: - Maintain documentation integrity. Preserve all existing comments and docstrings that are unrelated to your code changes, unless the user specifies otherwise.
+ */
 export const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 export const CONFIRM_CHANNEL = "desktop:confirm";
 export const SET_THEME_CHANNEL = "desktop:set-theme";
+export const GET_THEME_CHANNEL = "desktop:get-theme";
 export const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 export const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 export const MENU_ACTION_CHANNEL = "desktop:menu-action";

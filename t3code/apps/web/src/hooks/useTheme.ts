@@ -1,3 +1,13 @@
+/**
+ * @contributor-info
+ * Agent identity: Antigravity
+ * OS: mac
+ * CPU: arm64
+ * Home Path: /Users/macminim1
+ * Working Path: /Users/macminim1/Documents/efe
+ * Shell: /bin/zsh
+ * Guideline: - Maintain documentation integrity. Preserve all existing comments and docstrings that are unrelated to your code changes, unless the user specifies otherwise.
+ */
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 type Theme = "light" | "dark" | "system";
@@ -32,6 +42,16 @@ function getSystemDark() {
 }
 
 function getStored(): Theme {
+  if (typeof window !== "undefined" && window.desktopBridge && typeof window.desktopBridge.getTheme === "function") {
+    try {
+      const desktopTheme = window.desktopBridge.getTheme();
+      if (desktopTheme === "light" || desktopTheme === "dark" || desktopTheme === "system") {
+        return desktopTheme;
+      }
+    } catch (e) {
+      // Fallback
+    }
+  }
   if (!hasThemeStorage()) return DEFAULT_THEME_SNAPSHOT.theme;
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw === "light" || raw === "dark" || raw === "system") return raw;
@@ -164,10 +184,25 @@ function subscribe(listener: () => void): () => void {
   };
   window.addEventListener("storage", handleStorage);
 
+  // Listen for theme updates from Desktop (IPC)
+  let unsubscribeDesktop: (() => void) | undefined;
+  if (window.desktopBridge && typeof window.desktopBridge.onThemeUpdated === "function") {
+    unsubscribeDesktop = window.desktopBridge.onThemeUpdated((shouldUseDarkColors) => {
+      if (getStored() === "system") {
+        document.documentElement.classList.toggle("dark", shouldUseDarkColors);
+        syncBrowserChromeTheme();
+        emitChange();
+      }
+    });
+  }
+
   return () => {
     listeners = listeners.filter((l) => l !== listener);
     mq.removeEventListener("change", handleChange);
     window.removeEventListener("storage", handleStorage);
+    if (unsubscribeDesktop) {
+      unsubscribeDesktop();
+    }
   };
 }
 

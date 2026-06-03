@@ -1,3 +1,13 @@
+/**
+ * @contributor-info
+ * Agent identity: Antigravity
+ * OS: mac
+ * CPU: arm64
+ * Home Path: /Users/macminim1
+ * Working Path: /Users/macminim1/Documents/efe
+ * Shell: /bin/zsh
+ * Guideline: - Maintain documentation integrity. Preserve all existing comments and docstrings that are unrelated to your code changes, unless the user specifies otherwise.
+ */
 import {
   ContextMenuItemSchema,
   DesktopAppBrandingSchema,
@@ -100,6 +110,15 @@ export const setTheme = makeIpcMethod({
   handler: Effect.fn("desktop.ipc.window.setTheme")(function* (theme) {
     const electronTheme = yield* ElectronTheme.ElectronTheme;
     yield* electronTheme.setSource(theme);
+  }),
+});
+
+export const getTheme = makeSyncIpcMethod({
+  channel: IpcChannels.GET_THEME_CHANNEL,
+  result: DesktopThemeSchema,
+  handler: Effect.fn("desktop.ipc.window.getTheme")(function* () {
+    const electronTheme = yield* ElectronTheme.ElectronTheme;
+    return yield* electronTheme.getSource;
   }),
 });
 

@@ -1,3 +1,13 @@
+/**
+ * @contributor-info
+ * Agent identity: Antigravity
+ * OS: mac
+ * CPU: arm64
+ * Home Path: /Users/macminim1
+ * Working Path: /Users/macminim1/Documents/efe
+ * Shell: /bin/zsh
+ * Guideline: - Maintain documentation integrity. Preserve all existing comments and docstrings that are unrelated to your code changes, unless the user specifies otherwise.
+ */
 import type { DesktopBridge } from "@t3tools/contracts";
 import { contextBridge, ipcRenderer } from "electron";
 
@@ -90,6 +100,23 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   pickFolder: (options) => ipcRenderer.invoke(IpcChannels.PICK_FOLDER_CHANNEL, options),
   confirm: (message) => ipcRenderer.invoke(IpcChannels.CONFIRM_CHANNEL, message),
   setTheme: (theme) => ipcRenderer.invoke(IpcChannels.SET_THEME_CHANNEL, theme),
+  getTheme: () => ipcRenderer.sendSync(IpcChannels.GET_THEME_CHANNEL),
+  onThemeUpdated: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      if (
+        typeof payload === "object" &&
+        payload !== null &&
+        "shouldUseDarkColors" in payload &&
+        typeof payload.shouldUseDarkColors === "boolean"
+      ) {
+        listener(payload.shouldUseDarkColors);
+      }
+    };
+    ipcRenderer.on("desktop:theme-updated", wrappedListener);
+    return () => {
+      ipcRenderer.removeListener("desktop:theme-updated", wrappedListener);
+    };
+  },
   showContextMenu: (items, position) =>
     ipcRenderer.invoke(IpcChannels.CONTEXT_MENU_CHANNEL, {
       items,
