@@ -3,32 +3,41 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract LiquidityPool is ERC20 {
+contract LiquidityPool is ERC20, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     IERC20 public tokenA;
     IERC20 public tokenB;
 
     uint256 public reserveA;
     uint256 public reserveB;
 
-    // BUG: No MINIMUM_LIQUIDITY lock — first depositor can manipulate LP price
     uint256 public constant MINIMUM_LIQUIDITY = 1000;
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
 
     constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") {
+        require(_tokenA != address(0), "Invalid token A");
+        require(_tokenB != address(0), "Invalid token B");
         tokenA = IERC20(_tokenA);
         tokenB = IERC20(_tokenB);
     }
 
-    function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
-        tokenA.transferFrom(msg.sender, address(this), amountA);
-        tokenB.transferFrom(msg.sender, address(this), amountB);
+    function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant returns (uint256 lpTokens) {
+        require(amountA > 0 && amountB > 0, "Amounts must be > 0");
+
+        tokenA.safeTransferFrom(msg.sender, address(this), amountA);
+        tokenB.safeTransferFrom(msg.sender, address(this), amountB);
 
         if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
             lpTokens = sqrt(amountA * amountB);
+            require(lpTokens > MINIMUM_LIQUIDITY, "Insufficient initial liquidity");
+            _mint(address(0), MINIMUM_LIQUIDITY);
+            lpTokens -= MINIMUM_LIQUIDITY;
         } else {
             uint256 lpFromA = amountA * totalSupply() / reserveA;
             uint256 lpFromB = amountB * totalSupply() / reserveB;
@@ -44,27 +53,31 @@ contract LiquidityPool is ERC20 {
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
     }
 
-    // BUG: Uses balanceOf instead of internal reserves — manipulable via direct transfer
-    function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
+    function removeLiquidity(uint256 lpTokens) external nonReentrant returns (uint256 amountA, uint256 amountB) {
         require(lpTokens > 0, "Must burn > 0");
         require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
 
-        // BUG: Should use reserveA/reserveB, not balanceOf
-        uint256 balA = tokenA.balanceOf(address(this));
-        uint256 balB = tokenB.balanceOf(address(this));
-
-        amountA = lpTokens * balA / totalSupply();
-        amountB = lpTokens * balB / totalSupply();
+        amountA = lpTokens * reserveA / totalSupply();
+        amountB = lpTokens * reserveB / totalSupply();
 
         _burn(msg.sender, lpTokens);
 
-        tokenA.transfer(msg.sender, amountA);
-        tokenB.transfer(msg.sender, amountB);
+        tokenA.safeTransfer(msg.sender, amountA);
+        tokenB.safeTransfer(msg.sender, amountB);
 
         reserveA -= amountA;
         reserveB -= amountB;
 
         emit LiquidityRemoved(msg.sender, amountA, amountB, lpTokens);
+    }
+
+    function sync() external nonReentrant {
+        reserveA = tokenA.balanceOf(address(this));
+        reserveB = tokenB.balanceOf(address(this));
+    }
+
+    function getReserves() external view returns (uint256 _reserveA, uint256 _reserveB) {
+        return (reserveA, reserveB);
     }
 
     function sqrt(uint256 y) internal pure returns (uint256 z) {
