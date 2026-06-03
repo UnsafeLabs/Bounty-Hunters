@@ -528,6 +528,25 @@ def get_openapi(
     separate_input_output_schemas: bool = True,
     external_docs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """
+    Generate an OpenAPI schema for the given routes.
+
+    Parameters:
+    - title: The title of the API.
+    - version: The version of the API.
+    - openapi_version: The version of the OpenAPI specification to use (default: 3.1.0).
+    - summary: A short summary of the API.
+    - description: A longer description of the API.
+    - routes: The list of routes to include in the schema.
+    - webhooks: The list of webhooks to include in the schema.
+    - tags: The list of tags to include in the schema.
+    - servers: The list of servers that provide the API.
+    - terms_of_service: The URL to the terms of service.
+    - contact: The contact information for the API.
+    - license_info: The license information for the API.
+    - separate_input_output_schemas: Whether to separate input and output schemas.
+    - external_docs: Additional external documentation.
+    """
     info: dict[str, Any] = {"title": title, "version": version}
     if summary:
         info["summary"] = summary
