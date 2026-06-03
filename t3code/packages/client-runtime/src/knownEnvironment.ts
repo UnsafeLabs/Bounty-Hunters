@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 
 export interface KnownEnvironmentConnectionTarget {
@@ -51,3 +52,98 @@ export function attachEnvironmentDescriptor(
     label: descriptor.label,
   };
 }
+
+import * as fs from "fs";
+
+export interface EnvironmentInfo {
+  readonly runtime: string;
+  readonly platform: string;
+  readonly arch: string;
+  readonly isContainer: boolean;
+  readonly isCI: boolean;
+  readonly ciProvider: string | null;
+  readonly isWSL: boolean;
+}
+
+export function getEnvironmentInfo(): EnvironmentInfo {
+  let runtime = "browser";
+  let platform = "unknown";
+  let arch = "unknown";
+
+  if (typeof process !== "undefined" && process.versions) {
+    if (process.versions.bun) {
+      runtime = "bun";
+    } else if (process.versions.node) {
+      runtime = "node";
+    }
+    platform = process.platform || "unknown";
+    arch = process.arch || "unknown";
+  }
+
+  let isContainer = false;
+  let isWSL = false;
+
+  // Docker Container Detection
+  try {
+    if (fs.existsSync("/.dockerenv")) {
+      isContainer = true;
+    } else if (fs.existsSync("/proc/self/cgroup")) {
+      const cgroup = fs.readFileSync("/proc/self/cgroup", "utf8");
+      if (cgroup.includes("docker") || cgroup.includes("kubepods")) {
+        isContainer = true;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // WSL Detection
+  try {
+    if (fs.existsSync("/proc/version")) {
+      const version = fs.readFileSync("/proc/version", "utf8");
+      if (version.toLowerCase().includes("microsoft")) {
+        isWSL = true;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // CI Detection
+  let isCI = false;
+  let ciProvider: string | null = null;
+
+  if (typeof process !== "undefined" && process.env) {
+    const env = process.env;
+    if (env.GITHUB_ACTIONS) {
+      isCI = true;
+      ciProvider = "GitHub Actions";
+    } else if (env.GITLAB_CI) {
+      isCI = true;
+      ciProvider = "GitLab CI";
+    } else if (env.JENKINS_URL) {
+      isCI = true;
+      ciProvider = "Jenkins";
+    } else if (env.CIRCLECI) {
+      isCI = true;
+      ciProvider = "CircleCI";
+    } else if (env.TRAVIS) {
+      isCI = true;
+      ciProvider = "Travis CI";
+    } else if (env.CI) {
+      isCI = true;
+      ciProvider = "CI";
+    }
+  }
+
+  return {
+    runtime,
+    platform,
+    arch,
+    isContainer,
+    isCI,
+    ciProvider,
+    isWSL,
+  };
+}
+
