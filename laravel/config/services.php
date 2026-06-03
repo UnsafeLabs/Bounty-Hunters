@@ -33,6 +33,8 @@ return [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
+        'webhook_url' => env('SLACK_WEBHOOK_URL'),
+        'default_channel' => env('SLACK_DEFAULT_CHANNEL'),
     ],
 
 ];
