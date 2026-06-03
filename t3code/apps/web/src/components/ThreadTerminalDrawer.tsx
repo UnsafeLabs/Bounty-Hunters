@@ -48,6 +48,8 @@ import {
 import { readEnvironmentApi } from "~/environmentApi";
 import { readLocalApi } from "~/localApi";
 import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalStateStore";
+import { isMacPlatform } from "~/lib/utils";
+import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
@@ -426,6 +428,48 @@ export function TerminalViewport({
         isDiffToggleShortcut(event, currentKeybindings, options)
       ) {
         return false;
+      }
+
+      if (event.type === "keydown") {
+        const isMac = isMacPlatform(navigator.platform);
+        const hasSelection = terminal.hasSelection();
+
+        // Copy shortcut handler: Cmd+C (macOS), Ctrl+Shift+C / Ctrl+C (Windows/Linux) when text is selected
+        if (isTerminalCopyShortcut(event, isMac, hasSelection)) {
+          event.preventDefault();
+          event.stopPropagation();
+          const selectedText = terminal.getSelection();
+          void navigator.clipboard.writeText(selectedText);
+          toastManager.add(
+            stackedThreadToast({
+              type: "success",
+              title: "Copied to clipboard",
+            })
+          );
+          return false;
+        }
+
+        // Paste shortcut handler: Cmd+V (macOS), Ctrl+Shift+V (Windows/Linux)
+        if (isTerminalPasteShortcut(event, isMac)) {
+          event.preventDefault();
+          event.stopPropagation();
+          void navigator.clipboard.readText()
+            .then((text) => {
+              if (text) {
+                void sendTerminalInput(text, "Failed to paste");
+              }
+            })
+            .catch((err) => {
+              const activeTerminal = terminalRef.current;
+              if (activeTerminal) {
+                writeSystemMessage(
+                  activeTerminal,
+                  err instanceof Error ? err.message : "Failed to read clipboard"
+                );
+              }
+            });
+          return false;
+        }
       }
 
       const navigationData = terminalNavigationShortcutData(event);
@@ -1350,4 +1394,40 @@ export default function ThreadTerminalDrawer({
       </div>
     </aside>
   );
+}
+
+export function isTerminalCopyShortcut(
+  event: { type?: string; key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean },
+  isMac: boolean,
+  hasSelection: boolean,
+): boolean {
+  if (event.type !== undefined && event.type !== "keydown") {
+    return false;
+  }
+  const key = event.key.toLowerCase();
+  if (key !== "c") {
+    return false;
+  }
+  const isMacCmdC = isMac && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+  const isCtrlShiftC = event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey;
+  const isCtrlC = !isMac && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+
+  return (isMacCmdC || isCtrlShiftC || isCtrlC) && hasSelection;
+}
+
+export function isTerminalPasteShortcut(
+  event: { type?: string; key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean },
+  isMac: boolean,
+): boolean {
+  if (event.type !== undefined && event.type !== "keydown") {
+    return false;
+  }
+  const key = event.key.toLowerCase();
+  if (key !== "v") {
+    return false;
+  }
+  const isMacCmdV = isMac && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+  const isCtrlShiftV = event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey;
+
+  return isMacCmdV || isCtrlShiftV;
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isTerminalCopyShortcut,
+  isTerminalPasteShortcut,
   resolveTerminalSelectionActionPosition,
   selectPendingTerminalEventEntries,
   selectTerminalEventEntriesAfterSnapshot,
@@ -133,5 +135,59 @@ describe("resolveTerminalSelectionActionPosition", () => {
         1,
       ).map((entry) => entry.id),
     ).toEqual([2]);
+  });
+
+  describe("isTerminalCopyShortcut", () => {
+    it("should return true for Cmd+C on Mac when selection is present", () => {
+      const event = { type: "keydown", key: "c", metaKey: true, ctrlKey: false, altKey: false, shiftKey: false };
+      expect(isTerminalCopyShortcut(event, true, true)).toBe(true);
+    });
+
+    it("should return false for Cmd+C on Mac when no selection is present", () => {
+      const event = { type: "keydown", key: "c", metaKey: true, ctrlKey: false, altKey: false, shiftKey: false };
+      expect(isTerminalCopyShortcut(event, true, false)).toBe(false);
+    });
+
+    it("should return true for Ctrl+Shift+C on Windows/Linux when selection is present", () => {
+      const event = { type: "keydown", key: "c", ctrlKey: true, shiftKey: true, metaKey: false, altKey: false };
+      expect(isTerminalCopyShortcut(event, false, true)).toBe(true);
+    });
+
+    it("should return true for Ctrl+C on Windows/Linux when selection is present", () => {
+      const event = { type: "keydown", key: "c", ctrlKey: true, shiftKey: false, metaKey: false, altKey: false };
+      expect(isTerminalCopyShortcut(event, false, true)).toBe(true);
+    });
+
+    it("should return false for Ctrl+C on Windows/Linux when no selection is present (SIGINT pass-through)", () => {
+      const event = { type: "keydown", key: "c", ctrlKey: true, shiftKey: false, metaKey: false, altKey: false };
+      expect(isTerminalCopyShortcut(event, false, false)).toBe(false);
+    });
+
+    it("should return false for non-keydown event type", () => {
+      const event = { type: "keyup", key: "c", ctrlKey: true, shiftKey: true, metaKey: false, altKey: false };
+      expect(isTerminalCopyShortcut(event, false, true)).toBe(false);
+    });
+  });
+
+  describe("isTerminalPasteShortcut", () => {
+    it("should return true for Cmd+V on Mac", () => {
+      const event = { type: "keydown", key: "v", metaKey: true, ctrlKey: false, altKey: false, shiftKey: false };
+      expect(isTerminalPasteShortcut(event, true)).toBe(true);
+    });
+
+    it("should return false for Ctrl+V on Mac", () => {
+      const event = { type: "keydown", key: "v", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false };
+      expect(isTerminalPasteShortcut(event, true)).toBe(false);
+    });
+
+    it("should return true for Ctrl+Shift+V on Windows/Linux", () => {
+      const event = { type: "keydown", key: "v", ctrlKey: true, shiftKey: true, metaKey: false, altKey: false };
+      expect(isTerminalPasteShortcut(event, false)).toBe(true);
+    });
+
+    it("should return false for Ctrl+V on Windows/Linux", () => {
+      const event = { type: "keydown", key: "v", ctrlKey: true, shiftKey: false, metaKey: false, altKey: false };
+      expect(isTerminalPasteShortcut(event, false)).toBe(false);
+    });
   });
 });
