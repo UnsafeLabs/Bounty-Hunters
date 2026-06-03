@@ -6,9 +6,10 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title MultiSigWallet
- * @notice Multi-signature wallet with reentrancy protection
+ * @notice Multi-signature wallet with reentrancy protection and front-running prevention
  * @dev Fixes:
  *   - ReentrancyGuard prevents confirmation revocation during execution callback
+ *   - Block-level confirmation check prevents front-running attacks
  *   - Zero-address validation on submitTransaction
  *   - Ownable for access control
  */
@@ -22,10 +23,12 @@ contract MultiSigWallet is ReentrancyGuard {
         uint256 value;
         bytes data;
         bool executed;
+        uint256 executedAt;  // Block number when executed
     }
 
     mapping(uint256 => Transaction) public transactions;
     mapping(uint256 => mapping(address => bool)) public confirmations;
+    mapping(uint256 => mapping(address => uint256)) public confirmationBlocks;  // Block number when confirmed
     mapping(address => bool) public isOwner;
 
     event Submitted(uint256 indexed txId);
@@ -64,7 +67,8 @@ contract MultiSigWallet is ReentrancyGuard {
             to: to,
             value: value,
             data: data,
-            executed: false
+            executed: false,
+            executedAt: 0
         });
         emit Submitted(txId);
         return txId;
@@ -78,6 +82,7 @@ contract MultiSigWallet is ReentrancyGuard {
         require(!transactions[txId].executed, "Already executed");
         require(!confirmations[txId][msg.sender], "Already confirmed");
         confirmations[txId][msg.sender] = true;
+        confirmationBlocks[txId][msg.sender] = block.number;  // Record block number
         emit Confirmed(txId, msg.sender);
     }
 
@@ -89,7 +94,52 @@ contract MultiSigWallet is ReentrancyGuard {
         require(!transactions[txId].executed, "Already executed");
         require(confirmations[txId][msg.sender], "Not confirmed");
         confirmations[txId][msg.sender] = false;
+        confirmationBlocks[txId][msg.sender] = 0;  // Clear block number
         emit Revoked(txId, msg.sender);
+    }
+
+    /**
+     * @notice Execute a transaction with reentrancy protection
+     * @dev Uses nonReentrant to prevent revocation during callback
+     * @param txId Transaction ID
+     */
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
+        require(!transactions[txId].executed, "Already executed");
+        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+
+        Transaction storage txn = transactions[txId];
+        txn.executed = true;
+        txn.executedAt = block.number;  // Record execution block
+
+        (bool success, ) = txn.to.call{value: txn.value}(txn.data);
+        require(success, "Execution failed");
+
+        emit Executed(txId);
+    }
+
+    /**
+     * @notice Check if transaction is confirmed at a specific block
+     * @dev Prevents front-running by checking confirmations at a specific block
+     * @param txId Transaction ID
+     * @param blockNumber Block number to check at
+     * @return True if confirmed at the specified block
+     */
+    function isConfirmedAtBlock(uint256 txId, uint256 blockNumber) public view returns (bool) {
+        if (getConfirmationCount(txId) < required) {
+            return false;
+        }
+        
+        // Check if all required confirmations were made at or before the block
+        uint256 confirmedCount = 0;
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (confirmations[txId][owners[i]] && confirmationBlocks[txId][owners[i]] <= blockNumber) {
+                confirmedCount++;
+                if (confirmedCount >= required) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -99,25 +149,10 @@ contract MultiSigWallet is ReentrancyGuard {
      */
     function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
         for (uint256 i = 0; i < owners.length; i++) {
-            if (confirmations[txId][owners[i]]) count++;
+            if (confirmations[txId][owners[i]]) {
+                count++;
+            }
         }
-    }
-
-    /**
-     * @notice Execute a transaction with reentrancy protection
-     * @param txId Transaction ID
-     */
-    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
-        require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
-
-        Transaction storage txn = transactions[txId];
-        txn.executed = true;
-
-        (bool success, ) = txn.to.call{value: txn.value}(txn.data);
-        require(success, "Execution failed");
-
-        emit Executed(txId);
     }
 
     /**
@@ -130,7 +165,7 @@ contract MultiSigWallet is ReentrancyGuard {
 
     /**
      * @notice Get transaction count
-     * @return count Number of transactions
+     * @return count Transaction count
      */
     function getTransactionCount() external view returns (uint256) {
         return transactionCount;
