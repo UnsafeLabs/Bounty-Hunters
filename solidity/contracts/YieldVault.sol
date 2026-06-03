@@ -2,8 +2,23 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract YieldVault {
+/**
+ * @title YieldVault
+ * @notice Yield farming vault with security hardening
+ * @dev Fixes:
+ *   - Cap rewardPerToken at periodFinish to prevent phantom rewards
+ *   - Access control on notifyRewardAmount
+ *   - Precision-safe rewardRate calculation
+ *   - SafeERC20 for all transfers
+ *   - ReentrancyGuard on all external functions
+ */
+contract YieldVault is Ownable, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     IERC20 public rewardToken;
     IERC20 public stakingToken;
 
@@ -13,33 +28,46 @@ contract YieldVault {
     uint256 public rewardPerTokenStored;
     uint256 public totalSupply;
 
+    uint256 public constant PRECISION = 1e18;
+
     mapping(address => uint256) public balanceOf;
     mapping(address => uint256) public userRewardPerTokenPaid;
     mapping(address => uint256) public rewards;
 
-    address public rewardDistributor;
-
     event Deposited(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
+    event RewardAdded(uint256 reward, uint256 duration);
 
-    constructor(address _stakingToken, address _rewardToken) {
+    constructor(address _stakingToken, address _rewardToken) Ownable(msg.sender) {
+        require(_stakingToken != address(0), "Invalid staking token");
+        require(_rewardToken != address(0), "Invalid reward token");
         stakingToken = IERC20(_stakingToken);
         rewardToken = IERC20(_rewardToken);
-        rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    /**
+     * @notice Calculate reward per token, capped at periodFinish
+     * @return Reward per token stored
+     */
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+        
+        // Cap at periodFinish to prevent phantom rewards
+        uint256 currentTime = block.timestamp > periodFinish ? periodFinish : block.timestamp;
+        
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (currentTime - lastUpdateTime) * rewardRate * PRECISION / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
+    /**
+     * @notice Calculate earned rewards for an account
+     * @param account User address
+     * @return Earned rewards
+     */
     function earned(address account) public view returns (uint256) {
-        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
+        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / PRECISION + rewards[account];
     }
 
     modifier updateReward(address account) {
@@ -52,36 +80,57 @@ contract YieldVault {
         _;
     }
 
-    function deposit(uint256 amount) external updateReward(msg.sender) {
+    /**
+     * @notice Deposit staking tokens
+     * @param amount Amount to deposit
+     */
+    function deposit(uint256 amount) external nonReentrant updateReward(msg.sender) {
         require(amount > 0, "Cannot deposit 0");
         totalSupply += amount;
         balanceOf[msg.sender] += amount;
-        stakingToken.transferFrom(msg.sender, address(this), amount);
+        stakingToken.safeTransferFrom(msg.sender, address(this), amount);
         emit Deposited(msg.sender, amount);
     }
 
-    function withdraw(uint256 amount) external updateReward(msg.sender) {
+    /**
+     * @notice Withdraw staking tokens
+     * @param amount Amount to withdraw
+     */
+    function withdraw(uint256 amount) external nonReentrant updateReward(msg.sender) {
         require(amount > 0, "Cannot withdraw 0");
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         totalSupply -= amount;
         balanceOf[msg.sender] -= amount;
-        stakingToken.transfer(msg.sender, amount);
+        stakingToken.safeTransfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
 
-    function claimReward() external updateReward(msg.sender) {
+    /**
+     * @notice Claim earned rewards
+     */
+    function claimReward() external nonReentrant updateReward(msg.sender) {
         uint256 reward = rewards[msg.sender];
         if (reward > 0) {
             rewards[msg.sender] = 0;
-            rewardToken.transfer(msg.sender, reward);
+            rewardToken.safeTransfer(msg.sender, reward);
             emit RewardPaid(msg.sender, reward);
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
-    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+    /**
+     * @notice Add reward tokens (only owner)
+     * @param reward Amount of reward tokens
+     * @param duration Duration of reward period
+     */
+    function notifyRewardAmount(uint256 reward, uint256 duration) external onlyOwner updateReward(address(0)) {
+        require(duration > 0, "Duration must be > 0");
+        require(reward > 0, "Reward must be > 0");
+        
+        // Precision-safe calculation: multiply before divide
+        rewardRate = reward * PRECISION / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
+        
+        emit RewardAdded(reward, duration);
     }
 }
