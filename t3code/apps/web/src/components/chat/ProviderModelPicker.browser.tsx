@@ -1223,4 +1223,127 @@ describe("ProviderModelPicker", () => {
       await mounted.cleanup();
     }
   });
+
+  it("does not call onInstanceModelChange on mount if localStorage is empty", async () => {
+    localStorage.removeItem("t3code:provider-model-picker:provider-id");
+    localStorage.removeItem("t3code:provider-model-picker:model-id");
+
+    const mounted = await mountPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      expect(mounted.onInstanceModelChange).not.toHaveBeenCalled();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("restores the persisted values on component mount", async () => {
+    localStorage.setItem("t3code:provider-model-picker:provider-id", "claudeAgent");
+    localStorage.setItem("t3code:provider-model-picker:model-id", "claude-opus-4-6");
+
+    const mounted = await mountPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith("claudeAgent", "claude-opus-4-6");
+      });
+    } finally {
+      await mounted.cleanup();
+      localStorage.removeItem("t3code:provider-model-picker:provider-id");
+      localStorage.removeItem("t3code:provider-model-picker:model-id");
+    }
+  });
+
+  it("falls back to the first available provider if the persisted provider is no longer available", async () => {
+    localStorage.setItem("t3code:provider-model-picker:provider-id", "non-existent-provider");
+    localStorage.setItem("t3code:provider-model-picker:model-id", "some-model");
+
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        // TEST_PROVIDERS[0] is codex (first ready provider)
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith("codex", "gpt-5-codex");
+      });
+    } finally {
+      await mounted.cleanup();
+      localStorage.removeItem("t3code:provider-model-picker:provider-id");
+      localStorage.removeItem("t3code:provider-model-picker:model-id");
+    }
+  });
+
+  it("syncs persisted preference across browser tabs via storage event", async () => {
+    localStorage.removeItem("t3code:provider-model-picker:provider-id");
+    localStorage.removeItem("t3code:provider-model-picker:model-id");
+
+    const mounted = await mountPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      localStorage.setItem("t3code:provider-model-picker:provider-id", "claudeAgent");
+      localStorage.setItem("t3code:provider-model-picker:model-id", "claude-opus-4-6");
+
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "t3code:provider-model-picker:provider-id",
+          newValue: "claudeAgent",
+        })
+      );
+
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith("claudeAgent", "claude-opus-4-6");
+      });
+    } finally {
+      await mounted.cleanup();
+      localStorage.removeItem("t3code:provider-model-picker:provider-id");
+      localStorage.removeItem("t3code:provider-model-picker:model-id");
+    }
+  });
+
+  it("clears persisted preference and reverts to default when reset is clicked", async () => {
+    localStorage.setItem("t3code:provider-model-picker:provider-id", "claudeAgent");
+    localStorage.setItem("t3code:provider-model-picker:model-id", "claude-opus-4-6");
+
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(document.querySelector("button")).not.toBeNull();
+      });
+      const resetBtn = page.getByRole("button", { name: "Reset to default" });
+      await resetBtn.click();
+
+      await vi.waitFor(() => {
+        expect(localStorage.getItem("t3code:provider-model-picker:provider-id")).toBeNull();
+        expect(localStorage.getItem("t3code:provider-model-picker:model-id")).toBeNull();
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith("codex", "gpt-5-codex");
+      });
+    } finally {
+      await mounted.cleanup();
+      localStorage.removeItem("t3code:provider-model-picker:provider-id");
+      localStorage.removeItem("t3code:provider-model-picker:model-id");
+    }
+  });
 });
+

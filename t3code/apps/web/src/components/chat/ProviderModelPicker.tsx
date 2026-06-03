@@ -3,7 +3,8 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import * as React from "react";
+import { memo, useMemo } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -43,7 +44,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   onOpenChange?: (open: boolean) => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
-  const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
+  const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = React.useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
 
   // Resolve the active instance entry by exact routing key. The composer
@@ -79,18 +80,148 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     }
   };
 
-  useEffect(() => {
+  React.useEffect(() => {
     setModelPickerOpen(isMenuOpen);
     return () => {
       setModelPickerOpen(false);
     };
   }, [isMenuOpen]);
 
+  const [restored, setRestored] = React.useState(false);
+
+  React.useEffect(() => {
+    if (restored) return;
+    if (props.instanceEntries.length === 0) return;
+
+    const persistedProviderId = localStorage.getItem(
+      "t3code:provider-model-picker:provider-id",
+    ) as ProviderInstanceId | null;
+    const persistedModel = localStorage.getItem("t3code:provider-model-picker:model-id");
+
+    if (persistedProviderId && persistedModel) {
+      setRestored(true);
+      const matchedEntry = props.instanceEntries.find(
+        (entry) => entry.instanceId === persistedProviderId,
+      );
+
+      if (matchedEntry) {
+        const models = props.modelOptionsByInstance.get(matchedEntry.instanceId) ?? [];
+        const hasModel = models.some((m) => m.slug === persistedModel);
+        if (hasModel) {
+          props.onInstanceModelChange(matchedEntry.instanceId, persistedModel);
+        } else if (models.length > 0) {
+          const firstModel = models[0];
+          if (firstModel) {
+            props.onInstanceModelChange(matchedEntry.instanceId, firstModel.slug);
+          }
+        }
+      } else {
+        const firstReady = props.instanceEntries.find((entry) => entry.status === "ready");
+        if (firstReady) {
+          const models = props.modelOptionsByInstance.get(firstReady.instanceId) ?? [];
+          const firstModel = models[0];
+          if (firstModel) {
+            props.onInstanceModelChange(firstReady.instanceId, firstModel.slug);
+          }
+        } else if (props.instanceEntries.length > 0) {
+          const first = props.instanceEntries[0];
+          if (first) {
+            const models = props.modelOptionsByInstance.get(first.instanceId) ?? [];
+            const firstModel = models[0];
+            if (firstModel) {
+              props.onInstanceModelChange(first.instanceId, firstModel.slug);
+            }
+          }
+        }
+      }
+    } else {
+      setRestored(true);
+    }
+  }, [props.instanceEntries, props.modelOptionsByInstance, restored]);
+
+  React.useEffect(() => {
+    const handleStorageChange = (event: StorageEvent) => {
+      if (
+        event.key === "t3code:provider-model-picker:provider-id" ||
+        event.key === "t3code:provider-model-picker:model-id"
+      ) {
+        const persistedProviderId = localStorage.getItem(
+          "t3code:provider-model-picker:provider-id",
+        ) as ProviderInstanceId | null;
+        const persistedModel = localStorage.getItem("t3code:provider-model-picker:model-id");
+
+        if (persistedProviderId && persistedModel) {
+          const matchedEntry = props.instanceEntries.find(
+            (entry) => entry.instanceId === persistedProviderId,
+          );
+          if (matchedEntry) {
+            const models = props.modelOptionsByInstance.get(matchedEntry.instanceId) ?? [];
+            const hasModel = models.some((m) => m.slug === persistedModel);
+            if (hasModel) {
+              props.onInstanceModelChange(matchedEntry.instanceId, persistedModel);
+            }
+          }
+        } else if (!persistedProviderId && !persistedModel) {
+          // Revert to default
+          const firstReady = props.instanceEntries.find((entry) => entry.status === "ready");
+          if (firstReady) {
+            const models = props.modelOptionsByInstance.get(firstReady.instanceId) ?? [];
+            const firstModel = models[0];
+            if (firstModel) {
+              props.onInstanceModelChange(firstReady.instanceId, firstModel.slug);
+            }
+          } else if (props.instanceEntries.length > 0) {
+            const first = props.instanceEntries[0];
+            if (first) {
+              const models = props.modelOptionsByInstance.get(first.instanceId) ?? [];
+              const firstModel = models[0];
+              if (firstModel) {
+                props.onInstanceModelChange(first.instanceId, firstModel.slug);
+              }
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, [props.instanceEntries, props.modelOptionsByInstance, props.onInstanceModelChange]);
+
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
+    localStorage.setItem("t3code:provider-model-picker:provider-id", instanceId);
+    localStorage.setItem("t3code:provider-model-picker:model-id", model);
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
   };
+
+  const handleResetToDefault = () => {
+    localStorage.removeItem("t3code:provider-model-picker:provider-id");
+    localStorage.removeItem("t3code:provider-model-picker:model-id");
+
+    const firstReady = props.instanceEntries.find((entry) => entry.status === "ready");
+    if (firstReady) {
+      const models = props.modelOptionsByInstance.get(firstReady.instanceId) ?? [];
+      const firstModel = models[0];
+      if (firstModel) {
+        props.onInstanceModelChange(firstReady.instanceId, firstModel.slug);
+      }
+    } else if (props.instanceEntries.length > 0) {
+      const first = props.instanceEntries[0];
+      if (first) {
+        const models = props.modelOptionsByInstance.get(first.instanceId) ?? [];
+        const firstModel = models[0];
+        if (firstModel) {
+          props.onInstanceModelChange(first.instanceId, firstModel.slug);
+        }
+      }
+    }
+    setIsMenuOpen(false);
+  };
+
 
   return (
     <Popover
@@ -180,6 +311,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           terminalOpen={props.terminalOpen ?? false}
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
+          onResetToDefault={handleResetToDefault}
         />
       </PopoverPopup>
     </Popover>

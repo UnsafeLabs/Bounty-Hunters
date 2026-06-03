@@ -21,6 +21,7 @@ import {
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { TooltipProvider } from "../ui/tooltip";
+import { Button } from "../ui/button";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 
@@ -82,6 +83,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   terminalOpen: boolean;
   onRequestClose?: () => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  onResetToDefault?: () => void;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -90,6 +92,59 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     onInstanceModelChange,
   } = props;
   const [searchQuery, setSearchQuery] = useState("");
+  const [hasPersisted, setHasPersisted] = useState(false);
+
+  useEffect(() => {
+    const checkPersisted = () => {
+      const pId = localStorage.getItem("t3code:provider-model-picker:provider-id");
+      const mId = localStorage.getItem("t3code:provider-model-picker:model-id");
+      setHasPersisted(Boolean(pId || mId));
+    };
+    checkPersisted();
+
+    const handleStorage = () => {
+      checkPersisted();
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  const handleResetToDefault = useCallback(() => {
+    if (props.onResetToDefault) {
+      props.onResetToDefault();
+      setHasPersisted(false);
+      return;
+    }
+    localStorage.removeItem("t3code:provider-model-picker:provider-id");
+    localStorage.removeItem("t3code:provider-model-picker:model-id");
+    setHasPersisted(false);
+
+    const firstReady = props.instanceEntries.find((entry) => entry.status === "ready");
+    if (firstReady) {
+      const models = props.modelOptionsByInstance.get(firstReady.instanceId) ?? [];
+      const firstModel = models[0];
+      if (firstModel) {
+        props.onInstanceModelChange(firstReady.instanceId, firstModel.slug);
+      }
+    } else if (props.instanceEntries.length > 0) {
+      const first = props.instanceEntries[0];
+      if (first) {
+        const models = props.modelOptionsByInstance.get(first.instanceId) ?? [];
+        const firstModel = models[0];
+        if (firstModel) {
+          props.onInstanceModelChange(first.instanceId, firstModel.slug);
+        }
+      }
+    }
+    props.onRequestClose?.();
+  }, [
+    props.onResetToDefault,
+    props.instanceEntries,
+    props.modelOptionsByInstance,
+    props.onInstanceModelChange,
+    props.onRequestClose,
+  ]);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listRegionRef = useRef<HTMLDivElement>(null);
   const highlightedModelKeyRef = useRef<string | null>(null);
@@ -641,6 +696,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             <ComboboxEmpty className="not-empty:py-6 empty:h-0 text-xs font-normal leading-snug">
               No models found
             </ComboboxEmpty>
+            {hasPersisted && (
+              <div className="border-t p-2 flex justify-end bg-muted/20">
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                  onClick={handleResetToDefault}
+                >
+                  Reset to default
+                </Button>
+              </div>
+            )}
           </div>
         </Combobox>
       </div>
