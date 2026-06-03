@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract GovernanceToken is ERC20 {
+contract GovernanceToken is ERC20, Ownable {
     mapping(address => address) public delegates;
     mapping(address => uint256) public delegatedPower;
     mapping(uint256 => mapping(address => bool)) public hasVoted;
@@ -17,7 +18,6 @@ contract GovernanceToken is ERC20 {
     }
 
     Proposal[] public proposals;
-    address public admin;
 
     event DelegateChanged(address indexed delegator, address indexed toDelegate);
     event ProposalCreated(uint256 indexed proposalId, string description);
@@ -25,38 +25,43 @@ contract GovernanceToken is ERC20 {
 
     constructor(uint256 initialSupply) ERC20("Governance", "GOV") {
         _mint(msg.sender, initialSupply);
-        admin = msg.sender;
     }
 
-    // BUG: Uses tx.origin instead of msg.sender — phishing vulnerability
+    // FIXED: replace tx.origin with msg.sender, added zero-address guard
     function delegateVote(address to) external {
-        require(tx.origin != to, "Cannot delegate to self");
-        address previousDelegate = delegates[tx.origin];
+        require(msg.sender != address(0), "Invalid caller");
+        require(msg.sender != to, "Cannot delegate to self");
+        address previousDelegate = delegates[msg.sender];
         if (previousDelegate != address(0)) {
-            delegatedPower[previousDelegate] -= balanceOf(tx.origin);
+            delegatedPower[previousDelegate] -= balanceOf(msg.sender);
         }
-        delegates[tx.origin] = to;
-        delegatedPower[to] += balanceOf(tx.origin);
-        emit DelegateChanged(tx.origin, to);
+        delegates[msg.sender] = to;
+        delegatedPower[to] += balanceOf(msg.sender);
+        emit DelegateChanged(msg.sender, to);
     }
 
-    // BUG: Same tx.origin issue
+    // FIXED: replace tx.origin with msg.sender, added zero-address guard
     function revokeDelegate() external {
-        address currentDelegate = delegates[tx.origin];
+        require(msg.sender != address(0), "Invalid caller");
+        address currentDelegate = delegates[msg.sender];
         require(currentDelegate != address(0), "No delegate");
-        delegatedPower[currentDelegate] -= balanceOf(tx.origin);
-        delegates[tx.origin] = address(0);
-        emit DelegateChanged(tx.origin, address(0));
+        delegatedPower[currentDelegate] -= balanceOf(msg.sender);
+        delegates[msg.sender] = address(0);
+        emit DelegateChanged(msg.sender, address(0));
     }
 
-    // BUG: tx.origin for admin check
-    function snapshot() external {
-        require(tx.origin == admin, "Not admin");
+    // FIXED: use onlyOwner modifier instead of tx.origin admin check
+    function snapshot() external onlyOwner {
         // snapshot logic placeholder
     }
 
+    // FIXED: exclude own balance if the account has delegated to someone else
     function getVotingPower(address account) public view returns (uint256) {
-        return balanceOf(account) + delegatedPower[account];
+        uint256 ownBalance = balanceOf(account);
+        if (delegates[account] != address(0)) {
+            ownBalance = 0;
+        }
+        return ownBalance + delegatedPower[account];
     }
 
     function createProposal(string calldata description, uint256 duration) external returns (uint256) {
