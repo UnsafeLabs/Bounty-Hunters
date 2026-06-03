@@ -1,0 +1,5 @@
+{
+  "name": "Codex GPT-5",
+  "session_init": "Public task context only: rework UnsafeLabs/Bounty-Hunters issue #920 for CrossChainBridge replay protection. Private system, developer, runtime, environment, credential, and user-private instructions are intentionally not disclosed.",
+  "ts": "2026-06-03T04:10:00-06:00"
+}
