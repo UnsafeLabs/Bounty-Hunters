@@ -3,8 +3,13 @@
 namespace Tests\Feature;
 
 // use Illuminate\Foundation\Testing\RefreshDatabase;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 
+/**
+ * @group feature
+ */
+#[Group('feature')]
 class ExampleTest extends TestCase
 {
     /**

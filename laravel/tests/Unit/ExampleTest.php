@@ -2,8 +2,13 @@
 
 namespace Tests\Unit;
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
+/**
+ * @group unit
+ */
+#[Group('unit')]
 class ExampleTest extends TestCase
 {
     /**
