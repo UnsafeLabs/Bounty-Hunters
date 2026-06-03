@@ -13,6 +13,8 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { Argument, Flag } from "effect/unstable/cli";
 
+import { runConfigValidationOrExit } from "./envValidation.ts";
+
 import { readBootstrapEnvelope } from "../bootstrap.ts";
 import {
   DEFAULT_PORT,
@@ -78,6 +80,10 @@ export const tailscaleServeFlag = Flag.boolean("tailscale-serve").pipe(
 export const tailscaleServePortFlag = Flag.integer("tailscale-serve-port").pipe(
   Flag.withSchema(PortSchema),
   Flag.withDescription("HTTPS port for Tailscale Serve when --tailscale-serve is enabled."),
+  Flag.optional,
+);
+export const validateConfigFlag = Flag.boolean("validate-config").pipe(
+  Flag.withDescription("Validate environment variable configuration and exit without starting the server."),
   Flag.optional,
 );
 
@@ -151,6 +157,7 @@ export interface CliServerFlags {
   readonly logWebSocketEvents: Option.Option<boolean>;
   readonly tailscaleServeEnabled: Option.Option<boolean>;
   readonly tailscaleServePort: Option.Option<number>;
+  readonly validateConfig: Option.Option<boolean>;
 }
 
 export interface CliAuthLocationFlags {
@@ -185,6 +192,7 @@ export const sharedServerCommandFlags = {
   logWebSocketEvents: logWebSocketEventsFlag,
   tailscaleServeEnabled: tailscaleServeFlag,
   tailscaleServePort: tailscaleServePortFlag,
+  validateConfig: validateConfigFlag,
 } as const;
 
 export const authLocationFlags = sharedServerLocationFlags;
@@ -210,6 +218,7 @@ export const resolveServerConfig = (
   options?: {
     readonly startupPresentation?: StartupPresentation;
     readonly forceAutoBootstrapProjectFromCwd?: boolean;
+    readonly skipEnvValidation?: boolean;
   },
 ) =>
   Effect.gen(function* () {
@@ -230,7 +239,13 @@ export const resolveServerConfig = (
       logWebSocketEvents: flags.logWebSocketEvents ?? Option.none(),
       tailscaleServeEnabled: flags.tailscaleServeEnabled ?? Option.none(),
       tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
+      validateConfig: flags.validateConfig ?? Option.none(),
     } satisfies CliServerFlags;
+
+    const shouldSkipValidation = options?.skipEnvValidation ?? (process.env.NODE_ENV === "test" || !!process.env.VITEST);
+    if (!shouldSkipValidation) {
+      yield* runConfigValidationOrExit(normalizedFlags);
+    }
     const bootstrapFd = Option.getOrUndefined(normalizedFlags.bootstrapFd) ?? env.bootstrapFd;
     const bootstrapEnvelope =
       bootstrapFd !== undefined
