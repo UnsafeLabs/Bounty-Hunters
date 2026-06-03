@@ -61,6 +61,38 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "@t3tools/contracts#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "@t3tools/client-runtime#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "@t3tools/shared#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "effect-acp#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "effect-codex-app-server#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "@t3tools/ssh#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "@t3tools/tailscale#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "@t3tools/oxlint-plugin-t3code#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
     "dev": {
       "dependsOn": ["@t3tools/contracts#build"],
       "cache": false,
