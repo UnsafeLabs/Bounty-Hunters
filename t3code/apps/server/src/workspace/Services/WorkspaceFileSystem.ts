@@ -10,7 +10,12 @@ import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 
-import type { ProjectWriteFileInput, ProjectWriteFileResult } from "@t3tools/contracts";
+import type {
+  ProjectWriteFileInput,
+  ProjectWriteFileResult,
+  ProjectMoveFileInput,
+  ProjectMoveFileResult,
+} from "@t3tools/contracts";
 import { WorkspacePathOutsideRootError } from "./WorkspacePaths.ts";
 
 export class WorkspaceFileSystemError extends Schema.TaggedErrorClass<WorkspaceFileSystemError>()(
@@ -38,6 +43,12 @@ export interface WorkspaceFileSystemShape {
     input: ProjectWriteFileInput,
   ) => Effect.Effect<
     ProjectWriteFileResult,
+    WorkspaceFileSystemError | WorkspacePathOutsideRootError
+  >;
+  readonly moveFile: (
+    input: ProjectMoveFileInput,
+  ) => Effect.Effect<
+    ProjectMoveFileResult,
     WorkspaceFileSystemError | WorkspacePathOutsideRootError
   >;
 }

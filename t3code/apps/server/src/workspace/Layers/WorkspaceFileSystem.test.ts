@@ -13,6 +13,35 @@ import { WorkspaceFileSystem } from "../Services/WorkspaceFileSystem.ts";
 import { WorkspaceEntriesLive } from "./WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./WorkspacePaths.ts";
+import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
+
+let lastGitCommands: Array<{ operation: string; args: string[] }> = [];
+
+const MockGitVcsDriver = Layer.succeed(
+  GitVcsDriver.GitVcsDriver,
+  GitVcsDriver.GitVcsDriver.of({
+    execute: (input) => {
+      lastGitCommands.push({ operation: input.operation, args: [...input.args] });
+      if (input.args[0] === "ls-files" && input.args[1] === "--error-unmatch") {
+        const isTracked = input.args[2].includes("tracked") && !input.args[2].includes("untracked");
+        return Effect.succeed({
+          exitCode: isTracked ? 0 : 1,
+          stdout: "",
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        });
+      }
+      return Effect.succeed({
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      });
+    },
+  } as any),
+);
 
 const ProjectLayer = WorkspaceFileSystemLive.pipe(
   Layer.provide(WorkspacePathsLive),
@@ -24,6 +53,7 @@ const TestLayer = Layer.empty.pipe(
   Layer.provideMerge(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
   Layer.provideMerge(WorkspacePathsLive),
   Layer.provideMerge(VcsDriverRegistry.layer.pipe(Layer.provide(VcsProcess.layer))),
+  Layer.provideMerge(MockGitVcsDriver),
   Layer.provide(
     ServerConfig.layerTest(process.cwd(), {
       prefix: "t3-workspace-files-test-",
@@ -134,6 +164,77 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
           .stat(escapedPath)
           .pipe(Effect.catch(() => Effect.succeed(null)));
         expect(escapedStat).toBeNull();
+      }),
+    );
+  });
+
+  describe("moveFile", () => {
+    it.effect("moves untracked files using standard filesystem move", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        lastGitCommands = [];
+
+        yield* writeTextFile(cwd, "src/untracked.ts", "content");
+
+        const result = yield* workspaceFileSystem.moveFile({
+          cwd,
+          sourceRelativePaths: ["src/untracked.ts"],
+          destinationDirectoryRelativePath: "dist",
+        });
+
+        expect(result).toEqual({
+          movedPaths: [
+            {
+              sourceRelativePath: "src/untracked.ts",
+              destinationRelativePath: "dist/untracked.ts",
+            },
+          ],
+        });
+
+        const gitMvCall = lastGitCommands.find((c) => c.args[0] === "mv");
+        expect(gitMvCall).toBeUndefined();
+
+        const destExists = yield* fileSystem.exists(path.join(cwd, "dist/untracked.ts"));
+        expect(destExists).toBe(true);
+
+        const srcExists = yield* fileSystem.exists(path.join(cwd, "src/untracked.ts"));
+        expect(srcExists).toBe(false);
+      }),
+    );
+
+    it.effect("moves tracked files using git mv", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        lastGitCommands = [];
+
+        yield* writeTextFile(cwd, "src/tracked.ts", "content");
+
+        const result = yield* workspaceFileSystem.moveFile({
+          cwd,
+          sourceRelativePaths: ["src/tracked.ts"],
+          destinationDirectoryRelativePath: "dist",
+        });
+
+        expect(result).toEqual({
+          movedPaths: [
+            {
+              sourceRelativePath: "src/tracked.ts",
+              destinationRelativePath: "dist/tracked.ts",
+            },
+          ],
+        });
+
+        const gitMvCall = lastGitCommands.find((c) => c.args[0] === "mv");
+        expect(gitMvCall).toBeDefined();
+        expect(gitMvCall?.args).toEqual(["mv", "src/tracked.ts", "dist/tracked.ts"]);
       }),
     );
   });

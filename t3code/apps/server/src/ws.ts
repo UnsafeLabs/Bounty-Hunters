@@ -26,6 +26,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
+  ProjectMoveFileError,
   OrchestrationReplayEventsError,
   FilesystemBrowseError,
   ThreadId,
@@ -972,6 +973,22 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   ? "Workspace file path must stay within the project root."
                   : "Failed to write workspace file";
                 return new ProjectWriteFileError({
+                  message,
+                  cause,
+                });
+              }),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsMoveFile]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsMoveFile,
+            workspaceFileSystem.moveFile(input).pipe(
+              Effect.mapError((cause) => {
+                const message = isWorkspacePathOutsideRootError(cause)
+                  ? "Workspace file path must stay within the project root."
+                  : "Failed to move workspace file";
+                return new ProjectMoveFileError({
                   message,
                   cause,
                 });

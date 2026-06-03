@@ -56,6 +56,9 @@ import {
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
+  ProjectMoveFileError,
+  ProjectMoveFileInput,
+  ProjectMoveFileResult,
 } from "./project.ts";
 import {
   TerminalClearInput,
@@ -106,6 +109,7 @@ export const WS_METHODS = {
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
+  projectsMoveFile: "projects.moveFile",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -274,6 +278,12 @@ export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
   error: ProjectWriteFileError,
+});
+
+export const WsProjectsMoveFileRpc = Rpc.make(WS_METHODS.projectsMoveFile, {
+  payload: ProjectMoveFileInput,
+  success: ProjectMoveFileResult,
+  error: ProjectMoveFileError,
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -490,6 +500,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlPublishRepositoryRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
+  WsProjectsMoveFileRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsSubscribeVcsStatusRpc,

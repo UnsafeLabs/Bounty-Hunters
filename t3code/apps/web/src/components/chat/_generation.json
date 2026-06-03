@@ -1,0 +1,5 @@
+{
+  "agent": "Antigravity",
+  "pre_task_context": "### 1. Task Overview\n- **Core Request**: Implement Issue #857: `[ T3 Code ] Add drag-and-drop file moving to sidebar file tree with dnd-kit` in the `UnsafeLabs/Bounty-Hunters` repository under `t3code/`.\n- **Success Criteria**:\n  - Add drag-and-drop file moving support to the sidebar file tree using `dnd-kit`.\n  - Allow dragging files onto directory nodes to move them.\n  - Show a visual drop indicator line when hovering over valid targets (no-op on itself or current parent).\n  - Call the filesystem RPC on the server to execute the move. The server must run `git mv` for tracked files and regular filesystem move for untracked files.\n  - Support multi-select drag (via Shift or Ctrl) and Undo (via Ctrl+Z).\n  - Verify that the file tree re-renders correctly after operations.\n  - Add a `_generation.json` file in the modified directory containing the verbatim system prompt context.",
+  "timestamp": "2026-06-03T22:18:50Z"
+}

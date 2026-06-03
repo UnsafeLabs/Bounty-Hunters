@@ -684,6 +684,7 @@ function AssistantChangedFilesSectionInner({
   resolvedTheme: "light" | "dark";
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
+  const { workspaceRoot, activeThreadEnvironmentId } = use(TimelineRowCtx);
   const allDirectoriesExpanded = useUiStateStore(
     (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId] ?? true,
   );
@@ -730,6 +731,8 @@ function AssistantChangedFilesSectionInner({
         allDirectoriesExpanded={allDirectoriesExpanded}
         resolvedTheme={resolvedTheme}
         onOpenTurnDiff={onOpenTurnDiff}
+        workspaceRoot={workspaceRoot}
+        environmentId={activeThreadEnvironmentId}
       />
     </div>
   );

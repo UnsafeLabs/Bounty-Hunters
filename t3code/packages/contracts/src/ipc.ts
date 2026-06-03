@@ -24,6 +24,8 @@ import type {
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
+  ProjectMoveFileInput,
+  ProjectMoveFileResult,
 } from "./project.ts";
 import type { ProviderInstanceId } from "./providerInstance.ts";
 import type {
@@ -506,6 +508,7 @@ export interface EnvironmentApi {
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+    moveFile: (input: ProjectMoveFileInput) => Promise<ProjectMoveFileResult>;
   };
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;

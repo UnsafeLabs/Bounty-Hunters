@@ -53,3 +53,28 @@ export class ProjectWriteFileError extends Schema.TaggedErrorClass<ProjectWriteF
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
+
+export const ProjectMoveFileInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  sourceRelativePaths: Schema.Array(TrimmedNonEmptyString),
+  destinationDirectoryRelativePath: Schema.String,
+});
+export type ProjectMoveFileInput = typeof ProjectMoveFileInput.Type;
+
+export const ProjectMoveFileResult = Schema.Struct({
+  movedPaths: Schema.Array(
+    Schema.Struct({
+      sourceRelativePath: TrimmedNonEmptyString,
+      destinationRelativePath: TrimmedNonEmptyString,
+    }),
+  ),
+});
+export type ProjectMoveFileResult = typeof ProjectMoveFileResult.Type;
+
+export class ProjectMoveFileError extends Schema.TaggedErrorClass<ProjectMoveFileError>()(
+  "ProjectMoveFileError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
