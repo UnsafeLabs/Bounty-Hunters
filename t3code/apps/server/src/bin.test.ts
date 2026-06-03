@@ -359,4 +359,18 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       assert.equal(optionError.option, "--dev-url");
     }),
   );
+
+  it.effect("outputs version for version subcommand", () =>
+    Effect.gen(function* () {
+      const output = yield* captureStdout(runCli(["version"]));
+      assert.isTrue(output.output.includes("t3code v"));
+    }),
+  );
+
+  it.effect("outputs version for --version flag", () =>
+    Effect.gen(function* () {
+      const output = yield* captureStdout(runCli(["--version"]));
+      assert.equal(output.output, "t3 v0.0.0");
+    }),
+  );
 });
