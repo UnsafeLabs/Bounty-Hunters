@@ -23,21 +23,26 @@ contract YieldVault {
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
 
+    modifier onlyRewardDistributor() {
+        require(msg.sender == rewardDistributor, "Not authorized");
+        _;
+    }
+
     constructor(address _stakingToken, address _rewardToken) {
         stakingToken = IERC20(_stakingToken);
         rewardToken = IERC20(_rewardToken);
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    // FIX: Cap time at periodFinish to prevent phantom rewards after period expiry
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+        uint256 time = block.timestamp < periodFinish ? block.timestamp : periodFinish;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (time - lastUpdateTime) * rewardRate * 1e18 / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
@@ -77,10 +82,18 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
-    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+    // FIX: Added onlyRewardDistributor access control
+    // FIX: Multiplies before dividing to reduce precision loss
+    // FIX: Handles leftover rewards during active period
+    function notifyRewardAmount(uint256 reward, uint256 duration) external onlyRewardDistributor updateReward(address(0)) {
+        require(duration > 0, "Duration must be > 0");
+        if (block.timestamp >= periodFinish) {
+            rewardRate = reward * 1e18 / duration;
+        } else {
+            uint256 remaining = periodFinish - block.timestamp;
+            uint256 leftover = remaining * rewardRate;
+            rewardRate = (reward * 1e18 + leftover) / duration;
+        }
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
     }
