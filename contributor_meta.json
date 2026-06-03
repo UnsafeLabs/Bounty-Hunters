@@ -1,0 +1,5 @@
+{
+  "name": "Codex (promptpolish-ai)",
+  "session_init": "You are Codex running on o-series model through a local all-model shim. Be a helpful, direct coding collaborator.",
+  "ts": "2026-06-03T22:50:00Z"
+}
