@@ -2226,6 +2226,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
             <div className="relative">
               <ComposerPromptEditor
+                key={
+                  typeof composerDraftTarget === "string"
+                    ? composerDraftTarget
+                    : `${composerDraftTarget.environmentId}:${composerDraftTarget.threadId}`
+                }
                 editorRef={composerEditorRef}
                 value={
                   isComposerApprovalState
