@@ -23,7 +23,7 @@ import * as Schema from "effect/Schema";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
-const SIDEBAR_WIDTH = "16rem";
+const SIDEBAR_WIDTH = "280px";
 const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
@@ -543,6 +543,24 @@ function SidebarRail({
     [onClick, open, resolvedResizable, toggleSidebar],
   );
 
+  const handleDoubleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      if (!resolvedResizable || !open) return;
+      event.preventDefault();
+
+      const wrapper = event.currentTarget.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
+      if (!wrapper) return;
+
+      const defaultWidth = 280;
+      wrapper.style.setProperty("--sidebar-width", `${defaultWidth}px`);
+      if (resolvedResizable.storageKey && typeof window !== "undefined") {
+        setLocalStorageItem(resolvedResizable.storageKey, defaultWidth, Schema.Finite);
+      }
+      resolvedResizable.onResize?.(defaultWidth);
+    },
+    [open, resolvedResizable],
+  );
+
   React.useEffect(() => {
     if (!resolvedResizable?.storageKey || typeof window === "undefined") return;
     const rail = railRef.current;
@@ -576,7 +594,7 @@ function SidebarRail({
       aria-label={railLabel}
       className={cn(
         /* disable pointer events only when offcanvas sidebar is collapsed, that's when the rail sits over the native scrollbar on windows and linux. icon mode stays fully clickable. */
-        "-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none",
+        "-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-primary hover:after:w-[3px] after:transition-all after:duration-150 group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none",
         "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
         "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
         "group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:left-full",
@@ -587,6 +605,7 @@ function SidebarRail({
       data-sidebar="rail"
       data-slot="sidebar-rail"
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       onPointerCancel={handlePointerCancel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
