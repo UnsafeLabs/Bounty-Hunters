@@ -407,6 +407,7 @@ export const TraitsPicker = memo(function TraitsPicker({
           <Button
             size="sm"
             variant={triggerVariant ?? "ghost"}
+            aria-label="Model options"
             className={cn(
               isCodexStyle
                 ? "min-w-0 max-w-40 shrink justify-start overflow-hidden whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:max-w-48 sm:px-3 [&_svg]:mx-0"

@@ -204,6 +204,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             size="sm"
             type="button"
             onClick={props.onToggleInteractionMode}
+            aria-label={props.interactionMode === "plan" ? "Switch to build mode" : "Switch to plan mode"}
             title={
               props.interactionMode === "plan"
                 ? "Plan mode — click to return to normal build mode"
@@ -269,6 +270,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             size="sm"
             type="button"
             onClick={props.onTogglePlanSidebar}
+            aria-label={props.planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
             title={
               props.planSidebarOpen
                 ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
@@ -1673,6 +1675,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return true;
       }
     }
+    if (key === "ArrowUp" && !menuIsActive) {
+      const editorSnapshot = composerRef.current?.readSnapshot();
+      if (editorSnapshot && editorSnapshot.cursor === 0 && editorSnapshot.value.trim().length === 0) {
+        const timelineRows = document.querySelectorAll('[data-timeline-row-kind="message"][tabindex="0"]');
+        if (timelineRows.length > 0) {
+          const lastRow = timelineRows[timelineRows.length - 1] as HTMLElement;
+          lastRow.focus();
+          return true;
+        }
+      }
+    }
     if (key === "Enter" && !event.shiftKey) {
       submitComposer();
       return true;
@@ -1940,9 +1953,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   return (
     <form
+      id="composer"
+      tabIndex={-1}
       ref={composerFormRef}
       onSubmit={submitComposer}
-      className="mx-auto w-full min-w-0 max-w-208"
+      className="mx-auto w-full min-w-0 max-w-208 focus:outline-none"
       data-chat-composer-form="true"
     >
       <div

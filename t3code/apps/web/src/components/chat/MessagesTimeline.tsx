@@ -86,6 +86,7 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onFocusComposer?: (() => void) | undefined;
 }
 
 interface TimelineRowActivityState {
@@ -126,6 +127,7 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onFocusComposer?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +157,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
+  onFocusComposer,
 }: MessagesTimelineProps) {
   const rawRows = useMemo(
     () =>
@@ -220,6 +223,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onFocusComposer,
     }),
     [
       timestampFormat,
@@ -232,6 +236,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onFocusComposer,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -300,12 +305,66 @@ type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["grouped
 type TimelineRow = MessagesTimelineRow;
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
+  const ctx = use(TimelineRowCtx);
+  const isMessage = row.kind === "message";
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isMessage) return;
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      const currentWrapper = event.currentTarget.closest('[data-timeline-root="true"]');
+      if (!currentWrapper) return;
+      let prevWrapper = currentWrapper.previousElementSibling;
+      while (prevWrapper) {
+        const focusable = prevWrapper.querySelector('[tabindex="0"]') as HTMLElement | null;
+        if (focusable) {
+          focusable.focus();
+          break;
+        }
+        prevWrapper = prevWrapper.previousElementSibling;
+      }
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      const currentWrapper = event.currentTarget.closest('[data-timeline-root="true"]');
+      if (!currentWrapper) return;
+      let nextWrapper = currentWrapper.nextElementSibling;
+      let focusedNext = false;
+      while (nextWrapper) {
+        const focusable = nextWrapper.querySelector('[tabindex="0"]') as HTMLElement | null;
+        if (focusable) {
+          focusable.focus();
+          focusedNext = true;
+          break;
+        }
+        nextWrapper = nextWrapper.nextElementSibling;
+      }
+      if (!focusedNext) {
+        ctx.onFocusComposer?.();
+      }
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      ctx.onFocusComposer?.();
+    } else if (event.key === "Enter") {
+      const expandButton = event.currentTarget.querySelector(
+        'button[aria-expanded], button[data-timeline-expand="true"], button[aria-label^="Expand"]'
+      ) as HTMLElement | null;
+      if (expandButton) {
+        event.preventDefault();
+        expandButton.click();
+      }
+    }
+  };
+
   return (
     <div
       className={cn(
-        "pb-4",
+        "pb-4 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
+      role={isMessage ? "listitem" : undefined}
+      tabIndex={isMessage ? 0 : undefined}
+      onKeyDown={handleKeyDown}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
@@ -622,6 +681,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
               type="button"
               className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
               onClick={() => setIsExpanded((v) => !v)}
+              aria-expanded={isExpanded}
             >
               {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
             </button>
@@ -710,6 +770,7 @@ function AssistantChangedFilesSectionInner({
             variant="outline"
             data-scroll-anchor-ignore
             onClick={() => setExpanded(routeThreadKey, turnSummary.turnId, !allDirectoriesExpanded)}
+            aria-expanded={allDirectoriesExpanded}
           >
             {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
           </Button>

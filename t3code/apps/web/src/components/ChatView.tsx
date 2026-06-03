@@ -3498,6 +3498,13 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      {/* Skip links for keyboard accessibility */}
+      <div className="sr-only focus-within:not-sr-only focus-within:fixed focus-within:top-4 focus-within:left-4 focus-within:z-50 focus-within:flex focus-within:gap-2 focus-within:bg-background focus-within:p-2 focus-within:rounded-md focus-within:border focus-within:shadow-md">
+        <a href="#sidebar" className="px-3 py-1.5 text-xs font-medium hover:underline focus:outline-none focus:ring-2 focus:ring-primary rounded">Skip to Sidebar</a>
+        <a href="#chat-messages" className="px-3 py-1.5 text-xs font-medium hover:underline focus:outline-none focus:ring-2 focus:ring-primary rounded">Skip to Chat Messages</a>
+        <a href="#composer" className="px-3 py-1.5 text-xs font-medium hover:underline focus:outline-none focus:ring-2 focus:ring-primary rounded">Skip to Composer</a>
+      </div>
+
       {/* Top bar */}
       <header
         className={cn(
@@ -3551,7 +3558,13 @@ export default function ChatView(props: ChatViewProps) {
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div
+            id="chat-messages"
+            tabIndex={-1}
+            role="log"
+            aria-live="polite"
+            className="relative flex min-h-0 flex-1 flex-col focus:outline-none"
+          >
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}
@@ -3577,6 +3590,7 @@ export default function ChatView(props: ChatViewProps) {
               workspaceRoot={activeWorkspaceRoot}
               skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
               onIsAtEndChange={onIsAtEndChange}
+              onFocusComposer={focusComposer}
             />
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}

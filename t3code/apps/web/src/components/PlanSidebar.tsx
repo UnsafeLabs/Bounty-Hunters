@@ -128,8 +128,10 @@ const PlanSidebar = memo(function PlanSidebar({
 
   return (
     <div
+      id="sidebar"
+      tabIndex={-1}
       className={cn(
-        "flex min-h-0 flex-col bg-card/50",
+        "flex min-h-0 flex-col bg-card/50 focus:outline-none",
         mode === "sidebar"
           ? "h-full w-[340px] shrink-0 border-l border-border/70"
           : "h-full w-full",

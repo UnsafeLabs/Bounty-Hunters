@@ -108,6 +108,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           <Button
             size="sm"
             variant={props.triggerVariant ?? "ghost"}
+            aria-label="Select model"
             data-chat-provider-model-picker="true"
             className={cn(
               "min-w-0 justify-start overflow-hidden whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 [&_svg]:mx-0",
