@@ -65,3 +65,26 @@ def test_google_fonts_in_generated_redoc():
         openapi_url="/docs", title="title", with_google_fonts=False
     ).body.decode()
     assert "fonts.googleapis.com" not in body_without_google_fonts
+
+
+def test_none_in_custom_swagger():
+    html = get_swagger_ui_html(
+        openapi_url="/docs",
+        title="title",
+        swagger_js_url=None,
+        swagger_css_url=None,
+    )
+    body_content = html.body.decode()
+    assert "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.6/swagger-ui-bundle.js" in body_content
+    assert "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.6/swagger-ui.css" in body_content
+
+
+def test_none_in_custom_redoc():
+    html = get_redoc_html(
+        openapi_url="/docs",
+        title="title",
+        redoc_js_url=None,
+    )
+    body_content = html.body.decode()
+    assert "https://cdn.jsdelivr.net/npm/redoc@2.5.3/bundles/redoc.standalone.js" in body_content
+

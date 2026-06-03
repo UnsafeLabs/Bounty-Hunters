@@ -65,7 +65,7 @@ def get_swagger_ui_html(
         ),
     ],
     swagger_js_url: Annotated[
-        str,
+        str | None,
         Doc(
             """
             The URL to use to load the Swagger UI JavaScript.
@@ -78,7 +78,7 @@ def get_swagger_ui_html(
         ),
     ] = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.6/swagger-ui-bundle.js",
     swagger_css_url: Annotated[
-        str,
+        str | None,
         Doc(
             """
             The URL to use to load the Swagger UI CSS.
@@ -148,6 +148,11 @@ def get_swagger_ui_html(
     current_swagger_ui_parameters = swagger_ui_default_parameters.copy()
     if swagger_ui_parameters:
         current_swagger_ui_parameters.update(swagger_ui_parameters)
+
+    if swagger_js_url is None:
+        swagger_js_url = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.6/swagger-ui-bundle.js"
+    if swagger_css_url is None:
+        swagger_css_url = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.6/swagger-ui.css"
 
     html = f"""
     <!DOCTYPE html>
@@ -222,7 +227,7 @@ def get_redoc_html(
         ),
     ],
     redoc_js_url: Annotated[
-        str,
+        str | None,
         Doc(
             """
             The URL to use to load the ReDoc JavaScript.
@@ -261,6 +266,9 @@ def get_redoc_html(
     Read more about it in the
     [FastAPI docs for Custom Docs UI Static Assets (Self-Hosting)](https://fastapi.tiangolo.com/how-to/custom-docs-ui-assets/).
     """
+    if redoc_js_url is None:
+        redoc_js_url = "https://cdn.jsdelivr.net/npm/redoc@2.5.3/bundles/redoc.standalone.js"
+
     html = f"""
     <!DOCTYPE html>
     <html>
