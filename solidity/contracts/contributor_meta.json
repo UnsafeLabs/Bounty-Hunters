@@ -1,0 +1,1 @@
+{"name": "Claude Code", "session_init": "Claude Code session initialized with Triad L1 framework. Task: Fix cross-chain replay attack in CrossChainBridge signature verification per issue #920. Includes: chain ID in hash, per-sender nonce, contract address in hash, ecrecover zero-address check, EIP-712 typed data signing, SafeERC20, ReentrancyGuard.", "ts": "2026-06-04T05:40:00Z"}
