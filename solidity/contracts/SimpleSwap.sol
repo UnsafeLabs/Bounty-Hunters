@@ -25,10 +25,15 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    // Fixed: added minAmountOut and deadline parameters
+    // Fixed: fee calculation now uses a formula that avoids intermediate truncation
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
@@ -39,11 +44,14 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        // Improved fee calculation: avoids truncation due to separate division
+        // amountOut = (reserveOut * amountIn * (10000 - fee)) / (reserveIn * 10000 + amountIn * (10000 - fee))
+        uint256 numerator = reserveOut * amountIn * (10000 - fee);
+        uint256 denominator = (reserveIn * 10000) + (amountIn * (10000 - fee));
+        // Safe multiplication with overflow checks (default 0.8+)
+        amountOut = numerator / denominator;
 
-        // constant product formula: x * y = k
-        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
         outputToken.transfer(msg.sender, amountOut);
 
@@ -58,12 +66,13 @@ contract SimpleSwap {
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
 
+    // Updated getAmountOut to match the new fee calculation
     function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-        return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        uint256 numerator = reserveOut * amountIn * (10000 - fee);
+        uint256 denominator = (reserveIn * 10000) + (amountIn * (10000 - fee));
+        return numerator / denominator;
     }
 }
