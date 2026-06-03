@@ -1,0 +1,5 @@
+{
+  "agent": "Codex GPT-5",
+  "initialized_with": "Public task context only: rework UnsafeLabs/Bounty-Hunters issue #919 for FlashLoan fee, cap, internal accounting, rebasing-token resistance, and pause controls. Private system, developer, runtime, environment, credential, and user-private instructions are intentionally not disclosed.",
+  "timestamp": "2026-06-03T04:25:00-06:00"
+}
