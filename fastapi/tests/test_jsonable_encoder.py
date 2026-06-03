@@ -329,3 +329,62 @@ def test_encode_color(module_path):
 
     data = {"color": Color("blue")}
     assert jsonable_encoder(data) == {"color": "blue"}
+
+
+def test_encode_bytes_default_base64():
+    data = b"hello world"
+    assert jsonable_encoder(data) == "aGVsbG8gd29ybGQ="
+
+
+def test_encode_bytes_hex():
+    data = b"hello world"
+    assert jsonable_encoder(data, bytes_encoding="hex") == "68656c6c6f20776f726c64"
+
+
+def test_encode_memoryview_default_base64():
+    data = memoryview(b"hello world")
+    assert jsonable_encoder(data) == "aGVsbG8gd29ybGQ="
+
+
+def test_encode_memoryview_hex():
+    data = memoryview(b"hello world")
+    assert jsonable_encoder(data, bytes_encoding="hex") == "68656c6c6f20776f726c64"
+
+
+def test_encode_bytes_inside_containers():
+    data = {
+        "bytes_val": b"hello",
+        "list_bytes": [b"one", b"two"],
+        "mv_val": memoryview(b"world"),
+    }
+    expected_default = {
+        "bytes_val": "aGVsbG8=",
+        "list_bytes": ["b25l", "dHdv"],
+        "mv_val": "d29ybGQ=",
+    }
+    assert jsonable_encoder(data) == expected_default
+
+    expected_hex = {
+        "bytes_val": "68656c6c6f",
+        "list_bytes": ["6f6e65", "74776f"],
+        "mv_val": "776f726c64",
+    }
+    assert jsonable_encoder(data, bytes_encoding="hex") == expected_hex
+
+
+def test_encode_bytes_in_basemodel():
+    class BytesModel(BaseModel):
+        raw: bytes
+        view: memoryview
+
+        model_config = {"arbitrary_types_allowed": True}
+
+    model = BytesModel(raw=b"hello", view=memoryview(b"world"))
+    assert jsonable_encoder(model) == {
+        "raw": "aGVsbG8=",
+        "view": "d29ybGQ=",
+    }
+    assert jsonable_encoder(model, bytes_encoding="hex") == {
+        "raw": "68656c6c6f",
+        "view": "776f726c64",
+    }
