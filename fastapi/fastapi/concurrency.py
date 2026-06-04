@@ -1,7 +1,8 @@
-from collections.abc import AsyncGenerator
+import asyncio
+from collections.abc import AsyncGenerator, Awaitable, Sequence
 from contextlib import AbstractContextManager
 from contextlib import asynccontextmanager as asynccontextmanager
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import anyio.to_thread
 from anyio import CapacityLimiter
@@ -12,6 +13,86 @@ from starlette.concurrency import (  # noqa
 )
 
 _T = TypeVar("_T")
+_UNSET: object = object()
+
+
+class ConcurrencyError(Exception):
+    """Raised when one or more concurrent tasks fail."""
+
+    def __init__(
+        self,
+        failures: list[BaseException],
+        *,
+        partial_results: list[_T] | None = None,
+    ) -> None:
+        super().__init__(self._message(failures))
+        self.failures = failures
+        self.partial_results = partial_results
+
+    @staticmethod
+    def _message(failures: list[BaseException]) -> str:
+        messages = [f"  - {exc}" for exc in failures]
+        return "Concurrent run failed:\n" + "\n".join(messages)
+
+
+async def _run_in_slot(
+    index: int,
+    coroutine: Awaitable[_T],
+    limiter: asyncio.Semaphore,
+) -> tuple[int, _T]:
+    async with limiter:
+        return index, await coroutine
+
+
+async def run_concurrently(
+    coroutines: Sequence[Awaitable[_T]],
+    *,
+    max_concurrency: int,
+    timeout: float | None = None,
+) -> list[_T]:
+    if max_concurrency < 1:
+        raise ValueError("max_concurrency must be >= 1")
+
+    if not coroutines:
+        return []
+
+    limiter = asyncio.Semaphore(max_concurrency)
+    tasks: list[asyncio.Task[tuple[int, _T]]] = [
+        asyncio.create_task(_run_in_slot(index, coroutine, limiter))
+        for index, coroutine in enumerate(coroutines)
+    ]
+    completed: list[_T | object] = [_UNSET] * len(coroutines)
+    failures: list[BaseException] = []
+
+    try:
+        if timeout is None:
+            raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+        else:
+            raw_results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=timeout,
+            )
+    except asyncio.TimeoutError as exc:
+        failures.append(exc)
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for result in raw_results:
+        if isinstance(result, asyncio.CancelledError):
+            continue
+        if isinstance(result, BaseException):
+            failures.append(result)
+            continue
+        index, value = result
+        completed[index] = value
+
+    if failures:
+        partial_results = [cast(_T, value) for value in completed if value is not _UNSET]
+        raise ConcurrencyError(failures=failures, partial_results=partial_results)
+
+    return cast(list[_T], completed)
 
 
 @asynccontextmanager
