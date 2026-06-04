@@ -78,6 +78,8 @@ const makeCliTestServerConfig = (baseDir: string) =>
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
+      httpCompressionThresholdBytes: 1024,
+      httpCompressionLevel: 4,
     } satisfies ServerConfigShape;
   });
 

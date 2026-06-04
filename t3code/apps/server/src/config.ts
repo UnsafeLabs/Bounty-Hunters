@@ -73,6 +73,8 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logWebSocketEvents: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
+  readonly httpCompressionThresholdBytes: number;
+  readonly httpCompressionLevel: number;
 }
 
 export const deriveServerPaths = Effect.fn(function* (
@@ -168,6 +170,8 @@ export class ServerConfig extends Context.Service<ServerConfig, ServerConfigShap
           logWebSocketEvents: false,
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
+          httpCompressionThresholdBytes: 1024,
+          httpCompressionLevel: 4,
           port: 0,
           host: undefined,
           desktopBootstrapToken: undefined,

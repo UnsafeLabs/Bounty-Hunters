@@ -50,6 +50,7 @@ import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 import { vi } from "vitest";
+import { gzipSync } from "node:zlib";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
@@ -371,6 +372,8 @@ const buildAppUnderTest = (options?: {
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
+      httpCompressionThresholdBytes: 1024,
+      httpCompressionLevel: 4,
       ...options?.config,
     };
     const layerConfig = Layer.succeed(ServerConfig, config);
@@ -1064,6 +1067,196 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.status, 200);
       assertBrowserApiCorsHeaders(response.headers);
       assert.deepEqual(body, testEnvironmentDescriptor);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("compresses large responses when supported", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-static-large-" });
+      const largePayload = "a".repeat(4096);
+      yield* fileSystem.writeFileString(
+        path.join(staticDir, "large.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({ data: largePayload }),
+      );
+
+      yield* buildAppUnderTest({ config: { staticDir } });
+
+      const url = yield* getHttpServerUrl("/large.json");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          headers: {
+            "accept-encoding": "br, gzip",
+            accept: "*/*",
+          },
+        }),
+      );
+      const body = (yield* Effect.promise(() =>
+        response.json(),
+      )) as { readonly data: string };
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-encoding"), "br");
+      assert.equal(response.headers.get("vary"), "accept-encoding");
+      assert.deepEqual(body, { data: largePayload });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("does not compress responses when only identity is accepted", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-static-identity-" });
+      const payload = "a".repeat(4096);
+      yield* fileSystem.writeFileString(
+        path.join(staticDir, "large.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({ data: payload }),
+      );
+
+      yield* buildAppUnderTest({ config: { staticDir } });
+
+      const url = yield* getHttpServerUrl("/large.json");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          headers: {
+            "accept-encoding": "identity",
+            accept: "*/*",
+          },
+        }),
+      );
+      const body = (yield* Effect.promise(() =>
+        response.json(),
+      )) as { readonly data: string };
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-encoding"), null);
+      assert.deepEqual(body, { data: payload });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("does not compress small responses below the threshold", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-router-static-threshold-",
+      });
+      const payload = "small";
+      yield* fileSystem.writeFileString(
+        path.join(staticDir, "small.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({ data: payload }),
+      );
+
+      yield* buildAppUnderTest({ config: { staticDir, httpCompressionThresholdBytes: 2048 } });
+
+      const url = yield* getHttpServerUrl("/small.json");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          headers: {
+            "accept-encoding": "br",
+            accept: "*/*",
+          },
+        }),
+      );
+      const body = (yield* Effect.promise(() =>
+        response.json(),
+      )) as { readonly data: string };
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-encoding"), null);
+      assert.deepEqual(body, { data: payload });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("does not compress image responses", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-router-static-image-",
+      });
+      const payload = "image-payload".repeat(500);
+      yield* fileSystem.writeFileString(
+        path.join(staticDir, "image.png"),
+        payload,
+      );
+
+      yield* buildAppUnderTest({ config: { staticDir } });
+
+      const url = yield* getHttpServerUrl("/image.png");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          headers: {
+            "accept-encoding": "br, gzip",
+            accept: "*/*",
+          },
+        }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-encoding"), null);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("accepts gzip-compressed request bodies for auth bootstrap", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const payload = gzipSync(
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({
+          credential: defaultDesktopBootstrapToken,
+        }),
+      );
+      const url = yield* getHttpServerUrl("/api/auth/bootstrap");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            "accept-encoding": "identity",
+            "content-type": "application/json",
+            "content-encoding": "gzip",
+          },
+          body: payload,
+        }),
+      );
+      const body = (yield* Effect.promise(() => response.json())) as {
+        readonly authenticated: boolean;
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.authenticated, true);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects unsupported request content-encoding", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const payload = gzipSync(
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({
+          credential: defaultDesktopBootstrapToken,
+        }),
+      );
+      const url = yield* getHttpServerUrl("/api/auth/bootstrap");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            "accept-encoding": "identity",
+            "content-type": "application/json",
+            "content-encoding": "deflate",
+          },
+          body: payload,
+        }),
+      );
+
+      assert.equal(response.status, 400);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

@@ -104,6 +104,10 @@ const EnvServerConfig = Config.all({
     Config.withDefault(10_000),
   ),
   otlpServiceName: Config.string("T3CODE_OTLP_SERVICE_NAME").pipe(Config.withDefault("t3-server")),
+  httpCompressionLevel: Config.int("T3CODE_HTTP_COMPRESSION_LEVEL").pipe(Config.withDefault(4)),
+  httpCompressionThresholdBytes: Config.int("T3CODE_HTTP_COMPRESSION_THRESHOLD_BYTES").pipe(
+    Config.withDefault(1024),
+  ),
   mode: Config.schema(RuntimeMode, "T3CODE_MODE").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -374,6 +378,8 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      httpCompressionThresholdBytes: env.httpCompressionThresholdBytes,
+      httpCompressionLevel: env.httpCompressionLevel,
     };
 
     return config;
