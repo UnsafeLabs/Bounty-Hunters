@@ -277,6 +277,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           maintainScrollAtEndThreshold={0.1}
           maintainVisibleContentPosition
           onScroll={handleScroll}
+          role="log"
+          aria-live="polite"
+          aria-label="Chat messages"
           className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
@@ -306,10 +309,23 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
+      role="listitem"
+      tabIndex={0}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
+      aria-label={
+        row.kind === "message"
+          ? `${row.message.role === "user" ? "You" : "Assistant"}: ${(row.message as { text?: string }).text?.slice(0, 100) || "message"}`
+          : row.kind === "work"
+            ? "Tool activity"
+            : row.kind === "proposed-plan"
+              ? "Proposed plan"
+              : row.kind === "working"
+                ? "Working"
+                : undefined
+      }
     >
       {row.kind === "work" ? <WorkGroupSection groupedEntries={row.groupedEntries} /> : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
@@ -816,6 +832,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
               size="xs"
               variant="ghost"
               aria-expanded={expanded}
+              data-expand-toggle="true"
               data-scroll-anchor-ignore
               onClick={() => setExpanded((value) => !value)}
               className="-ml-1 h-6 rounded-md px-1.5 text-xs text-muted-foreground/72 hover:bg-muted/55 hover:text-foreground/85"

@@ -2549,6 +2549,53 @@ export default function ChatView(props: ChatViewProps) {
     toggleTerminalVisibility,
   ]);
 
+  // ---------------------------------------------------------------------------
+  // Keyboard navigation for messages (ARIA: Arrow Up/Down, Enter, Escape)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const messagesRegion = document.getElementById("chat-messages");
+    if (!messagesRegion) return;
+
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      // Only handle when focus is on a message row or within messages region
+      const messageRow = target.closest?.("[data-timeline-row-id]");
+      if (!messageRow && target !== messagesRegion) return;
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        const next = (messageRow?.nextElementSibling ?? target.nextElementSibling) as HTMLElement | null;
+        if (next?.getAttribute("data-timeline-row-id")) {
+          next.focus();
+          next.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        const prev = (messageRow?.previousElementSibling ?? target.previousElementSibling) as HTMLElement | null;
+        if (prev?.getAttribute("data-timeline-row-id")) {
+          prev.focus();
+          prev.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+      } else if (event.key === "Enter" && messageRow) {
+        // Toggle expanded state on message rows that support it
+        const expandBtn = messageRow.querySelector<HTMLElement>("[data-expand-toggle]");
+        if (expandBtn) {
+          event.preventDefault();
+          expandBtn.click();
+        }
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        // Return focus to composer
+        const composer = document.getElementById("chat-composer");
+        const input = composer?.querySelector<HTMLElement>("textarea, [contenteditable]");
+        input?.focus();
+      }
+    };
+
+    messagesRegion.addEventListener("keydown", handler, true);
+    return () => messagesRegion.removeEventListener("keydown", handler, true);
+  }, []);
+
   const onRevertToTurnCount = useCallback(
     async (turnCount: number) => {
       const api = readEnvironmentApi(environmentId);
@@ -3498,6 +3545,27 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      {/* Skip links for keyboard/screen reader navigation */}
+      <a
+        href="#chat-messages"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-primary focus:text-primary-foreground focus:px-4 focus:py-2 focus:rounded"
+      >
+        Skip to chat messages
+      </a>
+      <a
+        href="#chat-composer"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-primary focus:text-primary-foreground focus:px-4 focus:py-2 focus:rounded"
+      >
+        Skip to message composer
+      </a>
+      {planSidebarOpen && (
+        <a
+          href="#plan-sidebar"
+          className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-primary focus:text-primary-foreground focus:px-4 focus:py-2 focus:rounded"
+        >
+          Skip to plan sidebar
+        </a>
+      )}
       {/* Top bar */}
       <header
         className={cn(
@@ -3551,7 +3619,7 @@ export default function ChatView(props: ChatViewProps) {
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div id="chat-messages" className="relative flex min-h-0 flex-1 flex-col" role="region" aria-label="Chat messages">
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}
@@ -3596,6 +3664,9 @@ export default function ChatView(props: ChatViewProps) {
 
           {/* Input bar */}
           <div
+            id="chat-composer"
+            role="region"
+            aria-label="Message composer"
             className={cn(
               "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
               isGitRepo
@@ -3724,6 +3795,7 @@ export default function ChatView(props: ChatViewProps) {
 
         {/* Plan sidebar */}
         {planSidebarOpen && !shouldUsePlanSidebarSheet ? (
+          <div id="plan-sidebar" role="complementary" aria-label="Plan sidebar">
           <PlanSidebar
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
@@ -3735,6 +3807,7 @@ export default function ChatView(props: ChatViewProps) {
             mode="sidebar"
             onClose={closePlanSidebar}
           />
+          </div>
         ) : null}
       </div>
       {/* end horizontal flex container */}
