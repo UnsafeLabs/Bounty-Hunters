@@ -105,6 +105,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           size="sm"
           className={cn("rounded-full", compact ? "px-3" : "px-4")}
           {...pointerFocusProps}
+          aria-label={formatPendingPrimaryActionLabel({
+            compact,
+            isLastQuestion: pendingAction.isLastQuestion,
+            isResponding: pendingAction.isResponding,
+            questionIndex: pendingAction.questionIndex,
+          })}
           disabled={
             isEnvironmentUnavailable ||
             pendingAction.isResponding ||
@@ -146,6 +152,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           size="sm"
           className={cn("rounded-full", compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8")}
           {...pointerFocusProps}
+          aria-label={isConnecting || isSendBusy ? "Sending refinement" : "Refine plan"}
           disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
         >
           {isConnecting || isSendBusy ? "Sending..." : "Refine"}
@@ -160,6 +167,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           size="sm"
           className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
           {...pointerFocusProps}
+          aria-label={
+            isConnecting || isSendBusy ? "Sending implementation request" : "Implement plan"
+          }
           disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
         >
           {isConnecting || isSendBusy ? "Sending..." : "Implement"}

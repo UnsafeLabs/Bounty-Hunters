@@ -5,6 +5,7 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveTimelineKeyboardNavigationIndex,
 } from "./MessagesTimeline.logic";
 
 describe("computeMessageDurationStart", () => {
@@ -201,6 +202,76 @@ describe("resolveAssistantMessageCopyState", () => {
       text: "Interim thought",
       visible: false,
     });
+  });
+});
+
+describe("resolveTimelineKeyboardNavigationIndex", () => {
+  it("moves between rows with arrow keys", () => {
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        currentIndex: 0,
+        key: "ArrowDown",
+        rowCount: 3,
+      }),
+    ).toBe(1);
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        currentIndex: 2,
+        key: "ArrowUp",
+        rowCount: 3,
+      }),
+    ).toBe(1);
+  });
+
+  it("keeps navigation within the available rows", () => {
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        currentIndex: 0,
+        key: "ArrowUp",
+        rowCount: 3,
+      }),
+    ).toBe(0);
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        currentIndex: 2,
+        key: "ArrowDown",
+        rowCount: 3,
+      }),
+    ).toBe(2);
+  });
+
+  it("supports jumping to the first or last row", () => {
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        currentIndex: 1,
+        key: "Home",
+        rowCount: 3,
+      }),
+    ).toBe(0);
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        currentIndex: 1,
+        key: "End",
+        rowCount: 3,
+      }),
+    ).toBe(2);
+  });
+
+  it("ignores unsupported keys and invalid row positions", () => {
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        currentIndex: 1,
+        key: "Enter",
+        rowCount: 3,
+      }),
+    ).toBeNull();
+    expect(
+      resolveTimelineKeyboardNavigationIndex({
+        currentIndex: -1,
+        key: "ArrowDown",
+        rowCount: 3,
+      }),
+    ).toBeNull();
   });
 });
 

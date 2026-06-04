@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -46,6 +47,7 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveTimelineKeyboardNavigationIndex,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
@@ -98,6 +100,7 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const TIMELINE_KEYBOARD_ROW_SELECTOR = '[data-timeline-keyboard-row="true"]';
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -126,6 +129,7 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onReturnFocusToComposer?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +159,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
+  onReturnFocusToComposer,
 }: MessagesTimelineProps) {
   const rawRows = useMemo(
     () =>
@@ -242,6 +247,51 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [isRevertingCheckpoint, isWorking],
   );
 
+  const handleTimelineKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      const target = event.target;
+      const rowElement =
+        target instanceof HTMLElement ? target.closest(TIMELINE_KEYBOARD_ROW_SELECTOR) : null;
+      if (!(rowElement instanceof HTMLElement) || !event.currentTarget.contains(rowElement)) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onReturnFocusToComposer?.();
+        return;
+      }
+
+      if (isInteractiveTimelineKeyboardTarget(target, rowElement)) {
+        return;
+      }
+
+      if (event.key === "Enter") {
+        if (clickFirstExpandableTimelineControl(rowElement)) {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      const rowElements = Array.from(
+        event.currentTarget.querySelectorAll<HTMLElement>(TIMELINE_KEYBOARD_ROW_SELECTOR),
+      );
+      const currentIndex = rowElements.indexOf(rowElement);
+      const nextIndex = resolveTimelineKeyboardNavigationIndex({
+        currentIndex,
+        key: event.key,
+        rowCount: rowElements.length,
+      });
+      if (nextIndex === null || nextIndex === currentIndex) {
+        return;
+      }
+
+      event.preventDefault();
+      rowElements[nextIndex]?.focus();
+    },
+    [onReturnFocusToComposer],
+  );
+
   // Stable renderItem — no closure deps. Row components read shared state
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
@@ -255,7 +305,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   if (rows.length === 0 && !isWorking) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div
+        id="chat-messages"
+        className="flex h-full items-center justify-center"
+        role="log"
+        aria-live="polite"
+        aria-label="Conversation messages"
+      >
         <p className="text-sm text-muted-foreground/30">
           Send a message to start the conversation.
         </p>
@@ -266,21 +322,32 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <LegendList<MessagesTimelineRow>
-          ref={listRef}
-          data={rows}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          estimatedItemSize={90}
-          initialScrollAtEnd
-          maintainScrollAtEnd
-          maintainScrollAtEndThreshold={0.1}
-          maintainVisibleContentPosition
-          onScroll={handleScroll}
-          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-          ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={TIMELINE_LIST_FOOTER}
-        />
+        <div
+          id="chat-messages"
+          className="h-full"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-label="Conversation messages"
+          aria-busy={isWorking}
+          onKeyDown={handleTimelineKeyDown}
+        >
+          <LegendList<MessagesTimelineRow>
+            ref={listRef}
+            data={rows}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            estimatedItemSize={90}
+            initialScrollAtEnd
+            maintainScrollAtEnd
+            maintainScrollAtEndThreshold={0.1}
+            maintainVisibleContentPosition
+            onScroll={handleScroll}
+            className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListFooterComponent={TIMELINE_LIST_FOOTER}
+          />
+        </div>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );
@@ -300,12 +367,18 @@ type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["grouped
 type TimelineRow = MessagesTimelineRow;
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
+  const isMessageRow = row.kind === "message";
+
   return (
     <div
       className={cn(
-        "pb-4",
+        "pb-4 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
+      role={isMessageRow ? "listitem" : undefined}
+      aria-label={isMessageRow ? formatTimelineMessageRowLabel(row) : undefined}
+      tabIndex={isMessageRow ? 0 : undefined}
+      data-timeline-keyboard-row={isMessageRow ? "true" : undefined}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
@@ -400,6 +473,7 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
       disabled={activity.isRevertingCheckpoint || activity.isWorking}
       onClick={() => ctx.onRevertUserMessage(messageId)}
       title="Revert to this message"
+      aria-label="Revert to this message"
     >
       <Undo2Icon className="size-3" />
     </Button>
@@ -929,6 +1003,42 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     </div>
   );
 });
+
+function isInteractiveTimelineKeyboardTarget(
+  target: EventTarget | null,
+  rowElement: HTMLElement,
+): boolean {
+  if (!(target instanceof HTMLElement) || target === rowElement) {
+    return false;
+  }
+
+  return (
+    target.closest(
+      "button, a, input, select, textarea, [role='button'], [role='link'], [contenteditable='true']",
+    ) !== null
+  );
+}
+
+function clickFirstExpandableTimelineControl(rowElement: HTMLElement): boolean {
+  const expandableControl = rowElement.querySelector<HTMLButtonElement>("button[aria-expanded]");
+  if (!expandableControl || expandableControl.disabled) {
+    return false;
+  }
+
+  expandableControl.click();
+  return true;
+}
+
+function formatTimelineMessageRowLabel(row: Extract<TimelineRow, { kind: "message" }>): string {
+  const speaker =
+    row.message.role === "assistant"
+      ? "Assistant message"
+      : row.message.role === "user"
+        ? "User message"
+        : "System message";
+  const textPreview = (row.message.text ?? "").replace(/\s+/g, " ").trim().slice(0, 140);
+  return textPreview ? `${speaker}: ${textPreview}` : speaker;
+}
 
 // ---------------------------------------------------------------------------
 // Structural sharing — reuse old row references when data hasn't changed

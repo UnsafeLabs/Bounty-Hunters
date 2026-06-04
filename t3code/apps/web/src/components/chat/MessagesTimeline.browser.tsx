@@ -244,6 +244,74 @@ describe("MessagesTimeline", () => {
     }
   });
 
+  it("moves focus between message rows and returns focus intent to the composer", async () => {
+    const props = buildProps();
+    const onReturnFocusToComposer = vi.fn();
+    const screen = await render(
+      <MessagesTimeline
+        {...props}
+        onReturnFocusToComposer={onReturnFocusToComposer}
+        timelineEntries={[
+          buildUserTimelineEntry("First message."),
+          {
+            id: "entry-2",
+            kind: "message",
+            createdAt: MESSAGE_CREATED_AT,
+            message: {
+              id: "message-2" as never,
+              role: "assistant" as const,
+              text: "Second message.",
+              createdAt: MESSAGE_CREATED_AT,
+              streaming: false,
+            },
+          },
+        ]}
+      />,
+    );
+
+    try {
+      const rows = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-timeline-keyboard-row="true"]'),
+      );
+      expect(rows).toHaveLength(2);
+
+      rows[0]?.focus();
+      expect(document.activeElement).toBe(rows[0]);
+
+      rows[0]?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" }));
+      expect(document.activeElement).toBe(rows[1]);
+
+      rows[1]?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowUp" }));
+      expect(document.activeElement).toBe(rows[0]);
+
+      rows[0]?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
+      expect(onReturnFocusToComposer).toHaveBeenCalledTimes(1);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("expands a focused message row with Enter", async () => {
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildUserTimelineEntry(buildLongUserMessageText())]}
+      />,
+    );
+
+    try {
+      const row = document.querySelector<HTMLElement>('[data-timeline-keyboard-row="true"]');
+      expect(row).not.toBeNull();
+
+      row?.focus();
+      row?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+
+      await expect.element(page.getByRole("button", { name: "Show less" })).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("starts the newest long user prompt collapsed", async () => {
     const screen = await render(
       <MessagesTimeline

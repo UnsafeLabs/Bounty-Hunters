@@ -133,6 +133,38 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
+  it("renders the messages container as a live log with focusable message rows", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          buildUserTimelineEntry("Please make this easier to navigate."),
+          {
+            id: "entry-2",
+            kind: "message",
+            createdAt: MESSAGE_CREATED_AT,
+            message: {
+              id: MessageId.make("message-2"),
+              role: "assistant",
+              text: "Done.",
+              createdAt: MESSAGE_CREATED_AT,
+              streaming: false,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('id="chat-messages"');
+    expect(markup).toContain('role="log"');
+    expect(markup).toContain('aria-live="polite"');
+    expect(markup).toContain('role="listitem"');
+    expect(markup).toContain('data-timeline-keyboard-row="true"');
+    expect(markup).toContain('aria-label="User message: Please make this easier to navigate."');
+    expect(markup).toContain('aria-label="Assistant message: Done."');
+  });
+
   it("does not render collapse controls for short user messages", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

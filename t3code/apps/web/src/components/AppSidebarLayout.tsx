@@ -56,6 +56,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
       <Sidebar
+        id="chat-sidebar"
+        tabIndex={-1}
+        aria-label="Thread sidebar"
         side="left"
         collapsible="offcanvas"
         className="border-r border-border bg-card text-foreground"
