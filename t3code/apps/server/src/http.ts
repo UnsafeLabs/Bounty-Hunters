@@ -68,7 +68,7 @@ const HTTP_BR_CONTENT_TYPES = new Set(
     "application/vnd.rar",
   ],
 );
-const HTTP_COMPRESSED_CONTENT_TYPE_PREFIXES = ["image/", "audio/", "video/"]; 
+const HTTP_COMPRESSED_CONTENT_TYPE_PREFIXES = ["image/", "audio/", "video/"];
 type ContentEncoding = "br" | "gzip";
 
 const parseEncodingHeader = (value: string | undefined) =>
