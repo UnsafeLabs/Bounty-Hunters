@@ -29,11 +29,11 @@
   "type": "module",
   "scripts": {
     "prepare": "effect-language-service patch",
-    "dev": "node scripts/dev-runner.ts dev",
-    "dev:server": "node scripts/dev-runner.ts dev:server",
-    "dev:web": "node scripts/dev-runner.ts dev:web",
+    "dev": "npx tsx scripts/dev-runner.ts dev",
+    "dev:server": "npx tsx scripts/dev-runner.ts dev:server",
+    "dev:web": "npx tsx scripts/dev-runner.ts dev:web",
     "dev:marketing": "turbo run dev --filter=@t3tools/marketing",
-    "dev:desktop": "node scripts/dev-runner.ts dev:desktop",
+    "dev:desktop": "npx tsx scripts/dev-runner.ts dev:desktop",
     "start": "turbo run start --filter=t3",
     "start:desktop": "turbo run start --filter=@t3tools/desktop",
     "start:marketing": "turbo run preview --filter=@t3tools/marketing",
@@ -68,6 +68,7 @@
     "@types/node": "catalog:",
     "oxfmt": "^0.40.0",
     "oxlint": "^1.63.0",
+    "tsx": "^4.19.2",
     "turbo": "^2.3.3",
     "typescript": "catalog:",
     "vitest": "catalog:"

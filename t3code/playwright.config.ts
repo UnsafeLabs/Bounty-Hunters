@@ -23,7 +23,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npx bun scripts/dev-runner.ts dev",
+    command: "npx tsx scripts/dev-runner.ts dev",
     url: "http://localhost:5733",
     reuseExistingServer: !process.env.CI,
     timeout: 120000,

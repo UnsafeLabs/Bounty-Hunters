@@ -15,7 +15,7 @@
   ],
   "type": "module",
   "scripts": {
-    "dev": "npx bun --watch src/bin.ts",
+    "dev": "npx tsx watch src/bin.ts",
     "build": "node scripts/cli.ts build",
     "build:bundle": "tsdown",
     "start": "node dist/bin.mjs",
@@ -45,6 +45,7 @@
     "effect-acp": "workspace:*",
     "effect-codex-app-server": "workspace:*",
     "tsdown": "catalog:",
+    "tsx": "^4.19.2",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
