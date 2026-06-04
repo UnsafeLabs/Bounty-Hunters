@@ -8,8 +8,13 @@ test("opens command palette and searches", async ({ page }) => {
   const trigger = page.locator('[data-testid="command-palette-trigger"]');
   await expect(trigger).toBeVisible();
 
-  // Click the command palette trigger to open it
-  await trigger.click();
+  // Open command palette using keyboard shortcut (mod+k)
+  const isMac = await page.evaluate(() => navigator.platform.toUpperCase().indexOf('MAC') >= 0);
+  if (isMac) {
+    await page.keyboard.press("Meta+k");
+  } else {
+    await page.keyboard.press("Control+k");
+  }
 
   // Assert command palette input is visible
   const input = page.locator('input[placeholder="Search commands, projects, and threads..."]');
