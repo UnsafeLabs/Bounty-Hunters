@@ -72,6 +72,10 @@ class ModelWithDefault(BaseModel):
     bla: str = "bla"
 
 
+class ModelWithBytes(BaseModel):
+    payload: bytes
+
+
 def test_encode_dict():
     pet = {"name": "Firulais", "owner": {"name": "Foo"}}
     assert jsonable_encoder(pet) == {"name": "Firulais", "owner": {"name": "Foo"}}
@@ -135,6 +139,44 @@ def test_encode_unsupported():
     unserializable = Unserializable()
     with pytest.raises(ValueError):
         jsonable_encoder(unserializable)
+
+
+def test_encode_bytes_as_base64_by_default():
+    assert jsonable_encoder(b"\xff\x00hello") == "/wBoZWxsbw=="
+
+
+def test_encode_memoryview_as_base64_by_default():
+    assert jsonable_encoder(memoryview(b"\x00\xff")) == "AP8="
+
+
+def test_encode_bytes_as_hex():
+    assert jsonable_encoder(b"\xff\x00hello", bytes_encoding="hex") == "ff0068656c6c6f"
+
+
+def test_encode_memoryview_as_hex():
+    assert jsonable_encoder(memoryview(b"\x00\xff"), bytes_encoding="hex") == "00ff"
+
+
+def test_encode_nested_bytes_with_encoding_option():
+    payload = {"items": [b"hello", {"view": memoryview(b"\xff")}]}
+
+    assert jsonable_encoder(payload, bytes_encoding="hex") == {
+        "items": ["68656c6c6f", {"view": "ff"}]
+    }
+
+
+def test_encode_model_with_bytes_field():
+    model = ModelWithBytes(payload=b"\xff\x00hello")
+
+    assert jsonable_encoder(model) == {"payload": "/wBoZWxsbw=="}
+    assert jsonable_encoder(model, bytes_encoding="hex") == {
+        "payload": "ff0068656c6c6f"
+    }
+
+
+def test_invalid_bytes_encoding_raises():
+    with pytest.raises(ValueError, match="bytes_encoding"):
+        jsonable_encoder(b"hello", bytes_encoding="utf-8")
 
 
 def test_encode_custom_json_encoders_model_pydanticv2():
