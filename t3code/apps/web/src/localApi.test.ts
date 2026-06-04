@@ -225,7 +225,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     setTheme: async () => undefined,
     showContextMenu: async () => null,
     openExternal: async () => true,
-    onMenuAction: () => () => undefined,
+    onMenuAction: (_action) => () => undefined,
     getUpdateState: async () => {
       throw new Error("getUpdateState not implemented in test");
     },

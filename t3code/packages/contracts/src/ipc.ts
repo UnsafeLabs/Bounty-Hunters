@@ -62,7 +62,7 @@ import type {
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
-import { EnvironmentId } from "./baseSchemas.ts";
+import { EnvironmentId, ProjectId, ThreadId } from "./baseSchemas.ts";
 import { AuthBearerBootstrapResult, AuthSessionState, AuthWebSocketTokenResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { EditorId } from "./editor.ts";
@@ -105,6 +105,28 @@ export const ContextMenuItemSchema: Schema.Codec<ContextMenuItemSchemaType> = Sc
     ),
   ),
 });
+
+export interface OpenSettingsMenuAction {
+  readonly kind: "open-settings";
+}
+
+export interface OpenProjectMenuAction {
+  readonly kind: "open-project";
+  readonly environmentId?: EnvironmentId;
+  readonly projectId?: ProjectId;
+  readonly path?: string;
+}
+
+export interface OpenThreadMenuAction {
+  readonly kind: "open-thread";
+  readonly environmentId?: EnvironmentId;
+  readonly threadId?: ThreadId;
+}
+
+export type DesktopMenuAction =
+  | OpenSettingsMenuAction
+  | OpenProjectMenuAction
+  | OpenThreadMenuAction;
 
 export type DesktopUpdateStatus =
   | "disabled"
@@ -414,7 +436,7 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
-  onMenuAction: (listener: (action: string) => void) => () => void;
+  onMenuAction: (listener: (action: DesktopMenuAction) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;

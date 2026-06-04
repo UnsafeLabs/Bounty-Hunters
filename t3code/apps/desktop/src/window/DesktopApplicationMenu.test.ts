@@ -4,6 +4,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import { type DesktopMenuAction } from "@t3tools/contracts";
 
 import type * as Electron from "electron";
 
@@ -42,6 +43,8 @@ const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
   setDesktopName: () => Effect.void,
   setDockIcon: () => Effect.void,
   appendCommandLineSwitch: () => Effect.void,
+  requestSingleInstanceLock: () => Effect.succeed(true),
+  setAsDefaultProtocolClient: () => Effect.void,
   on: () => Effect.void,
 } satisfies ElectronApp.ElectronAppShape);
 
@@ -63,7 +66,7 @@ const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, {
   install: Effect.die("unexpected install"),
 } satisfies DesktopUpdates.DesktopUpdatesShape);
 
-const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
+const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<DesktopMenuAction>) =>
   Layer.succeed(DesktopWindow.DesktopWindow, {
     createMain: Effect.die("unexpected createMain"),
     ensureMain: Effect.die("unexpected ensureMain"),
@@ -88,7 +91,7 @@ const makeElectronMenuLayer = (
 describe("DesktopApplicationMenu", () => {
   it.effect("installs the native menu and routes Settings through DesktopWindow", () =>
     Effect.gen(function* () {
-      const selectedAction = yield* Deferred.make<string>();
+      const selectedAction = yield* Deferred.make<DesktopMenuAction>();
       const applicationMenuTemplate =
         yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
 
@@ -126,7 +129,7 @@ describe("DesktopApplicationMenu", () => {
       }
 
       settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
-      assert.equal(yield* Deferred.await(selectedAction), "open-settings");
+      assert.deepEqual(yield* Deferred.await(selectedAction), { kind: "open-settings" });
     }),
   );
 });
