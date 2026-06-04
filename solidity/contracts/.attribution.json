@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent",
+  "initialized_with": "Fix GovernanceToken tx.origin phishing vulnerability per issue #912: replace all tx.origin with msg.sender, add address(0) guards, use Ownable for admin functions",
+  "timestamp": "2026-06-04T12:20:00Z"
+}
