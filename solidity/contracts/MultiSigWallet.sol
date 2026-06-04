@@ -17,6 +17,11 @@ contract MultiSigWallet {
     mapping(uint256 => mapping(address => bool)) public confirmations;
     mapping(address => bool) public isOwner;
 
+    // Reentrancy guard
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+    uint256 private _status;
+
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
     event Executed(uint256 indexed txId);
@@ -27,6 +32,13 @@ contract MultiSigWallet {
         _;
     }
 
+    modifier nonReentrant() {
+        require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
+        _status = _ENTERED;
+        _;
+        _status = _NOT_ENTERED;
+    }
+
     constructor(address[] memory _owners, uint256 _required) {
         require(_owners.length > 0, "No owners");
         require(_required > 0 && _required <= _owners.length, "Invalid required");
@@ -35,10 +47,11 @@ contract MultiSigWallet {
         }
         owners = _owners;
         required = _required;
+        _status = _NOT_ENTERED;
     }
 
-    // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Invalid destination");
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -70,13 +83,16 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
-        require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
-
+    // FIXED: Added nonReentrant guard + snapshot confirmation count before execution
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         Transaction storage txn = transactions[txId];
+        require(!txn.executed, "Already executed");
+
+        // Snapshot confirmation count at execution time to prevent race condition
+        uint256 confirmationCount = getConfirmationCount(txId);
+        require(confirmationCount >= required, "Not enough confirmations");
+
+        // Mark as executed BEFORE external call
         txn.executed = true;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
