@@ -16,6 +16,7 @@ import * as CliError from "effect/unstable/cli/CliError";
 import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/unstable/cli";
 
+import packageJson from "../package.json" with { type: "json" };
 import { cli } from "./bin.ts";
 import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "./config.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -156,6 +157,17 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
 
   it.effect("accepts canonical --no-<flag> boolean negation", () =>
     runCliWithRuntime(["--no-log-websocket-events", "--version"]),
+  );
+
+  it.effect("prints detailed package and runtime information for the version subcommand", () =>
+    Effect.gen(function* () {
+      const { output } = yield* captureStdout(runCli(["version"]));
+
+      assert.match(output, new RegExp(`^t3 v${packageJson.version.replaceAll(".", "\\.")} `));
+      assert.match(output, /\((bun|node) [^,]+, [a-z0-9]+ [a-z0-9_]+(?:-[a-z0-9_]+)?\)$/);
+      assert.include(output, process.platform);
+      assert.include(output, process.arch);
+    }),
   );
 
   it.effect("rejects invalid log-level casing before launching the server", () =>
