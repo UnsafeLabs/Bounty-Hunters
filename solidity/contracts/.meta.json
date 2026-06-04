@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent",
+  "initialized_with": "Fix CrossChainBridge replay attack per issue #920: add chain ID, contract address, per-sender nonces via EIP-712, ecrecover zero-address check",
+  "timestamp": "2026-06-04T12:30:00Z"
+}
