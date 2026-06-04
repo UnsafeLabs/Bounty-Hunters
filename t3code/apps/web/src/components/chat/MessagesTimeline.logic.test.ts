@@ -3,8 +3,10 @@ import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
+  getTimelineRowAriaLabel,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveTimelineKeyboardNavigation,
 } from "./MessagesTimeline.logic";
 
 describe("computeMessageDurationStart", () => {
@@ -201,6 +203,121 @@ describe("resolveAssistantMessageCopyState", () => {
       text: "Interim thought",
       visible: false,
     });
+  });
+});
+
+describe("resolveTimelineKeyboardNavigation", () => {
+  it("moves to adjacent rows with arrow keys without leaving bounds", () => {
+    expect(
+      resolveTimelineKeyboardNavigation({ key: "ArrowUp", currentIndex: 1, rowCount: 3 }),
+    ).toBe(0);
+    expect(
+      resolveTimelineKeyboardNavigation({ key: "ArrowUp", currentIndex: 0, rowCount: 3 }),
+    ).toBe(0);
+    expect(
+      resolveTimelineKeyboardNavigation({ key: "ArrowDown", currentIndex: 1, rowCount: 3 }),
+    ).toBe(2);
+    expect(
+      resolveTimelineKeyboardNavigation({ key: "ArrowDown", currentIndex: 2, rowCount: 3 }),
+    ).toBe(2);
+  });
+
+  it("jumps to the first and last rows with Home and End", () => {
+    expect(resolveTimelineKeyboardNavigation({ key: "Home", currentIndex: 2, rowCount: 4 })).toBe(
+      0,
+    );
+    expect(resolveTimelineKeyboardNavigation({ key: "End", currentIndex: 0, rowCount: 4 })).toBe(
+      3,
+    );
+  });
+
+  it("ignores unsupported keys and invalid row positions", () => {
+    expect(resolveTimelineKeyboardNavigation({ key: "Enter", currentIndex: 1, rowCount: 3 })).toBe(
+      null,
+    );
+    expect(
+      resolveTimelineKeyboardNavigation({ key: "ArrowDown", currentIndex: -1, rowCount: 3 }),
+    ).toBe(null);
+    expect(
+      resolveTimelineKeyboardNavigation({ key: "ArrowDown", currentIndex: 0, rowCount: 0 }),
+    ).toBe(null);
+  });
+});
+
+describe("getTimelineRowAriaLabel", () => {
+  it("labels user, assistant, and streaming assistant message rows", () => {
+    const baseMessage = {
+      id: "message-1" as never,
+      role: "user" as const,
+      text: "Hello",
+      createdAt: "2026-01-01T00:00:00Z",
+      streaming: false,
+    };
+
+    expect(
+      getTimelineRowAriaLabel({
+        kind: "message",
+        id: "row-user",
+        createdAt: baseMessage.createdAt,
+        message: baseMessage,
+        durationStart: baseMessage.createdAt,
+        showCompletionDivider: false,
+        completionSummary: null,
+        showAssistantCopyButton: false,
+        assistantCopyStreaming: false,
+      }),
+    ).toBe("User message");
+
+    expect(
+      getTimelineRowAriaLabel({
+        kind: "message",
+        id: "row-assistant",
+        createdAt: baseMessage.createdAt,
+        message: {
+          ...baseMessage,
+          id: "message-2" as never,
+          role: "assistant" as const,
+          streaming: true,
+        },
+        durationStart: baseMessage.createdAt,
+        showCompletionDivider: false,
+        completionSummary: null,
+        showAssistantCopyButton: false,
+        assistantCopyStreaming: true,
+      }),
+    ).toBe("Assistant message, streaming");
+  });
+
+  it("labels non-message rows by timeline purpose", () => {
+    expect(
+      getTimelineRowAriaLabel({
+        kind: "work",
+        id: "work-row",
+        createdAt: "2026-01-01T00:00:00Z",
+        groupedEntries: [
+          {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:00Z",
+            label: "Read file",
+            tone: "tool",
+          },
+          {
+            id: "work-2",
+            createdAt: "2026-01-01T00:00:01Z",
+            label: "Edit file",
+            tone: "tool",
+          },
+        ],
+      }),
+    ).toBe("Work log, 2 entries");
+
+    expect(
+      getTimelineRowAriaLabel({
+        kind: "working",
+        id: "working-indicator-row",
+        createdAt: null,
+      }),
+    ).toBe("Assistant is working");
   });
 });
 

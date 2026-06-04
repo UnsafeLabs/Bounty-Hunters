@@ -45,6 +45,50 @@ export interface StableMessagesTimelineRowsState {
   result: MessagesTimelineRow[];
 }
 
+export function resolveTimelineKeyboardNavigation({
+  key,
+  currentIndex,
+  rowCount,
+}: {
+  key: string;
+  currentIndex: number;
+  rowCount: number;
+}): number | null {
+  if (rowCount <= 0 || currentIndex < 0 || currentIndex >= rowCount) {
+    return null;
+  }
+
+  switch (key) {
+    case "ArrowUp":
+      return Math.max(0, currentIndex - 1);
+    case "ArrowDown":
+      return Math.min(rowCount - 1, currentIndex + 1);
+    case "Home":
+      return 0;
+    case "End":
+      return rowCount - 1;
+    default:
+      return null;
+  }
+}
+
+export function getTimelineRowAriaLabel(row: MessagesTimelineRow) {
+  switch (row.kind) {
+    case "message": {
+      const speaker = row.message.role === "user" ? "User" : "Assistant";
+      return row.message.streaming ? `${speaker} message, streaming` : `${speaker} message`;
+    }
+    case "work":
+      return row.groupedEntries.length === 1
+        ? "Work log, 1 entry"
+        : `Work log, ${row.groupedEntries.length} entries`;
+    case "proposed-plan":
+      return "Proposed plan";
+    case "working":
+      return "Assistant is working";
+  }
+}
+
 export function computeMessageDurationStart(
   messages: ReadonlyArray<TimelineDurationMessage>,
 ): Map<string, string> {

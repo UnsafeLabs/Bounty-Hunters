@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -44,8 +45,10 @@ import {
   computeStableMessagesTimelineRows,
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
+  getTimelineRowAriaLabel,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveTimelineKeyboardNavigation,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
@@ -182,6 +185,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -242,15 +247,79 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [isRevertingCheckpoint, isWorking],
   );
 
-  // Stable renderItem — no closure deps. Row components read shared state
-  // from TimelineRowCtx, which propagates through LegendList's memo.
+  useEffect(() => {
+    if (focusedRowId === null || rows.some((row) => row.id === focusedRowId)) {
+      return;
+    }
+    setFocusedRowId(null);
+  }, [focusedRowId, rows]);
+
+  const registerRowRef = useCallback(
+    (rowId: string) => (node: HTMLDivElement | null) => {
+      if (node) {
+        rowRefs.current.set(rowId, node);
+        return;
+      }
+      rowRefs.current.delete(rowId);
+    },
+    [],
+  );
+
+  const focusTimelineRow = useCallback((rowId: string) => {
+    const rowElement = rowRefs.current.get(rowId);
+    if (!rowElement) {
+      return;
+    }
+    setFocusedRowId(rowId);
+    rowElement.focus();
+  }, []);
+
+  const handleRowKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>, rowId: string) => {
+      if (event.key === "Escape") {
+        event.currentTarget.blur();
+        setFocusedRowId(null);
+        return;
+      }
+
+      const currentIndex = rows.findIndex((row) => row.id === rowId);
+      const nextIndex = resolveTimelineKeyboardNavigation({
+        key: event.key,
+        currentIndex,
+        rowCount: rows.length,
+      });
+
+      if (nextIndex === null) {
+        return;
+      }
+
+      event.preventDefault();
+      const nextRow = rows[nextIndex];
+      if (nextRow) {
+        focusTimelineRow(nextRow.id);
+      }
+    },
+    [focusTimelineRow, rows],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div
+        ref={registerRowRef(item.id)}
+        className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        role="article"
+        aria-label={getTimelineRowAriaLabel(item)}
+        tabIndex={
+          focusedRowId === item.id || (focusedRowId === null && rows[0]?.id === item.id) ? 0 : -1
+        }
+        data-timeline-root="true"
+        onFocus={() => setFocusedRowId(item.id)}
+        onKeyDown={(event) => handleRowKeyDown(event, item.id)}
+      >
         <TimelineRowContent row={item} />
       </div>
     ),
-    [],
+    [focusedRowId, handleRowKeyDown, registerRowRef, rows],
   );
 
   if (rows.length === 0 && !isWorking) {
@@ -278,6 +347,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           maintainVisibleContentPosition
           onScroll={handleScroll}
           className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+          role="log"
+          aria-label="Conversation messages"
+          aria-live="polite"
+          aria-relevant="additions text"
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
         />
