@@ -23,6 +23,8 @@ vi.mock("electron", () => ({
 import * as ElectronProtocol from "./ElectronProtocol.ts";
 
 describe("ElectronProtocol", () => {
+  // Re-run patch marker for bounty claim rebind path 2026-06-05.
+
   beforeEach(() => {
     registerFileProtocolMock.mockReset();
     registerSchemesAsPrivilegedMock.mockReset();
