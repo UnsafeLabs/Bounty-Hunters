@@ -9,6 +9,7 @@ import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useSettings } from "../hooks/useSettings";
+import { findProjectByPath } from "../lib/projectPaths";
 import {
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsAcrossEnvironments,
@@ -25,13 +26,26 @@ const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 
 type UseHandleNewThreadResult = ReturnType<typeof useHandleNewThread>;
 
-function resolveMenuProjectRef(
+export function resolveMenuProjectRef(
   action: Extract<DesktopMenuAction, { kind: "open-project" }>,
   projects: ReturnType<typeof selectProjectsAcrossEnvironments>,
   defaultProjectRef: UseHandleNewThreadResult["defaultProjectRef"],
 ): ReturnType<typeof scopeProjectRef> | null {
   if (action.projectId === undefined) {
-    return null;
+    if (action.path === undefined) {
+      return null;
+    }
+
+    const candidate = action.environmentId
+      ? findProjectByPath(
+          projects.filter((project) => project.environmentId === action.environmentId),
+          action.path,
+        )
+      : findProjectByPath(projects, action.path);
+    if (!candidate) {
+      return null;
+    }
+    return scopeProjectRef(candidate.environmentId, candidate.id);
   }
 
   const candidates = projects.filter((project) => {

@@ -57,6 +57,17 @@ describe("DesktopDeepLink", () => {
     assert.isTrue(Option.isNone(action));
   });
 
+  it("parses open/project path-only links", () => {
+    const action = DesktopDeepLink.parseDeepLinkAction("t3code://open/project?path=%2Ftmp%2Frepo");
+    assert.isTrue(Option.isSome(action));
+    if (Option.isSome(action)) {
+      assert.deepEqual(action.value, {
+        kind: "open-project",
+        path: "/tmp/repo",
+      });
+    }
+  });
+
   it("parses open-thread links with threadId", () => {
     const action = DesktopDeepLink.parseDeepLinkAction(
       "t3code://open-thread?environmentId=env-1&threadId=thread-1",
