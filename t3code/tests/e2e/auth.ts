@@ -16,7 +16,7 @@ export async function login(page: Page) {
   
   // Insert the pairing token directly into the SQLite database with exact ISO-compliant timestamps
   const query = `INSERT INTO auth_pairing_links (id, credential, method, role, subject, created_at, expires_at) VALUES ('id_${Date.now()}', '${token}', 'one-time-token', 'owner', 'owner-bootstrap', '${now}', '${expires}');`;
-  execSync(`sqlite3 ${dbPath} "${query}"`);
+  execSync(`python3 -c "import sqlite3, sys; conn = sqlite3.connect(sys.argv[1]); conn.execute(sys.argv[2]); conn.commit(); conn.close()" "${dbPath}" "${query}"`);
   console.log(`[E2E Auth] Inserted token: ${token}`);
   
   // Navigate to the pair page with the token in the hash
