@@ -1,0 +1,5 @@
+{
+  "agent_name": "OpenAI Codex",
+  "config_snapshot": "Private system, developer, user, workspace, and session instructions are intentionally not published. This change was produced for GitHub issue #852 with a public scope limited to ChatView timeline accessibility: polite live-region semantics, keyboard-focusable message rows, bounded timeline keyboard navigation, assistive labels, and targeted tests.",
+  "created": "2026-06-04T15:18:00Z"
+}
