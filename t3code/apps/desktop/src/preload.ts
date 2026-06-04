@@ -1,4 +1,4 @@
-import type { DesktopBridge } from "@t3tools/contracts";
+import type { DesktopBridge, DesktopMenuAction } from "@t3tools/contracts";
 import { contextBridge, ipcRenderer } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
@@ -98,8 +98,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
   onMenuAction: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {
-      if (typeof action !== "string") return;
-      listener(action);
+      if (typeof action !== "object" || action === null) return;
+      listener(action as DesktopMenuAction);
     };
 
     ipcRenderer.on(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener);

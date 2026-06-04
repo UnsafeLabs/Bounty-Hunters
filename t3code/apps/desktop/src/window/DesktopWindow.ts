@@ -5,6 +5,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
+import type { DesktopMenuAction } from "@t3tools/contracts";
+
 import type * as Electron from "electron";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
@@ -57,7 +59,9 @@ export interface DesktopWindowShape {
   readonly activate: Effect.Effect<void, DesktopWindowError>;
   readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
   readonly handleBackendReady: Effect.Effect<void, DesktopWindowError>;
-  readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
+  readonly dispatchMenuAction: (
+    action: DesktopMenuAction,
+  ) => Effect.Effect<void, DesktopWindowError>;
   readonly syncAppearance: Effect.Effect<void>;
 }
 

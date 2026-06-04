@@ -4,6 +4,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
+import type { DesktopMenuAction } from "@t3tools/contracts";
+
 import type * as Electron from "electron";
 
 import * as DesktopObservability from "../app/DesktopObservability.ts";
@@ -33,7 +35,7 @@ const { logInfo: logUpdaterInfo } = DesktopObservability.makeComponentLogger("de
 const { logError: logMenuError } = DesktopObservability.makeComponentLogger("desktop-menu");
 
 const dispatchMenuAction = Effect.fn("desktop.menu.dispatchMenuAction")(function* (
-  action: string,
+  action: DesktopMenuAction,
 ): Effect.fn.Return<void, DesktopWindow.DesktopWindowError, DesktopWindow.DesktopWindow> {
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
   yield* desktopWindow.dispatchMenuAction(action);
@@ -125,7 +127,7 @@ const make = Effect.gen(function* () {
       runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
     };
     const settingsClick = () => {
-      runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
+      runMenuEffect("open-settings", dispatchMenuAction({ kind: "open-settings" }));
     };
     const template: Electron.MenuItemConstructorOptions[] = [];
 

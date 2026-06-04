@@ -3,17 +3,23 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 
 import type * as Electron from "electron";
-
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
+import {
+  findDeepLinkArg,
+  parseDeepLinkAction,
+  parseDeepLinkFromArguments,
+} from "./DesktopDeepLink.ts";
 
 export interface DesktopShutdownShape {
   readonly request: Effect.Effect<void>;
@@ -52,6 +58,7 @@ export type DesktopLifecycleRuntimeServices =
   | DesktopState.DesktopState
   | DesktopWindow.DesktopWindow
   | ElectronApp.ElectronApp
+  | ElectronDialog.ElectronDialog
   | ElectronTheme.ElectronTheme;
 
 export interface DesktopLifecycleShape {
@@ -96,6 +103,42 @@ const requestDesktopShutdownAndWait = Effect.fn("desktop.lifecycle.requestShutdo
     yield* shutdown.awaitComplete;
   },
 );
+
+function dispatchMenuActionFromArguments(
+  args: Iterable<string>,
+  runEffect: <A, E>(effect: Effect.Effect<A, E, DesktopLifecycleRuntimeServices>) => Promise<A>,
+): Option.Option<string> {
+  const action = parseDeepLinkFromArguments(args);
+  if (Option.isNone(action)) {
+    return findDeepLinkArg(args);
+  }
+
+  void runEffect(
+    Effect.gen(function* () {
+      const desktopWindow = yield* DesktopWindow.DesktopWindow;
+      yield* desktopWindow.dispatchMenuAction(action.value);
+    }).pipe(Effect.withSpan("desktop.lifecycle.dispatchMenuActionFromArguments")),
+  );
+  return Option.none();
+}
+
+function dispatchMenuActionFromUrl(
+  url: string,
+  runEffect: <A, E>(effect: Effect.Effect<A, E, DesktopLifecycleRuntimeServices>) => Promise<A>,
+): Option.Option<string> {
+  const action = parseDeepLinkAction(url);
+  if (Option.isNone(action)) {
+    return Option.some(url);
+  }
+
+  void runEffect(
+    Effect.gen(function* () {
+      const desktopWindow = yield* DesktopWindow.DesktopWindow;
+      yield* desktopWindow.dispatchMenuAction(action.value);
+    }).pipe(Effect.withSpan("desktop.lifecycle.dispatchMenuActionFromUrl")),
+  );
+  return Option.none();
+}
 
 function handleBeforeQuit(
   event: Electron.Event,
@@ -218,6 +261,35 @@ export const layer = Layer.succeed(
             }
           }).pipe(Effect.withSpan("desktop.lifecycle.windowAllClosed")),
         );
+      });
+
+      const notifyInvalidDeepLink = (url: string) =>
+        runEffect(
+          Effect.gen(function* () {
+            const dialog = yield* ElectronDialog.ElectronDialog;
+            yield* dialog.showErrorBox("Invalid T3 Code link", `Unable to open ${url}`);
+          }).pipe(
+            Effect.catchCause((cause) =>
+              logLifecycleError("failed to show invalid deep link error", {
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          ),
+        );
+
+      yield* electronApp.on("second-instance", (_event: Electron.Event, args: string[]) => {
+        const invalid = dispatchMenuActionFromArguments(args, runEffect);
+        if (Option.isSome(invalid)) {
+          void notifyInvalidDeepLink(invalid.value);
+        }
+      });
+
+      yield* electronApp.on("open-url", (event: Electron.Event, url: string) => {
+        event.preventDefault();
+        const invalid = dispatchMenuActionFromUrl(url, runEffect);
+        if (Option.isSome(invalid)) {
+          void notifyInvalidDeepLink(invalid.value);
+        }
       });
 
       if (environment.platform !== "win32") {

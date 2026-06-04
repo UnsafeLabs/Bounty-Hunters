@@ -18,6 +18,8 @@ const {
   setNameMock,
   setPathMock,
   whenReadyMock,
+  requestSingleInstanceLockMock,
+  setAsDefaultProtocolClientMock,
 } = vi.hoisted(() => ({
   appendSwitchMock: vi.fn(),
   exitMock: vi.fn(),
@@ -34,6 +36,8 @@ const {
   setNameMock: vi.fn(),
   setPathMock: vi.fn(),
   whenReadyMock: vi.fn(() => Promise.resolve()),
+  requestSingleInstanceLockMock: vi.fn(() => true),
+  setAsDefaultProtocolClientMock: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
@@ -58,6 +62,8 @@ vi.mock("electron", () => ({
     setDesktopName: setDesktopNameMock,
     setName: setNameMock,
     setPath: setPathMock,
+    requestSingleInstanceLock: requestSingleInstanceLockMock,
+    setAsDefaultProtocolClient: setAsDefaultProtocolClientMock,
     whenReady: whenReadyMock,
     exit: exitMock,
   },
@@ -74,6 +80,7 @@ describe("ElectronApp", () => {
     relaunchMock.mockClear();
     removeListenerMock.mockClear();
     setPathMock.mockClear();
+    setAsDefaultProtocolClientMock.mockClear();
   });
 
   it.effect("reads app metadata through the service", () =>

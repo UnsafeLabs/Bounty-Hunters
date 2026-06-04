@@ -33,6 +33,7 @@ interface ElectronAppCalls {
   readonly setAboutPanelOptions: Array<Electron.AboutPanelOptionsOptions>;
   readonly setDockIcon: string[];
   readonly setName: string[];
+  readonly setAsDefaultProtocolClient: string[];
 }
 
 const makeElectronAppLayer = (calls: ElectronAppCalls) =>
@@ -53,6 +54,11 @@ const makeElectronAppLayer = (calls: ElectronAppCalls) =>
         calls.setAboutPanelOptions.push(options);
       }),
     setAppUserModelId: () => Effect.void,
+    requestSingleInstanceLock: () => Effect.succeed(true),
+    setAsDefaultProtocolClient: (scheme) =>
+      Effect.sync(() => {
+        calls.setAsDefaultProtocolClient.push(scheme);
+      }),
     setDesktopName: () => Effect.void,
     setDockIcon: (iconPath) =>
       Effect.sync(() => {
@@ -110,6 +116,7 @@ const withIdentity = <A, E, R>(
     setAboutPanelOptions: [],
     setDockIcon: [],
     setName: [],
+    setAsDefaultProtocolClient: [],
   };
 
   return effect.pipe(
@@ -149,6 +156,7 @@ describe("DesktopAppIdentity", () => {
       setAboutPanelOptions: [],
       setDockIcon: [],
       setName: [],
+      setAsDefaultProtocolClient: [],
     };
 
     return withIdentity(
