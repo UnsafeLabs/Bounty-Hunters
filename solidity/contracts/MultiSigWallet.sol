@@ -133,6 +133,7 @@ contract MultiSigWallet {
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
         require(success, "Execution failed");
+        require(getConfirmationCount(txId) >= required, "Confirmations revoked");
 
         executionStatus = _NOT_EXECUTING;
         emit Executed(txId);
