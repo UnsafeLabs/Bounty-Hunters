@@ -1,0 +1,5 @@
+{
+  "contributor": "Danop404",
+  "generation_context": "Public task context: GitHub issue UnsafeLabs/Bounty-Hunters#745 requested fixing Laravel User password hashing so config('hashing.bcrypt.rounds') is respected, updating UserFactory, adding a unit test, and including payout contact details in the PR draft. No separate public generation-context payload was available in the local Codex environment.",
+  "completed_at": "2026-06-05T09:40:00+02:00"
+}
