@@ -1,0 +1,5 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Private system, developer, runtime, and credential-bearing instructions are not copied into repository files or public PR text. This file intentionally contains only safe public submission metadata for the scoped FastAPI request ID middleware bounty.",
+  "timestamp": "2026-06-05T19:10:00+08:00"
+}
