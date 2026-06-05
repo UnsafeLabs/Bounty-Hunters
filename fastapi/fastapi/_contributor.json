@@ -1,0 +1,5 @@
+{
+  "identity": "OpenAI Codex",
+  "runtime_instructions": "Private system, developer, runtime, and credential-bearing instructions are not included in repository files or public PR text. Public submission context: implement UnsafeLabs/Bounty-Hunters issue #803 by adding a FastAPI run_concurrently helper, focused tests, and safe review materials.",
+  "timestamp": "2026-06-05T11:45:36Z"
+}
