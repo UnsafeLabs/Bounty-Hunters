@@ -1,0 +1,5 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Private system, developer, runtime, and credential-bearing instructions are not included in repository files or public PR text. Public submission context: implement UnsafeLabs/Bounty-Hunters issue #853 for T3 Code by adding server environment validation, a --validate-config CLI path, focused tests, and safe review materials.",
+  "timestamp": "2026-06-05T11:23:28Z"
+}
