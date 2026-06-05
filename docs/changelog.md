@@ -33,6 +33,17 @@ All notable changes to BountyHunters will be documented in this file.
 - Fixed XSS vulnerability in bounty descriptions
 - Corrected timezone handling for deadline calculations
 
+## [v2.1.0] - 2025-08-15
+
+### Added
+- Team bounties with shared rewards
+- Export bounty data to CSV
+- Webhook support for bounty status changes
+
+### Fixed
+- Search not returning results for hyphenated terms
+- Pagination offset calculation error on filtered queries
+
 ## [v1.2.0] - 2025-05-10
 
 ### Added
@@ -43,16 +54,6 @@ All notable changes to BountyHunters will be documented in this file.
 ### Fixed
 - Fixed broken pagination on bounty list endpoint
 - Login redirect loop on expired sessions
-
-## [v1.1.0] - 2025-03-20
-
-### Added
-- Search functionality for bounties
-- User profile pages
-- Basic analytics dashboard
-
-### Fixed
-- Fixed duplicate bounty creation on double-click
 
 ## [v1.1.0] - 2025-03-20
 
