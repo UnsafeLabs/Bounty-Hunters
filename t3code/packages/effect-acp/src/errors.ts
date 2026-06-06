@@ -128,8 +128,23 @@ export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()(
   }
 }
 
+export class AcpAuthenticationError extends Schema.TaggedErrorClass<AcpAuthenticationError>()(
+  "AcpAuthenticationError",
+  {
+    sessionId: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message() {
+    return this.sessionId === undefined
+      ? "ACP authentication refresh failed"
+      : `ACP authentication refresh failed for session ${this.sessionId}`;
+  }
+}
+
 export const AcpError = Schema.Union([
   AcpRequestError,
+  AcpAuthenticationError,
   AcpSpawnError,
   AcpProcessExitedError,
   AcpProtocolParseError,
