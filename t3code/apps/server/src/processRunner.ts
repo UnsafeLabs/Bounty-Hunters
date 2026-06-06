@@ -1,4 +1,3 @@
-import * as Data from "effect/Data";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -12,6 +11,13 @@ import {
   collectUint8StreamText,
   type CollectedUint8StreamText,
 } from "./stream/collectUint8StreamText.ts";
+import {
+  ProcessOutputLimitError,
+  ProcessReadError,
+  ProcessSpawnError,
+  ProcessStdinError,
+  ProcessTimeoutError,
+} from "./errors.ts";
 
 export interface ProcessRunInput {
   readonly command: string;
@@ -41,42 +47,13 @@ export interface ProcessRunOutput {
   readonly stderrTruncated: boolean;
 }
 
-export class ProcessSpawnError extends Data.TaggedError("ProcessSpawnError")<{
-  readonly command: string;
-  readonly args: ReadonlyArray<string>;
-  readonly cwd?: string | undefined;
-  readonly cause: unknown;
-}> {}
-
-export class ProcessStdinError extends Data.TaggedError("ProcessStdinError")<{
-  readonly command: string;
-  readonly args: ReadonlyArray<string>;
-  readonly cwd?: string | undefined;
-  readonly cause: unknown;
-}> {}
-
-export class ProcessOutputLimitError extends Data.TaggedError("ProcessOutputLimitError")<{
-  readonly command: string;
-  readonly args: ReadonlyArray<string>;
-  readonly cwd?: string | undefined;
-  readonly stream: "stdout" | "stderr";
-  readonly maxBytes: number;
-}> {}
-
-export class ProcessReadError extends Data.TaggedError("ProcessReadError")<{
-  readonly command: string;
-  readonly args: ReadonlyArray<string>;
-  readonly cwd?: string | undefined;
-  readonly stream: "stdout" | "stderr" | "exitCode";
-  readonly cause: unknown;
-}> {}
-
-export class ProcessTimeoutError extends Data.TaggedError("ProcessTimeoutError")<{
-  readonly command: string;
-  readonly args: ReadonlyArray<string>;
-  readonly cwd?: string | undefined;
-  readonly timeoutMs: number;
-}> {}
+export {
+  ProcessOutputLimitError,
+  ProcessReadError,
+  ProcessSpawnError,
+  ProcessStdinError,
+  ProcessTimeoutError,
+} from "./errors.ts";
 
 export type ProcessRunError =
   | ProcessSpawnError
