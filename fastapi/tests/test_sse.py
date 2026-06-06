@@ -6,7 +6,7 @@ import fastapi.routing
 import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import EventSourceResponse
-from fastapi.sse import ServerSentEvent
+from fastapi.sse import ServerSentEvent, SSEManager
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -316,3 +316,88 @@ def test_no_keepalive_when_fast(client: TestClient):
     assert response.status_code == 200
     # KEEPALIVE_COMMENT is ": ping\n\n".
     assert ": ping\n" not in response.text
+
+
+def test_sse_manager_filters_broadcasts_and_sets_retry():
+    async def scenario():
+        manager = SSEManager(retry=5000)
+        stream = manager.stream(event_type="inventory")
+        next_event = asyncio.create_task(anext(stream))
+        await asyncio.sleep(0)
+
+        await manager.broadcast({"ignored": True}, event="orders", id="1")
+        await manager.broadcast({"stock": 3}, event="inventory", id="2")
+
+        sse_event = await asyncio.wait_for(next_event, timeout=1)
+        await stream.aclose()
+
+        assert sse_event.event == "inventory"
+        assert sse_event.data == {"stock": 3}
+        assert sse_event.id == "2"
+        assert sse_event.retry == 5000
+        assert manager.connection_count == 0
+
+    asyncio.run(scenario())
+
+
+def test_sse_manager_replays_after_last_event_id():
+    async def scenario():
+        manager = SSEManager()
+        await manager.broadcast("first", event="message", id="1")
+        await manager.broadcast("second", event="message", id="2")
+        await manager.broadcast("third", event="message", id="3")
+
+        stream = manager.stream(last_event_id="1")
+        replayed = await asyncio.wait_for(anext(stream), timeout=1)
+        await stream.aclose()
+
+        assert replayed.data == "second"
+        assert replayed.id == "2"
+        assert manager.connection_count == 0
+
+    asyncio.run(scenario())
+
+
+def test_sse_manager_stream_for_request_reads_filter_and_last_event_id():
+    class FakeRequest:
+        query_params = {"event_type": "inventory"}
+        headers = {"last-event-id": "2"}
+
+        async def is_disconnected(self):
+            return False
+
+    async def scenario():
+        manager = SSEManager()
+        await manager.broadcast("order", event="orders", id="1")
+        await manager.broadcast("old-stock", event="inventory", id="2")
+        await manager.broadcast("new-stock", event="inventory", id="3")
+
+        stream = manager.stream_for_request(FakeRequest())  # type: ignore[arg-type]
+        replayed = await asyncio.wait_for(anext(stream), timeout=1)
+        await stream.aclose()
+
+        assert replayed.data == "new-stock"
+        assert replayed.event == "inventory"
+        assert replayed.id == "3"
+
+    asyncio.run(scenario())
+
+
+def test_sse_manager_stops_and_cleans_up_on_disconnect():
+    class DisconnectedRequest:
+        query_params = {}
+        headers = {}
+
+        async def is_disconnected(self):
+            return True
+
+    async def scenario():
+        manager = SSEManager(disconnect_check_interval=0.01)
+        stream = manager.stream(request=DisconnectedRequest())  # type: ignore[arg-type]
+
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(anext(stream), timeout=1)
+
+        assert manager.connection_count == 0
+
+    asyncio.run(scenario())

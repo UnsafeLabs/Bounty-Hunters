@@ -1,7 +1,11 @@
+import asyncio
+from collections import deque
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from annotated_doc import Doc
 from pydantic import AfterValidator, BaseModel, Field, model_validator
+from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 # Canonical SSE event schema matching the OpenAPI 3.2 spec
@@ -141,6 +145,115 @@ class ServerSentEvent(BaseModel):
                 "or 'raw_data' for pre-formatted strings."
             )
         return self
+
+
+class SSEManager:
+    """Manage Server-Sent Event subscribers, filtering, and replay history."""
+
+    def __init__(
+        self,
+        *,
+        history_size: int = 100,
+        retry: int | None = None,
+        disconnect_check_interval: float = 0.25,
+    ) -> None:
+        self.history_size = max(history_size, 0)
+        self.retry = retry
+        self.disconnect_check_interval = max(disconnect_check_interval, 0.001)
+        self._history: deque[ServerSentEvent] = deque(maxlen=self.history_size or None)
+        self._connections: set[asyncio.Queue[ServerSentEvent]] = set()
+        self._lock = asyncio.Lock()
+
+    @property
+    def connection_count(self) -> int:
+        return len(self._connections)
+
+    async def broadcast(
+        self,
+        data: Any = None,
+        *,
+        event: str | None = None,
+        id: str | None = None,
+        retry: int | None = None,
+        raw_data: str | None = None,
+        comment: str | None = None,
+    ) -> ServerSentEvent:
+        sse_event = ServerSentEvent(
+            data=data,
+            raw_data=raw_data,
+            event=event,
+            id=id,
+            retry=self.retry if retry is None else retry,
+            comment=comment,
+        )
+        async with self._lock:
+            if self.history_size:
+                self._history.append(sse_event)
+            connections = tuple(self._connections)
+        for queue in connections:
+            queue.put_nowait(sse_event)
+        return sse_event
+
+    async def stream(
+        self,
+        *,
+        request: Request | None = None,
+        event_type: str | None = None,
+        last_event_id: str | None = None,
+    ) -> AsyncIterator[ServerSentEvent]:
+        queue: asyncio.Queue[ServerSentEvent] = asyncio.Queue()
+        async with self._lock:
+            replay_events = self._events_after(last_event_id)
+            self._connections.add(queue)
+        try:
+            for sse_event in replay_events:
+                if self._matches_event_type(sse_event, event_type):
+                    yield sse_event
+            while True:
+                if await self._is_disconnected(request):
+                    break
+                try:
+                    sse_event = await asyncio.wait_for(
+                        queue.get(), timeout=self.disconnect_check_interval
+                    )
+                except TimeoutError:
+                    continue
+                if self._matches_event_type(sse_event, event_type):
+                    yield sse_event
+        finally:
+            async with self._lock:
+                self._connections.discard(queue)
+
+    async def stream_for_request(
+        self,
+        request: Request,
+        *,
+        event_type_param: str = "event_type",
+        last_event_id_header: str = "last-event-id",
+    ) -> AsyncIterator[ServerSentEvent]:
+        async for sse_event in self.stream(
+            request=request,
+            event_type=request.query_params.get(event_type_param),
+            last_event_id=request.headers.get(last_event_id_header),
+        ):
+            yield sse_event
+
+    def _events_after(self, last_event_id: str | None) -> list[ServerSentEvent]:
+        if last_event_id is None:
+            return []
+        events = list(self._history)
+        for index, sse_event in enumerate(events):
+            if sse_event.id == last_event_id:
+                return events[index + 1 :]
+        return events
+
+    def _matches_event_type(
+        self, sse_event: ServerSentEvent, event_type: str | None
+    ) -> bool:
+        return event_type is None or sse_event.event == event_type
+
+    async def _is_disconnected(self, request: Request | None) -> bool:
+        return request is not None and await request.is_disconnected()
 
 
 def format_sse_event(
