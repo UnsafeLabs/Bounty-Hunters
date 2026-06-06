@@ -78,6 +78,8 @@ from starlette._utils import is_async_callable
 from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import (
@@ -133,6 +135,31 @@ def request_response(
         # Same as in Starlette
         await wrap_app_handling_exceptions(app, request)(scope, receive, send)
 
+    return app
+
+
+def _normalize_router_middleware(
+    middleware: Sequence[Middleware | type[Any] | Callable[..., Any]] | None,
+) -> list[Middleware]:
+    if middleware is None:
+        return []
+
+    normalized: list[Middleware] = []
+    for item in middleware:
+        if isinstance(item, Middleware):
+            normalized.append(item)
+        elif inspect.isclass(item):
+            normalized.append(Middleware(item))
+        else:
+            normalized.append(Middleware(BaseHTTPMiddleware, dispatch=item))
+    return normalized
+
+
+def _wrap_with_router_middleware(
+    app: ASGIApp, middleware: Sequence[Middleware]
+) -> ASGIApp:
+    for cls, args, kwargs in reversed(middleware):
+        app = cls(app, *args, **kwargs)
     return app
 
 
@@ -1162,6 +1189,19 @@ class APIRouter(routing.Router):
                 """
             ),
         ] = APIRoute,
+        middleware: Annotated[
+            Sequence[Middleware | type[Any] | Callable[..., Any]] | None,
+            Doc(
+                """
+                A list of middleware to apply only to routes registered on this
+                router.
+
+                The middleware can be Starlette `Middleware` instances, middleware
+                classes, or simple HTTP middleware callables compatible with
+                `BaseHTTPMiddleware`.
+                """
+            ),
+        ] = None,
         on_startup: Annotated[
             Sequence[Callable[[], Any]] | None,
             Doc(
@@ -1310,9 +1350,23 @@ class APIRouter(routing.Router):
         self.callbacks = callbacks or []
         self.dependency_overrides_provider = dependency_overrides_provider
         self.route_class = route_class
+        self.middleware: list[Middleware] = _normalize_router_middleware(middleware)
         self.default_response_class = default_response_class
         self.generate_unique_id_function = generate_unique_id_function
         self.strict_content_type = strict_content_type
+
+    def add_middleware(
+        self,
+        middleware_class: type[Any] | Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        if inspect.isclass(middleware_class):
+            self.middleware.append(Middleware(middleware_class, *args, **kwargs))
+        else:
+            self.middleware.append(
+                Middleware(BaseHTTPMiddleware, dispatch=middleware_class)
+            )
 
     def route(
         self,
@@ -1359,6 +1413,7 @@ class APIRouter(routing.Router):
         response_class: type[Response] | DefaultPlaceholder = Default(JSONResponse),
         name: str | None = None,
         route_class_override: type[APIRoute] | None = None,
+        route_middleware: Sequence[Middleware] | None = None,
         callbacks: list[BaseRoute] | None = None,
         openapi_extra: dict[str, Any] | None = None,
         generate_unique_id_function: Callable[[APIRoute], str]
@@ -1414,6 +1469,12 @@ class APIRouter(routing.Router):
                 strict_content_type, self.strict_content_type
             ),
         )
+        current_middleware = list(
+            self.middleware if route_middleware is None else route_middleware
+        )
+        route.router_middleware = current_middleware  # type: ignore[attr-defined]
+        if current_middleware:
+            route.app = _wrap_with_router_middleware(route.app, current_middleware)
         self.routes.append(route)
 
     def api_route(
@@ -1785,6 +1846,10 @@ class APIRouter(routing.Router):
                     response_class=use_response_class,
                     name=route.name,
                     route_class_override=type(route),
+                    route_middleware=[
+                        *self.middleware,
+                        *getattr(route, "router_middleware", router.middleware),
+                    ],
                     callbacks=current_callbacks,
                     openapi_extra=route.openapi_extra,
                     generate_unique_id_function=current_generate_unique_id,
