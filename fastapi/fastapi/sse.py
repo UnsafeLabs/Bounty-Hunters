@@ -1,7 +1,11 @@
+import asyncio
+from collections.abc import AsyncIterator, Iterable
+from dataclasses import dataclass, field
 from typing import Annotated, Any
 
 from annotated_doc import Doc
 from pydantic import AfterValidator, BaseModel, Field, model_validator
+from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 # Canonical SSE event schema matching the OpenAPI 3.2 spec
@@ -220,3 +224,158 @@ KEEPALIVE_COMMENT = b": ping\n\n"
 # Seconds between keep-alive pings when a generator is idle.
 # Private but importable so tests can monkeypatch it.
 _PING_INTERVAL: float = 15.0
+
+
+@dataclass(eq=False, slots=True)
+class SSEConnection:
+    queue: asyncio.Queue[ServerSentEvent | None]
+    event_type: str | None = None
+    last_event_id: str | None = None
+
+
+@dataclass
+class SSEManager:
+    """Manage SSE connections, event history, filtering, and reconnect replay."""
+
+    retry: int = 3000
+    history_size: int = 1000
+    _connections: set[SSEConnection] = field(default_factory=set, init=False)
+    _history: list[ServerSentEvent] = field(default_factory=list, init=False)
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
+
+    async def connect(
+        self,
+        *,
+        event_type: str | None = None,
+        last_event_id: str | None = None,
+    ) -> SSEConnection:
+        connection = SSEConnection(
+            queue=asyncio.Queue(),
+            event_type=event_type,
+            last_event_id=last_event_id,
+        )
+        async with self._lock:
+            self._connections.add(connection)
+        return connection
+
+    async def disconnect(self, connection: SSEConnection) -> None:
+        async with self._lock:
+            self._connections.discard(connection)
+        await connection.queue.put(None)
+
+    async def broadcast(
+        self,
+        event: ServerSentEvent,
+        *,
+        event_type: str | None = None,
+    ) -> None:
+        if event.retry is None:
+            event = event.model_copy(update={"retry": self.retry})
+
+        async with self._lock:
+            self._remember(event)
+            connections = list(self._connections)
+
+        for connection in connections:
+            if self._matches(connection, event, event_type=event_type):
+                await connection.queue.put(event)
+
+    def replay_since(
+        self,
+        last_event_id: str | None,
+        *,
+        event_type: str | None = None,
+    ) -> list[ServerSentEvent]:
+        if last_event_id is None:
+            events = self._history
+        else:
+            last_seen_index = next(
+                (
+                    index
+                    for index, event in enumerate(self._history)
+                    if event.id == last_event_id
+                ),
+                -1,
+            )
+            events = self._history[last_seen_index + 1 :]
+        return [
+            event
+            for event in events
+            if event_type is None or event.event == event_type
+        ]
+
+    async def stream(
+        self,
+        request: Request,
+        *,
+        event_type: str | None = None,
+        last_event_id: str | None = None,
+    ) -> AsyncIterator[ServerSentEvent]:
+        connection = await self.connect(
+            event_type=event_type,
+            last_event_id=last_event_id,
+        )
+        try:
+            for event in self.replay_since(last_event_id, event_type=event_type):
+                if await request.is_disconnected():
+                    return
+                yield event
+
+            while True:
+                if await request.is_disconnected():
+                    return
+                event = await connection.queue.get()
+                if event is None:
+                    return
+                yield event
+        finally:
+            await self.disconnect(connection)
+
+    def _remember(self, event: ServerSentEvent) -> None:
+        self._history.append(event)
+        if len(self._history) > self.history_size:
+            del self._history[: len(self._history) - self.history_size]
+
+    def _matches(
+        self,
+        connection: SSEConnection,
+        event: ServerSentEvent,
+        *,
+        event_type: str | None = None,
+    ) -> bool:
+        requested_type = event_type or connection.event_type
+        return requested_type is None or event.event == requested_type
+
+
+def get_sse_filter(
+    request: Request,
+    *,
+    event_type_param: str = "event_type",
+) -> str | None:
+    return request.query_params.get(event_type_param)
+
+
+def get_last_event_id(request: Request) -> str | None:
+    return request.headers.get("Last-Event-ID")
+
+
+async def iter_sse_events(
+    request: Request,
+    events: Iterable[ServerSentEvent],
+    *,
+    event_type: str | None = None,
+    last_event_id: str | None = None,
+    retry: int | None = None,
+) -> AsyncIterator[ServerSentEvent]:
+    started = last_event_id is None
+    for event in events:
+        if await request.is_disconnected():
+            return
+        if not started:
+            started = event.id == last_event_id
+            continue
+        if event_type is not None and event.event != event_type:
+            continue
+        if retry is not None and event.retry is None:
+            event = event.model_copy(update={"retry": retry})
+        yield event
