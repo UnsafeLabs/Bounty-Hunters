@@ -1,12 +1,165 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
-import * as SubscriptionRef from "effect/SubscriptionRef";
+import * as Schedule from "effect/Schedule";
+import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
+import * as Duration from "effect/Duration";
+import * as Clock from "effect/Clock";
+import * as Data from "effect/Data";
 
-export interface DesktopIpcInvokeEvent {}
+export class IpcMessage extends Data.Class<{
+  id: string;
+  channel: string;
+  payload: unknown;
+  timestamp: number;
+}> {}
+
+export class TimeoutError extends Data.TaggedError("TimeoutError")<{
+  readonly message: string;
+}>() {}
+
+export class DesktopIpc extends Context.Service<DesktopIpc, DesktopIpcShape>()("t3/desktop/Ipc") {}
+
+export type ConnectionState = "connected" | "disconnected" | "reconnecting";
+export const ConnectionStatus = Context.GenericTag<ConnectionState>("@@t3/desktop/ipc/connection-state");
+
+export interface QueuedIpcMessage {
+  readonly id: string;
+  readonly channel: string;
+ readonly payload: unknown;
+  readonly timestamp: number;
+}
+
+export const make = (ipcMain: DesktopIpcMain): DesktopIpcShape => {
+  const baseIpc = DesktopIpc.of({
+    handle: Effect.fn("desktop.ipc.registerInvoke")(function* <E, R>({
+      channel,
+      handler,
+    }: DesktopIpcMethod<E, R>) {
+      yield* Effect.annotateCurrentSpan({ channel });
+      const context = yield* Effect.context<R>();
+      const runPromise = Effect.runPromiseWith(context);
+
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          ipcMain.removeHandler(channel);
+          ipcMain.handle(channel, (_event, raw) =>
+            runPromise(
+              Effect.gen(function* () {
+                yield* Effect.annotateCurrentSpan({ channel });
+                return yield* handler(raw);
+              }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invoke")),
+            ),
+          );
+        }),
+        () => Effect.sync(() => ipcMain.removeHandler(channel)),
+      );
+    }),
+
+    handleSync: Effect.fn("desktop.ipc.registerSync")(function* <E, R>({
+      channel,
+      handler,
+    }: DesktopSyncIpcMethod<E, R>) {
+      yield* Effect.annotateCurrentSpan({ channel });
+      const context = yield* Effect.context<R>();
+      const runSync = Effect.runSyncWith(context);
+
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          ipcMain.removeAllListeners(channel);
+          ipcMain.on(channel, (event) => {
+            event.returnValue = runSync(
+              Effect.gen(function* () {
+                yield* Effect.annotateCurrentSpan({ channel });
+                return yield* handler();
+              }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invokeSync")),
+            );
+          });
+        }),
+        () => Effect.sync(() => ipcMain.removeAllListeners(channel)),
+      );
+    }),
+  });
+
+  // Add queuing functionality
+  const makeWithQueue = (ipcMain: DesktopIpcMain): DesktopIpcShape => {
+    interface DesktopIpcShapeWithQueue extends DesktopIpcShape {
+      readonly messageQueue: Queue.Queue<QueuedIpcMessage>;
+      readonly connectionState: Stream.Stream<ConnectionState, never, never>;
+    }
+    
+    // Create the base IPC service
+    const baseIpcShape = baseIpc;
+    
+    // Add queue management
+    const messageQueue = yield* Queue.bounded<QueuedIpcMessage>(100);
+    const connectionState = Stream.fromSchedule(Schedule.spaced("5 seconds")).pipe(
+      Stream.map(() => "connected" as const)
+    );
+    
+    return DesktopIpc.of({
+      ...baseIpcShape,
+      messageQueue,
+      connectionState
+    } as any) as any;
+  };
+  
+  return makeWithQueue(ipcMain);
+};
+
+export const {
+  handle: Effect.fn("desktop.ipc.registerInvoke")(function* <E, R>({
+    channel,
+    handler,
+  }: DesktopIpcMethod<E, R>) {
+    yield* Effect.annotateCurrentSpan({ channel });
+    const context = yield* Effect.context<R>();
+    const runPromise = Effect.runPromiseWith(context);
+
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, (_event, raw) =>
+          runPromise(
+            Effect.gen(function* () {
+              yield* Effect.annotateCurrentSpan({ channel });
+              return yield* handler(raw);
+            }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invoke")),
+          ),
+        );
+      }),
+      () => Effect.sync(() => ipcMain.removeHandler(channel)),
+    );
+  }),
+
+  handleSync: Effect.fn("desktop.ipc.registerSync")(function* <E, R>({
+    channel,
+    handler,
+  }: DesktopSyncIpcMethod<E, R>) {
+    yield* Effect.annotateCurrentSpan({ channel });
+    const context = yield* Effect.context<R>();
+    const runSync = Effect.runSyncWith(context);
+
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        ipcMain.removeAllListeners(channel);
+        ipcMain.on(channel, (event) => {
+          event.returnValue = runSync(
+            Effect.gen(function* () {
+              yield* Effect.annotateCurrentSpan({ channel });
+              return yield* handler();
+            }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invokeSync")),
+          );
+        });
+      }),
+      () => Effect.sync(() => ipcMain.removeAllListeners(channel)),
+    );
+  }),
+});
 
 export interface DesktopIpcSyncEvent {
   returnValue: unknown;
@@ -33,67 +186,12 @@ export interface DesktopIpcMethod<E, R> {
 
 export interface DesktopSyncIpcMethod<E, R> {
   readonly channel: string;
-  ) => Effect.Effect<void, never, R | Scope.Scope>;
+  readonly handler: () => Effect.Effect<unknown, E, R>;
 }
 
-export type ConnectionState = "connected" | "disconnected" | "reconnecting";
-
-export interface QueuedMessage {
-  readonly id: number;
-  readonly channel: string;
-  readonly raw: unknown;
-  readonly enqueuedAt: number;
-  readonly fiber: Fiber.RuntimeFiber<unknown, unknown>;
-}
-
-export interface DesktopIpcQueue {
-  readonly enqueue: (message: Omit<QueuedMessage, "enqueuedAt">) => Effect.Effect<void>;
-  readonly dequeue: () => Effect.Effect<QueuedMessage | undefined>;
-  readonly peek: () => Effect.Effect<QueuedMessage | undefined>;
-  readonly size: () => Effect.Effect<number>;
-  readonly isEmpty: () => Effect.Effect<boolean>;
-  readonly clear: () => Effect.Effect<void>;
-  readonly removeExpired: (now: number, maxAgeMs: number) => Effect.Effect<QueuedMessage[]>;
-}
-
-export const makeIpcQueue = (maxSize: number): DesktopIpcQueue => {
-  let queue: Array<QueuedMessage> = [];
-  let nextId = 1;
-
-  return {
-    enqueue: (message) => Effect.sync(() => {
-      const item = { ...message, id: nextId++, enqueuedAt: Date.now() } as QueuedMessage;
-      if (queue.length >= maxSize) {
-        const dropped = queue.shift();
-        if (dropped) {
-          Effect.runFork(Effect.fail(new Error("Queue full - message dropped")));
-        }
-      }
-      queue.push(item);
-    }),
-    dequeue: () => Effect.sync(() => {
-      const item = queue.shift();
-      return item;
-    }),
-    peek: () => Effect.sync(() => queue[0]),
-    size: () => Effect.sync(() => queue.length),
-    isEmpty: () => Effect.sync(() => queue.length === 0),
-    clear: () => Effect.sync(() => { queue = []; }),
-    removeExpired: (now: number, maxAgeMs: number) => Effect.sync(() => {
-      const expired: QueuedMessage[] = [];
-      queue = queue.filter((msg) => {
-        const isExpired = now - msg.enqueuedAt > maxAgeMs;
-        if (isExpired) expired.push(msg);
-        return !isExpired;
-      });
-      return expired;
-    }),
-  };
-};
-
-export class DesktopIpc extends Context.Service<DesktopIpc, DesktopIpcShape>()("t3/desktop/Ipc") {}
-
-export const make = (ipcMain: DesktopIpcMain): DesktopIpcShape =>
+export interface DesktopIpcShape {
+  readonly handle: <E, R>(
+    input: DesktopIpcMethod<E, R>,
   ) => Effect.Effect<void, never, R | Scope.Scope>;
   readonly handleSync: <E, R>(
     input: DesktopSyncIpcMethod<E, R>,
@@ -127,11 +225,9 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpcShape =>
         () => Effect.sync(() => ipcMain.removeHandler(channel)),
       );
     }),
-    }),
-  });
 
-export const MAX_QUEUE_SIZE = 100;
-export const MESSAGE_EXPIRY_MS = 30000;
+    handleSync: Effect.fn("desktop.ipc.registerSync")(function* <E, R>({
+      channel,
       handler,
     }: DesktopSyncIpcMethod<E, R>) {
       yield* Effect.annotateCurrentSpan({ channel });
