@@ -1,4 +1,5 @@
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import (
     Annotated,
     Any,
@@ -8,6 +9,7 @@ from typing import (
 )
 
 from annotated_doc import Doc
+from fastapi.exceptions import HTTPException
 from pydantic import GetJsonSchemaHandler
 from starlette.datastructures import URL as URL  # noqa: F401
 from starlette.datastructures import Address as Address  # noqa: F401
@@ -16,6 +18,17 @@ from starlette.datastructures import Headers as Headers  # noqa: F401
 from starlette.datastructures import QueryParams as QueryParams  # noqa: F401
 from starlette.datastructures import State as State  # noqa: F401
 from starlette.datastructures import UploadFile as StarletteUploadFile
+from starlette.status import (
+    HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+)
+
+
+@dataclass(frozen=True)
+class ValidationResult:
+    is_valid: bool
+    file_size: int | None
+    content_type: str | None
 
 
 class UploadFile(StarletteUploadFile):
@@ -62,6 +75,57 @@ class UploadFile(StarletteUploadFile):
     content_type: Annotated[
         str | None, Doc("The content type of the request, from the headers.")
     ]
+
+    def __init__(
+        self,
+        *args: Any,
+        max_size: int | None = None,
+        allowed_content_types: list[str] | tuple[str, ...] | set[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.max_size = max_size
+        self.allowed_content_types = (
+            None if allowed_content_types is None else set(allowed_content_types)
+        )
+
+    async def validate(self) -> ValidationResult:
+        file_size = await self._get_file_size()
+        content_type = self.content_type
+
+        if self.max_size is not None and file_size is not None and file_size > self.max_size:
+            raise HTTPException(
+                status_code=HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Uploaded file exceeds the maximum allowed size.",
+            )
+
+        if (
+            self.allowed_content_types is not None
+            and content_type not in self.allowed_content_types
+        ):
+            raise HTTPException(
+                status_code=HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="Uploaded file content type is not allowed.",
+            )
+
+        return ValidationResult(
+            is_valid=True,
+            file_size=file_size,
+            content_type=content_type,
+        )
+
+    async def _get_file_size(self) -> int | None:
+        if self.size is not None:
+            return self.size
+
+        try:
+            current_position = self.file.tell()
+            self.file.seek(0, 2)
+            file_size = self.file.tell()
+            self.file.seek(current_position)
+            return file_size
+        except (AttributeError, OSError):
+            return None
 
     async def write(
         self,
