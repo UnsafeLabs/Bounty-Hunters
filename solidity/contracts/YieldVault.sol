@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+contract YieldVault {
     IERC20 public rewardToken;
- * @title YieldVault
- * @notice A simple yield vault that distributes rewards over a fixed period
- */
-contract YieldVault is ReentrancyGuard, Ownable {
     IERC20 public stakingToken;
-    IERC20 public rewardToken;
-    
+
+    uint256 public rewardRate;
+    uint256 public periodFinish;
+    uint256 public lastUpdateTime;
+    uint256 public rewardPerTokenStored;
+    uint256 public totalSupply;
 
     mapping(address => uint256) public balanceOf;
     mapping(address => uint256) public userRewardPerTokenPaid;
@@ -20,50 +19,38 @@ contract YieldVault is ReentrancyGuard, Ownable {
 
     address public rewardDistributor;
 
-    uint256 public rewardRate;
-    uint256 public periodFinish;
-    uint256 public lastUpdateTime;
-    uint256 public constant PRECISION = 1e18;
-    uint256 public scaledRewardRate;
-    address public rewardDistributor;
-    
-    mapping(address => uint256) public userRewardPerTokenPaid;
-    mapping(address => uint256) public rewards;
-        rewardToken = IERC20(_rewardToken);
-        rewardDistributor = msg.sender;
-    event RewardAdded(uint256 reward);
+    event Deposited(address indexed user, uint256 amount);
+    event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
-    
-    modifier onlyDistributor() {
-        require(msg.sender == rewardDistributor, "Not authorized distributor");
-        _;
-    }
-    
+
     constructor(address _stakingToken, address _rewardToken) {
         stakingToken = IERC20(_stakingToken);
         rewardToken = IERC20(_rewardToken);
+        rewardDistributor = msg.sender;
+    }
+
+    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    function rewardPerToken() public view returns (uint256) {
+        if (totalSupply == 0) return rewardPerTokenStored;
+        return rewardPerTokenStored + (
             (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
         );
-    function rewardPerToken() public view returns (uint256) {
-        if (_totalSupply == 0) {
-            return rewardPerTokenStored;
-        }
-        uint256 timeToUse = block.timestamp;
-        if (timeToUse > periodFinish) {
-            timeToUse = periodFinish;
-        }
-        return rewardPerTokenStored + (((timeToUse - lastUpdateTime) * scaledRewardRate) / _totalSupply);
     }
-    
+
+    // BUG: Uses uncapped rewardPerToken
     function earned(address account) public view returns (uint256) {
-        rewardPerTokenStored = rewardPerToken();
-    
+        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
+    }
+
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp > periodFinish ? periodFinish : block.timestamp;
+        lastUpdateTime = block.timestamp;
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
+        }
+        _;
+    }
 
     function deposit(uint256 amount) external updateReward(msg.sender) {
         require(amount > 0, "Cannot deposit 0");
@@ -79,28 +66,29 @@ contract YieldVault is ReentrancyGuard, Ownable {
         balanceOf[msg.sender] -= amount;
         stakingToken.transfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
-        _;
     }
-    
-    function setRewardDistributor(address _distributor) external onlyOwner {
-        rewardDistributor = _distributor;
+
+    function claimReward() external updateReward(msg.sender) {
+        uint256 reward = rewards[msg.sender];
+        if (reward > 0) {
+            rewards[msg.sender] = 0;
+            rewardToken.transfer(msg.sender, reward);
+            emit RewardPaid(msg.sender, reward);
+        }
     }
-    
-    function notifyRewardAmount(uint256 reward, uint256 duration) external onlyDistributor updateReward(address(0)) {
-        require(duration > 0, "Duration must be > 0");
-        
-        rewardRate = reward / duration;
-        scaledRewardRate = (reward * PRECISION) / duration;
-        rewardPerTokenStored = 0;
-        lastUpdateTime = block.timestamp;
-        periodFinish = block.timestamp + duration;
-        
+
     // BUG: No access control — anyone can call
     // BUG: Precision loss in rewardRate calculation
+    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
+        rewardRate = reward / duration;
+        lastUpdateTime = block.timestamp;
+        periodFinish = block.timestamp + duration;
+    }
+}
     
     function getReward() public nonReentrant updateReward(msg.sender) {
         uint256 reward = rewards[msg.sender];
-        if (reward > 0 && reward <= rewardToken.balanceOf(address(this))) {
+        if (reward > 0) {
             rewards[msg.sender] = 0;
             rewardToken.transfer(msg.sender, reward);
             emit RewardPaid(msg.sender, reward);
