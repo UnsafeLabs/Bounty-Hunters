@@ -7,19 +7,18 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { cast } from "effect/Function";
-import { pipe } from "effect/Function";
 import {
   HttpBody,
   HttpClient,
   HttpClientResponse,
   HttpRouter,
+  HttpRouter,
   HttpServerResponse,
   HttpServerRequest,
+  HttpServerError,
 } from "effect/unstable/http";
-import { HttpServer } from "effect/unstable/http";
 import { OtlpTracer } from "effect/unstable/observability";
 
-import {
   ATTACHMENTS_ROUTE_PREFIX,
   normalizeAttachmentRelativePath,
   resolveAttachmentRelativePath,
@@ -33,115 +32,108 @@ import { respondToAuthError } from "./auth/http.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import {
   browserApiCorsAllowedHeaders,
-  browserApiCorsAllowedMethods,
-  browserApiCorsHeaders,
-} from "./httpCors.ts";
-
-const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+
 const DEFAULT_BODY_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
 const FILE_UPLOAD_BODY_SIZE_LIMIT = 50 * 1024 * 1024; // 50MB
-const BODY_SIZE_LIMIT_HEADER = "X-Max-Body-Size";
 
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: [...browserApiCorsAllowedMethods],
+  allowedHeaders: [...browserApiCorsAllowedHeaders],
+const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+
+export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: [...browserApiCorsAllowedMethods],
+  allowedHeaders: [...browserApiCorsAllowedHeaders],
   maxAge: 600,
 });
 
-export interface BodySizeLimitOptions {
-  readonly limit?: number;
-}
-
-class PayloadTooLargeError extends Data.TaggedError("PayloadTooLargeError")<{
-  readonly limit: number;
-  readonly received: number;
-}> {}
-
-export function getContentLength(request: HttpServerRequest.HttpServerRequest): number {
-  const contentLength = request.headers["content-length"];
-  if (contentLength === undefined) return 0;
-  const parsed = parseInt(contentLength, 10);
-  return isNaN(parsed) ? 0 : parsed;
-}
-
-export function checkBodySize(
-  request: HttpServerRequest.HttpServerRequest,
-  limit: number
-): Effect.Effect<void, PayloadTooLargeError> {
-  const contentLength = getContentLength(request);
-  if (contentLength > limit) {
-    return Effect.fail(
-      new PayloadTooLargeError({ limit, received: contentLength })
-    );
-  }
-  return Effect.succeed(undefined);
-}
-
-export function createBodySizeExceededResponse(
-  limit: number,
-  received: number
-): HttpServerResponse.HttpServerResponse {
-  return HttpServerResponse.json(
-    {
-      error: "Payload Too Large",
-      limit,
-      received,
-    },
-    {
-      status: 413,
-      headers: {
-        [BODY_SIZE_LIMIT_HEADER]: String(limit),
-      },
-    }
-  );
-}
-
-export function withBodySizeLimit(
-  route: HttpRouter.Route<any, any>,
-  options: BodySizeLimitOptions = {}
-): HttpRouter.Route<any, any> {
-  const limit = options.limit ?? DEFAULT_BODY_SIZE_LIMIT;
-  
-  return {
-    ...route,
-    handler: Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      const contentLength = getContentLength(request);
-      
-      if (contentLength > limit) {
-        return createBodySizeExceededResponse(limit, contentLength);
-      }
-      
-      return yield* route.handler;
-    }),
-  };
-}
-
-export function applyBodySizeLimit(
-  limit: number = DEFAULT_BODY_SIZE_LIMIT
-): <R, E>(route: HttpRouter.Route<R, E>) => HttpRouter.Route<R, E> {
-  return (route) => withBodySizeLimit(route, { limit });
-}
-
-export const defaultBodySizeLimit = applyBodySizeLimit(DEFAULT_BODY_SIZE_LIMIT);
-export const fileUploadBodySizeLimit = applyBodySizeLimit(FILE_UPLOAD_BODY_SIZE_LIMIT);
-
 export function isLoopbackHostname(hostname: string): boolean {
   const normalizedHostname = hostname
-    .trim()
     .trim()
     .toLowerCase()
     .replace(/^\[(.*)\]$/, "$1");
   return LOOPBACK_HOSTNAMES.has(normalizedHostname);
 }
 
-export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
-  const redirectUrl = new URL(devUrl.toString());
-  redirectUrl.pathname = requestUrl.pathname;
-  redirectUrl.search = requestUrl.search;
-  redirectUrl.hash = requestUrl.hash;
+  return redirectUrl.toString();
+}
+
+export interface BodySizeLimitConfig {
+  readonly limit: number;
+}
+
+export const defaultBodySizeLimit: BodySizeLimitConfig = {
+  limit: DEFAULT_BODY_SIZE_LIMIT,
+};
+
+export const fileUploadBodySizeLimit: BodySizeLimitConfig = {
+  limit: FILE_UPLOAD_BODY_SIZE_LIMIT,
+};
+
+class PayloadTooLargeError extends Data.TaggedError("PayloadTooLargeError")<{
+  readonly limit: number;
+  readonly received: number;
+}> {}
+
+export function checkBodySize(
+  limitConfig: BodySizeLimitConfig
+): Effect.Effect<void, PayloadTooLargeError, HttpServerRequest.HttpServerRequest> {
+  return Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const contentLength = request.headers["content-length"];
+    if (contentLength) {
+      const size = parseInt(contentLength, 10);
+      if (!isNaN(size) && size > limitConfig.limit) {
+        return yield* new PayloadTooLargeError({
+          limit: limitConfig.limit,
+          received: size,
+        });
+      }
+    }
+  });
+}
+
+export function withBodySizeLimit(
+  route: HttpRouter.Route<any, any, any, any, any, any>,
+  limitConfig: BodySizeLimitConfig = defaultBodySizeLimit
+): HttpRouter.Route<any, any, any, any, any, any> {
+  const originalHandler = route.handler;
+  const newHandler = Effect.gen(function* () {
+    yield* checkBodySize(limitConfig);
+    return yield* originalHandler;
+  }).pipe(
+    Effect.catchAll((error) => {
+      if (error instanceof PayloadTooLargeError) {
+        return Effect.succeed(
+          HttpServerResponse.jsonUnsafe(
+            {
+              error: "Payload Too Large",
+              limit: error.limit,
+              received: error.received,
+            },
+            {
+              status: 413,
+              headers: {
+                "X-Max-Body-Size": String(error.limit),
+              },
+            }
+          )
+        );
+      }
+      return Effect.fail(error);
+    })
+  );
+  return {
+    ...route,
+    handler: newHandler,
+  };
+}
+
+const requireAuthenticatedRequest = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
   return redirectUrl.toString();
 }
 
@@ -153,13 +145,12 @@ const requireAuthenticatedRequest = Effect.gen(function* () {
 
 export const serverEnvironmentRouteLayer = HttpRouter.add(
   "GET",
-export const serverEnvironmentRouteLayer = HttpRouter.add(
-  "GET",
   "/.well-known/t3/environment",
-  defaultBodySizeLimit,
   Effect.gen(function* () {
     const descriptor = yield* Effect.service(ServerEnvironment).pipe(
       Effect.flatMap((serverEnvironment) => serverEnvironment.getDescriptor),
+    );
+    return HttpServerResponse.jsonUnsafe(descriptor, {
       status: 200,
       headers: browserApiCorsHeaders,
     });
@@ -178,13 +169,12 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
     yield* requireAuthenticatedRequest;
     const request = yield* HttpServerRequest.HttpServerRequest;
     const config = yield* ServerConfig;
-export const otlpTracesProxyRouteLayer = HttpRouter.add(
-  "POST",
-  OTLP_TRACES_PROXY_PATH,
-  defaultBodySizeLimit,
-  Effect.gen(function* () {
-    yield* requireAuthenticatedRequest;
-    const request = yield* HttpServerRequest.HttpServerRequest;
+    const otlpTracesUrl = config.otlpTracesUrl;
+    const browserTraceCollector = yield* BrowserTraceCollector;
+    const httpClient = yield* HttpClient.HttpClient;
+    const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
+
+    yield* Effect.try({
       try: () => decodeOtlpTraceRecords(bodyJson),
       catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson }),
     }).pipe(
