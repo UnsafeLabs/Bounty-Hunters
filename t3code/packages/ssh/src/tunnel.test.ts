@@ -5,6 +5,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 import * as Result from "effect/Result";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -390,4 +391,69 @@ describe("ssh tunnel scripts", () => {
       assert.equal(tunnelKillCount, 1);
     }).pipe(Effect.provide(layer), Effect.scoped);
   });
+
+  it.effect("reconnects a dropped tunnel after the first exponential backoff delay", () =>
+    Effect.gen(function* () {
+      const tunnelStarts = yield* Queue.unbounded<number>();
+      let tunnelStartCount = 0;
+      let requestCount = 0;
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.sync(() => {
+        const args = commandArgs(command);
+        if (args.includes("-N")) {
+          tunnelStartCount += 1;
+          return makeRunningProcess(() => {});
+        }
+        if (args.includes("sh") && args.includes("--")) {
+          return makeSuccessfulProcess('{"remotePort":3773}\n');
+        }
+        if (args.includes("sh")) {
+          return makeSuccessfulProcess('{"stopped":true}\n');
+        }
+        return makeSuccessfulProcess("\n");
+      }).pipe(
+        Effect.tap(() =>
+          commandArgs(command).includes("-N")
+            ? Queue.offer(tunnelStarts, tunnelStartCount)
+            : Effect.void,
+        ),
+      ),
+    );
+    const httpClient = HttpClient.make((request) => {
+      requestCount += 1;
+      if (requestCount === 2) {
+        return Effect.never;
+      }
+      return Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status: 200 })));
+    });
+    const layer = Layer.mergeAll(
+      NodeServices.layer,
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(HttpClient.HttpClient, httpClient),
+      Layer.succeed(NetService.NetService, testNetService),
+      SshPasswordPrompt.disabledLayer,
+      SshEnvironmentManager.layer(),
+    );
+    const target = {
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 2222,
+    } as const;
+
+    return yield* Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+      yield* manager.ensureEnvironment(target);
+      assert.equal(yield* Queue.take(tunnelStarts), 1);
+
+      yield* TestClock.adjust(Duration.millis(15_000));
+      yield* TestClock.adjust(Duration.millis(1_000));
+      yield* TestClock.adjust(Duration.millis(999));
+      assert.equal(yield* Queue.size(tunnelStarts), 0);
+
+      yield* TestClock.adjust(Duration.millis(1));
+      assert.equal(yield* Queue.take(tunnelStarts), 2);
+    }).pipe(Effect.provide(Layer.merge(TestClock.layer(), layer)), Effect.scoped);
+    }),
+  );
 });
