@@ -1,3 +1,5 @@
+import time
+from threading import RLock
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -5,7 +7,8 @@ from fastapi.openapi.models import APIKey, APIKeyIn
 from fastapi.security.base import SecurityBase
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.responses import Response
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class APIKeyBase(SecurityBase):
@@ -230,6 +233,102 @@ class APIKeyHeader(APIKeyBase):
     async def __call__(self, request: Request) -> str | None:
         api_key = request.headers.get(self.model.name)
         return self.check_api_key(api_key)
+
+
+class APIKeyWithRateLimit(APIKeyHeader):
+    """
+    API key authentication with in-memory sliding-window rate limiting.
+
+    Deprecated keys are still accepted but add a `Warning` response header so
+    clients can rotate before deactivation.
+    """
+
+    _WINDOW_SECONDS = {
+        "second": 1,
+        "minute": 60,
+        "hour": 3600,
+        "day": 86400,
+    }
+
+    def __init__(
+        self,
+        *,
+        name: Annotated[str, Doc("Header name.")],
+        rate_limit: Annotated[
+            str,
+            Doc('Rate limit in the form "100/minute" or "1000/hour".'),
+        ],
+        deprecated_keys: Annotated[
+            list[str] | None,
+            Doc("Old API keys that still authenticate but emit a Warning header."),
+        ] = None,
+        scheme_name: Annotated[str | None, Doc("Security scheme name.")] = None,
+        description: Annotated[str | None, Doc("Security scheme description.")] = None,
+        auto_error: Annotated[bool, Doc("Automatically error when the key is missing.")] = True,
+    ):
+        super().__init__(
+            name=name,
+            scheme_name=scheme_name,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.max_requests, self.window_seconds = self._parse_rate_limit(rate_limit)
+        self.deprecated_keys = set(deprecated_keys or [])
+        self._requests_by_key: dict[str, list[float]] = {}
+        self._lock = RLock()
+
+    async def __call__(self, request: Request, response: Response) -> str | None:
+        api_key = self.check_api_key(request.headers.get(self.model.name))
+        if api_key is None:
+            return None
+
+        retry_after = self._record_request(api_key)
+        if retry_after is not None:
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        if api_key in self.deprecated_keys:
+            response.headers["Warning"] = (
+                '299 - "API key is deprecated and will be deactivated"'
+            )
+
+        return api_key
+
+    def _record_request(self, api_key: str) -> int | None:
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+        with self._lock:
+            timestamps = [
+                timestamp
+                for timestamp in self._requests_by_key.get(api_key, [])
+                if timestamp > cutoff
+            ]
+            if len(timestamps) >= self.max_requests:
+                retry_after = max(1, int(self.window_seconds - (now - timestamps[0])))
+                self._requests_by_key[api_key] = timestamps
+                return retry_after
+            timestamps.append(now)
+            self._requests_by_key[api_key] = timestamps
+            return None
+
+    @classmethod
+    def _parse_rate_limit(cls, rate_limit: str) -> tuple[int, int]:
+        try:
+            amount_text, window_text = rate_limit.split("/", 1)
+            amount = int(amount_text)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("rate_limit must use the format '<count>/<window>'") from exc
+
+        window = window_text.rstrip("s").lower()
+        if amount <= 0 or window not in cls._WINDOW_SECONDS:
+            raise ValueError(
+                "rate_limit must use a positive count and one of: "
+                "second, minute, hour, day"
+            )
+        return amount, cls._WINDOW_SECONDS[window]
 
 
 class APIKeyCookie(APIKeyBase):
