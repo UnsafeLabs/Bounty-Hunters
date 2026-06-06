@@ -392,6 +392,66 @@ describe("DesktopBackendManager", () => {
     }),
   );
 
+  it.effect("restarts the backend after three post-readiness health check failures", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      const healthChecks = yield* Queue.unbounded<void>();
+      const closed = yield* Deferred.make<void>();
+      const ready = yield* Deferred.make<void>();
+      let startCount = 0;
+      let requestCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            startCount += 1;
+            yield* Queue.offer(starts, startCount);
+            return makeProcess({
+              exitCode: Deferred.await(closed).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+              kill: () => Deferred.succeed(closed, void 0).pipe(Effect.asVoid),
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer((request) =>
+          Effect.gen(function* () {
+            requestCount += 1;
+            if (requestCount === 1) {
+              return responseForRequest(request, 200);
+            }
+
+            yield* Queue.offer(healthChecks, void 0);
+            return responseForRequest(request, 503);
+          }),
+        ),
+        desktopWindow: {
+          handleBackendReady: Deferred.succeed(ready, void 0).pipe(Effect.asVoid),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        assert.equal(yield* Queue.take(starts), 1);
+        yield* Deferred.await(ready);
+
+        yield* TestClock.adjust(Duration.seconds(15));
+        yield* Queue.take(healthChecks);
+        yield* TestClock.adjust(Duration.seconds(20));
+        yield* Queue.take(healthChecks);
+        yield* TestClock.adjust(Duration.seconds(20));
+        yield* Queue.take(healthChecks);
+
+        yield* TestClock.adjust(Duration.millis(500));
+        assert.equal(yield* Queue.take(starts), 2);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
   it.effect("cancels a scheduled restart when start is requested manually", () =>
     Effect.gen(function* () {
       const starts = yield* Queue.unbounded<number>();
