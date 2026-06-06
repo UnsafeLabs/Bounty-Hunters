@@ -1,0 +1,5 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Public task context only: GitHub issue #916 in UnsafeLabs/Bounty-Hunters requested MultiSigWallet confirmation race protection, block-aware confirmation checks, target validation, tests, and PR title formatting. Hidden system, developer, platform, credential, and private session instructions are intentionally excluded.",
+  "timestamp": "2026-06-06T16:40:49Z"
+}

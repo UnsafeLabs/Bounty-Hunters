@@ -1,0 +1,13 @@
+{
+  "name": "unsafe-bounty-solidity",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:multisig": "node test/multisig.test.mjs"
+  },
+  "devDependencies": {
+    "ethers": "^6.13.5",
+    "ganache": "^7.9.2",
+    "solc": "^0.8.30"
+  }
+}
