@@ -31,6 +31,7 @@ import {
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
+import { scopedThreadKey } from "@t3tools/client-runtime";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import {
   clampCollapsedComposerCursor,
@@ -145,6 +146,10 @@ const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-slot="combobox-popup"]',
   '[data-slot="autocomplete-popup"]',
 ].join(",");
+
+function composerDraftTargetKey(target: ScopedThreadRef | DraftId): string {
+  return typeof target === "string" ? target : scopedThreadKey(target);
+}
 
 const extendReplacementRangeForTrailingSpace = (
   text: string,
@@ -1202,13 +1207,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   // Reset compositor state on thread/draft change
   // ------------------------------------------------------------------
+  const composerDraftTargetKeyValue = useMemo(
+    () => composerDraftTargetKey(composerDraftTarget),
+    [composerDraftTarget],
+  );
+
   useEffect(() => {
     setComposerHighlightedItemId(null);
-    setComposerCursor(collapseExpandedComposerCursor(promptRef.current, promptRef.current.length));
-    setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length));
+    const nextCursor = collapseExpandedComposerCursor(prompt, prompt.length);
+    setComposerCursor(nextCursor);
+    setComposerTrigger(
+      detectComposerTrigger(prompt, expandCollapsedComposerCursor(prompt, nextCursor)),
+    );
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
-  }, [draftId, activeThreadId, promptRef]);
+  }, [composerDraftTargetKeyValue]);
 
   // ------------------------------------------------------------------
   // Footer compact layout observation

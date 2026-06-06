@@ -285,6 +285,27 @@ describe("composerDraftStore clearComposerContent", () => {
     expect(draft).toBeUndefined();
     expect(revokeSpy).not.toHaveBeenCalledWith("blob:optimistic");
   });
+
+  it("keeps independent session drafts when switching threads and clears only the sent thread", () => {
+    const firstThreadId = ThreadId.make("thread-draft-one");
+    const secondThreadId = ThreadId.make("thread-draft-two");
+    const firstThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, firstThreadId);
+    const secondThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, secondThreadId);
+    const store = useComposerDraftStore.getState();
+
+    store.setPrompt(firstThreadRef, "continue the first thread");
+    store.setPrompt(secondThreadRef, "ask something different");
+
+    expect(store.getComposerDraft(firstThreadRef)?.prompt).toBe("continue the first thread");
+    expect(store.getComposerDraft(secondThreadRef)?.prompt).toBe("ask something different");
+
+    store.clearComposerContent(secondThreadRef);
+
+    expect(useComposerDraftStore.getState().getComposerDraft(firstThreadRef)?.prompt).toBe(
+      "continue the first thread",
+    );
+    expect(useComposerDraftStore.getState().getComposerDraft(secondThreadRef)).toBeNull();
+  });
 });
 
 describe("composerDraftStore syncPersistedAttachments", () => {
