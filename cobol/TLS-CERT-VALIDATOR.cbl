@@ -108,6 +108,11 @@
        01  WS-SIG-VERIFY-RESULT        PIC X(1).
            88  WS-SIG-VALID            VALUE 'V'.
            88  WS-SIG-INVALID          VALUE 'I'.
+       01  WS-SIG-VERIFY-BUFFER        PIC X(64).
+       01  WS-FINGERPRINT-INDEX        PIC 9(2)  VALUE 0.
+       01  WS-FINGERPRINT-MATCH-FLAG   PIC X(1).
+           88  WS-FINGERPRINT-MATCHES  VALUE 'Y'.
+           88  WS-FINGERPRINT-MISMATCH VALUE 'N'.
        01  WS-MIN-KEY-LENGTH           PIC 9(5)  VALUE 02048.
        01  WS-ALLOWED-ALGORITHMS.
            05  FILLER  PIC X(20) VALUE 'SHA256WITHRSA       '.
@@ -250,6 +255,25 @@
                SET WS-SIG-INVALID TO TRUE
                GO TO 4000-EXIT
            END-IF
+           MOVE WS-CERT-FINGERPRINT TO WS-SIG-VERIFY-BUFFER
+           SET WS-FINGERPRINT-MATCHES TO TRUE
+           PERFORM VARYING WS-FINGERPRINT-INDEX FROM 1 BY 1
+               UNTIL WS-FINGERPRINT-INDEX > 64
+               IF FUNCTION ORD(
+                   WS-SIG-VERIFY-BUFFER(WS-FINGERPRINT-INDEX:1))
+                   NOT = FUNCTION ORD(
+                   CS-FINGERPRINT(WS-FINGERPRINT-INDEX:1))
+                   SET WS-FINGERPRINT-MISMATCH TO TRUE
+               END-IF
+           END-PERFORM
+           IF WS-FINGERPRINT-MISMATCH
+               SET WS-SIG-INVALID TO TRUE
+               DISPLAY 'TLSVAL-E040: FINGERPRINT MISMATCH '
+                   WS-SIG-VERIFY-BUFFER
+               GO TO 4000-EXIT
+           END-IF
+           DISPLAY 'TLSVAL-I040: FINGERPRINT '
+               WS-SIG-VERIFY-BUFFER
            SET WS-SIG-VALID TO TRUE
            .
        4000-EXIT.
