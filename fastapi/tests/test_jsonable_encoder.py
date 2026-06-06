@@ -329,3 +329,34 @@ def test_encode_color(module_path):
 
     data = {"color": Color("blue")}
     assert jsonable_encoder(data) == {"color": "blue"}
+
+
+def test_encode_bytes_as_base64_by_default():
+    assert jsonable_encoder(b"\xff\x00") == "/wA="
+
+
+def test_encode_memoryview_as_base64_by_default():
+    assert jsonable_encoder(memoryview(b"\xff\x00")) == "/wA="
+
+
+def test_encode_bytes_as_hex():
+    assert jsonable_encoder(b"\xff\x00", bytes_encoding="hex") == "ff00"
+
+
+def test_encode_nested_bytes_uses_selected_encoding():
+    data = {"raw": [b"\xff\x00", memoryview(b"abc")]}
+
+    assert jsonable_encoder(data) == {"raw": ["/wA=", "YWJj"]}
+    assert jsonable_encoder(data, bytes_encoding="hex") == {"raw": ["ff00", "616263"]}
+
+
+def test_encode_model_bytes_as_base64():
+    class ModelWithBytes(BaseModel):
+        data: bytes
+
+    assert jsonable_encoder(ModelWithBytes(data=b"\xff\x00")) == {"data": "/wA="}
+
+
+def test_encode_invalid_bytes_encoding_raises():
+    with pytest.raises(ValueError):
+        jsonable_encoder(b"abc", bytes_encoding="utf-8")  # type: ignore[arg-type]
