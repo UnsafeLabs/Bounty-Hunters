@@ -1,5 +1,8 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Queue from "effect/Queue";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
@@ -30,12 +33,67 @@ export interface DesktopIpcMethod<E, R> {
 
 export interface DesktopSyncIpcMethod<E, R> {
   readonly channel: string;
-  readonly handler: () => Effect.Effect<unknown, E, R>;
+  ) => Effect.Effect<void, never, R | Scope.Scope>;
 }
 
-export interface DesktopIpcShape {
-  readonly handle: <E, R>(
-    input: DesktopIpcMethod<E, R>,
+export type ConnectionState = "connected" | "disconnected" | "reconnecting";
+
+export interface QueuedMessage {
+  readonly id: number;
+  readonly channel: string;
+  readonly raw: unknown;
+  readonly enqueuedAt: number;
+  readonly fiber: Fiber.RuntimeFiber<unknown, unknown>;
+}
+
+export interface DesktopIpcQueue {
+  readonly enqueue: (message: Omit<QueuedMessage, "enqueuedAt">) => Effect.Effect<void>;
+  readonly dequeue: () => Effect.Effect<QueuedMessage | undefined>;
+  readonly peek: () => Effect.Effect<QueuedMessage | undefined>;
+  readonly size: () => Effect.Effect<number>;
+  readonly isEmpty: () => Effect.Effect<boolean>;
+  readonly clear: () => Effect.Effect<void>;
+  readonly removeExpired: (now: number, maxAgeMs: number) => Effect.Effect<QueuedMessage[]>;
+}
+
+export const makeIpcQueue = (maxSize: number): DesktopIpcQueue => {
+  let queue: Array<QueuedMessage> = [];
+  let nextId = 1;
+
+  return {
+    enqueue: (message) => Effect.sync(() => {
+      const item = { ...message, id: nextId++, enqueuedAt: Date.now() } as QueuedMessage;
+      if (queue.length >= maxSize) {
+        const dropped = queue.shift();
+        if (dropped) {
+          Effect.runFork(Effect.fail(new Error("Queue full - message dropped")));
+        }
+      }
+      queue.push(item);
+    }),
+    dequeue: () => Effect.sync(() => {
+      const item = queue.shift();
+      return item;
+    }),
+    peek: () => Effect.sync(() => queue[0]),
+    size: () => Effect.sync(() => queue.length),
+    isEmpty: () => Effect.sync(() => queue.length === 0),
+    clear: () => Effect.sync(() => { queue = []; }),
+    removeExpired: (now: number, maxAgeMs: number) => Effect.sync(() => {
+      const expired: QueuedMessage[] = [];
+      queue = queue.filter((msg) => {
+        const isExpired = now - msg.enqueuedAt > maxAgeMs;
+        if (isExpired) expired.push(msg);
+        return !isExpired;
+      });
+      return expired;
+    }),
+  };
+};
+
+export class DesktopIpc extends Context.Service<DesktopIpc, DesktopIpcShape>()("t3/desktop/Ipc") {}
+
+export const make = (ipcMain: DesktopIpcMain): DesktopIpcShape =>
   ) => Effect.Effect<void, never, R | Scope.Scope>;
   readonly handleSync: <E, R>(
     input: DesktopSyncIpcMethod<E, R>,
@@ -69,9 +127,11 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpcShape =>
         () => Effect.sync(() => ipcMain.removeHandler(channel)),
       );
     }),
+    }),
+  });
 
-    handleSync: Effect.fn("desktop.ipc.registerSync")(function* <E, R>({
-      channel,
+export const MAX_QUEUE_SIZE = 100;
+export const MESSAGE_EXPIRY_MS = 30000;
       handler,
     }: DesktopSyncIpcMethod<E, R>) {
       yield* Effect.annotateCurrentSpan({ channel });
