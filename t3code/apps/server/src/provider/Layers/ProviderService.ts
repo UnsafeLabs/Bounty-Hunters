@@ -48,6 +48,7 @@ import {
 import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
+import { makeProviderCache } from "../Services/ProviderCache.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import {
   ProviderSessionDirectory,
@@ -210,6 +211,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   const registry = yield* ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory;
+  const providerCache = yield* makeProviderCache();
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -929,8 +931,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  yield* Stream.runForEach(registry.streamChanges, () => providerCache.invalidateAll).pipe(
+    Effect.forkScoped,
+  );
+
   const getCapabilities: ProviderServiceShape["getCapabilities"] = (instanceId) =>
-    registry.getByInstance(instanceId).pipe(Effect.map((adapter) => adapter.capabilities));
+    providerCache.getCapabilities(
+      instanceId,
+      registry.getByInstance(instanceId).pipe(Effect.map((adapter) => adapter.capabilities)),
+    );
 
   const getInstanceInfo: ProviderServiceShape["getInstanceInfo"] = (instanceId) =>
     registry.getInstanceInfo(instanceId);
