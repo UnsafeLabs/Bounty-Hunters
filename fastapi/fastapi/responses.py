@@ -1,4 +1,7 @@
 import importlib
+import csv
+from collections.abc import AsyncIterable, Iterable, Mapping, Sequence
+from io import StringIO
 from typing import Any, Protocol, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
@@ -11,6 +14,65 @@ from starlette.responses import RedirectResponse as RedirectResponse  # noqa
 from starlette.responses import Response as Response  # noqa
 from starlette.responses import StreamingResponse as StreamingResponse  # noqa
 from typing_extensions import deprecated
+
+
+CSVRow = Mapping[str, Any] | Sequence[Any]
+
+
+class StreamingCSVResponse(StreamingResponse):
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        rows: AsyncIterable[CSVRow] | Iterable[CSVRow],
+        *,
+        headers: Sequence[str] | None = None,
+        filename: str = "export.csv",
+        delimiter: str = ",",
+        status_code: int = 200,
+        media_type: str | None = None,
+        background: Any | None = None,
+    ) -> None:
+        self.csv_headers = list(headers) if headers is not None else None
+        self.delimiter = delimiter
+        content = self._stream_rows(rows)
+        response_headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        }
+        super().__init__(
+            content,
+            status_code=status_code,
+            headers=response_headers,
+            media_type=media_type or self.media_type,
+            background=background,
+        )
+
+    async def _stream_rows(
+        self, rows: AsyncIterable[CSVRow] | Iterable[CSVRow]
+    ) -> AsyncIterable[str]:
+        if self.csv_headers is not None:
+            yield self._render_row(self.csv_headers)
+
+        if hasattr(rows, "__aiter__"):
+            async for row in cast(AsyncIterable[CSVRow], rows):
+                yield self._render_row(self._normalize_row(row))
+            return
+
+        for row in cast(Iterable[CSVRow], rows):
+            yield self._render_row(self._normalize_row(row))
+
+    def _normalize_row(self, row: CSVRow) -> Sequence[Any]:
+        if isinstance(row, Mapping):
+            if self.csv_headers is None:
+                return list(row.values())
+            return [row.get(header, "") for header in self.csv_headers]
+        return row
+
+    def _render_row(self, row: Sequence[Any]) -> str:
+        buffer = StringIO()
+        writer = csv.writer(buffer, delimiter=self.delimiter, lineterminator="\n")
+        writer.writerow(row)
+        return buffer.getvalue()
 
 
 class _UjsonModule(Protocol):
