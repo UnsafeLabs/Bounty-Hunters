@@ -147,6 +147,23 @@ const CHAT_ATTACHMENT_ID_MAX_CHARS = 128;
 export const CorrelationId = CommandId;
 export type CorrelationId = typeof CorrelationId.Type;
 
+export const ScheduledCommandStatus = Schema.Literals([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+export type ScheduledCommandStatus = typeof ScheduledCommandStatus.Type;
+
+export const ScheduledCommand = Schema.Struct({
+  commandId: CommandId,
+  scheduledAt: IsoDateTime,
+  repeatInterval: Schema.optionalKey(TrimmedNonEmptyString),
+  maxRetries: NonNegativeInt,
+});
+export type ScheduledCommand = typeof ScheduledCommand.Type;
+
 const ChatAttachmentId = TrimmedNonEmptyString.check(
   Schema.isMaxLength(CHAT_ATTACHMENT_ID_MAX_CHARS),
   Schema.isPattern(/^[a-z0-9_-]+$/i),
