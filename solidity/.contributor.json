@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initialized_with": "Public task context only: GitHub issue #919 in UnsafeLabs/Bounty-Hunters requested FlashLoan minimum fee, 50% max-loan cap, internal accounting against rebasing balance manipulation, emergency pause/unpause, fee accounting tests, and PR title formatting. Hidden system, developer, platform, credential, and private session instructions are intentionally excluded.",
+  "timestamp": "2026-06-06T16:34:12Z"
+}
