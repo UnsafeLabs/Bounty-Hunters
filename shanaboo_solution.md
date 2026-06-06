@@ -1,153 +1,195 @@
-Looking at the issue, I need to create a ProviderCache.ts file that implements Effect.Cache-based caching for provider API responses with TTL and cache invalidation. Let me analyze the requirements:
-
-1. Create `t3code/apps/server/src/services/ProviderCache.ts`
-2. Use Effect.Cache with 5-minute TTL for model lists, 15-minute TTL for capability queries
-3. Implement cache invalidation on provider configuration changes via Effect.Hub
-4. Add cache hit/miss metrics
-5. Handle concurrent request deduplication
-6. Bounded memory usage
-
-```diff
+ ```diff
 --- /dev/null
 +++ b/t3code/apps/server/src/services/ProviderCache.ts
-@@ -0,0 +1,184 @@
-+import { Cache, Effect, Duration, Layer, Metric, Hub, Queue, Context, pipe } from "effect";
-+import type { ProviderId } from "../types/provider";
+@@ -0,0 +1,256 @@
++import { Effect, Cache, Hub, Layer, pipe, Duration, Metric, MetricLabel, Ref, Option } from "effect"
++import * as Schema from "@effect/schema/Schema"
 +
-+// Define cache configuration
-+interface CacheConfig {
-+  modelListTTL: Duration.Duration;
-+  capabilityTTL: Duration.Duration;
-+  maxEntries: number;
++// ============================================================================
++// Domain Types
++// ============================================================================
++
++export interface ProviderConfig {
++  readonly providerId: string
++  readonly apiKey: string
++  readonly baseUrl: string
++  readonly enabled: boolean
 +}
 +
-+// Default configuration
-+const defaultConfig: CacheConfig = {
-+  modelListTTL: Duration.minutes(5),
-+  capabilityTTL: Duration.minutes(15),
-+  maxEntries: 1000
-+};
-+
-+// Cache keys
-+type CacheKey = 
-+  | { _tag: "modelList"; providerId: ProviderId }
-+  | { _tag: "capability"; providerId: ProviderId; modelId: string };
-+
-+// Provider cache service
-+interface ProviderCacheService {
-+  readonly getModelList: (providerId: ProviderId) => Effect.Effect<unknown, unknown, never>;
-+  readonly getCapability: (providerId: ProviderId, modelId: string) => Effect.Effect<unknown, unknown, never>;
-+  readonly invalidateProvider: (providerId: ProviderId) => Effect.Effect<void, never, never>;
-+  readonly invalidateAll: () => Effect.Effect<void, never, never>;
++export interface Model {
++  readonly id: string
++  readonly name: string
++  readonly capabilities: ReadonlyArray<string>
 +}
 +
++export interface CapabilityQuery {
++  readonly modelId: string
++  readonly features: ReadonlyArray<string>
++}
++
++export interface ProviderCacheMetrics {
++  readonly modelListHits: number
++  readonly modelListMisses: number
++  readonly capabilityHits: number
++  readonly capabilityMisses: number
++  readonly invalidations: number
++}
++
++// ============================================================================
++// Cache Key Types
++// ============================================================================
++
++export interface ModelListKey {
++  readonly _tag: "ModelListKey"
++  readonly providerId: string
++}
++
++export interface CapabilityKey {
++  readonly _tag: "CapabilityKey"
++  readonly providerId: string
++  readonly modelId: string
++}
++
++export type CacheKey = ModelListKey | CapabilityKey
++
++// ============================================================================
 +// Metrics
-+const cacheHitMetric = Metric.counter("provider_cache_hits");
-+const cacheMissMetric = Metric.counter("provider_cache_misses");
++// ============================================================================
 +
-+// Create the ProviderCache service
-+const makeProviderCache = Effect.gen(function* ($) {
-+  const config = defaultConfig;
++const modelListHitCounter = Metric.counter("provider_cache_model_list_hits", {
++  description: "Number of model list cache hits",
++})
++
++const modelListMissCounter = Metric.counter("provider_cache_model_list_misses", {
++  description: "Number of model list cache misses",
++})
++
++const capabilityHitCounter = Metric.counter("provider_cache_capability_hits", {
++  description: "Number of capability query cache hits",
++})
++
++const capabilityMissCounter = Metric.counter("provider_cache_capability_misses", {
++  description: "Number of capability query cache misses",
++})
++
++const invalidationCounter = Metric.counter("provider_cache_invalidations", {
++  description: "Number of cache invalidations triggered by provider config changes",
++})
++
++// ============================================================================
++// Provider API Service (interface for external calls)
++// ============================================================================
++
++export interface ProviderApiService {
++  readonly fetchModelList: (providerId: string) => Effect.Effect<ReadonlyArray<Model>, Error>
++  readonly fetchCapabilityQuery: (providerId: string, modelId: string) => Effect.Effect<CapabilityQuery, Error>
++}
++
++export const ProviderApiService = Effect.Tag<ProviderApiService>("ProviderApiService")
++
++// ============================================================================
++// Provider Cache Service
++// ============================================================================
++
++export interface ProviderCacheService {
++  readonly getModelList: (providerId: string) => Effect.Effect<ReadonlyArray<Model>, Error>
++  readonly getCapabilityQuery: (providerId: string, modelId: string) => Effect.Effect<CapabilityQuery, Error>
++  readonly invalidateProvider: (providerId: string) => Effect.Effect<void, never>
++  readonly getMetrics: Effect.Effect<ProviderCacheMetrics, never>
++}
++
++export const ProviderCacheService = Effect.Tag<ProviderCacheService>("ProviderCacheService")
++
++// ============================================================================
++// Configuration
++// ============================================================================
++
++export interface ProviderCacheConfig {
++  readonly modelListTtl: Duration.Duration
++  readonly capabilityTtl: Duration.Duration
++  readonly maxModelListEntries: number
++  readonly maxCapabilityEntries: number
++}
++
++export const defaultProviderCacheConfig: ProviderCacheConfig = {
++  modelListTtl: Duration.minutes(5),
++  capabilityTtl: Duration.minutes(15),
++  maxModelListEntries: 100,
++  maxCapabilityEntries: 500,
++}
++
++// ============================================================================
++// Implementation
++// ============================================================================
++
++export const makeProviderCacheService = Effect.gen(function* (_) {
++  const config = yield* _(Effect.succeed(defaultProviderCacheConfig))
++  const providerApi = yield* _(ProviderApiService)
 +  
-+  // Create invalidation hub
-+  const invalidationHub = yield* $(Hub.unsafeMake<void>(Number.MAX_SAFE_INTEGER));
++  // Hub for provider configuration change events
++  const invalidationHub = yield* _(Hub.bounded<string>(100))
 +  
-+  // Create model list cache
-+  const modelListCache = yield* $(Cache.make({
-+    capacity: config.maxEntries,
-+    timeToLive: config.modelListTTL,
-+    lookup: (key: CacheKey & { _tag: "modelList" }) => 
-+      Effect.gen(function* ($) {
-+        yield* $(Metric.increment(cacheMissMetric));
-+        // Simulate API call - in real implementation this would call the actual provider API
-+        return yield* $(Effect.promise(() => 
-+          fetchModelListFromProvider(key.providerId)
-+        ));
-+      })
-+  }));
++  // Model list cache with 5-minute TTL
++  const modelListCache = yield* _(
++    Cache.make({
++      capacity: config.maxModelListEntries,
++      timeToLive: config.modelListTtl,
++      lookup: (providerId: string) =>
++        pipe(
++          providerApi.fetchModelList(providerId),
++          Effect.tap(() => modelListMissCounter.pipe(Metric.increment)),
++          Effect.tapError(() => modelListMissCounter.pipe(Metric.increment))
++        ),
++    })
++  )
 +  
-+  // Create capability cache
-+  const capabilityCache = yield* $(Cache.make({
-+    capacity: config.maxEntries,
-+    timeToLive: config.capabilityTTL,
-+    lookup: (key: CacheKey & { _tag: "capability" }) => 
-+      Effect.gen(function* ($) {
-+        yield* $(Metric.increment(cacheMissMetric));
-+        // Simulate API call - in real implementation this would call the actual provider API
-+        return yield* $(Effect.promise(() => 
-+          fetchCapabilityFromProvider(key.providerId, key.modelId)
-+        ));
-+      })
-+  }));
++  // Capability query cache with 15-minute TTL
++  const capabilityCache = yield* _(
++    Cache.make({
++      capacity: config.maxCapabilityEntries,
++      timeToLive: config.capabilityTtl,
++      lookup: ([providerId, modelId]: [string, string]) =>
++        pipe(
++          providerApi.fetchCapabilityQuery(providerId, modelId),
++          Effect.tap(() => capabilityMissCounter.pipe(Metric.increment)),
++          Effect.tapError(() => capabilityMissCounter.pipe(Metric.increment))
++        ),
++    })
++  )
 +  
 +  // Subscribe to invalidation events
-+  yield* $(Effect.forkDaemon(Queue.takeAll(invalidationHub).pipe(
-+    Effect.flatMap(Effect.forEach((providerId: ProviderId) => 
-+      invalidateProviderCaches(providerId, modelListCache, capabilityCache)
-+    )),
-+    Effect.forever
-+  )));
++  const invalidationSubscription = yield* _(Hub.subscribe(invalidationHub))
 +  
-+  // Return the service
-+  return {
-+    getModelList: (providerId: ProviderId) => 
-+      Effect.gen(function* ($) {
-+        const key: CacheKey = { _tag: "modelList", providerId };
-+        const result = yield* $(modelListCache.get(key));
-+        yield* $(Metric.increment(cacheHitMetric));
-+        return result;
-+      }).pipe(
-+        Effect.catchAll(() => 
-+          modelListCache.get({ _tag: "modelList", providerId } as CacheKey & { _tag: "modelList" })
++  // Process invalidation events
++  const invalidationFiber = yield* _(
++    pipe(
++      invalidationSubscription,
++      Effect.runFork
++    )
++  )
++  
++  const getModelList = (providerId: string): Effect.Effect<ReadonlyArray<Model>, Error> =>
++    pipe(
++      modelListCache.get(providerId),
++      Effect.tap(() => modelListHitCounter.pipe(Metric.increment)),
++      Effect.catchAll((error) =>
++        pipe(
++          providerApi.fetchModelList(providerId),
++          Effect.tap(() => modelListMissCounter.pipe(Metric.increment))
 +        )
-+      ),
-+    
-+    getCapability: (providerId: ProviderId, modelId: string) => 
-+      Effect.gen(function* ($) {
-+        const key: CacheKey = { _tag: "capability", providerId, modelId };
-+        const result = yield* $(capabilityCache.get(key));
-+        yield* $(Metric.increment(cacheHitMetric));
-+        return result;
-+      }).pipe(
-+        Effect.catchAll(() => 
-+          capabilityCache.get({ _tag: "capability", providerId, modelId } as CacheKey & { _tag: "capability" })
++      )
++    )
++  
++  const getCapabilityQuery = (providerId: string, modelId: string): Effect.Effect<CapabilityQuery, Error> =>
++    pipe(
++      capabilityCache.get([providerId, modelId]),
++      Effect.tap(() => capabilityHitCounter.pipe(Metric.increment)),
++      Effect.catchAll((error) =>
++        pipe(
++          providerApi.fetchCapabilityQuery(providerId, modelId),
++          Effect.tap(() => capabilityMissCounter.pipe(Metric.increment))
 +        )
-+      ),
-+    
-+    invalidateProvider: (providerId: ProviderId) => 
-+      invalidateProviderCaches(providerId, modelListCache, capabilityCache),
-+    
-+    invalidateAll: () => 
-+      Effect.gen(function* ($) {
-+        yield* $(modelListCache.invalidateAll());
-+        yield* $(capabilityCache.invalidateAll());
-+      })
-+  } satisfies ProviderCacheService;
-+});
-+
-+// Helper function to invalidate all caches for a provider
-+const invalidateProviderCaches = (
-+  providerId: ProviderId,
-+  modelListCache: Cache.Cache<CacheKey & { _tag: "modelList" }, unknown, unknown>,
-+  capabilityCache: Cache.Cache<CacheKey & { _tag: "capability" }, unknown, unknown>
-+) => 
-+  Effect.gen(function* ($) {
-+    // For simplicity, we're invalidating all entries for the provider
-+    // In a more complex implementation, you might want to be more selective
-+    yield* $(modelListCache.invalidateAll());
-+    yield* $(capabilityCache.invalidateAll());
-+  });
-+
-+// Simulated API calls - these would be replaced with actual provider API calls
-+const fetchModelListFromProvider = async (providerId: ProviderId): Promise<unknown> => {
-+  // Simulate network delay
-+  await new Promise(resolve => setTimeout(resolve, 100));
-+  return {
-+    providerId,
-+    models: [`model-1-${Date.now()}`, `model-2-${Date.now()}`],
-+    timestamp: new Date().toISOString()
-+  };
-+};
-+
-+const fetchCapabilityFromProvider = async (providerId: ProviderId, modelId: string): Promise<unknown> => {
-+  // Sim
++      )
++    )
++  
++  const invalidateProvider = (providerId: string): Effect.Effect
