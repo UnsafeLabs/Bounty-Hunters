@@ -1,0 +1,5 @@
+{
+  "agent": "Codex GPT-5",
+  "pre_task_context": "Public summary only: implemented Effect.Stream-based streaming support for issue #845. Private system, developer, runtime, session, credential, and hidden context instructions are intentionally excluded.",
+  "timestamp": "2026-06-06T18:30:00Z"
+}

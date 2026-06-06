@@ -1,9 +1,15 @@
 import * as Context from "effect/Context";
+import * as Exit from "effect/Exit";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stdio from "effect/Stdio";
+import * as Stream from "effect/Stream";
+import * as Take from "effect/Take";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as CodexRpc from "./_generated/meta.gen.ts";
@@ -18,6 +24,9 @@ import {
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
 
 const DEFAULT_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
+const DEFAULT_STREAM_WARNING_AFTER_MILLIS = 30_000;
+const DEFAULT_STREAM_FAIL_AFTER_MILLIS = 120_000;
+const DEFAULT_STREAM_BUFFER_SIZE = 16;
 
 export interface CodexAppServerClientOptions {
   readonly logIncoming?: boolean;
@@ -36,12 +45,45 @@ interface CodexAppServerClientRaw {
   readonly respondError: CodexProtocol.CodexAppServerPatchedProtocol["respondError"];
 }
 
+export type CodexAppServerRequestStreamEvent<M extends CodexRpc.ClientRequestMethod> =
+  | {
+      readonly type: "chunk";
+      readonly notification: CodexProtocol.CodexAppServerIncomingNotification;
+    }
+  | {
+      readonly type: "warning";
+      readonly reason: "chunk_timeout";
+      readonly idleMillis: number;
+    }
+  | {
+      readonly type: "response";
+      readonly response: CodexRpc.ClientRequestResponsesByMethod[M];
+    };
+
+export interface CodexAppServerRequestStreamOptions {
+  readonly bufferSize?: number;
+  readonly warningAfterMillis?: number;
+  readonly failAfterMillis?: number;
+  readonly abortSignal?: AbortSignal;
+  readonly includeNotification?: (
+    notification: CodexProtocol.CodexAppServerIncomingNotification,
+  ) => boolean;
+}
+
 export interface CodexAppServerClientShape {
   readonly raw: CodexAppServerClientRaw;
   readonly request: <M extends CodexRpc.ClientRequestMethod>(
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
   ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexError.CodexAppServerError>;
+  readonly requestStream: <M extends CodexRpc.ClientRequestMethod>(
+    method: M,
+    payload: CodexRpc.ClientRequestParamsByMethod[M],
+    options?: CodexAppServerRequestStreamOptions,
+  ) => Stream.Stream<
+    CodexAppServerRequestStreamEvent<M>,
+    CodexError.CodexAppServerError
+  >;
   readonly notify: <M extends CodexRpc.ClientNotificationMethod>(
     method: M,
     payload: CodexRpc.ClientNotificationParamsByMethod[M],
@@ -83,6 +125,14 @@ type ServerRequestHandler = (
 type ServerNotificationHandler = (
   payload: unknown,
 ) => Effect.Effect<void, CodexError.CodexAppServerError>;
+type StreamSubscriber = {
+  readonly includeNotification: (
+    notification: CodexProtocol.CodexAppServerIncomingNotification,
+  ) => boolean;
+  readonly offer: (
+    notification: CodexProtocol.CodexAppServerIncomingNotification,
+  ) => Effect.Effect<void, CodexError.CodexAppServerError>;
+};
 
 export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make")(function* (
   stdio: Stdio.Stdio,
@@ -91,6 +141,7 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
 ): Effect.fn.Return<CodexAppServerClientShape, never, Scope.Scope> {
   const requestHandlers = new Map<string, ServerRequestHandler>();
   const notificationHandlers = new Map<string, Array<ServerNotificationHandler>>();
+  const streamSubscribers = new Set<StreamSubscriber>();
   let unknownRequestHandler:
     | ((method: string, params: unknown) => Effect.Effect<unknown, CodexError.CodexAppServerError>)
     | undefined;
@@ -148,8 +199,18 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
         : undefined;
     const handlers = notificationHandlers.get(notification.method) ?? [];
 
+    const publishToStreams = Effect.forEach(
+      [...streamSubscribers],
+      (subscriber) =>
+        subscriber.includeNotification(notification)
+          ? subscriber.offer(notification)
+          : Effect.void,
+      { discard: true },
+    ).pipe(Effect.catch(() => Effect.void));
+
     if (schema) {
-      return decodeNotificationPayload(notification.method, schema, notification.params).pipe(
+      return publishToStreams.pipe(
+        Effect.andThen(decodeNotificationPayload(notification.method, schema, notification.params)),
         Effect.flatMap((decoded) =>
           Effect.forEach(handlers, (handler) => handler(decoded), { discard: true }),
         ),
@@ -157,11 +218,14 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       );
     }
 
-    return unknownNotificationHandler
-      ? unknownNotificationHandler(notification.method, notification.params).pipe(
-          Effect.catch(() => Effect.void),
-        )
-      : Effect.void;
+    return publishToStreams.pipe(
+      Effect.andThen(
+        unknownNotificationHandler
+          ? unknownNotificationHandler(notification.method, notification.params)
+          : Effect.void,
+      ),
+      Effect.catch(() => Effect.void),
+    );
   };
 
   const dispatchRequest = (
@@ -210,6 +274,107 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       ),
     );
 
+  const requestStream = <M extends CodexRpc.ClientRequestMethod>(
+    method: M,
+    payload: CodexRpc.ClientRequestParamsByMethod[M],
+    options: CodexAppServerRequestStreamOptions = {},
+  ): Stream.Stream<
+    CodexAppServerRequestStreamEvent<M>,
+    CodexError.CodexAppServerError
+  > =>
+    Stream.scoped(Stream.unwrap(
+      Effect.gen(function* () {
+        const bufferSize = Math.max(1, Math.floor(options.bufferSize ?? DEFAULT_STREAM_BUFFER_SIZE));
+        const warningAfterMillis = Math.max(
+          1,
+          Math.floor(options.warningAfterMillis ?? DEFAULT_STREAM_WARNING_AFTER_MILLIS),
+        );
+        const failAfterMillis = Math.max(
+          warningAfterMillis + 1,
+          Math.floor(options.failAfterMillis ?? DEFAULT_STREAM_FAIL_AFTER_MILLIS),
+        );
+        const output =
+          yield* Queue.bounded<Take.Take<CodexAppServerRequestStreamEvent<M>, CodexError.CodexAppServerError>>(
+            bufferSize,
+          );
+        const activityVersion = yield* Ref.make(0);
+
+        const emit = (event: CodexAppServerRequestStreamEvent<M>) =>
+          Ref.update(activityVersion, (current) => current + 1).pipe(
+            Effect.andThen(Queue.offer(output, [event])),
+          );
+        const fail = (error: CodexError.CodexAppServerError) =>
+          Queue.offer(output, Exit.fail(error));
+        const end = Queue.offer(output, Exit.void);
+        const subscriber: StreamSubscriber = {
+          includeNotification: options.includeNotification ?? (() => true),
+          offer: (notification) => emit({ type: "chunk", notification }),
+        };
+
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            streamSubscribers.add(subscriber);
+          }),
+          () =>
+            Effect.sync(() => {
+              streamSubscribers.delete(subscriber);
+            }).pipe(Effect.andThen(Queue.shutdown(output))),
+        );
+
+        const monitor = Effect.gen(function* () {
+          while (true) {
+            const observedVersion = yield* Ref.get(activityVersion);
+            yield* Effect.sleep(`${warningAfterMillis} millis`);
+            if ((yield* Ref.get(activityVersion)) !== observedVersion) {
+              continue;
+            }
+            yield* emit({
+              type: "warning",
+              reason: "chunk_timeout",
+              idleMillis: warningAfterMillis,
+            });
+            yield* Effect.sleep(`${failAfterMillis - warningAfterMillis} millis`);
+            if ((yield* Ref.get(activityVersion)) === observedVersion + 1) {
+              yield* fail(
+                new CodexError.CodexAppServerStreamTimeoutError({
+                  idleMillis: failAfterMillis,
+                }),
+              );
+              break;
+            }
+          }
+        });
+
+        yield* Effect.forkScoped(monitor);
+        const requestFiber = yield* request(method, payload).pipe(
+          Effect.flatMap((response) => emit({ type: "response", response })),
+          Effect.andThen(end),
+          Effect.catch(fail),
+          Effect.forkScoped,
+        );
+
+        if (options.abortSignal) {
+          const abort = () => {
+            Effect.runFork(Fiber.interrupt(requestFiber).pipe(Effect.andThen(end)));
+          };
+          yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              options.abortSignal?.addEventListener("abort", abort, { once: true });
+              if (options.abortSignal?.aborted) {
+                abort();
+              }
+            }),
+            () =>
+              Effect.sync(() => {
+                options.abortSignal?.removeEventListener("abort", abort);
+              }),
+          );
+        }
+
+        return Stream.fromQueue(output).pipe(Stream.flattenTake);
+      }),
+    ));
+
   const notify = <M extends CodexRpc.ClientNotificationMethod>(
     method: M,
     payload: CodexRpc.ClientNotificationParamsByMethod[M],
@@ -228,6 +393,7 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       respondError: transport.respondError,
     },
     request,
+    requestStream,
     notify,
     handleServerRequest: (method, handler) =>
       Effect.sync(() => {
