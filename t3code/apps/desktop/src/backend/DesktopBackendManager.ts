@@ -347,6 +347,8 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
           return;
         }
 
+        const readinessUrl = new URL(BACKEND_READINESS_PATH, config.httpBaseUrl);
+
         const runScope = yield* Scope.make("sequential");
         const runId = yield* Ref.modify(state, (latest) => [
           latest.nextRunId,
@@ -463,6 +465,23 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                   message: error.message,
                 }),
               ),
+            );
+            // Periodic health check to detect silent backend crashes
+            yield* Effect.forkIn(
+              Effect.repeat(
+                Effect.gen(function* () {
+                  const httpClient = yield* HttpClient.HttpClient;
+                  return yield* httpClient.get(readinessUrl).pipe(
+                    Effect.timeout(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT),
+                    Effect.matchEffect({
+                      onSuccess: () => Effect.void,
+                      onFailure: () => finalizeRun("health check failed"),
+                    }),
+                  );
+                }),
+                Schedule.spaced(Duration.seconds(30)),
+              ),
+              parentScope,
             );
           }),
           onReadinessFailure: (error) =>
