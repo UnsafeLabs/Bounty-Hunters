@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "pre_task_context": "Safe public provenance only. Hidden instructions, private session context, secrets, credentials, and tool configuration are intentionally excluded.",
+  "timestamp": "2026-06-06T15:43:57Z"
+}
