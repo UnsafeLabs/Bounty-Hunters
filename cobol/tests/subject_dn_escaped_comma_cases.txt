@@ -1,0 +1,14 @@
+single escaped comma:
+  input:  CN="Smith\, John",OU=Legal,O=Bank
+  parsed: Smith, John
+  count:  3
+
+multiple escaped commas:
+  input:  CN="Smith\, John\, Esq",OU=Legal,O=Bank
+  parsed: Smith, John, Esq
+  count:  3
+
+no escaped commas:
+  input:  CN=payments.example.com,OU=Gateway,O=Bank
+  parsed: payments.example.com
+  count:  3

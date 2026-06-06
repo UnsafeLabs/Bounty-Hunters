@@ -93,6 +93,16 @@
                88  WS-CERT-IS-EXPIRED  VALUE 'Y'.
                88  WS-CERT-NOT-EXPIRED VALUE 'N'.
        01  WS-EXPECTED-HOSTNAME        PIC X(255).
+       01  WS-PARSED-CN                PIC X(64).
+       01  WS-SUBJECT-DN-WORK          PIC X(256).
+       01  WS-RDN-COUNT                PIC 9(2)  VALUE 0.
+       01  WS-RDN-INDEX                PIC 9(2)  VALUE 0.
+       01  WS-DN-SRC-IDX               PIC 9(3)  VALUE 1.
+       01  WS-DN-DST-IDX               PIC 9(3)  VALUE 1.
+       01  WS-CN-CHAR-IDX              PIC 9(2)  VALUE 1.
+       01  WS-ESCAPED-COMMA-MARK       PIC X     VALUE X'1F'.
+       01  WS-RDN-TABLE.
+           05  WS-RDN-ENTRY            PIC X(128) OCCURS 20 TIMES.
        01  WS-HOSTNAME-TALLY           PIC 9(5)  VALUE 0.
        01  WS-WILDCARD-POS             PIC 9(3)  VALUE 0.
        01  WS-HOSTNAME-MATCH-FLAG      PIC X(1).
@@ -130,6 +140,7 @@
            PERFORM 2000-VALIDATE-CERT-CHAIN
            PERFORM 3000-CHECK-EXPIRY-DATE
            PERFORM 4000-VERIFY-SIGNATURE
+           PERFORM 3500-PARSE-SUBJECT-DN
            PERFORM 5000-MATCH-HOSTNAME
            PERFORM 6000-CHECK-REVOCATION-STATUS
            PERFORM 7000-DETERMINE-FINAL-RESULT
@@ -253,6 +264,78 @@
            SET WS-SIG-VALID TO TRUE
            .
        4000-EXIT.
+           EXIT.
+       3500-PARSE-SUBJECT-DN.
+           MOVE SPACES TO WS-PARSED-CN
+           MOVE SPACES TO WS-SUBJECT-DN-WORK
+           MOVE SPACES TO WS-RDN-TABLE
+           MOVE 0 TO WS-RDN-COUNT
+           MOVE 1 TO WS-DN-SRC-IDX
+           MOVE 1 TO WS-DN-DST-IDX
+           PERFORM UNTIL WS-DN-SRC-IDX > 256
+               IF WS-DN-SRC-IDX < 256
+                   AND WS-SUBJECT-COMMON-NAME(WS-DN-SRC-IDX:2)
+                       = '\,'
+                   MOVE WS-ESCAPED-COMMA-MARK
+                       TO WS-SUBJECT-DN-WORK(WS-DN-DST-IDX:1)
+                   ADD 2 TO WS-DN-SRC-IDX
+               ELSE
+                   MOVE WS-SUBJECT-COMMON-NAME(WS-DN-SRC-IDX:1)
+                       TO WS-SUBJECT-DN-WORK(WS-DN-DST-IDX:1)
+                   ADD 1 TO WS-DN-SRC-IDX
+               END-IF
+               ADD 1 TO WS-DN-DST-IDX
+               IF WS-DN-DST-IDX > 256
+                   MOVE 257 TO WS-DN-SRC-IDX
+               END-IF
+           END-PERFORM
+           UNSTRING WS-SUBJECT-DN-WORK DELIMITED BY ','
+               INTO WS-RDN-ENTRY(1)
+                    WS-RDN-ENTRY(2)
+                    WS-RDN-ENTRY(3)
+                    WS-RDN-ENTRY(4)
+                    WS-RDN-ENTRY(5)
+                    WS-RDN-ENTRY(6)
+                    WS-RDN-ENTRY(7)
+                    WS-RDN-ENTRY(8)
+                    WS-RDN-ENTRY(9)
+                    WS-RDN-ENTRY(10)
+                    WS-RDN-ENTRY(11)
+                    WS-RDN-ENTRY(12)
+                    WS-RDN-ENTRY(13)
+                    WS-RDN-ENTRY(14)
+                    WS-RDN-ENTRY(15)
+                    WS-RDN-ENTRY(16)
+                    WS-RDN-ENTRY(17)
+                    WS-RDN-ENTRY(18)
+                    WS-RDN-ENTRY(19)
+                    WS-RDN-ENTRY(20)
+               TALLYING IN WS-RDN-COUNT
+           END-UNSTRING
+           PERFORM VARYING WS-RDN-INDEX FROM 1 BY 1
+               UNTIL WS-RDN-INDEX > WS-RDN-COUNT
+               INSPECT WS-RDN-ENTRY(WS-RDN-INDEX)
+                   CONVERTING WS-ESCAPED-COMMA-MARK TO ','
+               IF WS-RDN-ENTRY(WS-RDN-INDEX)(1:3) = 'CN='
+                   MOVE WS-RDN-ENTRY(WS-RDN-INDEX)(4:64)
+                       TO WS-PARSED-CN
+               END-IF
+           END-PERFORM
+           IF WS-PARSED-CN(1:1) = '"'
+               MOVE WS-PARSED-CN(2:63) TO WS-PARSED-CN(1:63)
+               MOVE SPACE TO WS-PARSED-CN(64:1)
+           END-IF
+           PERFORM VARYING WS-CN-CHAR-IDX FROM 1 BY 1
+               UNTIL WS-CN-CHAR-IDX > 64
+               IF WS-PARSED-CN(WS-CN-CHAR-IDX:1) = '"'
+                   MOVE SPACE TO WS-PARSED-CN(WS-CN-CHAR-IDX:1)
+               END-IF
+           END-PERFORM
+           IF WS-PARSED-CN NOT = SPACES
+               MOVE WS-PARSED-CN TO WS-SUBJECT-COMMON-NAME
+           END-IF
+           .
+       3500-EXIT.
            EXIT.
        5000-MATCH-HOSTNAME.
            INSPECT WS-SUBJECT-COMMON-NAME
