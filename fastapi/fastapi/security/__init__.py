@@ -4,6 +4,7 @@ from .api_key import APIKeyQuery as APIKeyQuery
 from .http import HTTPAuthorizationCredentials as HTTPAuthorizationCredentials
 from .http import HTTPBasic as HTTPBasic
 from .http import HTTPBasicCredentials as HTTPBasicCredentials
+from .http import HTTPBasicWithProtection as HTTPBasicWithProtection
 from .http import HTTPBearer as HTTPBearer
 from .http import HTTPDigest as HTTPDigest
 from .oauth2 import OAuth2 as OAuth2

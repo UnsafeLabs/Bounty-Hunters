@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Safe public provenance only. Private system, developer, runtime, and hidden session instructions are intentionally not disclosed.",
+  "date": "2026-06-06T14:47:41Z"
+}
