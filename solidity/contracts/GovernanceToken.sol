@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
-// Using OpenZeppelin's ERC20 with additional governance functionality
-// The original code had tx.origin vulnerabilities that need to be fixed
 
-contract GovernanceToken is ERC20 {
-    mapping(address => address) public delegates;
-    mapping(address => uint256) public delegatedPower;
-    mapping(uint256 => mapping(address => bool)) public hasVoted;
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-    struct Proposal {
-        string description;
-        uint256 forVotes;
+/**
+ * @title GovernanceToken
+ * @dev ERC20 token with delegated voting power for governance proposals.
+ */
+contract GovernanceToken is ERC20, Ownable {
+    struct Delegate {
+        address principal;
+        uint256 delegatedWeight;
         uint256 againstVotes;
         uint256 endTime;
         bool executed;
@@ -58,27 +59,29 @@ contract GovernanceToken is ERC20 {
     function getVotingPower(address account) public view returns (uint256) {
         return balanceOf(account) + delegatedPower[account];
     }
+     * @param delegatee The address to delegate voting power to.
+     */
+    function delegateVote(address delegatee) external {
+        require(msg.sender != address(0), "Invalid sender");
+        require(msg.sender == tx.origin, "No contract delegation");
+        address principal = msg.sender;
 
-    function createProposal(string calldata description, uint256 duration) external returns (uint256) {
-        proposals.push(Proposal({
-            description: description,
-            forVotes: 0,
-            againstVotes: 0,
-            endTime: block.timestamp + duration,
-            executed: false
+        require(delegatee != address(0), "Cannot delegate to zero address");
+        require(balanceOf(principal) > 0, "No tokens to delegate");
         }));
         uint256 proposalId = proposals.length - 1;
         emit ProposalCreated(proposalId, description);
         return proposalId;
     }
 
-    function vote(uint256 proposalId, bool support) external {
-        Proposal storage proposal = proposals[proposalId];
-        require(block.timestamp < proposal.endTime, "Voting ended");
-        require(!hasVoted[proposalId][msg.sender], "Already voted");
+     * @dev Revoke an existing delegation.
+     */
+    function revokeDelegate() external {
+        require(msg.sender != address(0), "Invalid sender");
+        require(msg.sender == tx.origin, "No contract revocation");
+        address principal = msg.sender;
 
-        uint256 power = getVotingPower(msg.sender);
-        require(power > 0, "No voting power");
+        require(delegates[principal].principal != address(0), "No active delegation");
 
         hasVoted[proposalId][msg.sender] = true;
         if (support) {
@@ -87,5 +90,29 @@ contract GovernanceToken is ERC20 {
             proposal.againstVotes += power;
         }
         emit VoteCast(proposalId, msg.sender, support);
+    }
+    /**
+     * @dev Snapshot token balances for proposal voting. Admin only.
+     */
+    function snapshot() external onlyOwner {
+        currentSnapshotId++;
+        uint256 newSnapshotId = currentSnapshotId;
+
+    }
+
+    /**
+     * @dev Get voting power at current snapshot, accounting for delegations.
+     */
+    function getVotingPower(address account) external view returns (uint256) {
+        uint256 snapshotId = currentSnapshotId;
+        uint256 balance = balanceOfAt(account, snapshotId);
+        uint256 delegated = delegatedPower[account];
+
+        uint256 ownDelegatedAway = 0;
+        if (delegates[account].principal != address(0)) {
+            ownDelegatedAway = balanceOfAt(account, snapshotId);
+        }
+
+        return balance + delegated - ownDelegatedAway;
     }
 }
