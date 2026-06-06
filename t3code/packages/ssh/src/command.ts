@@ -93,6 +93,10 @@ export function baseSshArgs(
     `BatchMode=${input?.batchMode ?? "no"}`,
     "-o",
     "ConnectTimeout=10",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
     ...(target.port !== null ? ["-p", String(target.port)] : []),
   ];
 }
