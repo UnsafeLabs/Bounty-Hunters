@@ -85,6 +85,7 @@ export const makeServerAuth = Effect.gen(function* () {
         role: session.role,
         ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
       })),
+      Effect.tap((session) => sessions.markActive(session.sessionId)),
       Effect.mapError(
         (cause) =>
           new AuthError({

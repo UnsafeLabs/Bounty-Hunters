@@ -33,6 +33,7 @@ import {
 const SIGNING_SECRET_NAME = "server-signing-key";
 const DEFAULT_SESSION_TTL = Duration.days(30);
 const DEFAULT_WEBSOCKET_TOKEN_TTL = Duration.minutes(5);
+const LAST_ACTIVE_UPDATE_DEBOUNCE = Duration.minutes(5);
 
 const SessionClaims = Schema.Struct({
   v: Schema.Literal(1),
@@ -95,6 +96,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
   const authSessions = yield* AuthSessionRepository;
   const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
   const connectedSessionsRef = yield* Ref.make(new Map<string, number>());
+  const lastActiveWriteRef = yield* Ref.make(new Map<string, number>());
   const changesPubSub = yield* PubSub.unbounded<SessionCredentialChange>();
   const cookieName = resolveSessionCookieName({
     mode: serverConfig.mode,
@@ -192,6 +194,45 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       ),
       Effect.catchCause((cause) =>
         Effect.logError("Failed to publish disconnected-session auth update.").pipe(
+          Effect.annotateLogs({
+            sessionId,
+            cause,
+          }),
+        ),
+      ),
+    );
+
+  const markActive: SessionCredentialServiceShape["markActive"] = (sessionId) =>
+    DateTime.now.pipe(
+      Effect.flatMap((lastActiveAt) =>
+        Ref.modify(lastActiveWriteRef, (current) => {
+          const previousWrite = current.get(sessionId);
+          const shouldWrite =
+            previousWrite === undefined ||
+            lastActiveAt.epochMilliseconds - previousWrite >=
+              Duration.toMillis(LAST_ACTIVE_UPDATE_DEBOUNCE);
+          if (!shouldWrite) {
+            return [null, current] as const;
+          }
+          const next = new Map(current);
+          next.set(sessionId, lastActiveAt.epochMilliseconds);
+          return [lastActiveAt, next] as const;
+        }),
+      ),
+      Effect.flatMap((lastActiveAt) =>
+        lastActiveAt === null
+          ? Effect.void
+          : authSessions.setLastConnectedAt({
+              sessionId,
+              lastConnectedAt: lastActiveAt,
+            }),
+      ),
+      Effect.flatMap(() => loadActiveSession(sessionId)),
+      Effect.flatMap((session) =>
+        Option.isSome(session) ? emitUpsert(session.value) : Effect.void,
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logError("Failed to persist debounced session activity.").pipe(
           Effect.annotateLogs({
             sessionId,
             cause,
@@ -519,6 +560,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     revokeAllExcept,
     markConnected,
     markDisconnected,
+    markActive,
   } satisfies SessionCredentialServiceShape;
 });
 
