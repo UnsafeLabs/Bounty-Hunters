@@ -69,12 +69,27 @@ function joinSshAskpassPath(
   return platform === "win32" ? `${trimmed}\\${fileName}` : `${trimmed}/${fileName}`;
 }
 
+const UNSAFE_POSIX_ASKPASS_PATH = /[\s"'`$;&|<>(){}[\]\\]/u;
+
+export function isSafePosixAskpassPath(value: string): boolean {
+  return value.length > 0 && !UNSAFE_POSIX_ASKPASS_PATH.test(value);
+}
+
 export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
 # from the renderer's in-app prompt. We never expose a native dialog here - if
 # T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
 if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
-  printf "%s\\n" "$T3_SSH_AUTH_SECRET"
+  umask 077
+  secret_file="$(mktemp "\${TMPDIR:-/tmp}/t3code-ssh-askpass.XXXXXX")" || exit 1
+  cleanup() {
+    rm -f "$secret_file"
+  }
+  trap cleanup EXIT INT TERM
+  chmod 600 "$secret_file" 2>/dev/null || true
+  printf "%s" "$T3_SSH_AUTH_SECRET" > "$secret_file"
+  cat "$secret_file"
+  printf "\\n"
   exit 0
 fi
 printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
@@ -90,8 +105,18 @@ export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through
 # a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
 # and we fail loudly.\r
 if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
-  exit 0\r
+  $secret = ConvertTo-SecureString $env:T3_SSH_AUTH_SECRET -AsPlainText -Force\r
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secret)\r
+  try {\r
+    [Console]::Out.WriteLine([Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr))\r
+    exit 0\r
+  }\r
+  finally {\r
+    if ($bstr -ne [IntPtr]::Zero) {\r
+      [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)\r
+    }\r
+    $secret.Dispose()\r
+  }\r
 }\r
 [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
 exit 1\r
@@ -133,11 +158,16 @@ export const buildSshAskpassHelperDescriptor = Effect.fn(
     };
   }
 
+  const launcherPath = path.join(directory, "ssh-askpass.sh");
+  if (!isSafePosixAskpassPath(launcherPath)) {
+    throw new Error(`Unsafe SSH askpass path: ${launcherPath}`);
+  }
+
   return {
-    launcherPath: path.join(directory, "ssh-askpass.sh"),
+    launcherPath,
     files: [
       {
-        path: path.join(directory, "ssh-askpass.sh"),
+        path: launcherPath,
         contents: ASKPASS_POSIX_SCRIPT,
         mode: 0o700,
       },
