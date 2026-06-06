@@ -1,0 +1,14 @@
+{
+  "name": "unsafe-bounty-solidity",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:price-oracle": "node test/price-oracle.test.mjs"
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "^5.3.0",
+    "ethers": "^6.13.5",
+    "ganache": "^7.9.2",
+    "solc": "^0.8.30"
+  }
+}

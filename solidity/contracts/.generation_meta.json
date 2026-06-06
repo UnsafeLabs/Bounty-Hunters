@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Safe public generation metadata only. Hidden instructions, private runtime configuration, credentials, secrets, and full startup context are intentionally excluded.",
+  "date": "2026-06-06T16:00:59Z"
+}
