@@ -1,6 +1,9 @@
 import binascii
+import hashlib
+import hmac
+import time
 from base64 import b64decode
-from typing import Annotated
+from typing import Annotated, Any, Callable
 
 from annotated_doc import Doc
 from fastapi.exceptions import HTTPException
@@ -10,7 +13,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -217,6 +220,99 @@ class HTTPBasic(HTTPBase):
         if not separator:
             raise self.make_not_authenticated_error()
         return HTTPBasicCredentials(username=username, password=password)
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    def __init__(
+        self,
+        *,
+        max_attempts: int = 5,
+        window_seconds: int = 300,
+        password_hash: str | None = None,
+        password_verifier: Callable[[str, str], bool] | None = None,
+        **kwargs: Any,
+    ):
+        super().__init__(**kwargs)
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self.password_hash = password_hash
+        self.password_verifier = password_verifier or self.verify_password
+        self._failed_attempts: dict[str, list[float]] = {}
+
+    async def __call__(  # type: ignore
+        self, request: Request
+    ) -> HTTPBasicCredentials | None:
+        self._raise_if_locked_out(request)
+        credentials = await super().__call__(request)
+
+        if credentials is None or self.password_hash is None:
+            return credentials
+
+        if self.password_verifier(credentials.password, self.password_hash):
+            self.reset_attempts(request)
+            return credentials
+
+        self.record_failed_attempt(request)
+        raise self.make_not_authenticated_error()
+
+    @staticmethod
+    def verify_password(password: str, password_hash: str) -> bool:
+        try:
+            from passlib.context import CryptContext
+        except ImportError:
+            CryptContext = None  # type: ignore[assignment]
+
+        if CryptContext is not None and password_hash.startswith(("$2a$", "$2b$", "$2y$")):
+            return bool(CryptContext(schemes=["bcrypt"]).verify(password, password_hash))
+
+        if password_hash.startswith("sha256$"):
+            expected = password_hash.removeprefix("sha256$")
+            digest = hashlib.sha256(password.encode("utf-8")).hexdigest()
+            return hmac.compare_digest(digest, expected)
+
+        return hmac.compare_digest(password, password_hash)
+
+    def record_failed_attempt(self, request: Request) -> None:
+        client_ip = self._client_ip(request)
+        now = time.monotonic()
+        attempts = [
+            attempt
+            for attempt in self._failed_attempts.get(client_ip, [])
+            if now - attempt < self.window_seconds
+        ]
+        attempts.append(now)
+        self._failed_attempts[client_ip] = attempts
+
+    def reset_attempts(self, request: Request) -> None:
+        self._failed_attempts.pop(self._client_ip(request), None)
+
+    def _raise_if_locked_out(self, request: Request) -> None:
+        retry_after = self.retry_after(request)
+        if retry_after > 0:
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many authentication attempts",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+    def retry_after(self, request: Request) -> int:
+        client_ip = self._client_ip(request)
+        now = time.monotonic()
+        attempts = [
+            attempt
+            for attempt in self._failed_attempts.get(client_ip, [])
+            if now - attempt < self.window_seconds
+        ]
+        self._failed_attempts[client_ip] = attempts
+
+        if len(attempts) < self.max_attempts:
+            return 0
+
+        return max(1, int(self.window_seconds - (now - attempts[0])))
+
+    def _client_ip(self, request: Request) -> str:
+        client = request.client
+        return client.host if client else "unknown"
 
 
 class HTTPBearer(HTTPBase):
