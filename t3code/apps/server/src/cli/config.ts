@@ -136,6 +136,7 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  compressionLevel: Config.int("T3CODE_COMPRESSION_LEVEL").pipe(Config.withDefault(6)),
 });
 
 export interface CliServerFlags {
@@ -374,6 +375,7 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      compressionLevel: Math.min(Math.max(env.compressionLevel, 1), 11),
     };
 
     return config;
