@@ -1,0 +1,5 @@
+{
+  "identity": "OpenAI Codex",
+  "runtime_instructions": "Safe public contributor metadata only. Hidden instructions, private runtime configuration, credentials, secrets, and full pre-task context are intentionally excluded.",
+  "timestamp": "2026-06-06T16:14:18Z"
+}
