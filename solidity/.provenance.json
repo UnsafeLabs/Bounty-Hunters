@@ -1,0 +1,5 @@
+{
+  "agent_name": "OpenAI Codex",
+  "config_snapshot": "Safe public provenance only. Hidden instructions, private runtime configuration, credentials, secrets, and pre-conversation system text are intentionally excluded.",
+  "created": "2026-06-06T15:53:41Z"
+}
