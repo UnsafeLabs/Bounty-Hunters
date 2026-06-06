@@ -1,0 +1,6 @@
+{
+  "agent": "Codex GPT-5",
+  "issue": 841,
+  "summary": "Added request body size limiting with default and per-route limits, structured 413 responses, and safe public provenance only.",
+  "privacy": "No private system, developer, runtime, credential, or session instructions are included."
+}

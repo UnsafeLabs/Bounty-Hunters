@@ -14,6 +14,10 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { AuthError, ServerAuth } from "./Services/ServerAuth.ts";
 import { SessionCredentialService } from "./Services/SessionCredentialService.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
+import {
+  enforceRequestBodyLimit,
+  respondToRequestBodyTooLarge,
+} from "../httpBodyLimit.ts";
 import { browserApiCorsHeaders } from "../httpCors.ts";
 
 export const respondToAuthError = (error: AuthError) =>
@@ -70,6 +74,7 @@ export const authBootstrapRouteLayer = HttpRouter.add(
     const request = yield* HttpServerRequest.HttpServerRequest;
     const serverAuth = yield* ServerAuth;
     const sessions = yield* SessionCredentialService;
+    yield* enforceRequestBodyLimit();
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthBootstrapInput).pipe(
       Effect.mapError(
         (cause) =>
@@ -96,7 +101,10 @@ export const authBootstrapRouteLayer = HttpRouter.add(
         sameSite: "lax",
       }),
     );
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(
+    Effect.catchTag("RequestBodyTooLargeError", respondToRequestBodyTooLarge),
+    Effect.catchTag("AuthError", (error) => respondToAuthError(error)),
+  ),
 );
 
 export const authBearerBootstrapRouteLayer = HttpRouter.add(
@@ -105,6 +113,7 @@ export const authBearerBootstrapRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const serverAuth = yield* ServerAuth;
+    yield* enforceRequestBodyLimit();
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthBootstrapInput).pipe(
       Effect.mapError(
         (cause) =>
@@ -123,7 +132,10 @@ export const authBearerBootstrapRouteLayer = HttpRouter.add(
       status: 200,
       headers: browserApiCorsHeaders,
     });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(
+    Effect.catchTag("RequestBodyTooLargeError", respondToRequestBodyTooLarge),
+    Effect.catchTag("AuthError", (error) => respondToAuthError(error)),
+  ),
 );
 
 export const authWebSocketTokenRouteLayer = HttpRouter.add(
@@ -148,6 +160,7 @@ export const authPairingCredentialRouteLayer = HttpRouter.add(
     const serverAuth = yield* ServerAuth;
     const request = yield* HttpServerRequest.HttpServerRequest;
     const session = yield* serverAuth.authenticateHttpRequest(request);
+    yield* enforceRequestBodyLimit();
     if (session.role !== "owner") {
       return yield* new AuthError({
         message: "Only owner sessions can create pairing credentials.",
@@ -178,7 +191,10 @@ export const authPairingCredentialRouteLayer = HttpRouter.add(
       : {};
     const result = yield* serverAuth.issuePairingCredential(payload);
     return HttpServerResponse.jsonUnsafe(result, { status: 200 });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(
+    Effect.catchTag("RequestBodyTooLargeError", respondToRequestBodyTooLarge),
+    Effect.catchTag("AuthError", (error) => respondToAuthError(error)),
+  ),
 );
 
 const authenticateOwnerSession = Effect.gen(function* () {
@@ -209,6 +225,7 @@ export const authPairingLinksRevokeRouteLayer = HttpRouter.add(
   "/api/auth/pairing-links/revoke",
   Effect.gen(function* () {
     const { serverAuth } = yield* authenticateOwnerSession;
+    yield* enforceRequestBodyLimit();
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthRevokePairingLinkInput).pipe(
       Effect.mapError(
         (cause) =>
@@ -221,7 +238,10 @@ export const authPairingLinksRevokeRouteLayer = HttpRouter.add(
     );
     const revoked = yield* serverAuth.revokePairingLink(payload.id);
     return HttpServerResponse.jsonUnsafe({ revoked }, { status: 200 });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(
+    Effect.catchTag("RequestBodyTooLargeError", respondToRequestBodyTooLarge),
+    Effect.catchTag("AuthError", (error) => respondToAuthError(error)),
+  ),
 );
 
 export const authClientsRouteLayer = HttpRouter.add(
@@ -239,6 +259,7 @@ export const authClientsRevokeRouteLayer = HttpRouter.add(
   "/api/auth/clients/revoke",
   Effect.gen(function* () {
     const { serverAuth, session } = yield* authenticateOwnerSession;
+    yield* enforceRequestBodyLimit();
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthRevokeClientSessionInput).pipe(
       Effect.mapError(
         (cause) =>
@@ -251,7 +272,10 @@ export const authClientsRevokeRouteLayer = HttpRouter.add(
     );
     const revoked = yield* serverAuth.revokeClientSession(session.sessionId, payload.sessionId);
     return HttpServerResponse.jsonUnsafe({ revoked }, { status: 200 });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+  }).pipe(
+    Effect.catchTag("RequestBodyTooLargeError", respondToRequestBodyTooLarge),
+    Effect.catchTag("AuthError", (error) => respondToAuthError(error)),
+  ),
 );
 
 export const authClientsRevokeOthersRouteLayer = HttpRouter.add(
