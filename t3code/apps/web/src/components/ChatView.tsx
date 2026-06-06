@@ -576,6 +576,8 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
 
   return (
     <div className={visible ? undefined : "hidden"}>
+    role="log"
+    aria-live="polite"
       <ThreadTerminalDrawer
         threadRef={threadRef}
         threadId={threadId}
