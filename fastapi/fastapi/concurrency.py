@@ -1,7 +1,8 @@
-from collections.abc import AsyncGenerator
+import asyncio
+from collections.abc import AsyncGenerator, Awaitable, Sequence
 from contextlib import AbstractContextManager
 from contextlib import asynccontextmanager as asynccontextmanager
-from typing import TypeVar
+from typing import Generic, TypeVar
 
 import anyio.to_thread
 from anyio import CapacityLimiter
@@ -12,6 +13,67 @@ from starlette.concurrency import (  # noqa
 )
 
 _T = TypeVar("_T")
+
+
+class ConcurrencyError(Exception, Generic[_T]):
+    def __init__(
+        self,
+        failures: Sequence[BaseException],
+        partial_results: Sequence[_T | None] | None = None,
+    ) -> None:
+        self.failures = list(failures)
+        self.partial_results = list(partial_results or [])
+        super().__init__(
+            f"{len(self.failures)} concurrent task(s) failed"
+        )
+
+
+async def run_concurrently(
+    coroutines: Sequence[Awaitable[_T]],
+    *,
+    max_concurrency: int,
+    timeout: float | None = None,
+) -> list[_T]:
+    if max_concurrency < 1:
+        raise ValueError("max_concurrency must be at least 1")
+
+    semaphore = asyncio.Semaphore(max_concurrency)
+    results: list[_T | None] = [None] * len(coroutines)
+    failures: list[BaseException] = []
+
+    async def run_one(index: int, coroutine: Awaitable[_T]) -> None:
+        async with semaphore:
+            try:
+                results[index] = await coroutine
+            except asyncio.CancelledError:
+                raise
+            except BaseException as exc:
+                failures.append(exc)
+
+    tasks = [
+        asyncio.create_task(run_one(index, coroutine))
+        for index, coroutine in enumerate(coroutines)
+    ]
+
+    try:
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
+    except TimeoutError as exc:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        failures.append(exc)
+    finally:
+        for task in tasks:
+            if task.done() and not task.cancelled():
+                task_exception = task.exception()
+                if task_exception is not None and task_exception not in failures:
+                    failures.append(task_exception)
+
+    if failures:
+        raise ConcurrencyError(failures, results)
+
+    return [result for result in results]  # type: ignore[list-item]
 
 
 @asynccontextmanager
