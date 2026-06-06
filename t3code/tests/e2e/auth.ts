@@ -9,15 +9,16 @@ export async function login(page: Page) {
   page.on("pageerror", err => console.error("[BROWSER ERROR]", err.message));
 
   const token = `TEST_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-  const dbPath = path.join(os.homedir(), ".t3/dev/state.sqlite");
+  const t3Home = process.env.T3CODE_HOME || path.join(os.homedir(), ".t3");
+  const dbPath = path.join(t3Home, "dev/state.sqlite");
   
   const now = new Date().toISOString();
   const expires = new Date(Date.now() + 3600000).toISOString();
   
   // Insert the pairing token directly into the SQLite database with exact ISO-compliant timestamps
   const query = `INSERT INTO auth_pairing_links (id, credential, method, role, subject, created_at, expires_at) VALUES ('id_${Date.now()}', '${token}', 'one-time-token', 'owner', 'owner-bootstrap', '${now}', '${expires}');`;
-  execSync(`python3 -c "import sqlite3, sys; conn = sqlite3.connect(sys.argv[1]); conn.execute(sys.argv[2]); conn.commit(); conn.close()" "${dbPath}" "${query}"`);
-  console.log(`[E2E Auth] Inserted token: ${token}`);
+  execSync(`python3 -c "import os, sqlite3, sys; os.makedirs(os.path.dirname(sys.argv[1]), exist_ok=True); conn = sqlite3.connect(sys.argv[1]); conn.execute(sys.argv[2]); conn.commit(); conn.close()" "${dbPath}" "${query}"`);
+  console.log(`[E2E Auth] Inserted token: ${token} at db: ${dbPath}`);
   
   // Navigate to the pair page with the token in the hash
   await page.goto(`/pair#token=${token}`);

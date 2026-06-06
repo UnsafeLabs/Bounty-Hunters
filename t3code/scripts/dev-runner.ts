@@ -531,7 +531,9 @@ const cliRuntimeLayer = Layer.mergeAll(
   NetService.layer,
 );
 
-if (import.meta.main) {
+const isMain = import.meta.main || (typeof process !== "undefined" && process.argv[1] && (process.argv[1].endsWith("dev-runner.ts") || process.argv[1].endsWith("dev-runner")));
+
+if (isMain) {
   Command.run(devRunnerCli, { version: "0.0.0" }).pipe(
     Effect.scoped,
     Effect.provide(cliRuntimeLayer),

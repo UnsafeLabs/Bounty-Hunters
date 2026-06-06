@@ -19,7 +19,9 @@ export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
   Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
 );
 
-if (import.meta.main) {
+const isMain = import.meta.main || (typeof process !== "undefined" && process.argv[1] && (process.argv[1].endsWith("src/bin.ts") || process.argv[1].endsWith("src/bin.js") || process.argv[1].endsWith("bin.ts")));
+
+if (isMain) {
   Command.run(cli, { version: packageJson.version }).pipe(
     Effect.scoped,
     Effect.provide(CliRuntimeLayer),
