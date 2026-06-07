@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,6 +96,103 @@ assert.ok(verifySignature.includes('require(v == 27 || v == 28, "Invalid signatu
 assert.ok(
   verifySignature.includes('require(recovered != address(0), "Invalid signature recovery");'),
   "invalid signature case: zero-address ecrecover must be rejected",
+);
+
+function digest(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+class BridgeModel {
+  constructor({ chainId, address, validator }) {
+    this.chainId = chainId;
+    this.address = address;
+    this.validator = validator;
+    this.nonces = new Map();
+    this.processed = new Set();
+  }
+
+  nonceOf(sender) {
+    return this.nonces.get(sender) ?? 0;
+  }
+
+  domain() {
+    return {
+      name: "CrossChainBridge",
+      version: "1",
+      chainId: this.chainId,
+      verifyingContract: this.address,
+    };
+  }
+
+  transferHash(sender, recipient, amount, nonce) {
+    return digest({
+      domain: this.domain(),
+      type: "BridgeTransfer(address sender,address recipient,uint256 amount,uint256 nonce)",
+      sender,
+      recipient,
+      amount,
+      nonce,
+    });
+  }
+
+  sign(sender, recipient, amount, nonce) {
+    return {
+      signer: this.validator,
+      digest: this.transferHash(sender, recipient, amount, nonce),
+    };
+  }
+
+  processTransfer(sender, recipient, amount, nonce, signature) {
+    assert.notEqual(sender, "0x0000000000000000000000000000000000000000", "Invalid sender");
+    assert.notEqual(recipient, "0x0000000000000000000000000000000000000000", "Invalid recipient");
+    assert.ok(amount > 0, "Amount must be > 0");
+    assert.equal(nonce, this.nonceOf(sender), "Invalid nonce");
+
+    const transferHash = this.transferHash(sender, recipient, amount, nonce);
+    assert.equal(signature.signer, this.validator, "Invalid signature recovery");
+    assert.equal(signature.digest, transferHash, "Invalid signature");
+    assert.equal(this.processed.has(transferHash), false, "Already processed");
+
+    this.processed.add(transferHash);
+    this.nonces.set(sender, nonce + 1);
+  }
+}
+
+const validator = "0xvalidator";
+const sender = "0xsender";
+const recipient = "0xrecipient";
+
+const sourceBridge = new BridgeModel({ chainId: 1, address: "0xbridgeA", validator });
+const release = sourceBridge.sign(sender, recipient, 25, sourceBridge.nonceOf(sender));
+sourceBridge.processTransfer(sender, recipient, 25, 0, release);
+assert.throws(
+  () => sourceBridge.processTransfer(sender, recipient, 25, 0, release),
+  /Invalid nonce/,
+  "same-chain replay must fail after the sender nonce is consumed",
+);
+
+const otherChainBridge = new BridgeModel({ chainId: 2, address: "0xbridgeA", validator });
+assert.throws(
+  () => otherChainBridge.processTransfer(sender, recipient, 25, 0, release),
+  /Invalid signature/,
+  "cross-chain replay must fail because the EIP-712 domain includes chainId",
+);
+
+const replacementBridge = new BridgeModel({ chainId: 1, address: "0xbridgeB", validator });
+assert.throws(
+  () => replacementBridge.processTransfer(sender, recipient, 25, 0, release),
+  /Invalid signature/,
+  "replacement-contract replay must fail because the EIP-712 domain includes verifyingContract",
+);
+
+const invalidSignature = {
+  signer: "0x0000000000000000000000000000000000000000",
+  digest: sourceBridge.transferHash(sender, recipient, 25, 1),
+};
+assert.throws(
+  () => sourceBridge.processTransfer(sender, recipient, 25, 1, invalidSignature),
+  /Invalid signature recovery/,
+  "zero-address recovery must be rejected",
 );
 
 console.log(`CrossChainBridge replay tests passed: ${cases.join(", ")}.`);
