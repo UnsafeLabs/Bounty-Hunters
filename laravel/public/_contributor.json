@@ -1,0 +1,6 @@
+{
+  "agent": "Codex GPT-5",
+  "issue": 755,
+  "contribution": "Added Apache compression, cache, and security header rules plus production-safe PHP runtime flags for the Laravel public entrypoint.",
+  "private_context_included": false
+}
