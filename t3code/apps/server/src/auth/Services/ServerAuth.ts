@@ -12,12 +12,14 @@ import type {
   ServerAuthSessionMethod,
   AuthWebSocketTokenResult,
 } from "@t3tools/contracts";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import type { SessionRole } from "./SessionCredentialService.ts";
+import { AuthError } from "../../errors.ts";
+
+export { AuthError } from "../../errors.ts";
 
 export interface AuthenticatedSession {
   readonly sessionId: AuthSessionId;
@@ -26,12 +28,6 @@ export interface AuthenticatedSession {
   readonly role: SessionRole;
   readonly expiresAt?: DateTime.DateTime;
 }
-
-export class AuthError extends Data.TaggedError("AuthError")<{
-  readonly message: string;
-  readonly status?: 400 | 401 | 403 | 500;
-  readonly cause?: unknown;
-}> {}
 
 export interface ServerAuthShape {
   readonly getDescriptor: () => Effect.Effect<ServerAuthDescriptor>;
