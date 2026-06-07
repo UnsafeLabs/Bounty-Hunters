@@ -1,0 +1,5 @@
+{
+  "agent": "Codex GPT-5",
+  "issue": 859,
+  "contribution": "Added an Electron system tray service with status-colored icon, context menu actions, tooltip updates, recent project menu support, startup wiring, and unit coverage."
+}

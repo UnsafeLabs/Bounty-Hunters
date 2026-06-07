@@ -2902,6 +2902,62 @@ export default function Sidebar() {
       ) ?? scopedProjectKey(scopeProjectRef(activeThread.environmentId, activeThread.projectId));
     return physicalToLogicalKey.get(physicalKey) ?? physicalKey;
   }, [routeThreadKey, sidebarThreadByKey, physicalToLogicalKey, projectPhysicalKeyByScopedRef]);
+  const activeTrayProject =
+    activeRouteProjectKey === null ? null : sidebarProjectByKey.get(activeRouteProjectKey) ?? null;
+
+  useEffect(() => {
+    const updateTrayState = window.desktopBridge?.updateTrayState;
+    if (typeof updateTrayState !== "function") {
+      return;
+    }
+
+    void updateTrayState({
+      activeProjectName: activeTrayProject?.displayName ?? null,
+      recentProjects: sidebarProjects.slice(0, 5).map((project) => ({
+        name: project.displayName,
+        path: project.cwd,
+      })),
+    });
+  }, [activeTrayProject?.displayName, sidebarProjects]);
+
+  useEffect(() => {
+    const onMenuAction = window.desktopBridge?.onMenuAction;
+    if (typeof onMenuAction !== "function") {
+      return;
+    }
+
+    const openProject = (projectPath: string | null) => {
+      const targetProject =
+        projectPath === null
+          ? activeTrayProject ?? sidebarProjects[0] ?? null
+          : (sidebarProjects.find(
+              (project) =>
+                project.cwd === projectPath ||
+                project.memberProjects.some((member) => member.cwd === projectPath),
+            ) ?? null);
+      const member = targetProject?.memberProjects[0];
+      if (!member) {
+        return;
+      }
+      void handleNewThread(scopeProjectRef(member.environmentId, member.id));
+    };
+
+    const unsubscribe = onMenuAction((action) => {
+      if (action === "new-chat") {
+        openProject(null);
+        return;
+      }
+
+      const openProjectPrefix = "open-project:";
+      if (action.startsWith(openProjectPrefix)) {
+        openProject(action.slice(openProjectPrefix.length));
+      }
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [activeTrayProject, handleNewThread, sidebarProjects]);
 
   // Group threads by logical project key so all threads from grouped projects
   // are displayed together.

@@ -3,6 +3,7 @@ import {
   DesktopAppBrandingSchema,
   DesktopEnvironmentBootstrapSchema,
   DesktopThemeSchema,
+  DesktopTrayStateInputSchema,
   PickFolderOptionsSchema,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -15,6 +16,7 @@ import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../../electron/ElectronMenu.ts";
 import * as ElectronShell from "../../electron/ElectronShell.ts";
 import * as ElectronTheme from "../../electron/ElectronTheme.ts";
+import * as ElectronTray from "../../electron/ElectronTray.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as IpcChannels from "../channels.ts";
 import { makeIpcMethod, makeSyncIpcMethod } from "../DesktopIpc.ts";
@@ -131,5 +133,15 @@ export const openExternal = makeIpcMethod({
   handler: Effect.fn("desktop.ipc.window.openExternal")(function* (url) {
     const shell = yield* ElectronShell.ElectronShell;
     return yield* shell.openExternal(url);
+  }),
+});
+
+export const updateTrayState = makeIpcMethod({
+  channel: IpcChannels.UPDATE_TRAY_STATE_CHANNEL,
+  payload: DesktopTrayStateInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.updateTrayState")(function* (state) {
+    const tray = yield* ElectronTray.ElectronTray;
+    yield* tray.updateState(state);
   }),
 });

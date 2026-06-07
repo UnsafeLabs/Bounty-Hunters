@@ -369,6 +369,26 @@ export const PickFolderOptionsSchema = Schema.Struct({
   initialPath: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
+export interface DesktopTrayRecentProject {
+  name: string;
+  path: string;
+}
+
+export const DesktopTrayRecentProjectSchema = Schema.Struct({
+  name: Schema.String,
+  path: Schema.String,
+});
+
+export interface DesktopTrayStateInput {
+  activeProjectName: string | null;
+  recentProjects: readonly DesktopTrayRecentProject[];
+}
+
+export const DesktopTrayStateInputSchema = Schema.Struct({
+  activeProjectName: Schema.NullOr(Schema.String),
+  recentProjects: Schema.Array(DesktopTrayRecentProjectSchema),
+});
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
@@ -414,6 +434,7 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
+  updateTrayState: (state: DesktopTrayStateInput) => Promise<void>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
