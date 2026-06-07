@@ -11,6 +11,7 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
@@ -26,7 +27,8 @@ export class DesktopApplicationMenu extends Context.Service<
 type DesktopApplicationMenuRuntimeServices =
   | DesktopUpdates.DesktopUpdates
   | DesktopWindow.DesktopWindow
-  | ElectronDialog.ElectronDialog;
+  | ElectronDialog.ElectronDialog
+  | DesktopState.DesktopState;
 
 const { logInfo: logUpdaterInfo } = DesktopObservability.makeComponentLogger("desktop-updater");
 
@@ -190,6 +192,81 @@ const make = Effect.gen(function* () {
         ],
       },
       { role: "windowMenu" },
+      {
+        label: "Developer",
+        submenu: [
+          {
+            label: "Toggle Terminal",
+            accelerator: "CmdOrCtrl+`",
+            click: () => {
+              runMenuEffect("toggle-terminal", dispatchMenuAction("toggle-terminal"));
+            },
+          },
+          {
+            label: "Clear Terminal",
+            accelerator: "CmdOrCtrl+K",
+            click: () => {
+              runMenuEffect("clear-terminal", dispatchMenuAction("clear-terminal"));
+            },
+          },
+          { type: "separator" },
+          {
+            label: "Restart Backend",
+            click: () => {
+              runMenuEffect("restart-backend", dispatchMenuAction("restart-backend"));
+            },
+          },
+          {
+            label: "Open DevTools",
+            accelerator: environment.platform === "darwin" ? "CmdOrCtrl+Option+I" : "CmdOrCtrl+Shift+I",
+            click: () => {
+              runMenuEffect("open-devtools", dispatchMenuAction("open-devtools"));
+            },
+          },
+        ],
+      },
+      {
+        label: "Git",
+        submenu: [
+          {
+            label: "Stage All Changes",
+            accelerator: "CmdOrCtrl+Shift+A",
+            click: () => {
+              runMenuEffect("git-stage-all", dispatchMenuAction("git-stage-all"));
+            },
+          },
+          {
+            label: "Commit",
+            accelerator: "CmdOrCtrl+Enter",
+            click: () => {
+              runMenuEffect("git-commit", dispatchMenuAction("git-commit"));
+            },
+          },
+          { type: "separator" },
+          {
+            label: "Push",
+            accelerator: "CmdOrCtrl+Shift+P",
+            click: () => {
+              runMenuEffect("git-push", dispatchMenuAction("git-push"));
+            },
+          },
+          {
+            label: "Pull",
+            accelerator: "CmdOrCtrl+Shift+L",
+            click: () => {
+              runMenuEffect("git-pull", dispatchMenuAction("git-pull"));
+            },
+          },
+          { type: "separator" },
+          {
+            label: "Create Branch",
+            accelerator: "CmdOrCtrl+Shift+B",
+            click: () => {
+              runMenuEffect("git-create-branch", dispatchMenuAction("git-create-branch"));
+            },
+          },
+        ],
+      },
       {
         role: "help",
         submenu: [
