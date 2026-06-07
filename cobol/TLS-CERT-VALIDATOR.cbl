@@ -108,6 +108,11 @@
        01  WS-SIG-VERIFY-RESULT        PIC X(1).
            88  WS-SIG-VALID            VALUE 'V'.
            88  WS-SIG-INVALID          VALUE 'I'.
+       01  WS-SIG-VERIFY-BUFFER        PIC X(64).
+       01  WS-FINGERPRINT-INDEX        PIC 9(2)  VALUE 0.
+       01  WS-FINGERPRINT-MATCH-FLAG   PIC X(1).
+           88  WS-FINGERPRINT-MATCHES  VALUE 'Y'.
+           88  WS-FINGERPRINT-MISMATCH VALUE 'N'.
        01  WS-MIN-KEY-LENGTH           PIC 9(5)  VALUE 02048.
        01  WS-ALLOWED-ALGORITHMS.
            05  FILLER  PIC X(20) VALUE 'SHA256WITHRSA       '.
@@ -137,6 +142,7 @@
            STOP RUN.
        1000-INITIALIZE.
            MOVE SPACES TO WS-VALIDATION-MSG
+           MOVE SPACES TO WS-SIG-VERIFY-BUFFER
            SET WS-CERT-NOT-EXPIRED TO TRUE
            SET WS-CERT-NOT-REVOKED TO TRUE
            SET WS-HOSTNAME-NO-MATCH TO TRUE
@@ -175,6 +181,9 @@
                        SET WS-CHAIN-IS-INVALID TO TRUE
                        GO TO 2000-EXIT
                END-READ
+               IF WS-CHAIN-INDEX = 1
+                   MOVE CS-FINGERPRINT TO WS-SIG-VERIFY-BUFFER
+               END-IF
                IF WS-CHAIN-INDEX = WS-CHAIN-LENGTH
                    IF NOT CS-IS-TRUST-ANCHOR
                        SET WS-CHAIN-IS-INVALID TO TRUE
@@ -250,6 +259,24 @@
                SET WS-SIG-INVALID TO TRUE
                GO TO 4000-EXIT
            END-IF
+           SET WS-FINGERPRINT-MATCHES TO TRUE
+           PERFORM VARYING WS-FINGERPRINT-INDEX FROM 1 BY 1
+               UNTIL WS-FINGERPRINT-INDEX > 64
+               IF FUNCTION ORD(
+                   WS-CERT-FINGERPRINT(WS-FINGERPRINT-INDEX:1))
+                   NOT = FUNCTION ORD(
+                   WS-SIG-VERIFY-BUFFER(WS-FINGERPRINT-INDEX:1))
+                   SET WS-FINGERPRINT-MISMATCH TO TRUE
+               END-IF
+           END-PERFORM
+           IF WS-FINGERPRINT-MISMATCH
+               SET WS-SIG-INVALID TO TRUE
+               DISPLAY 'TLSVAL-E040: FINGERPRINT MISMATCH '
+                   WS-CERT-FINGERPRINT
+               GO TO 4000-EXIT
+           END-IF
+           DISPLAY 'TLSVAL-I040: FINGERPRINT '
+               WS-CERT-FINGERPRINT
            SET WS-SIG-VALID TO TRUE
            .
        4000-EXIT.
