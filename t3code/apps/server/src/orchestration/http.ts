@@ -8,6 +8,10 @@ import * as Effect from "effect/Effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { ServerAuth } from "../auth/Services/ServerAuth.ts";
+import {
+  enforceRequestBodyLimit,
+  respondToRequestBodyTooLarge,
+} from "../httpBodyLimit.ts";
 import { normalizeDispatchCommand } from "./Normalizer.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
@@ -68,6 +72,7 @@ export const orchestrationDispatchRouteLayer = HttpRouter.add(
   "/api/orchestration/dispatch",
   Effect.gen(function* () {
     yield* authenticateOwnerSession;
+    yield* enforceRequestBodyLimit();
     const orchestrationEngine = yield* OrchestrationEngineService;
     const command = yield* HttpServerRequest.schemaBodyJson(ClientOrchestrationCommand).pipe(
       Effect.mapError(
@@ -89,5 +94,8 @@ export const orchestrationDispatchRouteLayer = HttpRouter.add(
       ),
     );
     return HttpServerResponse.jsonUnsafe(result, { status: 200 });
-  }).pipe(Effect.catchTag("OrchestrationDispatchCommandError", respondToOrchestrationHttpError)),
+  }).pipe(
+    Effect.catchTag("RequestBodyTooLargeError", respondToRequestBodyTooLarge),
+    Effect.catchTag("OrchestrationDispatchCommandError", respondToOrchestrationHttpError),
+  ),
 );
