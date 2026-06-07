@@ -9,6 +9,7 @@ import * as Stream from "effect/Stream";
 
 import { outcomeFromExit } from "./Attributes.ts";
 import { metricAttributes, rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
+import { MetricsAggregator } from "./MetricsAggregator.ts";
 
 const RPC_SPAN_PREFIX = "ws.rpc";
 const DEFAULT_RPC_SPAN_ATTRIBUTES = {
@@ -65,7 +66,7 @@ const recordRpcStreamMetrics = <E>(
   method: string,
   startedAt: bigint,
   exit: Exit.Exit<unknown, E>,
-): Effect.Effect<void, never, never> =>
+) =>
   Effect.gen(function* () {
     const endedAt = yield* Clock.currentTimeNanos;
     const elapsedNanos = endedAt > startedAt ? endedAt - startedAt : 0n;
@@ -84,6 +85,12 @@ const recordRpcStreamMetrics = <E>(
       ),
       1,
     );
+    const aggregator = yield* MetricsAggregator;
+    yield* aggregator.recordRpc({
+      method,
+      durationMs: Duration.toMillis(Duration.nanos(elapsedNanos)),
+      outcome: outcomeFromExit(exit),
+    });
   });
 
 export const observeRpcEffect = <A, E, R>(
@@ -91,15 +98,33 @@ export const observeRpcEffect = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   traceAttributes?: Readonly<Record<string, unknown>>,
 ): Effect.Effect<A, E, R> => {
-  const instrumented = effect.pipe(
-    withMetrics({
-      counter: rpcRequestsTotal,
-      timer: rpcRequestDuration,
-      attributes: {
-        method,
-      },
-    }),
-  );
+  const instrumented = Effect.gen(function* () {
+    const startedAt = yield* Clock.currentTimeNanos;
+    const exit = yield* Effect.exit(
+      effect.pipe(
+        withMetrics({
+          counter: rpcRequestsTotal,
+          timer: rpcRequestDuration,
+          attributes: {
+            method,
+          },
+        }),
+      ),
+    );
+    const endedAt = yield* Clock.currentTimeNanos;
+    const elapsedNanos = endedAt > startedAt ? endedAt - startedAt : 0n;
+    const aggregator = yield* MetricsAggregator;
+    yield* aggregator.recordRpc({
+      method,
+      durationMs: Duration.toMillis(Duration.nanos(elapsedNanos)),
+      outcome: outcomeFromExit(exit),
+    });
+
+    if (Exit.isSuccess(exit)) {
+      return exit.value;
+    }
+    return yield* Effect.failCause(exit.cause);
+  });
 
   return withRpcEffectTracing(method, instrumented, traceAttributes);
 };
