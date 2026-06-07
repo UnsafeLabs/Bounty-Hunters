@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import datetime
 from collections import defaultdict, deque
@@ -15,7 +16,7 @@ from ipaddress import (
 from pathlib import Path, PurePath
 from re import Pattern
 from types import GeneratorType
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from annotated_doc import Doc
@@ -82,7 +83,6 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
@@ -124,6 +124,14 @@ def generate_encoders_by_class_tuples(
 
 
 encoders_by_class_tuples = generate_encoders_by_class_tuples(ENCODERS_BY_TYPE)
+
+
+def encode_bytes(o: bytes, *, bytes_encoding: Literal["base64", "hex"]) -> str:
+    if bytes_encoding == "base64":
+        return base64.b64encode(o).decode("ascii")
+    if bytes_encoding == "hex":
+        return o.hex()
+    raise ValueError("bytes_encoding must be 'base64' or 'hex'")
 
 
 def jsonable_encoder(
@@ -215,6 +223,16 @@ def jsonable_encoder(
             """
         ),
     ] = True,
+    bytes_encoding: Annotated[
+        Literal["base64", "hex"],
+        Doc(
+            """
+            The encoding to use for bytes-like objects. By default, bytes and
+            memoryview objects are encoded as base64 strings. Set to `hex` to
+            encode bytes-like objects as hexadecimal strings.
+            """
+        ),
+    ] = "base64",
 ) -> Any:
     """
     Convert any object to something that can be encoded in JSON.
@@ -255,6 +273,7 @@ def jsonable_encoder(
             exclude_none=exclude_none,
             exclude_defaults=exclude_defaults,
             sqlalchemy_safe=sqlalchemy_safe,
+            bytes_encoding=bytes_encoding,
         )
     if dataclasses.is_dataclass(obj):
         assert not isinstance(obj, type)
@@ -269,6 +288,7 @@ def jsonable_encoder(
             exclude_none=exclude_none,
             custom_encoder=custom_encoder,
             sqlalchemy_safe=sqlalchemy_safe,
+            bytes_encoding=bytes_encoding,
         )
     if isinstance(obj, Enum):
         return obj.value
@@ -276,6 +296,10 @@ def jsonable_encoder(
         return str(obj)
     if isinstance(obj, (str, int, float, type(None))):
         return obj
+    if isinstance(obj, bytes):
+        return encode_bytes(obj, bytes_encoding=bytes_encoding)
+    if isinstance(obj, memoryview):
+        return encode_bytes(obj.tobytes(), bytes_encoding=bytes_encoding)
     if isinstance(obj, PydanticUndefinedType):
         return None
     if isinstance(obj, dict):
@@ -302,6 +326,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
                 encoded_value = jsonable_encoder(
                     value,
@@ -310,6 +335,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
                 encoded_dict[encoded_key] = encoded_value
         return encoded_dict
@@ -327,6 +353,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
             )
         return encoded_list
@@ -361,4 +388,5 @@ def jsonable_encoder(
         exclude_none=exclude_none,
         custom_encoder=custom_encoder,
         sqlalchemy_safe=sqlalchemy_safe,
+        bytes_encoding=bytes_encoding,
     )

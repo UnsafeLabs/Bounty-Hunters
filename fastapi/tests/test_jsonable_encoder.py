@@ -84,6 +84,25 @@ def test_encode_dict():
     }
 
 
+def test_encode_bytes_base64_by_default():
+    assert jsonable_encoder(b"hello") == "aGVsbG8="
+
+
+def test_encode_memoryview_base64_by_default():
+    assert jsonable_encoder(memoryview(b"hello")) == "aGVsbG8="
+
+
+def test_encode_bytes_hex():
+    assert jsonable_encoder(b"hello", bytes_encoding="hex") == "68656c6c6f"
+
+
+def test_encode_nested_bytes_with_selected_encoding():
+    data = {"payload": [b"hi", memoryview(b"!")]}
+    assert jsonable_encoder(data, bytes_encoding="hex") == {
+        "payload": ["6869", "21"]
+    }
+
+
 def test_encode_dict_include_exclude_list():
     pet = {"name": "Firulais", "owner": {"name": "Foo"}}
     assert jsonable_encoder(pet) == {"name": "Firulais", "owner": {"name": "Foo"}}
