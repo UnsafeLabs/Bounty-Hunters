@@ -33,6 +33,7 @@ from fastapi.types import ModelNameMap
 from fastapi.utils import (
     deep_dict_update,
     generate_operation_id_for_path,
+    generate_unique_id_for_method,
     is_body_allowed_for_status_code,
 )
 from pydantic import BaseModel
@@ -233,8 +234,53 @@ def generate_operation_summary(*, route: routing.APIRoute, method: str) -> str:
     return route.name.replace("_", " ").title()
 
 
+def _uses_default_unique_id(route: routing.APIRoute) -> bool:
+    if route.operation_id:
+        return False
+    assert route.methods
+    first_method = sorted(route.methods)[0]
+    return route.unique_id == generate_unique_id_for_method(route, first_method)
+
+
+def _deduplicate_operation_id(
+    *,
+    operation_id: str,
+    route: routing.APIRoute,
+    operation_ids: set[str],
+    operation_id_counts: dict[str, int],
+    auto_suffix: bool,
+) -> str:
+    if operation_id not in operation_ids:
+        operation_ids.add(operation_id)
+        operation_id_counts.setdefault(operation_id, 1)
+        return operation_id
+
+    if auto_suffix:
+        count = operation_id_counts.get(operation_id, 1) + 1
+        deduplicated_id = f"{operation_id}_{count}"
+        while deduplicated_id in operation_ids:
+            count += 1
+            deduplicated_id = f"{operation_id}_{count}"
+        operation_id_counts[operation_id] = count
+        operation_ids.add(deduplicated_id)
+        return deduplicated_id
+
+    endpoint_name = getattr(route.endpoint, "__name__", "<unnamed_endpoint>")
+    message = f"Duplicate Operation ID {operation_id} for function {endpoint_name}"
+    file_name = getattr(route.endpoint, "__globals__", {}).get("__file__")
+    if file_name:
+        message += f" at {file_name}"
+    warnings.warn(message, stacklevel=1)
+    operation_ids.add(operation_id)
+    return operation_id
+
+
 def get_openapi_operation_metadata(
-    *, route: routing.APIRoute, method: str, operation_ids: set[str]
+    *,
+    route: routing.APIRoute,
+    method: str,
+    operation_ids: set[str],
+    operation_id_counts: dict[str, int],
 ) -> dict[str, Any]:
     operation: dict[str, Any] = {}
     if route.tags:
@@ -242,15 +288,18 @@ def get_openapi_operation_metadata(
     operation["summary"] = generate_operation_summary(route=route, method=method)
     if route.description:
         operation["description"] = route.description
-    operation_id = route.operation_id or route.unique_id
-    if operation_id in operation_ids:
-        endpoint_name = getattr(route.endpoint, "__name__", "<unnamed_endpoint>")
-        message = f"Duplicate Operation ID {operation_id} for function {endpoint_name}"
-        file_name = getattr(route.endpoint, "__globals__", {}).get("__file__")
-        if file_name:
-            message += f" at {file_name}"
-        warnings.warn(message, stacklevel=1)
-    operation_ids.add(operation_id)
+    auto_generated_id = _uses_default_unique_id(route)
+    if auto_generated_id:
+        operation_id = generate_unique_id_for_method(route, method)
+    else:
+        operation_id = route.operation_id or route.unique_id
+    operation_id = _deduplicate_operation_id(
+        operation_id=operation_id,
+        route=route,
+        operation_ids=operation_ids,
+        operation_id_counts=operation_id_counts,
+        auto_suffix=auto_generated_id,
+    )
     operation["operationId"] = operation_id
     if route.deprecated:
         operation["deprecated"] = route.deprecated
@@ -261,6 +310,7 @@ def get_openapi_path(
     *,
     route: routing.APIRoute,
     operation_ids: set[str],
+    operation_id_counts: dict[str, int],
     model_name_map: ModelNameMap,
     field_mapping: dict[
         tuple[ModelField, Literal["validation", "serialization"]], dict[str, Any]
@@ -280,7 +330,10 @@ def get_openapi_path(
     if route.include_in_schema:
         for method in route.methods:
             operation = get_openapi_operation_metadata(
-                route=route, method=method, operation_ids=operation_ids
+                route=route,
+                method=method,
+                operation_ids=operation_ids,
+                operation_id_counts=operation_id_counts,
             )
             parameters: list[dict[str, Any]] = []
             flat_dependant = get_flat_dependant(route.dependant, skip_repeats=True)
@@ -331,6 +384,7 @@ def get_openapi_path(
                         ) = get_openapi_path(
                             route=callback,
                             operation_ids=operation_ids,
+                            operation_id_counts=operation_id_counts,
                             model_name_map=model_name_map,
                             field_mapping=field_mapping,
                             separate_input_output_schemas=separate_input_output_schemas,
@@ -546,6 +600,7 @@ def get_openapi(
     paths: dict[str, dict[str, Any]] = {}
     webhook_paths: dict[str, dict[str, Any]] = {}
     operation_ids: set[str] = set()
+    operation_id_counts: dict[str, int] = {}
     all_fields = get_fields_from_routes(list(routes or []) + list(webhooks or []))
     flat_models = get_flat_models_from_fields(all_fields, known_models=set())
     model_name_map = get_model_name_map(flat_models)
@@ -559,6 +614,7 @@ def get_openapi(
             result = get_openapi_path(
                 route=route,
                 operation_ids=operation_ids,
+                operation_id_counts=operation_id_counts,
                 model_name_map=model_name_map,
                 field_mapping=field_mapping,
                 separate_input_output_schemas=separate_input_output_schemas,
@@ -578,6 +634,7 @@ def get_openapi(
             result = get_openapi_path(
                 route=webhook,
                 operation_ids=operation_ids,
+                operation_id_counts=operation_id_counts,
                 model_name_map=model_name_map,
                 field_mapping=field_mapping,
                 separate_input_output_schemas=separate_input_output_schemas,

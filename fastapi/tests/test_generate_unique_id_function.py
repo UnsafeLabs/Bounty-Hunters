@@ -1,3 +1,4 @@
+import re
 import warnings
 
 from fastapi import APIRouter, FastAPI
@@ -1667,6 +1668,72 @@ def test_callback_override_generate_unique_id():
             },
         }
     )
+
+
+def test_default_operation_ids_include_method_and_router_prefix():
+    app = FastAPI()
+    users_router = APIRouter(prefix="/users")
+    admin_router = APIRouter(prefix="/admin/users")
+
+    @users_router.get("/")
+    def list_users():
+        return []  # pragma: nocover
+
+    @admin_router.get("/")
+    def list_users():
+        return []  # pragma: nocover
+
+    app.include_router(users_router)
+    app.include_router(admin_router)
+
+    openapi = app.openapi()
+    operation_ids = [
+        openapi["paths"]["/users/"]["get"]["operationId"],
+        openapi["paths"]["/admin/users/"]["get"]["operationId"],
+    ]
+    assert operation_ids == [
+        "get_users_list_users",
+        "get_admin_users_list_users",
+    ]
+    assert len(operation_ids) == len(set(operation_ids))
+    assert all(
+        re.fullmatch(r"[a-z0-9_]+", operation_id) for operation_id in operation_ids
+    )
+
+
+def test_default_operation_ids_are_method_specific_for_multi_method_route():
+    app = FastAPI()
+
+    @app.api_route("/items", methods=["GET", "POST"])
+    def items():
+        return {}  # pragma: nocover
+
+    openapi = app.openapi()
+    assert openapi["paths"]["/items"]["get"]["operationId"] == "get_items_items"
+    assert openapi["paths"]["/items"]["post"]["operationId"] == "post_items_items"
+
+
+def test_default_operation_id_collision_gets_numeric_suffix():
+    app = FastAPI()
+
+    @app.get("/reports/a-b")
+    def read_report():
+        return {}  # pragma: nocover
+
+    @app.get("/reports/a_b")
+    def read_report():
+        return {}  # pragma: nocover
+
+    openapi = app.openapi()
+    operation_ids = [
+        openapi["paths"]["/reports/a-b"]["get"]["operationId"],
+        openapi["paths"]["/reports/a_b"]["get"]["operationId"],
+    ]
+    assert operation_ids == [
+        "get_reports_a_b_read_report",
+        "get_reports_a_b_read_report_2",
+    ]
+    assert len(operation_ids) == len(set(operation_ids))
 
 
 def test_warn_duplicate_operation_id():
