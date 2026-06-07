@@ -1,4 +1,5 @@
 import importlib
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any, Protocol, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
@@ -96,3 +97,91 @@ class ORJSONResponse(JSONResponse):
         return orjson.dumps(
             content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
         )
+
+
+class StreamingCSVResponse(StreamingResponse):
+    """Streaming CSV response for exporting large datasets.
+
+    Accepts an iterable or async iterable of row data and streams it as a
+    CSV file.  Works with both sync and async generators so callers can
+    stream database cursors directly without loading everything into memory.
+
+    Attributes:
+        media_type: ``text/csv``
+    """
+
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        rows: AsyncGenerator[Sequence[Any], None] | Sequence[Sequence[Any]],
+        headers: Sequence[str] | None = None,
+        filename: str = "export.csv",
+        delimiter: str = ",",
+        chunk_size: int = 100,
+        **kwargs: Any,
+    ):
+        self._headers = headers
+        self._filename = filename
+        self._delimiter = delimiter
+        self._chunk_size = chunk_size
+
+        if isinstance(rows, AsyncGenerator) or hasattr(rows, "__aiter__"):
+            content = self._stream(rows)  # type: ignore[arg-type]
+        else:
+            content = self._stream_sync(rows)
+
+        disposition = f'attachment; filename="{filename}"'
+        extra_headers = {"Content-Disposition": disposition}
+        if "headers" in kwargs and kwargs["headers"]:
+            kwargs["headers"].update(extra_headers)
+        else:
+            kwargs["headers"] = extra_headers
+
+        super().__init__(content, media_type=self.media_type, **kwargs)
+
+    @staticmethod
+    def _escape_csv(value: Any, delimiter: str) -> str:
+        """Escape a single CSV value per RFC 4180."""
+        s = str(value) if value is not None else ""
+        if (
+            delimiter in s
+            or '"' in s
+            or "\n" in s
+            or "\r" in s
+            or s.startswith(" ")
+            or s.endswith(" ")
+        ):
+            s = '"' + s.replace('"', '""') + '"'
+        return s
+
+    def _encode_row(self, row: Sequence[Any]) -> bytes:
+        line = self._delimiter.join(self._escape_csv(c, self._delimiter) for c in row)
+        return (line + "\r\n").encode("utf-8")
+
+    async def _stream(self, rows: AsyncGenerator[Sequence[Any], None]) -> AsyncGenerator[bytes, None]:
+        buffer: list[bytes] = []
+        if self._headers:
+            buffer.append(self._encode_row(self._headers))
+            if len(buffer) >= self._chunk_size:
+                yield b"".join(buffer)
+                buffer = []
+        async for row in rows:
+            buffer.append(self._encode_row(row))
+            if len(buffer) >= self._chunk_size:
+                yield b"".join(buffer)
+                buffer = []
+        if buffer:
+            yield b"".join(buffer)
+
+    async def _stream_sync(self, rows: Sequence[Sequence[Any]]) -> AsyncGenerator[bytes, None]:
+        buffer: list[bytes] = []
+        if self._headers:
+            buffer.append(self._encode_row(self._headers))
+        for row in rows:
+            buffer.append(self._encode_row(row))
+            if len(buffer) >= self._chunk_size:
+                yield b"".join(buffer)
+                buffer = []
+        if buffer:
+            yield b"".join(buffer)
