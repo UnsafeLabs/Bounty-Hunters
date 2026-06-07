@@ -75,6 +75,30 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     syncAppearance: Effect.void,
   } satisfies DesktopWindow.DesktopWindowShape);
 
+const readSubmenu = (
+  template: readonly Electron.MenuItemConstructorOptions[],
+  label: string,
+): Electron.MenuItemConstructorOptions[] => {
+  const menu = template.find((item) => item.label === label);
+  assert.isDefined(menu);
+  if (!Array.isArray(menu.submenu)) {
+    throw new Error(`Expected ${label} menu submenu to be an array.`);
+  }
+  return menu.submenu;
+};
+
+const clickMenuItem = (
+  submenu: readonly Electron.MenuItemConstructorOptions[],
+  label: string,
+): void => {
+  const item = submenu.find((entry) => entry.label === label);
+  assert.isDefined(item);
+  if (typeof item.click !== "function") {
+    throw new Error(`Expected ${label} menu item to have a click handler.`);
+  }
+  item.click({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
+};
+
 const makeElectronMenuLayer = (
   applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
 ) =>
@@ -113,12 +137,8 @@ describe("DesktopApplicationMenu", () => {
       );
 
       const template = yield* Deferred.await(applicationMenuTemplate);
-      const fileMenu = template.find((item) => item.label === "File");
-      assert.isDefined(fileMenu);
-      if (!Array.isArray(fileMenu.submenu)) {
-        throw new Error("Expected File menu submenu to be an array.");
-      }
-      const settingsItem = fileMenu.submenu.find((item) => item.label === "Settings...");
+      const fileMenu = readSubmenu(template, "File");
+      const settingsItem = fileMenu.find((item) => item.label === "Settings...");
       assert.isDefined(settingsItem);
       const settingsClick = settingsItem.click;
       if (typeof settingsClick !== "function") {
@@ -127,6 +147,123 @@ describe("DesktopApplicationMenu", () => {
 
       settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
       assert.equal(yield* Deferred.await(selectedAction), "open-settings");
+    }),
+  );
+
+  it.effect("installs Developer and Git menus with accelerators", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* Effect.gen(function* () {
+        const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
+        yield* menu.configure;
+      }).pipe(
+        Effect.provide(
+          DesktopApplicationMenu.layer.pipe(
+            Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
+            Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
+            Layer.provideMerge(desktopUpdatesLayer),
+            Layer.provideMerge(electronDialogLayer),
+            Layer.provideMerge(electronAppLayer),
+            Layer.provideMerge(
+              DesktopEnvironment.layer(environmentInput).pipe(
+                Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const developerMenu = readSubmenu(template, "Developer");
+      const gitMenu = readSubmenu(template, "Git");
+
+      assert.deepEqual(
+        developerMenu
+          .filter((item) => item.type !== "separator")
+          .map((item) => [item.label, item.accelerator, item.role ?? null]),
+        [
+          ["Toggle Terminal", "Ctrl+`", null],
+          ["Clear Terminal", "CmdOrCtrl+K", null],
+          ["Restart Backend", "CmdOrCtrl+Shift+R", null],
+          ["Open DevTools", "Ctrl+Shift+I", "toggleDevTools"],
+        ],
+      );
+      assert.deepEqual(
+        gitMenu.filter((item) => item.type !== "separator").map((item) => item.label),
+        ["Stage All Changes", "Commit", "Push", "Pull", "Create Branch"],
+      );
+    }),
+  );
+
+  it.effect("routes Developer and Git menu clicks through DesktopWindow actions", () =>
+    Effect.gen(function* () {
+      const selectedActions = yield* Deferred.make<string[]>();
+      const actions: string[] = [];
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      const desktopWindowLayer = Layer.succeed(DesktopWindow.DesktopWindow, {
+        createMain: Effect.die("unexpected createMain"),
+        ensureMain: Effect.die("unexpected ensureMain"),
+        revealOrCreateMain: Effect.die("unexpected revealOrCreateMain"),
+        activate: Effect.void,
+        createMainIfBackendReady: Effect.void,
+        handleBackendReady: Effect.void,
+        dispatchMenuAction: (action) =>
+          Effect.sync(() => {
+            actions.push(action);
+            if (actions.length === 8) {
+              Effect.runSync(Deferred.succeed(selectedActions, [...actions]));
+            }
+          }),
+        syncAppearance: Effect.void,
+      } satisfies DesktopWindow.DesktopWindowShape);
+
+      yield* Effect.gen(function* () {
+        const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
+        yield* menu.configure;
+      }).pipe(
+        Effect.provide(
+          DesktopApplicationMenu.layer.pipe(
+            Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
+            Layer.provideMerge(desktopWindowLayer),
+            Layer.provideMerge(desktopUpdatesLayer),
+            Layer.provideMerge(electronDialogLayer),
+            Layer.provideMerge(electronAppLayer),
+            Layer.provideMerge(
+              DesktopEnvironment.layer(environmentInput).pipe(
+                Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const developerMenu = readSubmenu(template, "Developer");
+      const gitMenu = readSubmenu(template, "Git");
+      clickMenuItem(developerMenu, "Toggle Terminal");
+      clickMenuItem(developerMenu, "Clear Terminal");
+      clickMenuItem(developerMenu, "Restart Backend");
+      clickMenuItem(gitMenu, "Stage All Changes");
+      clickMenuItem(gitMenu, "Commit");
+      clickMenuItem(gitMenu, "Push");
+      clickMenuItem(gitMenu, "Pull");
+      clickMenuItem(gitMenu, "Create Branch");
+
+      assert.deepEqual(yield* Deferred.await(selectedActions), [
+        "developer.toggle-terminal",
+        "developer.clear-terminal",
+        "developer.restart-backend",
+        "git.stage-all-changes",
+        "git.commit",
+        "git.push",
+        "git.pull",
+        "git.create-branch",
+      ]);
     }),
   );
 });

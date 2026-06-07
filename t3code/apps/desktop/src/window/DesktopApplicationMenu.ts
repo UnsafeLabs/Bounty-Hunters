@@ -39,6 +39,17 @@ const dispatchMenuAction = Effect.fn("desktop.menu.dispatchMenuAction")(function
   yield* desktopWindow.dispatchMenuAction(action);
 });
 
+const MENU_ACTIONS = {
+  toggleTerminal: "developer.toggle-terminal",
+  clearTerminal: "developer.clear-terminal",
+  restartBackend: "developer.restart-backend",
+  stageAllChanges: "git.stage-all-changes",
+  commit: "git.commit",
+  push: "git.push",
+  pull: "git.pull",
+  createBranch: "git.create-branch",
+} as const;
+
 const checkForUpdatesFromMenu: Effect.Effect<
   void,
   never,
@@ -127,6 +138,9 @@ const make = Effect.gen(function* () {
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
     };
+    const dispatchClick = (action: string) => () => {
+      runMenuEffect(action, dispatchMenuAction(action));
+    };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
     if (environment.platform === "darwin") {
@@ -187,6 +201,64 @@ const make = Effect.gen(function* () {
           { role: "zoomOut" },
           { type: "separator" },
           { role: "togglefullscreen" },
+        ],
+      },
+      {
+        label: "Developer",
+        submenu: [
+          {
+            label: "Toggle Terminal",
+            accelerator: "Ctrl+`",
+            click: dispatchClick(MENU_ACTIONS.toggleTerminal),
+          },
+          {
+            label: "Clear Terminal",
+            accelerator: "CmdOrCtrl+K",
+            click: dispatchClick(MENU_ACTIONS.clearTerminal),
+          },
+          { type: "separator" },
+          {
+            label: "Restart Backend",
+            accelerator: "CmdOrCtrl+Shift+R",
+            click: dispatchClick(MENU_ACTIONS.restartBackend),
+          },
+          {
+            label: "Open DevTools",
+            accelerator:
+              environment.platform === "darwin" ? "Alt+Command+I" : "Ctrl+Shift+I",
+            role: "toggleDevTools",
+          },
+        ],
+      },
+      {
+        label: "Git",
+        submenu: [
+          {
+            label: "Stage All Changes",
+            accelerator: "CmdOrCtrl+Shift+A",
+            click: dispatchClick(MENU_ACTIONS.stageAllChanges),
+          },
+          {
+            label: "Commit",
+            accelerator: "CmdOrCtrl+Enter",
+            click: dispatchClick(MENU_ACTIONS.commit),
+          },
+          {
+            label: "Push",
+            accelerator: "CmdOrCtrl+Shift+P",
+            click: dispatchClick(MENU_ACTIONS.push),
+          },
+          {
+            label: "Pull",
+            accelerator: "CmdOrCtrl+Shift+L",
+            click: dispatchClick(MENU_ACTIONS.pull),
+          },
+          { type: "separator" },
+          {
+            label: "Create Branch",
+            accelerator: "CmdOrCtrl+Shift+B",
+            click: dispatchClick(MENU_ACTIONS.createBranch),
+          },
         ],
       },
       { role: "windowMenu" },

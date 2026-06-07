@@ -45,7 +45,13 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     const unsubscribe = onMenuAction((action) => {
       if (action === "open-settings") {
         void navigate({ to: "/settings" });
+        return;
       }
+      window.dispatchEvent(
+        new CustomEvent("t3code:desktop-menu-action", {
+          detail: { action },
+        }),
+      );
     });
 
     return () => {
