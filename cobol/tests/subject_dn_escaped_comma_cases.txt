@@ -1,0 +1,17 @@
+case=single-escaped-comma
+subject-dn=CN="Smith\, John",OU=Legal,O=Bank
+parsed-cn=Smith, John
+rdn-count=3
+hostname-match=Y
+
+case=multiple-escaped-commas
+subject-dn=CN="Smith\, John\, Jr.",OU=Legal,O=Bank
+parsed-cn=Smith, John, Jr.
+rdn-count=3
+hostname-match=Y
+
+case=no-escaped-comma
+subject-dn=CN=api.bank.example,OU=Payments,O=Bank
+parsed-cn=api.bank.example
+rdn-count=3
+hostname-match=Y
