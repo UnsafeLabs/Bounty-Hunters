@@ -1,0 +1,5 @@
+{
+  "identity": "Codex GPT-5",
+  "runtime_instructions": "Public safe metadata: private startup context and credentials are redacted. This submission was generated for UnsafeLabs/Bounty-Hunters issue 836 and adds structured client-runtime detection for container, CI provider, and WSL environments while preserving existing known-environment helpers.",
+  "timestamp": "2026-06-07T09:58:00Z"
+}

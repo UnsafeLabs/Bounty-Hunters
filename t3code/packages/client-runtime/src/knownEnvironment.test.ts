@@ -1,7 +1,11 @@
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { createKnownEnvironment, getKnownEnvironmentHttpBaseUrl } from "./knownEnvironment.ts";
+import {
+  createKnownEnvironment,
+  detectEnvironmentInfo,
+  getKnownEnvironmentHttpBaseUrl,
+} from "./knownEnvironment.ts";
 import {
   parseScopedProjectKey,
   parseScopedThreadKey,
@@ -57,6 +61,114 @@ describe("known environment bootstrap helpers", () => {
         }),
       ),
     ).toBe("https://remote.example.com/api");
+  });
+});
+
+describe("environment info detection", () => {
+  it("returns runtime, platform, and arch while defaulting container and CI flags off", () => {
+    expect(
+      detectEnvironmentInfo({
+        runtime: "node",
+        platform: "linux",
+        arch: "x64",
+        env: {},
+      }),
+    ).toEqual({
+      runtime: "node",
+      platform: "linux",
+      arch: "x64",
+      isContainer: false,
+      isCI: false,
+      ciProvider: null,
+      isWSL: false,
+    });
+  });
+
+  it("detects Docker from /.dockerenv", () => {
+    const info = detectEnvironmentInfo({
+      env: {},
+      fileExists: (path) => path === "/.dockerenv",
+    });
+
+    expect(info.isContainer).toBe(true);
+  });
+
+  it("detects container cgroup entries without throwing on missing files", () => {
+    const info = detectEnvironmentInfo({
+      env: {},
+      readFile: (path) => (path === "/proc/1/cgroup" ? "0::/docker/test-id" : undefined),
+    });
+
+    expect(info.isContainer).toBe(true);
+  });
+
+  it.each([
+    ["GITHUB_ACTIONS", "GitHub Actions"],
+    ["GITLAB_CI", "GitLab CI"],
+    ["JENKINS_URL", "Jenkins"],
+    ["CIRCLECI", "CircleCI"],
+    ["TRAVIS", "Travis CI"],
+    ["CI", "Generic CI"],
+  ] as const)("detects CI provider from %s", (envVar, provider) => {
+    const info = detectEnvironmentInfo({
+      env: { [envVar]: "true" },
+    });
+
+    expect(info.isCI).toBe(true);
+    expect(info.ciProvider).toBe(provider);
+  });
+
+  it("prefers specific CI provider over generic CI", () => {
+    const info = detectEnvironmentInfo({
+      env: {
+        CI: "true",
+        GITHUB_ACTIONS: "true",
+      },
+    });
+
+    expect(info.ciProvider).toBe("GitHub Actions");
+  });
+
+  it("detects WSL from proc version text", () => {
+    const info = detectEnvironmentInfo({
+      env: {},
+      readFile: (path) => (path === "/proc/version" ? "Linux version Microsoft WSL2" : undefined),
+    });
+
+    expect(info.isWSL).toBe(true);
+  });
+
+  it("detects WSL from environment fallback", () => {
+    const info = detectEnvironmentInfo({
+      env: {
+        WSL_DISTRO_NAME: "Ubuntu",
+      },
+    });
+
+    expect(info.isWSL).toBe(false);
+
+    const interopInfo = detectEnvironmentInfo({
+      env: {
+        WSL_INTEROP: "/run/WSL/123_interop",
+      },
+    });
+
+    expect(interopInfo.isWSL).toBe(true);
+  });
+
+  it("does not throw when file probes fail", () => {
+    const info = detectEnvironmentInfo({
+      env: {},
+      fileExists: () => {
+        throw new Error("permission denied");
+      },
+      readFile: () => {
+        throw new Error("permission denied");
+      },
+    });
+
+    expect(info.isContainer).toBe(false);
+    expect(info.isWSL).toBe(false);
   });
 });
 
