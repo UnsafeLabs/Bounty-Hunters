@@ -14,6 +14,8 @@ import {
   ListByThreadIdInput,
   ProjectionCheckpoint,
   ProjectionCheckpointRepository,
+  PruneSnapshotsInput,
+  PruneSnapshotsResult,
   type ProjectionCheckpointRepositoryShape,
 } from "../Services/ProjectionCheckpoints.ts";
 
@@ -148,6 +150,76 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
       `,
   });
 
+  const collectPrunableCheckpointStats = SqlSchema.findOne({
+    Request: PruneSnapshotsInput,
+    Result: PruneSnapshotsResult,
+    execute: ({ olderThan, keepPerThread }: Schema.Schema.Type<typeof PruneSnapshotsInput>) =>
+      sql`
+        WITH ranked_checkpoints AS (
+          SELECT
+            row_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY thread_id
+              ORDER BY completed_at DESC, checkpoint_turn_count DESC
+            ) AS checkpoint_rank
+          FROM projection_turns
+          WHERE checkpoint_turn_count IS NOT NULL
+        ),
+        prunable AS (
+          SELECT projection_turns.*
+          FROM projection_turns
+          INNER JOIN ranked_checkpoints
+            ON ranked_checkpoints.row_id = projection_turns.row_id
+          WHERE projection_turns.completed_at < ${olderThan}
+            AND ranked_checkpoints.checkpoint_rank > ${keepPerThread}
+        )
+        SELECT
+          COUNT(*) AS "snapshotsDeleted",
+          COALESCE(SUM(
+            LENGTH(COALESCE(checkpoint_ref, '')) +
+            LENGTH(COALESCE(checkpoint_status, '')) +
+            LENGTH(COALESCE(checkpoint_files_json, ''))
+          ), 0) AS "bytesFreed"
+        FROM prunable
+      `,
+  });
+
+  const pruneProjectionCheckpointRows = SqlSchema.void({
+    Request: PruneSnapshotsInput,
+    execute: ({ olderThan, keepPerThread }: Schema.Schema.Type<typeof PruneSnapshotsInput>) =>
+      sql`
+        WITH ranked_checkpoints AS (
+          SELECT
+            row_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY thread_id
+              ORDER BY completed_at DESC, checkpoint_turn_count DESC
+            ) AS checkpoint_rank
+          FROM projection_turns
+          WHERE checkpoint_turn_count IS NOT NULL
+        )
+        UPDATE projection_turns
+        SET
+          checkpoint_turn_count = NULL,
+          checkpoint_ref = NULL,
+          checkpoint_status = NULL,
+          checkpoint_files_json = '[]'
+        WHERE row_id IN (
+          SELECT projection_turns.row_id
+          FROM projection_turns
+          INNER JOIN ranked_checkpoints
+            ON ranked_checkpoints.row_id = projection_turns.row_id
+          WHERE projection_turns.completed_at < ${olderThan}
+            AND ranked_checkpoints.checkpoint_rank > ${keepPerThread}
+        )
+      `,
+  });
+
+  const compactCheckpointDatabase = SqlSchema.void({
+    Request: Schema.Void,
+    execute: () => sql`VACUUM`,
+  });
+
   const upsertCheckpointRow = (row: Schema.Schema.Type<typeof ProjectionCheckpointDbRowSchema>) =>
     sql.withTransaction(
       clearCheckpointConflict({
@@ -203,11 +275,31 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
       ),
     );
 
+  const pruneSnapshots: ProjectionCheckpointRepositoryShape["pruneSnapshots"] = (input) =>
+    sql.withTransaction(
+      collectPrunableCheckpointStats(input).pipe(
+        Effect.flatMap((stats) =>
+          pruneProjectionCheckpointRows(input).pipe(Effect.as(stats)),
+        ),
+      ),
+    ).pipe(
+      Effect.tap((stats) =>
+        stats.snapshotsDeleted > 0 ? compactCheckpointDatabase() : Effect.void,
+      ),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionCheckpointRepository.pruneSnapshots:query",
+          "ProjectionCheckpointRepository.pruneSnapshots:decodeResult",
+        ),
+      ),
+    );
+
   return {
     upsert,
     listByThreadId,
     getByThreadAndTurnCount,
     deleteByThreadId,
+    pruneSnapshots,
   } satisfies ProjectionCheckpointRepositoryShape;
 });
 

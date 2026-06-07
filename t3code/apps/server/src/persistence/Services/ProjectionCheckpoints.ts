@@ -51,6 +51,18 @@ export const DeleteByThreadIdInput = Schema.Struct({
 });
 export type DeleteByThreadIdInput = typeof DeleteByThreadIdInput.Type;
 
+export const PruneSnapshotsInput = Schema.Struct({
+  olderThan: IsoDateTime,
+  keepPerThread: NonNegativeInt,
+});
+export type PruneSnapshotsInput = typeof PruneSnapshotsInput.Type;
+
+export const PruneSnapshotsResult = Schema.Struct({
+  snapshotsDeleted: NonNegativeInt,
+  bytesFreed: NonNegativeInt,
+});
+export type PruneSnapshotsResult = typeof PruneSnapshotsResult.Type;
+
 /**
  * ProjectionCheckpointRepositoryShape - Service API for projected checkpoints.
  */
@@ -84,6 +96,14 @@ export interface ProjectionCheckpointRepositoryShape {
   readonly deleteByThreadId: (
     input: DeleteByThreadIdInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /**
+   * Prune old projected checkpoint snapshots while preserving the newest
+   * checkpoints for each thread.
+   */
+  readonly pruneSnapshots: (
+    input: PruneSnapshotsInput,
+  ) => Effect.Effect<PruneSnapshotsResult, ProjectionRepositoryError>;
 }
 
 /**
