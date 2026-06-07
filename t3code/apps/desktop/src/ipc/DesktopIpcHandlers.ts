@@ -10,6 +10,7 @@ import {
   setSavedEnvironmentSecret,
 } from "./methods/savedEnvironments.ts";
 import {
+  diagnoseTailscalePeer,
   getAdvertisedEndpoints,
   getServerExposureState,
   setServerExposureMode,
@@ -68,6 +69,7 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
   yield* ipc.handle(getServerExposureState);
   yield* ipc.handle(setServerExposureMode);
   yield* ipc.handle(setTailscaleServeEnabled);
+  yield* ipc.handle(diagnoseTailscalePeer);
   yield* ipc.handle(getAdvertisedEndpoints);
 
   yield* ipc.handle(pickFolder);

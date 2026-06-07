@@ -361,6 +361,35 @@ export const DesktopServerExposureStateSchema = Schema.Struct({
   tailscaleServePort: Schema.Number,
 });
 
+export const TailscalePeerDiagnosticsSampleSchema = Schema.Struct({
+  latencyMs: Schema.Number,
+  connectionType: Schema.Literals(["direct", "relayed", "unknown"]),
+  peerIp: Schema.NullOr(Schema.String),
+  relayServer: Schema.NullOr(Schema.String),
+  relayRegion: Schema.NullOr(Schema.String),
+  raw: Schema.String,
+});
+
+export const TailscalePeerDiagnosticsSchema = Schema.Struct({
+  peer: Schema.String,
+  reachable: Schema.Boolean,
+  connectionType: Schema.Literals(["direct", "relayed", "unknown"]),
+  peerIp: Schema.NullOr(Schema.String),
+  latencyMs: Schema.NullOr(Schema.Number),
+  relayServer: Schema.NullOr(Schema.String),
+  relayRegion: Schema.NullOr(Schema.String),
+  lastSeen: Schema.NullOr(Schema.String),
+  online: Schema.NullOr(Schema.Boolean),
+  pingSamples: Schema.Array(TailscalePeerDiagnosticsSampleSchema),
+  statusMessage: Schema.NullOr(Schema.String),
+});
+
+export type TailscalePeerDiagnostics = typeof TailscalePeerDiagnosticsSchema.Type;
+
+export const TailscalePeerDiagnosticsInputSchema = Schema.Struct({
+  peer: Schema.String,
+});
+
 export interface PickFolderOptions {
   initialPath?: string | null;
 }
@@ -405,6 +434,7 @@ export interface DesktopBridge {
     readonly enabled: boolean;
     readonly port?: number;
   }) => Promise<DesktopServerExposureState>;
+  diagnoseTailscalePeer: (input: { readonly peer: string }) => Promise<TailscalePeerDiagnostics>;
   getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;

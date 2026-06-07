@@ -2,7 +2,10 @@ import {
   AdvertisedEndpoint,
   DesktopServerExposureModeSchema,
   DesktopServerExposureStateSchema,
+  TailscalePeerDiagnosticsInputSchema,
+  TailscalePeerDiagnosticsSchema,
 } from "@t3tools/contracts";
+import { diagnosePeer } from "@t3tools/tailscale";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -55,6 +58,15 @@ export const setTailscaleServeEnabled = makeIpcMethod({
       );
     }
     return change.state;
+  }),
+});
+
+export const diagnoseTailscalePeer = makeIpcMethod({
+  channel: IpcChannels.DIAGNOSE_TAILSCALE_PEER_CHANNEL,
+  payload: TailscalePeerDiagnosticsInputSchema,
+  result: TailscalePeerDiagnosticsSchema,
+  handler: Effect.fn("desktop.ipc.serverExposure.diagnoseTailscalePeer")(function* (input) {
+    return yield* diagnosePeer({ peer: input.peer });
   }),
 });
 

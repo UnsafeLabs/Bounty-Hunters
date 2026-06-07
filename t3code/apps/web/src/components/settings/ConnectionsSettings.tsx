@@ -16,6 +16,7 @@ import {
   type DesktopSshEnvironmentTarget,
   type DesktopServerExposureState,
   type EnvironmentId,
+  type TailscalePeerDiagnostics,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
@@ -1498,6 +1499,11 @@ export function ConnectionsSettings() {
   const [tailscaleServePortInput, setTailscaleServePortInput] = useState(
     String(DEFAULT_TAILSCALE_SERVE_PORT),
   );
+  const [tailscaleDiagnosticPeer, setTailscaleDiagnosticPeer] = useState("");
+  const [tailscaleDiagnostics, setTailscaleDiagnostics] =
+    useState<TailscalePeerDiagnostics | null>(null);
+  const [isDiagnosingTailscalePeer, setIsDiagnosingTailscalePeer] = useState(false);
+  const [tailscaleDiagnosticsError, setTailscaleDiagnosticsError] = useState<string | null>(null);
   const [pendingDesktopServerExposureMode, setPendingDesktopServerExposureMode] = useState<
     DesktopServerExposureState["mode"] | null
   >(null);
@@ -1640,6 +1646,32 @@ export function ConnectionsSettings() {
   const handleStartTailscaleServeDisable = useCallback((_endpoint: AdvertisedEndpoint) => {
     setDisableTailscaleServeDialogOpen(true);
   }, []);
+
+  const handleDiagnoseTailscalePeer = useCallback(async () => {
+    if (!desktopBridge) return;
+    const peer = tailscaleDiagnosticPeer.trim();
+    if (!peer) return;
+    setIsDiagnosingTailscalePeer(true);
+    setTailscaleDiagnosticsError(null);
+    try {
+      const diagnostics = await desktopBridge.diagnoseTailscalePeer({ peer });
+      setTailscaleDiagnostics(diagnostics);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to run Tailscale diagnostics.";
+      setTailscaleDiagnosticsError(message);
+      setTailscaleDiagnostics(null);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not diagnose Tailscale peer",
+          description: message,
+        }),
+      );
+    } finally {
+      setIsDiagnosingTailscalePeer(false);
+    }
+  }, [desktopBridge, tailscaleDiagnosticPeer]);
 
   const handleRevokeDesktopPairingLink = useCallback(async (id: string) => {
     setRevokingDesktopPairingLinkId(id);
@@ -2356,6 +2388,70 @@ export function ConnectionsSettings() {
       }
     />
   );
+  const renderTailscaleDiagnostics = () => {
+    const maxLatency = Math.max(
+      1,
+      ...(tailscaleDiagnostics?.pingSamples.map((sample) => sample.latencyMs) ?? []),
+    );
+    return (
+      <div className="space-y-3 border-t border-border/60 px-4 py-3">
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <Input
+            value={tailscaleDiagnosticPeer}
+            onChange={(event) => setTailscaleDiagnosticPeer(event.target.value)}
+            placeholder="runner-1 or runner-1.tail.ts.net"
+            disabled={!desktopBridge || isDiagnosingTailscalePeer}
+            spellCheck={false}
+            aria-label="Tailscale peer"
+          />
+          <Button
+            variant="outline"
+            disabled={
+              !desktopBridge || isDiagnosingTailscalePeer || tailscaleDiagnosticPeer.trim() === ""
+            }
+            onClick={() => void handleDiagnoseTailscalePeer()}
+          >
+            {isDiagnosingTailscalePeer ? <Spinner className="size-3.5" /> : null}
+            Diagnose
+          </Button>
+        </div>
+        {tailscaleDiagnosticsError ? (
+          <p className="text-xs text-destructive">{tailscaleDiagnosticsError}</p>
+        ) : null}
+        {tailscaleDiagnostics ? (
+          <div className="rounded-md border border-border/60 bg-muted/20 p-3">
+            <div className="grid gap-2 text-xs sm:grid-cols-2">
+              <span>Connection: {tailscaleDiagnostics.connectionType}</span>
+              <span>Latency: {tailscaleDiagnostics.latencyMs ?? "unknown"} ms</span>
+              <span>Peer IP: {tailscaleDiagnostics.peerIp ?? "unknown"}</span>
+              <span>Relay: {tailscaleDiagnostics.relayServer ?? "none"}</span>
+              <span>Region: {tailscaleDiagnostics.relayRegion ?? "none"}</span>
+              <span>Last seen: {tailscaleDiagnostics.lastSeen ?? "unknown"}</span>
+            </div>
+            {tailscaleDiagnostics.pingSamples.length > 0 ? (
+              <div className="mt-3 flex h-16 items-end gap-1">
+                {tailscaleDiagnostics.pingSamples.map((sample, index) => (
+                  <Tooltip key={`${sample.raw}:${index}`}>
+                    <TooltipTrigger
+                      className="min-h-2 flex-1 rounded-sm bg-primary/70"
+                      style={{ height: `${Math.max(8, (sample.latencyMs / maxLatency) * 64)}px` }}
+                      aria-label={`${sample.latencyMs} ms`}
+                    />
+                    <TooltipPopup>{sample.raw}</TooltipPopup>
+                  </Tooltip>
+                ))}
+              </div>
+            ) : null}
+            {tailscaleDiagnostics.statusMessage ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {tailscaleDiagnostics.statusMessage}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
   const renderAuthorizedClients = (presentation: AccessSectionPresentation) => (
     <>
       {desktopAccessManagementError ? (
@@ -2463,6 +2559,7 @@ export function ConnectionsSettings() {
                 {renderNetworkAccessRow()}
                 {renderEndpointRows("endpoint-rail")}
                 {renderTailscaleRow()}
+                {renderTailscaleDiagnostics()}
               </>
             ) : (
               renderDisabledNetworkAccessRow()

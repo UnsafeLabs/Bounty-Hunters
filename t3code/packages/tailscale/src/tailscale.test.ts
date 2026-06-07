@@ -7,9 +7,12 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   buildTailscaleHttpsBaseUrl,
+  diagnosePeer,
   disableTailscaleServe,
   ensureTailscaleServe,
   isTailscaleIpv4Address,
+  parsePeerStatus,
+  parseTailscalePingOutput,
   parseTailscaleMagicDnsName,
   parseTailscaleStatus,
   readTailscaleStatus,
@@ -18,6 +21,7 @@ import {
 const encoder = new TextEncoder();
 const tailscaleStatusJson = `{"Self":{"DNSName":"desktop.tail.ts.net.","TailscaleIPs":["100.100.100.100","fd7a:115c:a1e0::1","192.168.1.20"]}}`;
 const tailscaleStatusWithSingleIpJson = `{"Self":{"DNSName":"desktop.tail.ts.net.","TailscaleIPs":["100.90.1.2"]}}`;
+const tailscalePeerStatusJson = `{"Peer":{"nodekey:abc":{"HostName":"runner-1","DNSName":"runner-1.tail.ts.net.","TailscaleIPs":["100.88.1.9"],"LastSeen":"2026-06-06T18:00:00Z","Online":false}}}`;
 
 function mockHandle(result: { stdout?: string; stderr?: string; code?: number }) {
   return ChildProcessSpawner.makeHandle({
@@ -81,6 +85,63 @@ describe("tailscale", () => {
     }),
   );
 
+  it.effect("parses peer status facts", () =>
+    Effect.gen(function* () {
+      const status = yield* parsePeerStatus(tailscalePeerStatusJson, "runner-1");
+      assert.deepEqual(status, {
+        peerIp: "100.88.1.9",
+        lastSeen: "2026-06-06T18:00:00Z",
+        online: false,
+      });
+    }),
+  );
+
+  it("parses direct and relayed ping diagnostics", () => {
+    const direct = parseTailscalePingOutput(
+      "runner-1",
+      [
+        "pong from runner-1 (100.88.1.9) via 203.0.113.10:41641 in 24ms",
+        "pong from runner-1 (100.88.1.9) via 203.0.113.10:41641 in 25.5ms",
+      ].join("\n"),
+    );
+    assert.deepEqual(direct, {
+      reachable: true,
+      connectionType: "direct",
+      latencyMs: 25.5,
+      peerIp: "100.88.1.9",
+      relayServer: null,
+      relayRegion: null,
+      pingSamples: [
+        {
+          latencyMs: 24,
+          connectionType: "direct",
+          peerIp: "100.88.1.9",
+          relayServer: null,
+          relayRegion: null,
+          raw: "pong from runner-1 (100.88.1.9) via 203.0.113.10:41641 in 24ms",
+        },
+        {
+          latencyMs: 25.5,
+          connectionType: "direct",
+          peerIp: "100.88.1.9",
+          relayServer: null,
+          relayRegion: null,
+          raw: "pong from runner-1 (100.88.1.9) via 203.0.113.10:41641 in 25.5ms",
+        },
+      ],
+      statusMessage: null,
+    });
+
+    const relayed = parseTailscalePingOutput(
+      "runner-1",
+      "pong from runner-1 (100.88.1.9) via DERP(nyc) in 80ms",
+    );
+    assert.equal(relayed.connectionType, "relayed");
+    assert.equal(relayed.relayServer, "nyc");
+    assert.equal(relayed.relayRegion, "nyc");
+    assert.equal(relayed.latencyMs, 80);
+  });
+
   it.effect("builds clean HTTPS base URLs", () =>
     Effect.sync(() => {
       assert.equal(
@@ -108,6 +169,68 @@ describe("tailscale", () => {
       assert.deepEqual(status, {
         magicDnsName: "desktop.tail.ts.net",
         tailnetIpv4Addresses: ["100.90.1.2"],
+      });
+    });
+  });
+
+  it.effect("diagnoses a peer through ping and status commands", () => {
+    const layer = mockSpawnerLayer((command, args) => {
+      assert.equal(command, "tailscale");
+      if (args[0] === "ping") {
+        assert.deepEqual(args, ["ping", "--c", "3", "runner-1"]);
+        return {
+          stdout: [
+            "pong from runner-1 (100.88.1.9) via DERP(nyc) in 81ms",
+            "pong from runner-1 (100.88.1.9) via DERP(nyc) in 79ms",
+            "pong from runner-1 (100.88.1.9) via DERP(nyc) in 80ms",
+          ].join("\n"),
+        };
+      }
+      assert.deepEqual(args, ["status", "--json"]);
+      return { stdout: tailscalePeerStatusJson };
+    });
+
+    return Effect.gen(function* () {
+      const diagnostics = yield* diagnosePeer({ peer: "runner-1", samples: 3 }).pipe(
+        Effect.provide(layer),
+      );
+      assert.deepEqual(diagnostics, {
+        peer: "runner-1",
+        reachable: true,
+        connectionType: "relayed",
+        peerIp: "100.88.1.9",
+        latencyMs: 80,
+        relayServer: "nyc",
+        relayRegion: "nyc",
+        lastSeen: "2026-06-06T18:00:00Z",
+        online: false,
+        pingSamples: [
+          {
+            latencyMs: 81,
+            connectionType: "relayed",
+            peerIp: "100.88.1.9",
+            relayServer: "nyc",
+            relayRegion: "nyc",
+            raw: "pong from runner-1 (100.88.1.9) via DERP(nyc) in 81ms",
+          },
+          {
+            latencyMs: 79,
+            connectionType: "relayed",
+            peerIp: "100.88.1.9",
+            relayServer: "nyc",
+            relayRegion: "nyc",
+            raw: "pong from runner-1 (100.88.1.9) via DERP(nyc) in 79ms",
+          },
+          {
+            latencyMs: 80,
+            connectionType: "relayed",
+            peerIp: "100.88.1.9",
+            relayServer: "nyc",
+            relayRegion: "nyc",
+            raw: "pong from runner-1 (100.88.1.9) via DERP(nyc) in 80ms",
+          },
+        ],
+        statusMessage: null,
       });
     });
   });
