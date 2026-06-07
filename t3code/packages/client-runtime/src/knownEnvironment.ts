@@ -1,4 +1,26 @@
 import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
+import * as Fs from "node:fs";
+
+export type RuntimeEnvironmentKind = "container" | "ci" | "wsl" | "desktop" | "unknown";
+
+export function detectRuntimeEnvironment(): RuntimeEnvironmentKind {
+  try {
+    if (Fs.existsSync("/.dockerenv")) return "container";
+    const cgroup = Fs.readFileSync("/proc/1/cgroup", "utf-8");
+    if (/docker|containerd|kubepods/i.test(cgroup)) return "container";
+  } catch {}
+
+  for (const v of ["CI", "GITHUB_ACTIONS", "GITLAB_CI", "JENKINS_URL", "CIRCLECI", "TRAVIS"]) {
+    if (process.env[v]) return "ci";
+  }
+
+  try {
+    const version = Fs.readFileSync("/proc/version", "utf-8");
+    if (/microsoft/i.test(version)) return "wsl";
+  } catch {}
+
+  return "desktop";
+}
 
 export interface KnownEnvironmentConnectionTarget {
   readonly httpBaseUrl: string;
