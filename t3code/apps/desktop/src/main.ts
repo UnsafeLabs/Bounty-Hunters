@@ -151,4 +151,12 @@ const desktopRuntimeLayer = ElectronProtocol.layerSchemePrivileges.pipe(
   ),
 );
 
+// Handle --version flag before full app initialization
+for (const arg of process.argv) {
+  if (arg === "--version" || arg === "-v" || arg === "-V") {
+    console.log(serverPackageJson.version);
+    process.exit(0);
+  }
+}
+
 DesktopApp.program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);
