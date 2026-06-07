@@ -67,6 +67,8 @@ interface ChatMarkdownProps {
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
+const LONG_CODE_BLOCK_LINE_THRESHOLD = 20;
+const LONG_CODE_BLOCK_PREVIEW_LINES = 10;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
 const highlightedCodeCache = new LRUCache<string>(
@@ -75,11 +77,34 @@ const highlightedCodeCache = new LRUCache<string>(
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 
-function extractFenceLanguage(className: string | undefined): string {
+function detectFenceLanguage(code: string): string {
+  const trimmed = code.trimStart();
+  if (trimmed.length === 0) return "text";
+  if (/^(\{|\[)[\s\S]*(\}|\])\s*$/.test(trimmed)) return "json";
+  if (/^<([a-z][\w:-]*)(\s|>|\/>)/i.test(trimmed)) return "html";
+  if (/^(import|export)\s/m.test(trimmed) || /\b(from|interface|type)\b/.test(trimmed)) {
+    return "typescript";
+  }
+  if (/\b(def|class|from|import)\s+\w+/.test(trimmed) || /^if __name__ == ["']__main__["']/m.test(trimmed)) {
+    return "python";
+  }
+  if (/^(\$ |pnpm |npm |bun |git |cd |ls |mkdir |rm )/m.test(trimmed)) return "bash";
+  if (/^[\w.-]+:\s*[\w"'.-]+;/m.test(trimmed) || /(^|\n)\s*[\w.#:[\]-]+\s*\{/.test(trimmed)) {
+    return "css";
+  }
+  return "text";
+}
+
+function extractFenceLanguage(className: string | undefined, code: string): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
-  const raw = match?.[1] ?? "text";
+  const raw = match?.[1] ?? detectFenceLanguage(code);
   // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
   return raw === "gitignore" ? "ini" : raw;
+}
+
+function countCodeLines(code: string): number {
+  const normalized = code.endsWith("\n") ? code.slice(0, -1) : code;
+  return Math.max(1, normalized.split("\n").length);
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -148,7 +173,15 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
 
 function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lineCount = useMemo(() => countCodeLines(code), [code]);
+  const isCollapsible = lineCount > LONG_CODE_BLOCK_LINE_THRESHOLD;
+  const visibleLineCount = isCollapsible && !expanded ? LONG_CODE_BLOCK_PREVIEW_LINES : lineCount;
+  const lineNumbers = useMemo(
+    () => Array.from({ length: lineCount }, (_, index) => index + 1),
+    [lineCount],
+  );
   const handleCopy = useCallback(() => {
     if (typeof navigator === "undefined" || navigator.clipboard == null) {
       return;
@@ -178,8 +211,27 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
     [],
   );
 
+  const codeBlockBody = (
+    <div
+      className="chat-markdown-codeblock-body"
+      data-collapsed={isCollapsible && !expanded ? "true" : "false"}
+      style={{ "--chat-markdown-visible-lines": visibleLineCount } as React.CSSProperties}
+    >
+      <div className="chat-markdown-line-numbers" aria-hidden="true">
+        {lineNumbers.map((lineNumber) => (
+          <span key={lineNumber}>{lineNumber}</span>
+        ))}
+      </div>
+      <div className="chat-markdown-codeblock-scroll">{children}</div>
+    </div>
+  );
+
   return (
-    <div className="chat-markdown-codeblock leading-snug">
+    <div
+      className="chat-markdown-codeblock leading-snug"
+      data-line-count={lineCount}
+      data-collapsible={isCollapsible ? "true" : "false"}
+    >
       <button
         type="button"
         className="chat-markdown-copy-button"
@@ -189,7 +241,24 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
       >
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </button>
-      {children}
+      {isCollapsible ? (
+        <details className="chat-markdown-collapsible-codeblock" open>
+          <summary
+            className="chat-markdown-codeblock-summary"
+            onClick={(event) => {
+              event.preventDefault();
+              setExpanded((value) => !value);
+            }}
+          >
+            {expanded
+              ? `Collapse to first ${LONG_CODE_BLOCK_PREVIEW_LINES} lines`
+              : `Show all ${lineCount} lines`}
+          </summary>
+          {codeBlockBody}
+        </details>
+      ) : (
+        codeBlockBody
+      )}
     </div>
   );
 }
@@ -207,7 +276,7 @@ function SuspenseShikiCodeBlock({
   themeName,
   isStreaming,
 }: SuspenseShikiCodeBlockProps) {
-  const language = extractFenceLanguage(className);
+  const language = extractFenceLanguage(className, code);
   const cacheKey = createHighlightCacheKey(code, language, themeName);
   const cachedHighlightedHtml = !isStreaming ? highlightedCodeCache.get(cacheKey) : null;
 
@@ -215,6 +284,7 @@ function SuspenseShikiCodeBlock({
     return (
       <div
         className="chat-markdown-shiki"
+        data-language={language}
         dangerouslySetInnerHTML={{ __html: cachedHighlightedHtml }}
       />
     );
@@ -272,7 +342,11 @@ function UncachedShikiCodeBlock({
   }, [cacheKey, code, highlightedHtml, isStreaming]);
 
   return (
-    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+    <div
+      className="chat-markdown-shiki"
+      data-language={language}
+      dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+    />
   );
 }
 

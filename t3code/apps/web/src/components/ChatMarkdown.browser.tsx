@@ -29,6 +29,7 @@ describe("ChatMarkdown", () => {
   afterEach(() => {
     openInPreferredEditorMock.mockClear();
     readLocalApiMock.mockClear();
+    vi.unstubAllGlobals();
     localStorage.clear();
     document.body.innerHTML = "";
   });
@@ -134,6 +135,90 @@ describe("ChatMarkdown", () => {
       await expect.element(link).toBeInTheDocument();
       await expect.element(link).toHaveAttribute("href", "https://openai.com/docs");
       await expect.element(link).toHaveAttribute("target", "_blank");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("auto-detects unlabeled fenced TypeScript code blocks and keeps inline code plain", async () => {
+    const screen = await render(
+      <ChatMarkdown
+        text={
+          "Inline `const value = 1` stays inline.\n\n```\nimport { z } from 'zod';\nexport const value: string = z.string().parse('ok');\n```"
+        }
+        cwd="/repo/project"
+      />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector('.chat-markdown-shiki[data-language="typescript"]')).not.toBeNull();
+      });
+      expect(document.querySelector(".chat-markdown :not(pre) > code")?.textContent).toBe(
+        "const value = 1",
+      );
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("renders aligned line numbers for code blocks", async () => {
+    const screen = await render(
+      <ChatMarkdown text={"```ts\nconst a = 1;\nconst b = 2;\nconst c = 3;\n```"} cwd="/repo/project" />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelectorAll(".chat-markdown-line-numbers span").length).toBe(3);
+      });
+      expect(
+        [...document.querySelectorAll(".chat-markdown-line-numbers span")].map((node) =>
+          node.textContent?.trim(),
+        ),
+      ).toEqual(["1", "2", "3"]);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("collapses long code blocks to a ten-line preview and expands on summary click", async () => {
+    const longCode = Array.from({ length: 21 }, (_, index) => `console.log(${index + 1});`).join(
+      "\n",
+    );
+    const screen = await render(<ChatMarkdown text={`\`\`\`ts\n${longCode}\n\`\`\``} cwd="/repo/project" />);
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-collapsible="true"]')).not.toBeNull();
+      });
+      const body = document.querySelector(".chat-markdown-codeblock-body");
+      expect(body?.getAttribute("data-collapsed")).toBe("true");
+
+      await page.getByText("Show all 21 lines").click();
+
+      await vi.waitFor(() => {
+        expect(body?.getAttribute("data-collapsed")).toBe("false");
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("copies only the fenced code content", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: { writeText },
+    });
+    const screen = await render(
+      <ChatMarkdown text={"```ts\nconst copied = true;\n```"} cwd="/repo/project" />,
+    );
+
+    try {
+      await page.getByRole("button", { name: "Copy code" }).click();
+      await vi.waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith("const copied = true;\n");
+      });
     } finally {
       await screen.unmount();
     }
