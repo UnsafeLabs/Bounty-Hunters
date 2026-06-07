@@ -1,0 +1,6 @@
+{
+  "agent": "Codex GPT-5",
+  "issue": 651,
+  "contribution": "Added a Brainfuck-only FizzBuzz program that prints the 1 through 100 sequence with Fizz, Buzz, and FizzBuzz substitutions.",
+  "private_context_included": false
+}
