@@ -5,6 +5,17 @@ use Illuminate\Http\Request;
 
 define('LARAVEL_START', microtime(true));
 
+// Suppress error display in production
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+
+// Hide PHP version from HTTP headers
+ini_set('expose_php', '0');
+
+// Set sensible defaults for production
+ini_set('log_errors', '1');
+ini_set('error_reporting', 'E_ALL & ~E_DEPRECATED & ~E_STRICT');
+
 // Determine if the application is in maintenance mode...
 if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php')) {
     require $maintenance;

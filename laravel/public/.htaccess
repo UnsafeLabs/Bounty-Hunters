@@ -23,3 +23,103 @@
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
 </IfModule>
+
+# ----------------------------------------------------------------------
+# Compression — mod_deflate
+# ----------------------------------------------------------------------
+<IfModule mod_deflate.c>
+    # Force compression for mangled Accept-Encoding headers
+    <IfModule mod_setenvif.c>
+        <IfModule mod_headers.c>
+            SetEnvIfNoCase ^(Accept-EncodXng|X-cept-Encoding|X{15}|~{15}|-{15})$ ^((gzip|deflate)\s*,?\s*)+|[X~-]{4,13}$ HAVE_Accept-Encoding
+            RequestHeader append Accept-Encoding "gzip,deflate" env=HAVE_Accept-Encoding
+        </IfModule>
+    </IfModule>
+
+    # Compress all output labeled with one of the following MIME types
+    <IfModule mod_filter.c>
+        AddOutputFilterByType DEFLATE text/html
+        AddOutputFilterByType DEFLATE text/css
+        AddOutputFilterByType DEFLATE text/javascript
+        AddOutputFilterByType DEFLATE text/xml
+        AddOutputFilterByType DEFLATE text/plain
+        AddOutputFilterByType DEFLATE application/javascript
+        AddOutputFilterByType DEFLATE application/x-javascript
+        AddOutputFilterByType DEFLATE application/json
+        AddOutputFilterByType DEFLATE application/xml
+        AddOutputFilterByType DEFLATE application/rss+xml
+        AddOutputFilterByType DEFLATE application/atom+xml
+        AddOutputFilterByType DEFLATE image/svg+xml
+        AddOutputFilterByType DEFLATE font/ttf
+        AddOutputFilterByType DEFLATE font/otf
+        AddOutputFilterByType DEFLATE font/woff
+        AddOutputFilterByType DEFLATE application/vnd.ms-fontobject
+    </IfModule>
+
+    # Remove browser bugs (only needed for really old browsers)
+    <IfModule mod_browser.c>
+        BrowserMatch ^Mozilla/4 gzip-only-text/html
+        BrowserMatch ^Mozilla/4\.0[678] no-gzip
+        BrowserMatch \bMSIE !no-gzip !gzip-only-text/html
+    </IfModule>
+</IfModule>
+
+# ----------------------------------------------------------------------
+# Caching — mod_expires
+# ----------------------------------------------------------------------
+<IfModule mod_expires.c>
+    ExpiresActive On
+
+    # Default expiration: 1 month after request
+    ExpiresDefault                          "access plus 1 month"
+
+    # Data
+    ExpiresByType application/json          "access plus 0 seconds"
+    ExpiresByType application/xml           "access plus 0 seconds"
+    ExpiresByType text/xml                  "access plus 0 seconds"
+
+    # Favicon (cannot be renamed)
+    ExpiresByType image/x-icon              "access plus 1 year"
+
+    # Images
+    ExpiresByType image/jpg                 "access plus 30 days"
+    ExpiresByType image/jpeg                "access plus 30 days"
+    ExpiresByType image/png                 "access plus 30 days"
+    ExpiresByType image/gif                 "access plus 30 days"
+    ExpiresByType image/webp                "access plus 30 days"
+    ExpiresByType image/svg+xml             "access plus 30 days"
+    ExpiresByType image/bmp                 "access plus 30 days"
+    ExpiresByType image/ico                 "access plus 30 days"
+
+    # CSS and JavaScript
+    ExpiresByType text/css                  "access plus 7 days"
+    ExpiresByType text/javascript           "access plus 7 days"
+    ExpiresByType application/javascript    "access plus 7 days"
+    ExpiresByType application/x-javascript  "access plus 7 days"
+
+    # Web fonts
+    ExpiresByType font/ttf                  "access plus 365 days"
+    ExpiresByType font/otf                  "access plus 365 days"
+    ExpiresByType font/woff                 "access plus 365 days"
+    ExpiresByType font/woff2                "access plus 365 days"
+    ExpiresByType application/font-woff     "access plus 365 days"
+    ExpiresByType application/font-woff2    "access plus 365 days"
+    ExpiresByType application/vnd.ms-fontobject "access plus 365 days"
+</IfModule>
+
+# ----------------------------------------------------------------------
+# Security Headers
+# ----------------------------------------------------------------------
+<IfModule mod_headers.c>
+    # Prevent MIME type sniffing
+    Header set X-Content-Type-Options "nosniff"
+
+    # Prevent clickjacking
+    Header always set X-Frame-Options "SAMEORIGIN"
+
+    # Enable XSS filter in older browsers
+    Header set X-XSS-Protection "1; mode=block"
+
+    # Referrer policy for privacy
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
