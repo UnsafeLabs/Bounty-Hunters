@@ -1,0 +1,9 @@
+case=long-subject-dn
+subject-dn-bytes=300
+expected-marker=[TRUNCATED]
+hostname-corrupted=false
+
+case=normal-subject-dn
+subject-dn=CN=api.bank.example,OU=Payments,O=Bank
+expected-marker=none
+hostname-corrupted=false

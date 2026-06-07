@@ -25,7 +25,7 @@
        01  CERT-STORE-RECORD.
            05  CS-CERT-SERIAL          PIC X(40).
            05  CS-ISSUER-DN            PIC X(256).
-           05  CS-SUBJECT-DN           PIC X(256).
+           05  CS-SUBJECT-DN           PIC X(300).
            05  CS-NOT-BEFORE           PIC X(14).
            05  CS-NOT-AFTER            PIC X(14).
            05  CS-KEY-LENGTH           PIC 9(5).
@@ -123,6 +123,16 @@
            88  WS-CERT-INVALID         VALUE 'I'.
        01  WS-VALIDATION-MSG           PIC X(128).
        01  WS-AUDIT-TIMESTAMP          PIC X(26).
+       01  WS-AUDIT-RECORD             PIC X(512).
+       01  WS-AUDIT-SUBJECT-DN         PIC X(300).
+       01  WS-AUDIT-PTR                PIC 9(4)  VALUE 1.
+       01  WS-AUDIT-MAX-LENGTH         PIC 9(4)  VALUE 512.
+       01  WS-AUDIT-MARKER-POS         PIC 9(4)  VALUE 502.
+       01  WS-AUDIT-TRUNCATED-MARKER   PIC X(11)
+           VALUE '[TRUNCATED]'.
+       01  WS-AUDIT-OVERFLOW-FLAG      PIC X(1)  VALUE 'N'.
+           88  WS-AUDIT-WAS-TRUNCATED  VALUE 'Y'.
+           88  WS-AUDIT-NOT-TRUNCATED  VALUE 'N'.
        01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
        PROCEDURE DIVISION.
        0000-MAIN-CONTROL.
@@ -137,6 +147,7 @@
            STOP RUN.
        1000-INITIALIZE.
            MOVE SPACES TO WS-VALIDATION-MSG
+           MOVE SPACES TO WS-AUDIT-SUBJECT-DN
            SET WS-CERT-NOT-EXPIRED TO TRUE
            SET WS-CERT-NOT-REVOKED TO TRUE
            SET WS-HOSTNAME-NO-MATCH TO TRUE
@@ -175,6 +186,9 @@
                        SET WS-CHAIN-IS-INVALID TO TRUE
                        GO TO 2000-EXIT
                END-READ
+               IF WS-CHAIN-INDEX = 1
+                   MOVE CS-SUBJECT-DN TO WS-AUDIT-SUBJECT-DN
+               END-IF
                IF WS-CHAIN-INDEX = WS-CHAIN-LENGTH
                    IF NOT CS-IS-TRUST-ANCHOR
                        SET WS-CHAIN-IS-INVALID TO TRUE
@@ -336,16 +350,43 @@
            .
        8000-WRITE-AUDIT-ENTRY.
            MOVE FUNCTION CURRENT-DATE TO WS-AUDIT-TIMESTAMP
+           MOVE SPACES TO WS-AUDIT-RECORD
+           MOVE 1 TO WS-AUDIT-PTR
+           SET WS-AUDIT-NOT-TRUNCATED TO TRUE
+           PERFORM 8050-CHECK-AUDIT-POINTER
            STRING WS-AUDIT-TIMESTAMP DELIMITED SIZE
                '|' DELIMITED SIZE
                WS-CERT-SERIAL-NUM DELIMITED SPACES
                '|' DELIMITED SIZE
+               WS-ISSUER-COMMON-NAME DELIMITED SPACES
+               '|' DELIMITED SIZE
+               WS-AUDIT-SUBJECT-DN DELIMITED SPACES
+               '|' DELIMITED SIZE
                WS-VALIDATION-RESULT DELIMITED SIZE
                '|' DELIMITED SIZE
                WS-VALIDATION-MSG DELIMITED SPACES
-               INTO AUDIT-LOG-RECORD
+               INTO WS-AUDIT-RECORD
+               WITH POINTER WS-AUDIT-PTR
+               ON OVERFLOW
+                   PERFORM 8100-MARK-AUDIT-TRUNCATED
            END-STRING
+           IF WS-AUDIT-PTR > WS-AUDIT-MAX-LENGTH
+               PERFORM 8100-MARK-AUDIT-TRUNCATED
+           END-IF
+           MOVE WS-AUDIT-RECORD TO AUDIT-LOG-RECORD
            WRITE AUDIT-LOG-RECORD
+           .
+       8050-CHECK-AUDIT-POINTER.
+           IF WS-AUDIT-PTR > WS-AUDIT-MAX-LENGTH
+               PERFORM 8100-MARK-AUDIT-TRUNCATED
+           END-IF
+           .
+       8100-MARK-AUDIT-TRUNCATED.
+           SET WS-AUDIT-WAS-TRUNCATED TO TRUE
+           DISPLAY 'TLSVAL-W080: AUDIT RECORD TRUNCATED'
+           MOVE WS-AUDIT-TRUNCATED-MARKER
+               TO WS-AUDIT-RECORD(WS-AUDIT-MARKER-POS:11)
+           MOVE WS-AUDIT-MAX-LENGTH TO WS-AUDIT-PTR
            .
        9000-CLEANUP.
            CLOSE CERT-STORE-FILE
