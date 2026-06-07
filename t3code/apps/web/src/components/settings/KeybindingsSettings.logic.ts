@@ -13,6 +13,13 @@ import {
 import { isMacPlatform } from "../../lib/utils";
 
 export type KeybindingSource = "Default" | "Custom" | "Project";
+export type KeybindingSortKey = "command" | "key" | "source" | "when";
+export type KeybindingSortDirection = "asc" | "desc";
+
+export interface KeybindingSort {
+  readonly key: KeybindingSortKey;
+  readonly direction: KeybindingSortDirection;
+}
 
 export interface KeybindingRow {
   readonly id: string;
@@ -202,6 +209,35 @@ export function buildKeybindingRows(
       row.source.toLowerCase().includes(normalizedQuery)
     );
   });
+}
+
+export function sortKeybindingRows(
+  rows: ReadonlyArray<KeybindingRow>,
+  sort: KeybindingSort,
+): ReadonlyArray<KeybindingRow> {
+  const multiplier = sort.direction === "asc" ? 1 : -1;
+  return [...rows].sort((left, right) => {
+    const primary = keybindingSortValue(left, sort.key).localeCompare(
+      keybindingSortValue(right, sort.key),
+    );
+    if (primary !== 0) return primary * multiplier;
+    const commandCompare = commandLabel(left.command).localeCompare(commandLabel(right.command));
+    if (commandCompare !== 0) return commandCompare;
+    return left.key.localeCompare(right.key);
+  });
+}
+
+function keybindingSortValue(row: KeybindingRow, key: KeybindingSortKey): string {
+  switch (key) {
+    case "command":
+      return commandLabel(row.command);
+    case "key":
+      return row.key;
+    case "source":
+      return row.source;
+    case "when":
+      return row.when || "Always";
+  }
 }
 
 function collectWhenIdentifiersFromNode(

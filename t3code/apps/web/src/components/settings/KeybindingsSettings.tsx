@@ -53,8 +53,11 @@ import {
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
+  sortKeybindingRows,
   type KeybindingCommandOption,
   type KeybindingRow,
+  type KeybindingSort,
+  type KeybindingSortKey,
   type WhenVariableOption,
   unknownWhenVariables,
   whenAstToExpression,
@@ -70,16 +73,16 @@ function KeybindingPill({ value }: { value: string }) {
         <Kbd key={part} className="min-w-6 justify-center px-1.5">
           {part === "mod"
             ? navigator.platform.toLowerCase().includes("mac")
-              ? "⌘"
+              ? "Cmd"
               : "Ctrl"
             : part === "shift"
-              ? "⇧"
+              ? "Shift"
               : part === "alt"
                 ? navigator.platform.toLowerCase().includes("mac")
-                  ? "⌥"
+                  ? "Opt"
                   : "Alt"
                 : part === "ctrl"
-                  ? "⌃"
+                  ? "Ctrl"
                   : part.length === 1
                     ? part.toUpperCase()
                     : part}
@@ -277,6 +280,54 @@ function KeybindingConflictWarning({ labels }: { labels: ReadonlyArray<string> }
         {description} The most recent matching binding wins when both conditions can apply.
       </TooltipPopup>
     </Tooltip>
+  );
+}
+
+function SourceBadge({ source }: { source: KeybindingRow["source"] }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-5 w-fit items-center rounded-sm border px-1.5 text-[11px] font-medium",
+        source === "Default" && "border-border bg-muted text-muted-foreground",
+        source === "Custom" && "border-primary/30 bg-primary/10 text-primary",
+        source === "Project" && "border-warning/30 bg-warning/10 text-warning",
+      )}
+    >
+      {source}
+    </span>
+  );
+}
+
+function SortableHeader({
+  label,
+  sortKey,
+  sort,
+  onSortChange,
+}: {
+  label: string;
+  sortKey: KeybindingSortKey;
+  sort: KeybindingSort;
+  onSortChange: (sort: KeybindingSort) => void;
+}) {
+  const active = sort.key === sortKey;
+  const nextDirection = active && sort.direction === "asc" ? "desc" : "asc";
+
+  return (
+    <button
+      type="button"
+      aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+      className="inline-flex w-fit items-center gap-1 rounded-sm text-left outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/24"
+      onClick={() => onSortChange({ key: sortKey, direction: nextDirection })}
+    >
+      <span>{label}</span>
+      <ChevronDownIcon
+        className={cn(
+          "size-3 transition",
+          active ? "opacity-80" : "opacity-25",
+          active && sort.direction === "asc" && "rotate-180",
+        )}
+      />
+    </button>
   );
 }
 
@@ -802,7 +853,7 @@ function KeybindingTableRow({
   };
 
   return (
-    <div className="grid grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_60px] items-center px-4 py-1.5 text-sm even:bg-muted/15 hover:bg-accent/40">
+    <div className="grid grid-cols-[minmax(180px,1.1fr)_minmax(210px,0.85fr)_96px_minmax(190px,1fr)_60px] items-center px-4 py-1.5 text-sm even:bg-muted/15 hover:bg-accent/40">
       <div className="min-w-0 pr-4">
         <div className="flex min-w-0 items-center gap-1.5">
           <div className="truncate text-[13px] font-medium text-foreground" title={row.command}>
@@ -815,12 +866,12 @@ function KeybindingTableRow({
           <button
             type="button"
             onClick={() => setDraft({ isRecording: true })}
-            aria-label={`Edit shortcut for ${commandLabel(row.command)}`}
+            aria-label={`Record shortcut for ${commandLabel(row.command)}`}
             className="group inline-flex h-7 items-center gap-1.5 rounded-md border border-transparent px-1.5 outline-none transition-colors hover:border-border/70 hover:bg-background focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24"
           >
             <KeybindingPill value={row.key} />
             <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/0 transition-opacity group-hover:text-muted-foreground/70 group-focus-visible:text-muted-foreground/70">
-              Edit
+              Record
             </span>
           </button>
         ) : (
@@ -828,7 +879,7 @@ function KeybindingTableRow({
             autoFocus={isRecording}
             aria-label={`Keybinding for ${commandLabel(row.command)}`}
             value={isRecording ? "" : keyDraft}
-            placeholder={isRecording ? "Press shortcut" : "Unassigned"}
+            placeholder={isRecording ? "Record shortcut" : "Unassigned"}
             className={cn(
               "h-7 w-44 rounded-md font-mono text-[12px] sm:h-7",
               isRecording && "border-primary/70 bg-primary/5",
@@ -849,6 +900,9 @@ function KeybindingTableRow({
             {isSaving ? "Saving" : "Save"}
           </Button>
         ) : null}
+      </div>
+      <div className="pr-4">
+        <SourceBadge source={row.source} />
       </div>
       <div className="pr-4">
         <Popover>
@@ -963,7 +1017,7 @@ function NewKeybindingTableRow({
   };
 
   return (
-    <div className="grid grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_60px] items-center px-4 py-1.5 text-sm even:bg-muted/15 hover:bg-accent/40">
+    <div className="grid grid-cols-[minmax(180px,1.1fr)_minmax(210px,0.85fr)_96px_minmax(190px,1fr)_60px] items-center px-4 py-1.5 text-sm even:bg-muted/15 hover:bg-accent/40">
       <div className="min-w-0 pr-4">
         <Select
           value={commandDraft}
@@ -992,7 +1046,7 @@ function NewKeybindingTableRow({
         <Input
           aria-label={`Keybinding for ${commandLabelText}`}
           value={isRecording ? "" : keyDraft}
-          placeholder={isRecording ? "Press shortcut" : "Unassigned"}
+          placeholder={isRecording ? "Record shortcut" : "Unassigned"}
           className={cn(
             "h-7 w-44 rounded-md font-mono text-[12px] sm:h-7",
             isRecording && "border-primary/70 bg-primary/5",
@@ -1010,6 +1064,9 @@ function NewKeybindingTableRow({
         >
           {isSaving ? "Saving" : "Save"}
         </Button>
+      </div>
+      <div className="pr-4">
+        <SourceBadge source="Custom" />
       </div>
       <div className="pr-4">
         <Popover>
@@ -1058,7 +1115,7 @@ function NewKeybindingTableRow({
   );
 }
 
-export function KeybindingsSettingsPanel() {
+export function KeybindingsEditor() {
   const keybindings = useServerKeybindings();
   const keybindingsConfigPath = useServerKeybindingsConfigPath();
   const [query, setQuery] = useState("");
@@ -1066,7 +1123,11 @@ export function KeybindingsSettingsPanel() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [savingCommand, setSavingCommand] = useState<KeybindingCommand | null>(null);
   const [isAddingBinding, setIsAddingBinding] = useState(false);
-  const rows = useMemo(() => buildKeybindingRows(keybindings, query), [keybindings, query]);
+  const [sort, setSort] = useState<KeybindingSort>({ key: "command", direction: "asc" });
+  const rows = useMemo(
+    () => sortKeybindingRows(buildKeybindingRows(keybindings, query), sort),
+    [keybindings, query, sort],
+  );
   const commandOptions = useMemo(() => buildKeybindingCommandOptions(keybindings), [keybindings]);
   const whenVariables = useMemo(() => buildWhenVariableOptions(), []);
 
@@ -1240,13 +1301,14 @@ export function KeybindingsSettingsPanel() {
           hideScrollbars
           className="w-full max-w-full rounded-none"
         >
-          <div className="grid min-w-[680px] grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_60px] border-b border-border/70 bg-muted/25 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
-            <div>Command</div>
-            <div>Keybinding</div>
-            <div>When</div>
+          <div className="grid min-w-[780px] grid-cols-[minmax(180px,1.1fr)_minmax(210px,0.85fr)_96px_minmax(190px,1fr)_60px] border-b border-border/70 bg-muted/25 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+            <SortableHeader label="Command" sortKey="command" sort={sort} onSortChange={setSort} />
+            <SortableHeader label="Shortcut" sortKey="key" sort={sort} onSortChange={setSort} />
+            <SortableHeader label="Source" sortKey="source" sort={sort} onSortChange={setSort} />
+            <SortableHeader label="When" sortKey="when" sort={sort} onSortChange={setSort} />
             <div>Status</div>
           </div>
-          <div className="min-w-[680px] divide-y divide-border/60">
+          <div className="min-w-[780px] divide-y divide-border/60">
             {isAddingBinding ? (
               <NewKeybindingTableRow
                 commandOptions={commandOptions}
@@ -1279,4 +1341,8 @@ export function KeybindingsSettingsPanel() {
       </SettingsSection>
     </SettingsPageContainer>
   );
+}
+
+export function KeybindingsSettingsPanel() {
+  return <KeybindingsEditor />;
 }

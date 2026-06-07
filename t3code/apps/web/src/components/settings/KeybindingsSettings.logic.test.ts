@@ -10,6 +10,7 @@ import {
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
   shortcutToKeybindingInput,
+  sortKeybindingRows,
   unknownWhenVariables,
   whenAstToExpression,
 } from "./KeybindingsSettings.logic";
@@ -244,5 +245,58 @@ describe("KeybindingsSettings.logic", () => {
         when: "",
       }),
     ).toEqual(["Chat: New Local"]);
+  });
+
+  it("sorts rows by command, shortcut, source, and when fields", () => {
+    const rows = buildKeybindingRows(
+      [
+        {
+          command: "chat.newLocal",
+          shortcut: {
+            key: "l",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+          whenAst: { type: "identifier", name: "terminalFocus" },
+        },
+        {
+          command: "chat.new",
+          shortcut: {
+            key: "n",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+        },
+        {
+          command: "script.setup-db.run",
+          shortcut: {
+            key: "r",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+        },
+      ] satisfies ResolvedKeybindingsConfig,
+      "",
+    );
+
+    expect(sortKeybindingRows(rows, { key: "command", direction: "asc" })[0]?.command).toBe(
+      "chat.new",
+    );
+    expect(sortKeybindingRows(rows, { key: "key", direction: "desc" })[0]?.key).toBe("mod+n");
+    expect(sortKeybindingRows(rows, { key: "source", direction: "desc" })[0]?.source).toBe(
+      "Project",
+    );
+    expect(sortKeybindingRows(rows, { key: "when", direction: "desc" })[0]?.when).toBe(
+      "terminalFocus",
+    );
   });
 });
