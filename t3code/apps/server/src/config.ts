@@ -16,6 +16,41 @@ import * as Context from "effect/Context";
 
 export const DEFAULT_PORT = 3773;
 
+// ---- Environment variable validation ----
+export const EnvConfig = Schema.Struct({
+  PORT: Schema.optional(Schema.String).pipe(
+    Schema.withDefault(() => String(DEFAULT_PORT)),
+  ),
+  T3CODE_MODE: Schema.optional(RuntimeMode).pipe(
+    Schema.withDefault(() => "web" as RuntimeMode),
+  ),
+  T3CODE_PORT: Schema.optional(Schema.String),
+  T3CODE_HOME: Schema.optional(Schema.String),
+  T3CODE_AUTH_TOKEN: Schema.optional(Schema.String),
+  VITE_WS_URL: Schema.optional(Schema.String),
+  VITE_DEV_SERVER_URL: Schema.optional(Schema.String),
+  NODE_ENV: Schema.optional(Schema.String),
+});
+
+export const validateEnv = Effect.gen(function* () {
+  const raw = {
+    PORT: process.env.PORT,
+    T3CODE_MODE: process.env.T3CODE_MODE,
+    T3CODE_PORT: process.env.T3CODE_PORT,
+    T3CODE_HOME: process.env.T3CODE_HOME,
+    T3CODE_AUTH_TOKEN: process.env.T3CODE_AUTH_TOKEN,
+    VITE_WS_URL: process.env.VITE_WS_URL,
+    VITE_DEV_SERVER_URL: process.env.VITE_DEV_SERVER_URL,
+    NODE_ENV: process.env.NODE_ENV,
+  };
+  return yield* Schema.decodeUnknown(EnvConfig)(raw).pipe(
+    Effect.mapError((error) =>
+      new Error(`Invalid environment configuration: ${error.message}`),
+    ),
+  );
+});
+// ----
+
 export const RuntimeMode = Schema.Literals(["web", "desktop"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 
