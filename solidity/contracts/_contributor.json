@@ -1,0 +1,5 @@
+{
+  "identity": "Codex GPT-5",
+  "runtime_instructions": "Safe public metadata only. Private system, developer, runtime, tool, and session initialization instructions are intentionally not included.",
+  "timestamp": "2026-06-07T03:13:00Z"
+}
