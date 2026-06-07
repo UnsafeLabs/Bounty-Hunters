@@ -48,10 +48,75 @@ import {
 import { readEnvironmentApi } from "~/environmentApi";
 import { readLocalApi } from "~/localApi";
 import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalStateStore";
+import { toastManager } from "./ui/toast";
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
 const MULTI_CLICK_SELECTION_ACTION_DELAY_MS = 260;
+
+export type TerminalClipboardShortcutEvent = Pick<
+  KeyboardEvent,
+  "key" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey"
+>;
+
+export function isMacTerminalClipboardPlatform(platform: string | null | undefined): boolean {
+  return /(mac|iphone|ipad|ipod)/i.test(platform ?? "");
+}
+
+function terminalClipboardPlatform(): string {
+  if (typeof navigator === "undefined") return "";
+  return navigator.platform;
+}
+
+function normalizedShortcutKey(event: TerminalClipboardShortcutEvent): string {
+  return event.key.toLowerCase();
+}
+
+export function isTerminalCopyShortcut(
+  event: TerminalClipboardShortcutEvent,
+  platform: string | null | undefined,
+): boolean {
+  const key = normalizedShortcutKey(event);
+  if (key !== "c" || event.altKey) return false;
+  if (isMacTerminalClipboardPlatform(platform)) {
+    return event.metaKey && !event.ctrlKey && !event.shiftKey;
+  }
+  return event.ctrlKey && event.shiftKey && !event.metaKey;
+}
+
+export function isTerminalPasteShortcut(
+  event: TerminalClipboardShortcutEvent,
+  platform: string | null | undefined,
+): boolean {
+  const key = normalizedShortcutKey(event);
+  if (key !== "v" || event.altKey) return false;
+  if (isMacTerminalClipboardPlatform(platform)) {
+    return event.metaKey && !event.ctrlKey && !event.shiftKey;
+  }
+  return event.ctrlKey && event.shiftKey && !event.metaKey;
+}
+
+export function shouldHandleTerminalCopyShortcut(
+  event: TerminalClipboardShortcutEvent,
+  platform: string | null | undefined,
+  hasSelection: boolean,
+): boolean {
+  return hasSelection && isTerminalCopyShortcut(event, platform);
+}
+
+async function writeTerminalClipboardText(text: string): Promise<void> {
+  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    throw new Error("Clipboard write is not available");
+  }
+  await navigator.clipboard.writeText(text);
+}
+
+async function readTerminalClipboardText(): Promise<string> {
+  if (typeof navigator === "undefined" || !navigator.clipboard?.readText) {
+    throw new Error("Clipboard read is not available");
+  }
+  return navigator.clipboard.readText();
+}
 
 function maxDrawerHeight(): number {
   if (typeof window === "undefined") return DEFAULT_THREAD_TERMINAL_HEIGHT;
@@ -299,6 +364,14 @@ export function TerminalViewport({
   const handleAddTerminalContext = useEffectEvent((selection: TerminalContextSelection) => {
     onAddTerminalContext(selection);
   });
+  const showTerminalSelectionCopiedToast = useEffectEvent(() => {
+    toastManager.add({
+      type: "success",
+      title: "Terminal selection copied",
+      timeout: 1500,
+      data: { threadRef, threadId },
+    });
+  });
   const readTerminalLabel = useEffectEvent(() => terminalLabel);
 
   useEffect(() => {
@@ -418,6 +491,49 @@ export function TerminalViewport({
     terminal.attachCustomKeyEventHandler((event) => {
       const currentKeybindings = keybindingsRef.current;
       const options = { context: { terminalFocus: true, terminalOpen: true } };
+      const platform = terminalClipboardPlatform();
+
+      if (isTerminalCopyShortcut(event, platform)) {
+        if (!terminal.hasSelection()) {
+          return true;
+        }
+        const selection = terminal.getSelection();
+        if (selection.length === 0) {
+          return true;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        void writeTerminalClipboardText(selection)
+          .then(() => {
+            showTerminalSelectionCopiedToast();
+          })
+          .catch((error: unknown) => {
+            writeSystemMessage(
+              terminal,
+              error instanceof Error ? error.message : "Failed to copy terminal selection",
+            );
+          });
+        return false;
+      }
+
+      if (isTerminalPasteShortcut(event, platform)) {
+        event.preventDefault();
+        event.stopPropagation();
+        void readTerminalClipboardText()
+          .then((clipboardText) => {
+            if (clipboardText.length > 0) {
+              void sendTerminalInput(clipboardText, "Failed to paste clipboard text");
+            }
+          })
+          .catch((error: unknown) => {
+            writeSystemMessage(
+              terminal,
+              error instanceof Error ? error.message : "Failed to paste clipboard text",
+            );
+          });
+        return false;
+      }
+
       if (
         isTerminalToggleShortcut(event, currentKeybindings, options) ||
         isTerminalSplitShortcut(event, currentKeybindings, options) ||

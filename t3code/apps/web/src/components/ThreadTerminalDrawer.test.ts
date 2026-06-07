@@ -1,14 +1,67 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isMacTerminalClipboardPlatform,
+  isTerminalCopyShortcut,
+  isTerminalPasteShortcut,
   resolveTerminalSelectionActionPosition,
   selectPendingTerminalEventEntries,
   selectTerminalEventEntriesAfterSnapshot,
   shouldHandleTerminalSelectionMouseUp,
+  shouldHandleTerminalCopyShortcut,
   terminalSelectionActionDelayForClickCount,
+  type TerminalClipboardShortcutEvent,
 } from "./ThreadTerminalDrawer";
 
+function keyEvent(
+  key: string,
+  modifiers: Partial<Omit<TerminalClipboardShortcutEvent, "key">> = {},
+): TerminalClipboardShortcutEvent {
+  return {
+    key,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    ...modifiers,
+  };
+}
+
 describe("resolveTerminalSelectionActionPosition", () => {
+  it("detects mac-style terminal clipboard platforms", () => {
+    expect(isMacTerminalClipboardPlatform("MacIntel")).toBe(true);
+    expect(isMacTerminalClipboardPlatform("iPhone")).toBe(true);
+    expect(isMacTerminalClipboardPlatform("Win32")).toBe(false);
+    expect(isMacTerminalClipboardPlatform("Linux x86_64")).toBe(false);
+  });
+
+  it("uses Ctrl+Shift+C and Ctrl+Shift+V for terminal clipboard shortcuts on Windows and Linux", () => {
+    expect(isTerminalCopyShortcut(keyEvent("c", { ctrlKey: true, shiftKey: true }), "Win32")).toBe(
+      true,
+    );
+    expect(isTerminalPasteShortcut(keyEvent("v", { ctrlKey: true, shiftKey: true }), "Linux")).toBe(
+      true,
+    );
+    expect(isTerminalCopyShortcut(keyEvent("c", { ctrlKey: true }), "Linux")).toBe(false);
+    expect(isTerminalPasteShortcut(keyEvent("v", { ctrlKey: true }), "Win32")).toBe(false);
+  });
+
+  it("uses Cmd+C and Cmd+V for terminal clipboard shortcuts on macOS", () => {
+    expect(isTerminalCopyShortcut(keyEvent("C", { metaKey: true }), "MacIntel")).toBe(true);
+    expect(isTerminalPasteShortcut(keyEvent("V", { metaKey: true }), "MacIntel")).toBe(true);
+    expect(isTerminalCopyShortcut(keyEvent("c", { ctrlKey: true, shiftKey: true }), "MacIntel"))
+      .toBe(false);
+    expect(isTerminalPasteShortcut(keyEvent("v", { ctrlKey: true, shiftKey: true }), "MacIntel"))
+      .toBe(false);
+  });
+
+  it("handles terminal copy only when the terminal has selected text", () => {
+    const shortcut = keyEvent("c", { ctrlKey: true, shiftKey: true });
+
+    expect(shouldHandleTerminalCopyShortcut(shortcut, "Linux", true)).toBe(true);
+    expect(shouldHandleTerminalCopyShortcut(shortcut, "Linux", false)).toBe(false);
+  });
+
   it("prefers the selection rect over the last pointer position", () => {
     expect(
       resolveTerminalSelectionActionPosition({

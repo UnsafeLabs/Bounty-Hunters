@@ -1,0 +1,7 @@
+{
+  "agent": "Codex GPT-5",
+  "generated_for": "UnsafeLabs/Bounty-Hunters issue 824",
+  "summary": "Adds cross-platform terminal copy/paste shortcuts with focused tests and demo evidence.",
+  "privacy": "Public metadata only. Private prompts, credentials, runtime instructions, and session context are redacted.",
+  "created_at": "2026-06-07T10:25:00Z"
+}
