@@ -190,4 +190,33 @@ it.layer(NodeServices.layer)("SessionCredentialServiceLive", (it) => {
       expect(afterReconnect[0]?.lastConnectedAt?.toString()).not.toBe(firstConnectedAt?.toString());
     }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
   );
+
+  it.effect("debounces authenticated session activity updates", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const issued = yield* sessions.issue({
+        subject: "activity-test",
+        method: "bearer-session-token",
+      });
+
+      yield* sessions.markActive(issued.sessionId);
+      const firstActivity = yield* sessions.listActive();
+      const firstActiveAt = firstActivity[0]?.lastConnectedAt;
+      expect(firstActiveAt).not.toBeNull();
+
+      yield* TestClock.adjust(Duration.minutes(4));
+      yield* sessions.markActive(issued.sessionId);
+      const debouncedActivity = yield* sessions.listActive();
+      expect(debouncedActivity[0]?.lastConnectedAt?.toString()).toBe(
+        firstActiveAt?.toString(),
+      );
+
+      yield* TestClock.adjust(Duration.minutes(1));
+      yield* sessions.markActive(issued.sessionId);
+      const refreshedActivity = yield* sessions.listActive();
+      expect(refreshedActivity[0]?.lastConnectedAt?.toString()).not.toBe(
+        firstActiveAt?.toString(),
+      );
+    }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
+  );
 });

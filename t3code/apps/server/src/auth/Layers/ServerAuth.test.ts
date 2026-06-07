@@ -1,7 +1,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Duration from "effect/Duration";
 import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
 
 import type { ServerConfigShape } from "../../config.ts";
 import { ServerConfig } from "../../config.ts";
@@ -177,6 +179,53 @@ it.layer(NodeServices.layer)("ServerAuthLive", (it) => {
         makeServerAuthLayer({
           desktopBootstrapToken: "desktop-bootstrap-token",
         }),
+      ),
+    ),
+  );
+
+  it.effect("marks authenticated requests active without rewriting within debounce window", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* ServerAuth;
+
+      const exchanged = yield* serverAuth.exchangeBootstrapCredential(
+        "desktop-bootstrap-token",
+        requestMetadata,
+      );
+      const verified = yield* serverAuth.authenticateHttpRequest(
+        makeCookieRequest(exchanged.sessionToken),
+      );
+      const firstClients = yield* serverAuth.listClientSessions(verified.sessionId);
+      const firstActiveAt = firstClients.find(
+        (entry) => entry.sessionId === verified.sessionId,
+      )?.lastConnectedAt;
+
+      yield* TestClock.adjust(Duration.minutes(4));
+      yield* serverAuth.authenticateHttpRequest(makeCookieRequest(exchanged.sessionToken));
+      const debouncedClients = yield* serverAuth.listClientSessions(verified.sessionId);
+
+      yield* TestClock.adjust(Duration.minutes(1));
+      yield* serverAuth.authenticateHttpRequest(makeCookieRequest(exchanged.sessionToken));
+      const refreshedClients = yield* serverAuth.listClientSessions(verified.sessionId);
+
+      expect(firstActiveAt).not.toBeNull();
+      expect(
+        debouncedClients
+          .find((entry) => entry.sessionId === verified.sessionId)
+          ?.lastConnectedAt?.toString(),
+      ).toBe(firstActiveAt?.toString());
+      expect(
+        refreshedClients
+          .find((entry) => entry.sessionId === verified.sessionId)
+          ?.lastConnectedAt?.toString(),
+      ).not.toBe(firstActiveAt?.toString());
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          makeServerAuthLayer({
+            desktopBootstrapToken: "desktop-bootstrap-token",
+          }),
+          TestClock.layer(),
+        ),
       ),
     ),
   );

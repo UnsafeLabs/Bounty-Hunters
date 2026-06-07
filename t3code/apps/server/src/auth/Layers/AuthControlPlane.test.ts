@@ -1,7 +1,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
 
 import type { ServerConfigShape } from "../../config.ts";
 import { ServerConfig } from "../../config.ts";
@@ -108,5 +110,35 @@ it.layer(NodeServices.layer)("AuthControlPlane", (it) => {
       expect(beforeConnect[0]?.lastConnectedAt).toBeNull();
       expect(afterConnect[0]?.lastConnectedAt).not.toBeNull();
     }).pipe(Effect.provide(makeAuthControlPlaneLayer())),
+  );
+
+  it.effect("lists sessions by most recent activity first", () =>
+    Effect.gen(function* () {
+      const authControlPlane = yield* AuthControlPlane;
+      const sessionCredentials = yield* SessionCredentialService;
+
+      const first = yield* authControlPlane.issueSession({
+        label: "first-device",
+      });
+      yield* TestClock.adjust(Duration.minutes(1));
+      const second = yield* authControlPlane.issueSession({
+        label: "second-device",
+      });
+
+      let listed = yield* authControlPlane.listSessions();
+      expect(listed.map((session) => session.sessionId)).toEqual([
+        second.sessionId,
+        first.sessionId,
+      ]);
+
+      yield* TestClock.adjust(Duration.minutes(5));
+      yield* sessionCredentials.markActive(first.sessionId);
+
+      listed = yield* authControlPlane.listSessions();
+      expect(listed.map((session) => session.sessionId)).toEqual([
+        first.sessionId,
+        second.sessionId,
+      ]);
+    }).pipe(Effect.provide(Layer.merge(makeAuthControlPlaneLayer(), TestClock.layer()))),
   );
 });

@@ -83,6 +83,7 @@ export interface SessionCredentialServiceShape {
   ) => Effect.Effect<number, SessionCredentialError>;
   readonly markConnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
   readonly markDisconnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
+  readonly markActive: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
 }
 
 export class SessionCredentialService extends Context.Service<

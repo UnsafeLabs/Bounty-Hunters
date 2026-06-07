@@ -21,13 +21,12 @@ import type {
 } from "../Services/AuthControlPlane.ts";
 
 const bySessionPriority = (left: AuthClientSession, right: AuthClientSession) => {
-  if (left.role !== right.role) {
-    return left.role === "owner" ? -1 : 1;
-  }
-  if (left.connected !== right.connected) {
-    return left.connected ? -1 : 1;
-  }
-  return right.issuedAt.epochMilliseconds - left.issuedAt.epochMilliseconds;
+  const leftActivity = left.lastConnectedAt ?? left.issuedAt;
+  const rightActivity = right.lastConnectedAt ?? right.issuedAt;
+  const activityOrder = rightActivity.epochMilliseconds - leftActivity.epochMilliseconds;
+  return activityOrder === 0
+    ? right.issuedAt.epochMilliseconds - left.issuedAt.epochMilliseconds
+    : activityOrder;
 };
 
 const toAuthControlPlaneError =
