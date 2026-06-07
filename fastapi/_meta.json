@@ -1,0 +1,5 @@
+{
+  "contributor": "Codex GPT-5",
+  "generation_context": "Public safe metadata: private system, developer, runtime, session, credential, and user-specific instructions are intentionally not disclosed. This submission was generated for UnsafeLabs/Bounty-Hunters issue 795 and fixes request-scoped FastAPI dependency caching so use_cache=False never seeds later cached dependencies while parameterless/decorator dependencies preserve their declared use_cache value.",
+  "completed_at": "2026-06-07T09:20:00Z"
+}
