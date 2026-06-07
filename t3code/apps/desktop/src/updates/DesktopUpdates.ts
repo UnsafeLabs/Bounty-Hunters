@@ -39,20 +39,26 @@ import {
   reduceDesktopUpdateStateOnInstallFailure,
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
+  reduceDesktopUpdateStateOnUpdateDeferred,
+  reduceDesktopUpdateStateOnUpdateSkipped,
 } from "./updateMachine.ts";
 
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 minutes";
+const UPDATE_DEFER_DURATION_MS = 24 * 60 * 60 * 1000;
 
 const AppUpdateYmlConfig = Schema.Record(Schema.String, Schema.String);
 type AppUpdateYmlConfig = typeof AppUpdateYmlConfig.Type;
 
 const UpdateInfo = Schema.Struct({
   version: Schema.String,
+  releaseNotes: Schema.optionalKey(Schema.Unknown),
 });
 
 const DownloadProgressInfo = Schema.Struct({
   percent: Schema.Number,
+  transferred: Schema.optionalKey(Schema.Number),
+  total: Schema.optionalKey(Schema.Number),
 });
 const decodeAppUpdateYmlConfig = Schema.decodeUnknownEffect(AppUpdateYmlConfig);
 const decodeUpdateInfo = Schema.decodeUnknownEffect(UpdateInfo);
@@ -97,6 +103,8 @@ export interface DesktopUpdatesShape {
   readonly check: (reason: string) => Effect.Effect<DesktopUpdateCheckResult>;
   readonly download: Effect.Effect<DesktopUpdateActionResult>;
   readonly install: Effect.Effect<DesktopUpdateActionResult>;
+  readonly defer: Effect.Effect<DesktopUpdateActionResult, DesktopUpdatePersistenceError>;
+  readonly skip: Effect.Effect<DesktopUpdateActionResult, DesktopUpdatePersistenceError>;
 }
 
 export class DesktopUpdates extends Context.Service<DesktopUpdates, DesktopUpdatesShape>()(
@@ -143,6 +151,8 @@ function getCanRetryFromState(state: DesktopUpdateState): boolean {
 function shouldBroadcastDownloadProgress(
   currentState: DesktopUpdateState,
   nextPercent: number,
+  nextTransferredBytes: number | null,
+  nextTotalBytes: number | null,
 ): boolean {
   if (currentState.status !== "downloading") {
     return true;
@@ -155,7 +165,44 @@ function shouldBroadcastDownloadProgress(
 
   const previousStep = Math.floor(currentPercent / 10);
   const nextStep = Math.floor(nextPercent / 10);
-  return nextStep !== previousStep || nextPercent === 100;
+  return (
+    nextStep !== previousStep ||
+    currentState.downloadTransferredBytes !== nextTransferredBytes ||
+    currentState.downloadTotalBytes !== nextTotalBytes ||
+    nextPercent === 100
+  );
+}
+
+function normalizeReleaseNotes(raw: unknown): string | null {
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (!Array.isArray(raw)) {
+    return null;
+  }
+
+  const notes = raw
+    .map((entry) => {
+      if (typeof entry === "string") return entry.trim();
+      if (typeof entry !== "object" || entry === null) return "";
+      const note = "note" in entry && typeof entry.note === "string" ? entry.note : "";
+      return note.trim();
+    })
+    .filter((entry) => entry.length > 0);
+
+  return notes.length > 0 ? notes.join("\n\n") : null;
+}
+
+function isDeferredUpdateActive(
+  settings: DesktopAppSettings.DesktopSettings,
+  version: string,
+  now: string,
+) {
+  if (settings.deferredUpdateVersion !== version || !settings.deferredUpdateUntil) {
+    return false;
+  }
+  return Date.parse(settings.deferredUpdateUntil) > Date.parse(now);
 }
 
 function getAutoUpdateDisabledReason(args: {
@@ -426,9 +473,49 @@ const make = Effect.gen(function* () {
             return;
           }
 
+          const settings = yield* desktopSettings.get;
+          if (settings.skippedUpdateVersion === info.version) {
+            yield* logUpdaterInfo("ignoring skipped update version", { version: info.version });
+            const checkedAt = yield* currentIsoTimestamp;
+            yield* setState({
+              ...reduceDesktopUpdateStateOnNoUpdate(state, checkedAt),
+              skippedUpdateVersion: info.version,
+            });
+            yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
+            return;
+          }
+
+          const now = yield* currentIsoTimestamp;
+          if (isDeferredUpdateActive(settings, info.version, now)) {
+            yield* logUpdaterInfo("deferring update notification", {
+              version: info.version,
+              until: settings.deferredUpdateUntil,
+            });
+            const checkedAt = yield* currentIsoTimestamp;
+            yield* setState({
+              ...reduceDesktopUpdateStateOnNoUpdate(state, checkedAt),
+              deferredUpdateVersion: settings.deferredUpdateVersion,
+              deferredUpdateUntil: settings.deferredUpdateUntil,
+            });
+            yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
+            return;
+          }
+
+          if (
+            settings.deferredUpdateVersion === info.version &&
+            settings.deferredUpdateUntil !== null
+          ) {
+            yield* desktopSettings.clearDeferredUpdate().pipe(Effect.ignore);
+          }
+
           const checkedAt = yield* currentIsoTimestamp;
           yield* setState(
-            reduceDesktopUpdateStateOnUpdateAvailable(state, info.version, checkedAt),
+            reduceDesktopUpdateStateOnUpdateAvailable(
+              state,
+              info.version,
+              checkedAt,
+              normalizeReleaseNotes(info.releaseNotes),
+            ),
           );
           yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
           yield* logUpdaterInfo("update available", { version: info.version });
@@ -471,6 +558,8 @@ const make = Effect.gen(function* () {
         message,
         checkedAt,
         downloadPercent: null,
+        downloadTransferredBytes: null,
+        downloadTotalBytes: null,
         errorContext,
         canRetry: getCanRetryFromState(current),
       }));
@@ -487,14 +576,35 @@ const make = Effect.gen(function* () {
         Effect.fn("desktop.updates.applyDownloadProgress")(function* (progress) {
           const state = yield* Ref.get(updateStateRef);
           const percent = Math.floor(progress.percent);
-          if (shouldBroadcastDownloadProgress(state, progress.percent) || state.message !== null) {
-            yield* setState(reduceDesktopUpdateStateOnDownloadProgress(state, progress.percent));
+          const transferredBytes = progress.transferred ?? null;
+          const totalBytes = progress.total ?? null;
+          if (
+            shouldBroadcastDownloadProgress(
+              state,
+              progress.percent,
+              transferredBytes,
+              totalBytes,
+            ) ||
+            state.message !== null
+          ) {
+            yield* setState(
+              reduceDesktopUpdateStateOnDownloadProgress(
+                state,
+                progress.percent,
+                transferredBytes,
+                totalBytes,
+              ),
+            );
           }
           const milestone = percent - (percent % 10);
           const lastLoggedMilestone = yield* Ref.get(lastLoggedDownloadMilestoneRef);
           if (milestone > lastLoggedMilestone) {
             yield* Ref.set(lastLoggedDownloadMilestoneRef, milestone);
-            yield* logUpdaterInfo("download progress", { percent });
+            yield* logUpdaterInfo("download progress", {
+              percent,
+              transferredBytes,
+              totalBytes,
+            });
           }
         }),
       ),
@@ -624,6 +734,54 @@ const make = Effect.gen(function* () {
       );
       return yield* Ref.get(updateStateRef);
     }),
+    defer: Effect.gen(function* () {
+      const state = yield* Ref.get(updateStateRef);
+      const version = state.availableVersion;
+      if (state.status !== "available" || !version) {
+        return {
+          accepted: false,
+          completed: false,
+          state,
+        };
+      }
+
+      const now = yield* DateTime.now;
+      const until = DateTime.formatIso(
+        DateTime.add(now, { milliseconds: UPDATE_DEFER_DURATION_MS }),
+      );
+      yield* desktopSettings
+        .deferUpdate({ version, until })
+        .pipe(Effect.mapError((cause) => new DesktopUpdatePersistenceError({ cause })));
+      const nextState = reduceDesktopUpdateStateOnUpdateDeferred(state, version, until);
+      yield* setState(nextState);
+      return {
+        accepted: true,
+        completed: true,
+        state: nextState,
+      };
+    }).pipe(Effect.withSpan("desktop.updates.defer")),
+    skip: Effect.gen(function* () {
+      const state = yield* Ref.get(updateStateRef);
+      const version = state.availableVersion;
+      if (state.status !== "available" || !version) {
+        return {
+          accepted: false,
+          completed: false,
+          state,
+        };
+      }
+
+      yield* desktopSettings
+        .skipUpdateVersion(version)
+        .pipe(Effect.mapError((cause) => new DesktopUpdatePersistenceError({ cause })));
+      const nextState = reduceDesktopUpdateStateOnUpdateSkipped(state, version);
+      yield* setState(nextState);
+      return {
+        accepted: true,
+        completed: true,
+        state: nextState,
+      };
+    }).pipe(Effect.withSpan("desktop.updates.skip")),
     check: Effect.fn("desktop.updates.check")(function* (reason: string) {
       yield* Effect.annotateCurrentSpan({ reason });
       if (!(yield* Ref.get(updaterConfiguredRef))) {

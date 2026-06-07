@@ -28,8 +28,11 @@ interface UpdatesHarnessOptions {
 }
 
 const flushCallbacks = Effect.yieldNow;
+let harnessId = 0;
 
 function makeHarness(options: UpdatesHarnessOptions = {}) {
+  harnessId += 1;
+  const testHome = `/tmp/t3-desktop-updates-test-${process.pid}-${harnessId}`;
   let checkCount = 0;
   let allowDowngrade = false;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
@@ -116,7 +119,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
 
   const environmentLayer = DesktopEnvironment.layer({
     dirname: "/repo/apps/desktop/src",
-    homeDirectory: `/tmp/t3-desktop-updates-home-${process.pid}`,
+    homeDirectory: testHome,
     platform: "darwin",
     processArch: "x64",
     appVersion: "1.2.3",
@@ -129,7 +132,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
       Layer.mergeAll(
         NodeServices.layer,
         DesktopConfig.layerTest({
-          T3CODE_HOME: `/tmp/t3-desktop-updates-test-${process.pid}`,
+          T3CODE_HOME: testHome,
           T3CODE_DESKTOP_MOCK_UPDATES: "true",
           T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT: "4141",
           ...options.env,
@@ -146,7 +149,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     Layer.provideMerge(DesktopAppSettings.layer),
     Layer.provideMerge(
       DesktopConfig.layerTest({
-        T3CODE_HOME: `/tmp/t3-desktop-updates-test-${process.pid}`,
+        T3CODE_HOME: testHome,
         T3CODE_DESKTOP_MOCK_UPDATES: "true",
         T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT: "4141",
         ...options.env,
@@ -218,6 +221,91 @@ describe("DesktopUpdates", () => {
         assert.equal(state.availableVersion, "1.2.4");
         assert.isNotNull(state.checkedAt);
         assert.equal(harness.sentStates.at(-1)?.status, "available");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("broadcasts release notes and byte download progress", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        harness.emit("update-available", {
+          version: "1.2.4",
+          releaseNotes: "Fixes updater crashes",
+        });
+        yield* flushCallbacks;
+        harness.emit("download-progress", { percent: 42.5, transferred: 4_250, total: 10_000 });
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.releaseNotes, "Fixes updater crashes");
+        assert.equal(state.downloadPercent, 42.5);
+        assert.equal(state.downloadTransferredBytes, 4_250);
+        assert.equal(state.downloadTotalBytes, 10_000);
+        assert.equal(harness.sentStates.at(-1)?.downloadTransferredBytes, 4_250);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("persists skipped update versions and suppresses them", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const result = yield* updates.skip;
+        const persistedSettings = yield* settings.get;
+        assert.equal(result.accepted, true);
+        assert.equal(persistedSettings.skippedUpdateVersion, "1.2.4");
+
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "up-to-date");
+        assert.equal(state.availableVersion, null);
+        assert.equal(state.skippedUpdateVersion, "1.2.4");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("persists 24-hour update deferrals and suppresses them while active", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const result = yield* updates.defer;
+        const persistedSettings = yield* settings.get;
+        assert.equal(result.accepted, true);
+        assert.equal(persistedSettings.deferredUpdateVersion, "1.2.4");
+        assert.isNotNull(persistedSettings.deferredUpdateUntil);
+
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+        assert.equal((yield* updates.getState).status, "up-to-date");
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "up-to-date");
+        assert.equal(state.availableVersion, null);
+        assert.equal(state.deferredUpdateVersion, "1.2.4");
+        assert.isNotNull(state.deferredUpdateUntil);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

@@ -26,6 +26,9 @@ export interface DesktopSettings {
   readonly tailscaleServePort: number;
   readonly updateChannel: DesktopUpdateChannel;
   readonly updateChannelConfiguredByUser: boolean;
+  readonly deferredUpdateVersion: string | null;
+  readonly deferredUpdateUntil: string | null;
+  readonly skippedUpdateVersion: string | null;
 }
 
 export interface DesktopSettingsChange {
@@ -41,6 +44,9 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   tailscaleServePort: DEFAULT_TAILSCALE_SERVE_PORT,
   updateChannel: "latest",
   updateChannelConfiguredByUser: false,
+  deferredUpdateVersion: null,
+  deferredUpdateUntil: null,
+  skippedUpdateVersion: null,
 };
 
 const DesktopSettingsDocument = Schema.Struct({
@@ -49,6 +55,9 @@ const DesktopSettingsDocument = Schema.Struct({
   tailscaleServePort: Schema.optionalKey(Schema.Number),
   updateChannel: Schema.optionalKey(DesktopUpdateChannelSchema),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
+  deferredUpdateVersion: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  deferredUpdateUntil: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  skippedUpdateVersion: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
 type DesktopSettingsDocument = typeof DesktopSettingsDocument.Type;
@@ -84,6 +93,17 @@ export interface DesktopAppSettingsShape {
   readonly setUpdateChannel: (
     channel: DesktopUpdateChannel,
   ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+  readonly deferUpdate: (input: {
+    readonly version: string;
+    readonly until: string;
+  }) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+  readonly skipUpdateVersion: (
+    version: string,
+  ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+  readonly clearDeferredUpdate: () => Effect.Effect<
+    DesktopSettingsChange,
+    DesktopSettingsWriteError
+  >;
 }
 
 export class DesktopAppSettings extends Context.Service<
@@ -124,6 +144,12 @@ function normalizeDesktopSettingsDocument(
       ? Option.getOrElse(parsedUpdateChannel, () => defaultSettings.updateChannel)
       : defaultSettings.updateChannel,
     updateChannelConfiguredByUser,
+    deferredUpdateVersion:
+      typeof parsed.deferredUpdateVersion === "string" ? parsed.deferredUpdateVersion : null,
+    deferredUpdateUntil:
+      typeof parsed.deferredUpdateUntil === "string" ? parsed.deferredUpdateUntil : null,
+    skippedUpdateVersion:
+      typeof parsed.skippedUpdateVersion === "string" ? parsed.skippedUpdateVersion : null,
   };
 }
 
@@ -147,6 +173,15 @@ function toDesktopSettingsDocument(
   }
   if (settings.updateChannelConfiguredByUser !== defaults.updateChannelConfiguredByUser) {
     document.updateChannelConfiguredByUser = settings.updateChannelConfiguredByUser;
+  }
+  if (settings.deferredUpdateVersion !== defaults.deferredUpdateVersion) {
+    document.deferredUpdateVersion = settings.deferredUpdateVersion;
+  }
+  if (settings.deferredUpdateUntil !== defaults.deferredUpdateUntil) {
+    document.deferredUpdateUntil = settings.deferredUpdateUntil;
+  }
+  if (settings.skippedUpdateVersion !== defaults.skippedUpdateVersion) {
+    document.skippedUpdateVersion = settings.skippedUpdateVersion;
   }
 
   return document;
@@ -191,6 +226,41 @@ function setUpdateChannel(
         ...settings,
         updateChannel: requestedChannel,
         updateChannelConfiguredByUser: true,
+      };
+}
+
+function deferUpdate(
+  settings: DesktopSettings,
+  input: { readonly version: string; readonly until: string },
+): DesktopSettings {
+  return settings.deferredUpdateVersion === input.version &&
+    settings.deferredUpdateUntil === input.until
+    ? settings
+    : {
+        ...settings,
+        deferredUpdateVersion: input.version,
+        deferredUpdateUntil: input.until,
+      };
+}
+
+function skipUpdateVersion(settings: DesktopSettings, version: string): DesktopSettings {
+  return settings.skippedUpdateVersion === version
+    ? settings
+    : {
+        ...settings,
+        skippedUpdateVersion: version,
+        deferredUpdateVersion: null,
+        deferredUpdateUntil: null,
+      };
+}
+
+function clearDeferredUpdate(settings: DesktopSettings): DesktopSettings {
+  return settings.deferredUpdateVersion === null && settings.deferredUpdateUntil === null
+    ? settings
+    : {
+        ...settings,
+        deferredUpdateVersion: null,
+        deferredUpdateUntil: null,
       };
 }
 
@@ -285,6 +355,16 @@ export const layer = Layer.effect(
         persist((settings) => setUpdateChannel(settings, channel)).pipe(
           Effect.withSpan("desktop.settings.setUpdateChannel", { attributes: { channel } }),
         ),
+      deferUpdate: (input) =>
+        persist((settings) => deferUpdate(settings, input)).pipe(
+          Effect.withSpan("desktop.settings.deferUpdate", { attributes: input }),
+        ),
+      skipUpdateVersion: (version) =>
+        persist((settings) => skipUpdateVersion(settings, version)).pipe(
+          Effect.withSpan("desktop.settings.skipUpdateVersion", { attributes: { version } }),
+        ),
+      clearDeferredUpdate: () =>
+        persist(clearDeferredUpdate).pipe(Effect.withSpan("desktop.settings.clearDeferredUpdate")),
     });
   }),
 );
@@ -313,6 +393,9 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
           update((settings) => setServerExposureMode(settings, mode)),
         setTailscaleServe: (input) => update((settings) => setTailscaleServe(settings, input)),
         setUpdateChannel: (channel) => update((settings) => setUpdateChannel(settings, channel)),
+        deferUpdate: (input) => update((settings) => deferUpdate(settings, input)),
+        skipUpdateVersion: (version) => update((settings) => skipUpdateVersion(settings, version)),
+        clearDeferredUpdate: () => update(clearDeferredUpdate),
       });
     }),
   );

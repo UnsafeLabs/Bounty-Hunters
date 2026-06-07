@@ -352,6 +352,12 @@ const createDesktopBridgeStub = (overrides?: {
     availableVersion: null,
     downloadedVersion: null,
     downloadPercent: null,
+    downloadTransferredBytes: null,
+    downloadTotalBytes: null,
+    releaseNotes: null,
+    deferredUpdateVersion: null,
+    deferredUpdateUntil: null,
+    skippedUpdateVersion: null,
     checkedAt: null,
     message: null,
     errorContext: null,
@@ -462,6 +468,12 @@ const createDesktopBridgeStub = (overrides?: {
       .fn()
       .mockResolvedValue({ accepted: false, completed: false, state: idleUpdateState }),
     installUpdate: vi
+      .fn()
+      .mockResolvedValue({ accepted: false, completed: false, state: idleUpdateState }),
+    deferUpdate: vi
+      .fn()
+      .mockResolvedValue({ accepted: false, completed: false, state: idleUpdateState }),
+    skipUpdateVersion: vi
       .fn()
       .mockResolvedValue({ accepted: false, completed: false, state: idleUpdateState }),
     onUpdateState: () => () => {},

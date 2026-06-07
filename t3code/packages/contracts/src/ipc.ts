@@ -171,6 +171,12 @@ export interface DesktopUpdateState {
   availableVersion: string | null;
   downloadedVersion: string | null;
   downloadPercent: number | null;
+  downloadTransferredBytes: number | null;
+  downloadTotalBytes: number | null;
+  releaseNotes: string | null;
+  deferredUpdateVersion: string | null;
+  deferredUpdateUntil: string | null;
+  skippedUpdateVersion: string | null;
   checkedAt: string | null;
   message: string | null;
   errorContext: "check" | "download" | "install" | null;
@@ -188,6 +194,12 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   availableVersion: Schema.NullOr(Schema.String),
   downloadedVersion: Schema.NullOr(Schema.String),
   downloadPercent: Schema.NullOr(Schema.Number),
+  downloadTransferredBytes: Schema.NullOr(Schema.Number),
+  downloadTotalBytes: Schema.NullOr(Schema.Number),
+  releaseNotes: Schema.NullOr(Schema.String),
+  deferredUpdateVersion: Schema.NullOr(Schema.String),
+  deferredUpdateUntil: Schema.NullOr(Schema.String),
+  skippedUpdateVersion: Schema.NullOr(Schema.String),
   checkedAt: Schema.NullOr(Schema.String),
   message: Schema.NullOr(Schema.String),
   errorContext: Schema.NullOr(Schema.Literals(["check", "download", "install"])),
@@ -420,6 +432,8 @@ export interface DesktopBridge {
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
+  deferUpdate: () => Promise<DesktopUpdateActionResult>;
+  skipUpdateVersion: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
 }
 

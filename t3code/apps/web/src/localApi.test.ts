@@ -241,6 +241,12 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     installUpdate: async () => {
       throw new Error("installUpdate not implemented in test");
     },
+    deferUpdate: async () => {
+      throw new Error("deferUpdate not implemented in test");
+    },
+    skipUpdateVersion: async () => {
+      throw new Error("skipUpdateVersion not implemented in test");
+    },
     onUpdateState: () => () => undefined,
     ...overrides,
   };

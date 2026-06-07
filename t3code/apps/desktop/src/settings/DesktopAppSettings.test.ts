@@ -90,6 +90,7 @@ describe("DesktopSettings", () => {
 
   it("defaults packaged nightly builds to the nightly update channel", () => {
     assert.deepEqual(resolveDefaultDesktopSettings("0.0.17-nightly.20260415.1"), {
+      ...DEFAULT_DESKTOP_SETTINGS,
       serverExposureMode: "local-only",
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
@@ -111,6 +112,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          ...DEFAULT_DESKTOP_SETTINGS,
           serverExposureMode: "network-accessible",
           tailscaleServeEnabled: true,
           tailscaleServePort: 8443,
@@ -190,6 +192,7 @@ describe("DesktopSettings", () => {
         );
 
         assert.deepEqual(yield* settings.load, {
+          ...DEFAULT_DESKTOP_SETTINGS,
           serverExposureMode: "network-accessible",
           tailscaleServeEnabled: true,
           tailscaleServePort: 8443,
@@ -229,6 +232,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          ...DEFAULT_DESKTOP_SETTINGS,
           serverExposureMode: "local-only",
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
@@ -251,6 +255,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          ...DEFAULT_DESKTOP_SETTINGS,
           serverExposureMode: "local-only",
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
@@ -272,6 +277,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          ...DEFAULT_DESKTOP_SETTINGS,
           serverExposureMode: "local-only",
           tailscaleServeEnabled: true,
           tailscaleServePort: 443,

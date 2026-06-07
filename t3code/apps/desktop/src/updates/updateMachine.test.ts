@@ -11,6 +11,8 @@ import {
   reduceDesktopUpdateStateOnInstallFailure,
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
+  reduceDesktopUpdateStateOnUpdateDeferred,
+  reduceDesktopUpdateStateOnUpdateSkipped,
 } from "./updateMachine.ts";
 
 const runtimeInfo = {
@@ -136,5 +138,55 @@ describe("updateMachine", () => {
     expect(downloading.downloadPercent).toBe(0);
     expect(progress.downloadPercent).toBe(55.5);
     expect(progress.errorContext).toBeNull();
+  });
+
+  it("tracks release notes and byte progress for renderer updates", () => {
+    const available = reduceDesktopUpdateStateOnUpdateAvailable(
+      {
+        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+        enabled: true,
+        status: "checking",
+      },
+      "1.1.0",
+      "2026-03-04T00:00:00.000Z",
+      "Security fixes",
+    );
+    const progress = reduceDesktopUpdateStateOnDownloadProgress(
+      reduceDesktopUpdateStateOnDownloadStart(available),
+      45.2,
+      4_500,
+      10_000,
+    );
+
+    expect(available.releaseNotes).toBe("Security fixes");
+    expect(progress.downloadPercent).toBe(45.2);
+    expect(progress.downloadTransferredBytes).toBe(4_500);
+    expect(progress.downloadTotalBytes).toBe(10_000);
+  });
+
+  it("records deferred and skipped update preferences in state", () => {
+    const available = reduceDesktopUpdateStateOnUpdateAvailable(
+      {
+        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+        enabled: true,
+        status: "checking",
+      },
+      "1.1.0",
+      "2026-03-04T00:00:00.000Z",
+    );
+
+    const deferred = reduceDesktopUpdateStateOnUpdateDeferred(
+      available,
+      "1.1.0",
+      "2026-03-05T00:00:00.000Z",
+    );
+    const skipped = reduceDesktopUpdateStateOnUpdateSkipped(available, "1.1.0");
+
+    expect(deferred.status).toBe("idle");
+    expect(deferred.availableVersion).toBeNull();
+    expect(deferred.deferredUpdateVersion).toBe("1.1.0");
+    expect(deferred.deferredUpdateUntil).toBe("2026-03-05T00:00:00.000Z");
+    expect(skipped.status).toBe("idle");
+    expect(skipped.skippedUpdateVersion).toBe("1.1.0");
   });
 });
