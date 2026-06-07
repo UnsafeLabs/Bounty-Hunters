@@ -2,6 +2,7 @@ import type {
   DesktopSshEnvironmentBootstrap,
   DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
+import * as NodeNet from "node:net";
 import * as NetService from "@t3tools/shared/Net";
 import { extractJsonObject, fromLenientJson } from "@t3tools/shared/schemaJson";
 import { satisfiesSemverRange } from "@t3tools/shared/semver";
@@ -13,6 +14,7 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
@@ -55,6 +57,10 @@ const SSH_READY_PROBE_TIMEOUT_MS = 1_000;
 const TUNNEL_SHUTDOWN_TIMEOUT_MS = 2_000;
 const REMOTE_READY_TIMEOUT_MS = 15_000;
 const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
+const TUNNEL_HEALTH_INTERVAL_MS = 15_000;
+const TUNNEL_MAX_RECONNECT_ATTEMPTS = 5;
+const TUNNEL_RECONNECT_DELAYS_MS = [1_000, 4_000, 16_000, 60_000] as const;
+const TUNNEL_MAX_RECONNECT_DELAY_MS = 60_000;
 
 export interface RemoteT3RunnerOptions {
   readonly packageSpec?: string;
@@ -77,6 +83,22 @@ interface SshTunnelEntry {
   readonly wsBaseUrl: string;
   readonly process: ChildProcessSpawner.ChildProcessHandle;
   readonly scope: Scope.Scope;
+  readonly manualDisconnect: Ref.Ref<boolean>;
+}
+
+export type SshTunnelState =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "failed"
+  | "disconnected";
+
+export interface SshTunnelStateChange {
+  readonly key: string;
+  readonly target: DesktopSshEnvironmentTarget;
+  readonly state: SshTunnelState;
+  readonly attempt: number;
+  readonly reason: string | null;
 }
 
 type SshEnvironmentEffectContext =
@@ -149,6 +171,10 @@ export interface SshEnvironmentManagerShape {
   readonly disconnectEnvironment: (
     target: DesktopSshEnvironmentTarget,
   ) => Effect.Effect<void, SshEnvironmentEffectError, SshEnvironmentEffectContext>;
+  readonly tunnelState: (
+    target: DesktopSshEnvironmentTarget,
+  ) => Effect.Effect<SshTunnelState, SshInvalidTargetError>;
+  readonly tunnelEvents: Stream.Stream<SshTunnelStateChange>;
 }
 
 const RemoteLaunchResult = Schema.Struct({
@@ -220,6 +246,49 @@ export function normalizeSshErrorMessage(stderr: string, fallbackMessage: string
 function stripTrailingNewlines(value: string): string {
   return value.replace(/\n+$/u, "");
 }
+
+const probeLocalTcpPort = Effect.fn("ssh/tunnel.probeLocalTcpPort")(function* (
+  port: number,
+  timeoutMs: number,
+) {
+  yield* Effect.callback<void, NetService.NetError>((resume) => {
+    const socket = NodeNet.createConnection({ host: "127.0.0.1", port });
+    let settled = false;
+
+    const settle = (effect: Effect.Effect<void, NetService.NetError>) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resume(effect);
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => settle(Effect.void));
+    socket.once("timeout", () =>
+      settle(
+        Effect.fail(
+          new NetService.NetError({
+            message: `SSH tunnel TCP probe timed out for 127.0.0.1:${port}.`,
+          }),
+        ),
+      ),
+    );
+    socket.once("error", (cause) =>
+      settle(
+        Effect.fail(
+          new NetService.NetError({
+            message: `SSH tunnel TCP probe failed for 127.0.0.1:${port}.`,
+            cause,
+          }),
+        ),
+      ),
+    );
+
+    return Effect.sync(() => {
+      socket.destroy();
+    });
+  });
+});
 
 function shellSingleQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
@@ -1141,6 +1210,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   const tunnelCommand = ["ssh", ...args];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Scope.Scope;
+  const manualDisconnect = yield* Ref.make(false);
   yield* Effect.logDebug("ssh.tunnel.spawn.start", {
     ...sshTargetLogFields(input.resolvedTarget),
     command: tunnelCommand,
@@ -1193,6 +1263,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     wsBaseUrl: input.wsBaseUrl,
     process: child,
     scope,
+    manualDisconnect,
   };
   const exitFailure = Effect.all(
     [collectProcessOutput(child.stderr), child.exitCode.pipe(Effect.map(Number))],
@@ -1314,10 +1385,51 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     Deferred.Deferred<SshTunnelEntry, SshEnvironmentEffectError>
   >();
   const authSecrets = new Map<string, string>();
+  const tunnelStateRefs = new Map<string, Ref.Ref<SshTunnelState>>();
+  const tunnelEvents = yield* PubSub.unbounded<SshTunnelStateChange>();
+
+  const getTunnelStateRef = Effect.fn("ssh/tunnel.state.ref")(function* (key: string) {
+    const existing = tunnelStateRefs.get(key);
+    if (existing) {
+      return existing;
+    }
+    const ref = yield* Ref.make<SshTunnelState>("disconnected");
+    tunnelStateRefs.set(key, ref);
+    return ref;
+  });
+
+  const emitTunnelState = Effect.fn("ssh/tunnel.state.emit")(function* (input: {
+    readonly key: string;
+    readonly target: DesktopSshEnvironmentTarget;
+    readonly state: SshTunnelState;
+    readonly attempt?: number;
+    readonly reason?: string | null;
+  }) {
+    const ref = yield* getTunnelStateRef(input.key);
+    yield* Ref.set(ref, input.state);
+    yield* PubSub.publish(tunnelEvents, {
+      key: input.key,
+      target: input.target,
+      state: input.state,
+      attempt: input.attempt ?? 0,
+      reason: input.reason ?? null,
+    }).pipe(Effect.asVoid);
+    yield* Effect.logInfo("ssh.tunnel.state.changed", {
+      ...sshTargetLogFields(input.target),
+      key: input.key,
+      state: input.state,
+      attempt: input.attempt ?? 0,
+      reason: input.reason ?? null,
+    });
+  });
 
   const closeTunnelEntry = Effect.fn("ssh/tunnel.closeTunnelEntry")(function* (
     entry: SshTunnelEntry,
+    options?: { readonly manual?: boolean },
   ) {
+    if (options?.manual === true) {
+      yield* Ref.set(entry.manualDisconnect, true);
+    }
     yield* Effect.logDebug("ssh.tunnel.close.start", {
       ...sshTargetLogFields(entry.target),
       key: entry.key,
@@ -1325,6 +1437,14 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       remotePort: entry.remotePort,
     });
     yield* Scope.close(entry.scope, Exit.void).pipe(Effect.ignore);
+    if (options?.manual === true) {
+      yield* emitTunnelState({
+        key: entry.key,
+        target: entry.target,
+        state: "disconnected",
+        reason: "manual disconnect",
+      });
+    }
     yield* Effect.logInfo("ssh.tunnel.close.succeeded", {
       ...sshTargetLogFields(entry.target),
       key: entry.key,
@@ -1349,7 +1469,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     managerScope,
     Effect.sync(() => [...tunnels.values()]).pipe(
       Effect.flatMap((entries) =>
-        Effect.forEach(entries, closeTunnelEntry, { concurrency: "unbounded" }),
+        Effect.forEach(entries, (entry) => closeTunnelEntry(entry), { concurrency: "unbounded" }),
       ),
       Effect.ignore,
     ),
@@ -1476,6 +1596,12 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       ...sshRunnerLogFields(input.runner),
       key: input.key,
     });
+    yield* emitTunnelState({
+      key: input.key,
+      target: input.resolvedTarget,
+      state: "connecting",
+      reason: "creating tunnel",
+    });
     const remoteLaunch = yield* runWithSshAuth({
       key: input.key,
       target: input.resolvedTarget,
@@ -1519,6 +1645,18 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       ),
     );
     tunnels.set(input.key, tunnelEntry);
+    yield* emitTunnelState({
+      key: input.key,
+      target: input.resolvedTarget,
+      state: "connected",
+      reason: "tunnel ready",
+    });
+    yield* startTunnelHealthMonitor({
+      key: input.key,
+      target: input.resolvedTarget,
+      entry: tunnelEntry,
+      ...(input.runner === undefined ? {} : { runner: input.runner }),
+    });
     const spawnerService = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fileSystemService = yield* FileSystem.FileSystem;
     const pathService = yield* Path.Path;
@@ -1577,6 +1715,101 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       remotePort,
     });
     return tunnelEntry;
+  });
+
+  const startTunnelHealthMonitor = Effect.fn("ssh/tunnel.healthMonitor.start")(function* (input: {
+    readonly key: string;
+    readonly target: DesktopSshEnvironmentTarget;
+    readonly runner?: RemoteT3RunnerOptions;
+    readonly entry: SshTunnelEntry;
+  }) {
+    const monitor = Effect.gen(function* () {
+      yield* Effect.sleep(Duration.millis(TUNNEL_HEALTH_INTERVAL_MS));
+      while (true) {
+        const isManual = yield* Ref.get(input.entry.manualDisconnect);
+        const currentEntry = tunnels.get(input.key) ?? null;
+        if (isManual || currentEntry !== input.entry) {
+          return;
+        }
+
+        const health = yield* Effect.exit(
+          probeLocalTcpPort(input.entry.localPort, SSH_READY_PROBE_TIMEOUT_MS),
+        );
+
+        if (Exit.isSuccess(health)) {
+          yield* Effect.sleep(Duration.millis(TUNNEL_HEALTH_INTERVAL_MS));
+          continue;
+        }
+
+        yield* Effect.logWarning("ssh.tunnel.health.failed", {
+          ...sshTargetLogFields(input.target),
+          key: input.key,
+          localPort: input.entry.localPort,
+          remotePort: input.entry.remotePort,
+          cause: health.cause,
+        });
+
+        for (let attempt = 1; attempt <= TUNNEL_MAX_RECONNECT_ATTEMPTS; attempt += 1) {
+          const delayMs =
+            TUNNEL_RECONNECT_DELAYS_MS[
+              Math.min(attempt - 1, TUNNEL_RECONNECT_DELAYS_MS.length - 1)
+            ] ?? TUNNEL_MAX_RECONNECT_DELAY_MS;
+          yield* emitTunnelState({
+            key: input.key,
+            target: input.target,
+            state: "reconnecting",
+            attempt,
+            reason: "health probe failed",
+          });
+          tunnels.delete(input.key);
+          yield* closeTunnelEntry(input.entry);
+          yield* Effect.sleep(Duration.millis(delayMs));
+
+          const isStillManual = yield* Ref.get(input.entry.manualDisconnect);
+          if (isStillManual) {
+            return;
+          }
+
+          const reconnectExit = yield* Effect.exit(
+            createTunnelEntry({
+              key: input.key,
+              resolvedTarget: input.target,
+              ...(input.runner === undefined ? {} : { runner: input.runner }),
+            }),
+          );
+          if (Exit.isSuccess(reconnectExit)) {
+            return;
+          }
+
+          yield* Effect.logWarning("ssh.tunnel.reconnect.failed", {
+            ...sshTargetLogFields(input.target),
+            key: input.key,
+            attempt,
+            maxAttempts: TUNNEL_MAX_RECONNECT_ATTEMPTS,
+            cause: reconnectExit.cause,
+          });
+        }
+
+        yield* emitTunnelState({
+          key: input.key,
+          target: input.target,
+          state: "failed",
+          attempt: TUNNEL_MAX_RECONNECT_ATTEMPTS,
+          reason: "reconnect attempts exhausted",
+        });
+        return;
+      }
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("ssh.tunnel.health.monitor.failed", {
+          ...sshTargetLogFields(input.target),
+          key: input.key,
+          cause,
+        }),
+      ),
+    );
+
+    yield* Effect.forkIn(monitor, managerScope);
   });
 
   const ensureTunnelEntry = Effect.fn("ssh/tunnel.ensureTunnelEntry")(function* (
@@ -1734,7 +1967,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       hasPendingTunnel: pendingTunnelEntries.has(key),
     });
     if (entry !== null) {
-      yield* closeTunnelEntry(entry);
+      yield* closeTunnelEntry(entry, { manual: true });
     }
     yield* cancelPendingTunnelEntry(key, resolvedTarget);
     if (entry === null) {
@@ -1750,7 +1983,23 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     });
   });
 
-  return SshEnvironmentManager.of({ ensureEnvironment, disconnectEnvironment });
+  const tunnelState = Effect.fn("ssh/tunnel.state.read")(function* (
+    target: DesktopSshEnvironmentTarget,
+  ): Effect.fn.Return<SshTunnelState, SshInvalidTargetError> {
+    const key = targetConnectionKey(target);
+    const stateRef = tunnelStateRefs.get(key);
+    if (!stateRef) {
+      return "disconnected";
+    }
+    return yield* Ref.get(stateRef);
+  });
+
+  return SshEnvironmentManager.of({
+    ensureEnvironment,
+    disconnectEnvironment,
+    tunnelState,
+    tunnelEvents: Stream.fromPubSub(tunnelEvents),
+  });
 });
 
 export class SshEnvironmentManager extends Context.Service<
