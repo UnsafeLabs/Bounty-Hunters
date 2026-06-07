@@ -23,6 +23,7 @@ import * as DesktopSecretStorage from "./electron/ElectronSafeStorage.ts";
 import * as ElectronShell from "./electron/ElectronShell.ts";
 import * as ElectronTheme from "./electron/ElectronTheme.ts";
 import * as ElectronUpdater from "./electron/ElectronUpdater.ts";
+import * as ElectronTray from "./electron/ElectronTray.ts";
 import * as ElectronWindow from "./electron/ElectronWindow.ts";
 import * as DesktopApp from "./app/DesktopApp.ts";
 import * as DesktopAppIdentity from "./app/DesktopAppIdentity.ts";
@@ -102,6 +103,7 @@ const electronLayer = Layer.mergeAll(
   ElectronShell.layer,
   ElectronTheme.layer,
   ElectronUpdater.layer,
+  ElectronTray.layer,
   ElectronWindow.layer,
   Layer.succeed(DesktopIpc.DesktopIpc, DesktopIpc.make(Electron.ipcMain)),
 );
