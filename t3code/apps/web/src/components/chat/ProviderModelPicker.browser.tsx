@@ -213,6 +213,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
 const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
 const CLAUDE_INSTANCE_ID = ProviderInstanceId.make("claudeAgent");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
+const PROVIDER_MODEL_PICKER_STORAGE_KEY = "t3code:provider-model-picker-selection:v1";
 
 function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
   return {
@@ -1076,6 +1077,121 @@ describe("ProviderModelPicker", () => {
       );
     } finally {
       await mounted.cleanup();
+    }
+  });
+
+  it("restores the persisted provider and model on mount", async () => {
+    localStorage.setItem(
+      PROVIDER_MODEL_PICKER_STORAGE_KEY,
+      JSON.stringify({
+        instanceId: "claudeAgent",
+        model: "claude-sonnet-4-6",
+      }),
+    );
+
+    const mounted = await mountPicker({
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith(
+          "claudeAgent",
+          "claude-sonnet-4-6",
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+      localStorage.removeItem(PROVIDER_MODEL_PICKER_STORAGE_KEY);
+    }
+  });
+
+  it("falls back to the first available model when persisted values are stale", async () => {
+    localStorage.setItem(
+      PROVIDER_MODEL_PICKER_STORAGE_KEY,
+      JSON.stringify({
+        instanceId: "missing-provider",
+        model: "missing-model",
+      }),
+    );
+
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith("codex", "gpt-5-codex");
+      });
+    } finally {
+      await mounted.cleanup();
+      localStorage.removeItem(PROVIDER_MODEL_PICKER_STORAGE_KEY);
+    }
+  });
+
+  it("clears persisted values from the reset action and returns to the default model", async () => {
+    localStorage.setItem(
+      PROVIDER_MODEL_PICKER_STORAGE_KEY,
+      JSON.stringify({
+        instanceId: "claudeAgent",
+        model: "claude-opus-4-6",
+      }),
+    );
+
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByRole("button", { name: "Reset" }).click();
+
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith("codex", "gpt-5-codex");
+        expect(localStorage.getItem(PROVIDER_MODEL_PICKER_STORAGE_KEY)).toBeNull();
+      });
+    } finally {
+      await mounted.cleanup();
+      localStorage.removeItem(PROVIDER_MODEL_PICKER_STORAGE_KEY);
+    }
+  });
+
+  it("syncs provider model changes from storage events in other tabs", async () => {
+    const mounted = await mountPicker({
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      localStorage.setItem(
+        PROVIDER_MODEL_PICKER_STORAGE_KEY,
+        JSON.stringify({
+          instanceId: "claudeAgent",
+          model: "claude-haiku-4-5",
+        }),
+      );
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: PROVIDER_MODEL_PICKER_STORAGE_KEY,
+          newValue: localStorage.getItem(PROVIDER_MODEL_PICKER_STORAGE_KEY),
+          storageArea: localStorage,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith(
+          "claudeAgent",
+          "claude-haiku-4-5",
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+      localStorage.removeItem(PROVIDER_MODEL_PICKER_STORAGE_KEY);
     }
   });
 

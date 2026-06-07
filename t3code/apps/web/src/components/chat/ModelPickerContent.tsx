@@ -5,7 +5,7 @@ import {
 } from "@t3tools/contracts";
 import { resolveSelectableModel } from "@t3tools/shared/model";
 import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
-import { SearchIcon } from "lucide-react";
+import { RotateCcwIcon, SearchIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { isModelPickerNewModel } from "./modelPickerModelHighlights";
@@ -21,6 +21,7 @@ import {
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { TooltipProvider } from "../ui/tooltip";
+import { Button } from "../ui/button";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 
@@ -81,6 +82,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   terminalOpen: boolean;
   onRequestClose?: () => void;
+  onResetToDefault?: () => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
   const {
@@ -569,10 +571,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             )}
           >
             {/* Search bar */}
-            <div className="border-b px-3 py-2">
+            <div className="flex items-center gap-2 border-b px-3 py-2">
               <ComboboxInput
                 ref={searchInputRef}
-                className="[&_input]:font-sans rounded-md"
+                className="[&_input]:font-sans min-w-0 flex-1 rounded-md"
                 inputClassName="border-0 shadow-none ring-0 focus-visible:ring-0"
                 placeholder="Search models..."
                 showTrigger={false}
@@ -604,6 +606,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 onTouchStart={(e) => e.stopPropagation()}
                 size="sm"
               />
+              {props.onResetToDefault ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
+                  onClick={() => props.onResetToDefault?.()}
+                >
+                  <RotateCcwIcon aria-hidden="true" className="size-3.5" />
+                  Reset
+                </Button>
+              ) : null}
             </div>
 
             {/* Model list */}
