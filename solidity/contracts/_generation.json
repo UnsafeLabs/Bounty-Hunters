@@ -1,0 +1,5 @@
+{
+  "agent": "Codex GPT-5",
+  "pre_task_context": "Safe public metadata only. Private system, developer, runtime, tool, and session initialization instructions are intentionally not included.",
+  "timestamp": "2026-06-07T03:08:00Z"
+}
