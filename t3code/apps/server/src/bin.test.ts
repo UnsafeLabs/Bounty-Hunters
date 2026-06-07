@@ -33,6 +33,7 @@ import {
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import { formatVersionInfo } from "./cli/version.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
@@ -157,6 +158,28 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("accepts canonical --no-<flag> boolean negation", () =>
     runCliWithRuntime(["--no-log-websocket-events", "--version"]),
   );
+
+  it.effect("prints detailed version info from the version subcommand", () =>
+    Effect.gen(function* () {
+      const { output } = yield* captureStdout(runCli(["version"]));
+
+      assert.isTrue(output.startsWith("t3code v0.0.24 ("));
+      assert.isTrue(output.includes(`, ${process.platform} ${process.arch})`));
+    }),
+  );
+
+  it("formats version info with runtime and platform details", () => {
+    assert.equal(
+      formatVersionInfo({
+        version: "1.2.3",
+        runtime: "bun",
+        runtimeVersion: "1.3.11",
+        platform: "darwin",
+        arch: "arm64",
+      }),
+      "t3code v1.2.3 (bun 1.3.11, darwin arm64)",
+    );
+  });
 
   it.effect("rejects invalid log-level casing before launching the server", () =>
     Effect.gen(function* () {
