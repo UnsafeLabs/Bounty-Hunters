@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 
 import * as Electron from "electron";
 
@@ -93,6 +94,13 @@ const desktopSshEnvironmentLayer = Layer.unwrap(
   }),
 );
 
+const desktopState = Effect.runSync(
+  Effect.all({
+    backendReady: Ref.make(false),
+    quitting: Ref.make(false),
+  }),
+);
+
 const electronLayer = Layer.mergeAll(
   ElectronApp.layer,
   ElectronDialog.layer,
@@ -103,11 +111,14 @@ const electronLayer = Layer.mergeAll(
   ElectronTheme.layer,
   ElectronUpdater.layer,
   ElectronWindow.layer,
-  Layer.succeed(DesktopIpc.DesktopIpc, DesktopIpc.make(Electron.ipcMain)),
+  Layer.succeed(
+    DesktopIpc.DesktopIpc,
+    DesktopIpc.make(Electron.ipcMain, { backendReady: desktopState.backendReady }),
+  ),
 );
 
 const desktopFoundationLayer = Layer.mergeAll(
-  DesktopState.layer,
+  Layer.succeed(DesktopState.DesktopState, desktopState),
   DesktopLifecycle.layerShutdown,
   DesktopAppSettings.layer,
   DesktopClientSettings.layer,
