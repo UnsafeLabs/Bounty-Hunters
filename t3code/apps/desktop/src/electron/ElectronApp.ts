@@ -31,6 +31,8 @@ export interface ElectronAppShape {
   readonly setAppUserModelId: (id: string) => Effect.Effect<void>;
   readonly setDesktopName: (desktopName: string) => Effect.Effect<void>;
   readonly setDockIcon: (iconPath: string) => Effect.Effect<void>;
+  readonly setAsDefaultProtocolClient: (protocol: string) => Effect.Effect<boolean>;
+  readonly requestSingleInstanceLock: Effect.Effect<boolean>;
   readonly appendCommandLineSwitch: (switchName: string, value?: string) => Effect.Effect<void>;
   readonly on: <Args extends ReadonlyArray<unknown>>(
     eventName: string,
@@ -104,6 +106,9 @@ const make = ElectronApp.of({
     Effect.sync(() => {
       Electron.app.dock?.setIcon(iconPath);
     }),
+  setAsDefaultProtocolClient: (protocol) =>
+    Effect.sync(() => Electron.app.setAsDefaultProtocolClient(protocol)),
+  requestSingleInstanceLock: Effect.sync(() => Electron.app.requestSingleInstanceLock()),
   appendCommandLineSwitch: (switchName, value) =>
     Effect.sync(() => {
       if (value === undefined) {

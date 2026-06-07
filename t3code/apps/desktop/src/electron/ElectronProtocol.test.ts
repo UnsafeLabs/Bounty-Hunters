@@ -37,6 +37,47 @@ describe("ElectronProtocol", () => {
     assert.isTrue(Option.isNone(ElectronProtocol.normalizeDesktopProtocolPathname("/../secret")));
   });
 
+  it("parses supported t3code deep links", () => {
+    assert.deepEqual(ElectronProtocol.parseDesktopDeepLink("t3code://settings"), {
+      ok: true,
+      payload: { kind: "settings" },
+    });
+    assert.deepEqual(ElectronProtocol.parseDesktopDeepLink("t3code://chat/thread?id=thread-123"), {
+      ok: true,
+      payload: { kind: "chat-thread", threadId: "thread-123" },
+    });
+    assert.deepEqual(
+      ElectronProtocol.parseDesktopDeepLink(
+        "t3code://open/project?path=C%3A%5CUsers%5Calice%5Crepo",
+      ),
+      {
+        ok: true,
+        payload: { kind: "open-project", path: "C:\\Users\\alice\\repo" },
+      },
+    );
+  });
+
+  it("rejects malformed or unsafe t3code deep links", () => {
+    assert.deepEqual(ElectronProtocol.parseDesktopDeepLink("https://example.com"), {
+      ok: false,
+      url: "https://example.com",
+      message: "Unsupported deep link protocol.",
+    });
+    assert.deepEqual(ElectronProtocol.parseDesktopDeepLink("t3code://chat/thread"), {
+      ok: false,
+      url: "t3code://chat/thread",
+      message: "Chat thread link is missing an id.",
+    });
+    assert.deepEqual(
+      ElectronProtocol.parseDesktopDeepLink("t3code://open/project?path=..%2Fsecret"),
+      {
+        ok: false,
+        url: "t3code://open/project?path=..%2Fsecret",
+        message: "Project link path cannot contain traversal.",
+      },
+    );
+  });
+
   it.effect("registers desktop scheme privileges through a layer", () =>
     Effect.scoped(
       Layer.build(ElectronProtocol.layerSchemePrivileges).pipe(

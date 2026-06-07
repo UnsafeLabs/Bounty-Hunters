@@ -17,6 +17,7 @@ import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
+import { parseDesktopDeepLink } from "../electron/ElectronProtocol.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
@@ -58,6 +59,7 @@ export interface DesktopWindowShape {
   readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
   readonly handleBackendReady: Effect.Effect<void, DesktopWindowError>;
   readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
+  readonly dispatchDeepLinkUrl: (url: string) => Effect.Effect<void, DesktopWindowError>;
   readonly syncAppearance: Effect.Effect<void>;
 }
 
@@ -346,6 +348,28 @@ const make = Effect.gen(function* () {
       const send = () => {
         if (targetWindow.isDestroyed()) return;
         targetWindow.webContents.send(IpcChannels.MENU_ACTION_CHANNEL, action);
+        void runPromise(electronWindow.reveal(targetWindow));
+      };
+
+      if (targetWindow.webContents.isLoadingMainFrame()) {
+        targetWindow.webContents.once("did-finish-load", send);
+        return;
+      }
+
+      send();
+    }),
+    dispatchDeepLinkUrl: Effect.fn("desktop.window.dispatchDeepLinkUrl")(function* (url) {
+      yield* Effect.annotateCurrentSpan({ url });
+      const existingWindow = yield* electronWindow.focusedMainOrFirst;
+      const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* createMain;
+      const parsed = parseDesktopDeepLink(url);
+      const payload = parsed.ok
+        ? parsed.payload
+        : { kind: "error" as const, url: parsed.url, message: parsed.message };
+
+      const send = () => {
+        if (targetWindow.isDestroyed()) return;
+        targetWindow.webContents.send(IpcChannels.DEEP_LINK_CHANNEL, payload);
         void runPromise(electronWindow.reveal(targetWindow));
       };
 

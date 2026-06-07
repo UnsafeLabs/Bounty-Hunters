@@ -58,6 +58,8 @@ const makeElectronAppLayer = (calls: ElectronAppCalls) =>
       Effect.sync(() => {
         calls.setDockIcon.push(iconPath);
       }),
+    setAsDefaultProtocolClient: () => Effect.succeed(true),
+    requestSingleInstanceLock: Effect.succeed(true),
     appendCommandLineSwitch: () => Effect.void,
     on: () => Effect.void,
   } satisfies ElectronApp.ElectronAppShape);

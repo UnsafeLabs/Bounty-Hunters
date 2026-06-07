@@ -752,13 +752,13 @@ function OpenCommandPaletteDialog() {
   }
 
   const startAddProjectBrowse = useCallback(
-    (environmentId: EnvironmentId): void => {
+    (environmentId: EnvironmentId, initialPath?: string): void => {
       setAddProjectEnvironmentId(environmentId);
       setAddProjectCloneFlow(null);
       pushPaletteView({
         addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
         groups: [],
-        initialQuery: getAddProjectInitialQueryForEnvironment(environmentId),
+        initialQuery: initialPath ?? getAddProjectInitialQueryForEnvironment(environmentId),
       });
     },
     [getAddProjectInitialQueryForEnvironment],
@@ -942,41 +942,75 @@ function OpenCommandPaletteDialog() {
     [addProjectEnvironmentItems],
   );
 
-  const openAddProjectFlow = useCallback(() => {
-    if (addProjectEnvironmentOptions.length > 1) {
-      pushPaletteView({
-        addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
-        groups: addProjectEnvironmentGroups,
-      });
-      return;
-    }
+  const openAddProjectFlow = useCallback(
+    (initialPath?: string) => {
+      if (addProjectEnvironmentOptions.length > 1) {
+        const groups = initialPath
+          ? [
+              {
+                value: "environments",
+                label: "Environments",
+                items: addProjectEnvironmentOptions.map((option) => ({
+                  kind: "action" as const,
+                  value: `action:add-project:environment:${option.environmentId}:deep-link`,
+                  searchTerms: [
+                    option.label,
+                    option.environmentId,
+                    option.isPrimary ? "this device" : "",
+                  ],
+                  title: option.label,
+                  description: option.isPrimary ? "This device" : option.environmentId,
+                  icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+                  keepOpen: true,
+                  run: async () => {
+                    startAddProjectBrowse(option.environmentId, initialPath);
+                  },
+                })),
+              },
+            ]
+          : addProjectEnvironmentGroups;
+        pushPaletteView({
+          addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
+          groups,
+        });
+        return;
+      }
 
-    const environmentId = defaultAddProjectEnvironmentId;
-    if (!environmentId) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Unable to browse projects",
-          description: "No environment is available.",
-        }),
-      );
-      return;
-    }
+      const environmentId = defaultAddProjectEnvironmentId;
+      if (!environmentId) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Unable to browse projects",
+            description: "No environment is available.",
+          }),
+        );
+        return;
+      }
 
-    void startAddProjectSourceSelection(environmentId);
-  }, [
-    addProjectEnvironmentGroups,
-    addProjectEnvironmentOptions.length,
-    defaultAddProjectEnvironmentId,
-    startAddProjectSourceSelection,
-  ]);
+      if (initialPath) {
+        startAddProjectBrowse(environmentId, initialPath);
+        return;
+      }
+
+      void startAddProjectSourceSelection(environmentId);
+    },
+    [
+      addProjectEnvironmentGroups,
+      addProjectEnvironmentOptions.length,
+      defaultAddProjectEnvironmentId,
+      startAddProjectBrowse,
+      startAddProjectSourceSelection,
+    ],
+  );
 
   useLayoutEffect(() => {
     if (openIntent?.kind !== "add-project") {
       return;
     }
+    const initialPath = openIntent.initialPath;
     clearOpenIntent();
-    openAddProjectFlow();
+    openAddProjectFlow(initialPath);
   }, [clearOpenIntent, openAddProjectFlow, openIntent]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];

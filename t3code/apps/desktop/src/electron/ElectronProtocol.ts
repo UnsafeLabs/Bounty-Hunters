@@ -13,6 +13,16 @@ import * as Electron from "electron";
 import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/DesktopEnvironment.ts";
 
 export const DESKTOP_SCHEME = "t3";
+export const DESKTOP_DEEP_LINK_SCHEME = "t3code";
+
+export type DesktopDeepLinkPayload =
+  | { readonly kind: "open-project"; readonly path: string }
+  | { readonly kind: "chat-thread"; readonly threadId: string }
+  | { readonly kind: "settings" };
+
+export type DesktopDeepLinkParseResult =
+  | { readonly ok: true; readonly payload: DesktopDeepLinkPayload }
+  | { readonly ok: false; readonly url: string; readonly message: string };
 
 export class ElectronProtocolRegistrationError extends Data.TaggedError(
   "ElectronProtocolRegistrationError",
@@ -67,6 +77,51 @@ export function normalizeDesktopProtocolPathname(rawPath: string): Option.Option
     segments.push(segment);
   }
   return Option.some(segments.join("/"));
+}
+
+function hasTraversalSegment(path: string): boolean {
+  return path
+    .replaceAll("\\", "/")
+    .split("/")
+    .some((segment) => segment === "..");
+}
+
+export function parseDesktopDeepLink(rawUrl: string): DesktopDeepLinkParseResult {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return { ok: false, url: rawUrl, message: "Invalid t3code link." };
+  }
+
+  if (url.protocol !== `${DESKTOP_DEEP_LINK_SCHEME}:`) {
+    return { ok: false, url: rawUrl, message: "Unsupported deep link protocol." };
+  }
+
+  if (url.hostname === "settings" && url.pathname === "") {
+    return { ok: true, payload: { kind: "settings" } };
+  }
+
+  if (url.hostname === "chat" && url.pathname === "/thread") {
+    const threadId = url.searchParams.get("id")?.trim() ?? "";
+    if (threadId.length === 0) {
+      return { ok: false, url: rawUrl, message: "Chat thread link is missing an id." };
+    }
+    return { ok: true, payload: { kind: "chat-thread", threadId } };
+  }
+
+  if (url.hostname === "open" && url.pathname === "/project") {
+    const projectPath = url.searchParams.get("path")?.trim() ?? "";
+    if (projectPath.length === 0) {
+      return { ok: false, url: rawUrl, message: "Project link is missing a path." };
+    }
+    if (hasTraversalSegment(projectPath)) {
+      return { ok: false, url: rawUrl, message: "Project link path cannot contain traversal." };
+    }
+    return { ok: true, payload: { kind: "open-project", path: projectPath } };
+  }
+
+  return { ok: false, url: rawUrl, message: "Unsupported t3code link." };
 }
 
 const registerDesktopSchemePrivileges = Effect.sync(() => {
