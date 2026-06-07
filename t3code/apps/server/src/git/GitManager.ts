@@ -29,6 +29,9 @@ import {
   type VcsStatusRemoteResult,
   VcsStatusResult,
   ModelSelection,
+  type VcsRebaseConflictStatusResult,
+  type VcsRebaseInput,
+  type VcsRebaseResult,
 } from "@t3tools/contracts";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
@@ -71,6 +74,14 @@ export interface GitManagerShape {
   readonly remoteStatus: (
     input: VcsStatusInput,
   ) => Effect.Effect<VcsStatusRemoteResult | null, GitManagerServiceError>;
+  readonly rebaseCurrentBranch: (
+    input: VcsRebaseInput,
+  ) => Effect.Effect<VcsRebaseResult, GitManagerServiceError>;
+  readonly getRebaseConflictStatus: (
+    cwd: string,
+  ) => Effect.Effect<VcsRebaseConflictStatusResult, GitManagerServiceError>;
+  readonly abortRebase: (cwd: string) => Effect.Effect<void, GitManagerServiceError>;
+  readonly continueRebase: (cwd: string) => Effect.Effect<void, GitManagerServiceError>;
   readonly invalidateLocalStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>;
@@ -1375,6 +1386,39 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     },
   );
 
+  const rebaseCurrentBranch: GitManagerShape["rebaseCurrentBranch"] = Effect.fn(
+    "rebaseCurrentBranch",
+  )(function* (input) {
+    return yield* gitCore.rebaseCurrentBranch(input).pipe(
+      Effect.mapError((cause) => gitManagerError("rebaseCurrentBranch", cause.message, cause)),
+      Effect.ensuring(invalidateStatus(input.cwd)),
+    );
+  });
+
+  const getRebaseConflictStatus: GitManagerShape["getRebaseConflictStatus"] = Effect.fn(
+    "getRebaseConflictStatus",
+  )(function* (cwd) {
+    return yield* gitCore
+      .getRebaseConflictStatus(cwd)
+      .pipe(Effect.mapError((cause) => gitManagerError("getRebaseConflictStatus", cause.message, cause)));
+  });
+
+  const abortRebase: GitManagerShape["abortRebase"] = Effect.fn("abortRebase")(function* (cwd) {
+    return yield* gitCore.abortRebase(cwd).pipe(
+      Effect.mapError((cause) => gitManagerError("abortRebase", cause.message, cause)),
+      Effect.ensuring(invalidateStatus(cwd)),
+    );
+  });
+
+  const continueRebase: GitManagerShape["continueRebase"] = Effect.fn("continueRebase")(
+    function* (cwd) {
+      return yield* gitCore.continueRebase(cwd).pipe(
+        Effect.mapError((cause) => gitManagerError("continueRebase", cause.message, cause)),
+        Effect.ensuring(invalidateStatus(cwd)),
+      );
+    },
+  );
+
   const resolvePullRequest: GitManagerShape["resolvePullRequest"] = Effect.fn("resolvePullRequest")(
     function* (input) {
       const pullRequest = yield* (yield* sourceControlProvider(input.cwd))
@@ -1772,6 +1816,10 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     localStatus,
     remoteStatus,
     status,
+    rebaseCurrentBranch,
+    getRebaseConflictStatus,
+    abortRebase,
+    continueRebase,
     invalidateLocalStatus,
     invalidateRemoteStatus,
     invalidateStatus,

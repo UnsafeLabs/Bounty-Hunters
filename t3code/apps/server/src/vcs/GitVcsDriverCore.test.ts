@@ -313,6 +313,93 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("remote operations", () => {
+    it.effect("rebases a branch without conflicts and reports the result", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["branch", "-M", "main"]);
+        yield* git(cwd, ["checkout", "-b", "feature/rebase-clean"]);
+        yield* writeTextFile(cwd, "feature.txt", "feature\n");
+        yield* git(cwd, ["add", "feature.txt"]);
+        yield* git(cwd, ["commit", "-m", "feature commit"]);
+        yield* git(cwd, ["checkout", "main"]);
+        yield* writeTextFile(cwd, "main.txt", "main\n");
+        yield* git(cwd, ["add", "main.txt"]);
+        yield* git(cwd, ["commit", "-m", "main commit"]);
+        yield* git(cwd, ["checkout", "feature/rebase-clean"]);
+
+        const result = yield* driver.rebaseCurrentBranch({ cwd, upstreamRef: "main" });
+
+        assert.equal(result.status, "rebased");
+        assert.equal(result.refName, "feature/rebase-clean");
+        assert.equal(result.upstreamRef, "main");
+        assert.equal(yield* git(cwd, ["log", "-1", "--pretty=%s"]), "feature commit");
+      }),
+    );
+
+    it.effect("detects rebase conflicts and reports unmerged files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["branch", "-M", "main"]);
+        yield* git(cwd, ["checkout", "-b", "feature/rebase-conflict"]);
+        yield* writeTextFile(cwd, "README.md", "# test\nfeature\n");
+        yield* git(cwd, ["add", "README.md"]);
+        yield* git(cwd, ["commit", "-m", "feature edit"]);
+        yield* git(cwd, ["checkout", "main"]);
+        yield* writeTextFile(cwd, "README.md", "# test\nmain\n");
+        yield* git(cwd, ["add", "README.md"]);
+        yield* git(cwd, ["commit", "-m", "main edit"]);
+        yield* git(cwd, ["checkout", "feature/rebase-conflict"]);
+
+        const result = yield* driver.rebaseCurrentBranch({ cwd, upstreamRef: "main" });
+        const conflictStatus = yield* driver.getRebaseConflictStatus(cwd);
+
+        assert.equal(result.status, "conflicts");
+        assert.deepStrictEqual(result.conflicts?.files, ["README.md"]);
+        assert.equal(conflictStatus.inProgress, true);
+        assert.deepStrictEqual(conflictStatus.conflicts.files, ["README.md"]);
+
+        yield* driver.abortRebase(cwd);
+        const afterAbort = yield* driver.getRebaseConflictStatus(cwd);
+        assert.equal(afterAbort.inProgress, false);
+        assert.equal(yield* git(cwd, ["branch", "--show-current"]), "feature/rebase-conflict");
+      }),
+    );
+
+    it.effect("continues a rebase after conflicts are resolved", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["config", "core.editor", "true"]);
+        yield* git(cwd, ["branch", "-M", "main"]);
+        yield* git(cwd, ["checkout", "-b", "feature/rebase-continue"]);
+        yield* writeTextFile(cwd, "README.md", "# test\nfeature\n");
+        yield* git(cwd, ["add", "README.md"]);
+        yield* git(cwd, ["commit", "-m", "feature edit"]);
+        yield* git(cwd, ["checkout", "main"]);
+        yield* writeTextFile(cwd, "README.md", "# test\nmain\n");
+        yield* git(cwd, ["add", "README.md"]);
+        yield* git(cwd, ["commit", "-m", "main edit"]);
+        yield* git(cwd, ["checkout", "feature/rebase-continue"]);
+
+        const result = yield* driver.rebaseCurrentBranch({ cwd, upstreamRef: "main" });
+        assert.equal(result.status, "conflicts");
+        yield* writeTextFile(cwd, "README.md", "# test\nmain\nfeature\n");
+        yield* git(cwd, ["add", "README.md"]);
+
+        yield* driver.continueRebase(cwd);
+
+        const conflictStatus = yield* driver.getRebaseConflictStatus(cwd);
+        assert.equal(conflictStatus.inProgress, false);
+        assert.equal(yield* git(cwd, ["branch", "--show-current"]), "feature/rebase-continue");
+        assert.equal(yield* git(cwd, ["log", "-1", "--pretty=%s"]), "feature edit");
+      }),
+    );
+
     it.effect("pushes with upstream setup and skips when already up to date", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

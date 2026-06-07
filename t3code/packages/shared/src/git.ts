@@ -266,5 +266,28 @@ export function applyGitStatusStreamEvent(
         );
       }
       return mergeGitStatusParts(toLocalStatusPart(current), event.remote);
+    case "rebaseConflicts":
+      return (
+        current ??
+        mergeGitStatusParts(
+          {
+            isRepo: true,
+            hasPrimaryRemote: false,
+            isDefaultRef: false,
+            refName: null,
+            hasWorkingTreeChanges: true,
+            workingTree: {
+              files: event.conflicts.files.map((file) => ({
+                path: file,
+                insertions: 0,
+                deletions: 0,
+              })),
+              insertions: 0,
+              deletions: 0,
+            },
+          },
+          null,
+        )
+      );
   }
 }

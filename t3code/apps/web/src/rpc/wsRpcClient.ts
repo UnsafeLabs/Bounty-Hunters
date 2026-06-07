@@ -86,6 +86,10 @@ export interface WsRpcClient {
   };
   readonly vcs: {
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.vcsPull>;
+    readonly rebase: RpcUnaryMethod<typeof WS_METHODS.vcsRebase>;
+    readonly abortRebase: RpcUnaryMethod<typeof WS_METHODS.vcsRebaseAbort>;
+    readonly continueRebase: RpcUnaryMethod<typeof WS_METHODS.vcsRebaseContinue>;
+    readonly getRebaseConflicts: RpcUnaryMethod<typeof WS_METHODS.vcsRebaseConflicts>;
     readonly refreshStatus: RpcUnaryMethod<typeof WS_METHODS.vcsRefreshStatus>;
     readonly onStatus: (
       input: RpcInput<typeof WS_METHODS.subscribeVcsStatus>,
@@ -199,6 +203,13 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
     },
     vcs: {
       pull: (input) => transport.request((client) => client[WS_METHODS.vcsPull](input)),
+      rebase: (input) => transport.request((client) => client[WS_METHODS.vcsRebase](input)),
+      abortRebase: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsRebaseAbort](input)),
+      continueRebase: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsRebaseContinue](input)),
+      getRebaseConflicts: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsRebaseConflicts](input)),
       refreshStatus: (input) =>
         transport.request((client) => client[WS_METHODS.vcsRefreshStatus](input)),
       onStatus: (input, listener, options) => {

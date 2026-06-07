@@ -22,6 +22,9 @@ import {
   type VcsListRefsInput,
   type VcsListRefsResult,
   type VcsPullResult,
+  type VcsRebaseConflictStatusResult,
+  type VcsRebaseInput,
+  type VcsRebaseResult,
   type VcsRemoveWorktreeInput,
   type VcsStatusInput,
   type VcsStatusResult,
@@ -185,6 +188,15 @@ export interface GitVcsDriverShape {
   ) => Effect.Effect<string | null, GitCommandError>;
   readonly listRefs: (input: VcsListRefsInput) => Effect.Effect<VcsListRefsResult, GitCommandError>;
   readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
+  readonly rebaseCurrentBranch: (
+    input: VcsRebaseInput,
+  ) => Effect.Effect<VcsRebaseResult, GitCommandError>;
+  readonly getConflictFiles: (cwd: string) => Effect.Effect<string[], GitCommandError>;
+  readonly getRebaseConflictStatus: (
+    cwd: string,
+  ) => Effect.Effect<VcsRebaseConflictStatusResult, GitCommandError>;
+  readonly abortRebase: (cwd: string) => Effect.Effect<void, GitCommandError>;
+  readonly continueRebase: (cwd: string) => Effect.Effect<void, GitCommandError>;
   readonly createWorktree: (
     input: VcsCreateWorktreeInput,
   ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;

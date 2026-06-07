@@ -131,6 +131,17 @@ export const VcsListRefsInput = Schema.Struct({
 });
 export type VcsListRefsInput = typeof VcsListRefsInput.Type;
 
+export const VcsRebaseInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  upstreamRef: TrimmedNonEmptyStringSchema,
+});
+export type VcsRebaseInput = typeof VcsRebaseInput.Type;
+
+export const VcsRebaseControlInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type VcsRebaseControlInput = typeof VcsRebaseControlInput.Type;
+
 export const VcsCreateWorktreeInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   refName: TrimmedNonEmptyStringSchema,
@@ -246,6 +257,12 @@ export const VcsStatusStreamEvent = Schema.Union([
   Schema.TaggedStruct("remoteUpdated", {
     remote: Schema.NullOr(VcsStatusRemoteResult),
   }),
+  Schema.TaggedStruct("rebaseConflicts", {
+    conflicts: Schema.Struct({
+      cwd: TrimmedNonEmptyStringSchema,
+      files: Schema.Array(TrimmedNonEmptyStringSchema),
+    }),
+  }),
 ]);
 export type VcsStatusStreamEvent = typeof VcsStatusStreamEvent.Type;
 
@@ -315,6 +332,26 @@ export const VcsPullResult = Schema.Struct({
   upstreamRef: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
 });
 export type VcsPullResult = typeof VcsPullResult.Type;
+
+export const VcsRebaseConflicts = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  files: Schema.Array(TrimmedNonEmptyStringSchema),
+});
+export type VcsRebaseConflicts = typeof VcsRebaseConflicts.Type;
+
+export const VcsRebaseConflictStatusResult = Schema.Struct({
+  inProgress: Schema.Boolean,
+  conflicts: VcsRebaseConflicts,
+});
+export type VcsRebaseConflictStatusResult = typeof VcsRebaseConflictStatusResult.Type;
+
+export const VcsRebaseResult = Schema.Struct({
+  status: Schema.Literals(["rebased", "skipped_up_to_date", "conflicts"]),
+  refName: TrimmedNonEmptyStringSchema,
+  upstreamRef: TrimmedNonEmptyStringSchema,
+  conflicts: Schema.optional(VcsRebaseConflicts),
+});
+export type VcsRebaseResult = typeof VcsRebaseResult.Type;
 
 // RPC / domain errors
 export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()("GitCommandError", {

@@ -232,7 +232,20 @@ export const layer = Layer.effect(
       const cwd = yield* withFileSystem(normalizeCwd(rawCwd));
       yield* workflow.invalidateLocalStatus(cwd);
       const local = yield* workflow.localStatus({ cwd });
-      return yield* updateCachedLocalStatus(cwd, local, { publish: true });
+      const updated = yield* updateCachedLocalStatus(cwd, local, { publish: true });
+      const rebaseStatus = yield* workflow
+        .getRebaseConflictStatus(cwd)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (rebaseStatus?.inProgress && rebaseStatus.conflicts.files.length > 0) {
+        yield* PubSub.publish(changesPubSub, {
+          cwd,
+          event: {
+            _tag: "rebaseConflicts",
+            conflicts: rebaseStatus.conflicts,
+          },
+        });
+      }
+      return updated;
     });
 
     const refreshRemoteStatus = Effect.fn("VcsStatusBroadcaster.refreshRemoteStatus")(function* (

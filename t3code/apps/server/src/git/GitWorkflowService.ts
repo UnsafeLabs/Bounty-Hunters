@@ -26,6 +26,9 @@ import {
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
   type VcsStatusResult,
+  type VcsRebaseConflictStatusResult,
+  type VcsRebaseInput,
+  type VcsRebaseResult,
 } from "@t3tools/contracts";
 
 import { GitManager, type GitRunStackedActionOptions } from "./GitManager.ts";
@@ -46,6 +49,14 @@ export interface GitWorkflowServiceShape {
   readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
+  readonly rebaseCurrentBranch: (
+    input: VcsRebaseInput,
+  ) => Effect.Effect<VcsRebaseResult, GitManagerServiceError>;
+  readonly getRebaseConflictStatus: (
+    cwd: string,
+  ) => Effect.Effect<VcsRebaseConflictStatusResult, GitManagerServiceError>;
+  readonly abortRebase: (cwd: string) => Effect.Effect<void, GitManagerServiceError>;
+  readonly continueRebase: (cwd: string) => Effect.Effect<void, GitManagerServiceError>;
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
@@ -271,6 +282,22 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
     pullCurrentBranch: (cwd) =>
       ensureGitCommand("GitWorkflowService.pullCurrentBranch", cwd).pipe(
         Effect.andThen(git.pullCurrentBranch(cwd)),
+      ),
+    rebaseCurrentBranch: (input) =>
+      ensureGit("GitWorkflowService.rebaseCurrentBranch", input.cwd).pipe(
+        Effect.andThen(gitManager.rebaseCurrentBranch(input)),
+      ),
+    getRebaseConflictStatus: (cwd) =>
+      ensureGit("GitWorkflowService.getRebaseConflictStatus", cwd).pipe(
+        Effect.andThen(gitManager.getRebaseConflictStatus(cwd)),
+      ),
+    abortRebase: (cwd) =>
+      ensureGit("GitWorkflowService.abortRebase", cwd).pipe(
+        Effect.andThen(gitManager.abortRebase(cwd)),
+      ),
+    continueRebase: (cwd) =>
+      ensureGit("GitWorkflowService.continueRebase", cwd).pipe(
+        Effect.andThen(gitManager.continueRebase(cwd)),
       ),
     runStackedAction: (input, options) =>
       ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(

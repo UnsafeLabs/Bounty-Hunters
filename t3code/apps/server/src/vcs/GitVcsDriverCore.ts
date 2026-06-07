@@ -1586,6 +1586,147 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const resolveGitPath = Effect.fn("GitVcsDriver.resolveGitPath")(function* (
+    cwd: string,
+    gitPath: string,
+  ) {
+    const resolved = yield* runGitStdout(
+      "GitVcsDriver.resolveGitPath",
+      cwd,
+      ["rev-parse", "--git-path", gitPath],
+      true,
+    ).pipe(Effect.map((stdout) => stdout.trim()));
+    if (resolved.length === 0) {
+      return path.join(cwd, ".git", gitPath);
+    }
+    return path.isAbsolute(resolved) ? resolved : path.join(cwd, resolved);
+  });
+
+  const isRebaseInProgress = Effect.fn("GitVcsDriver.isRebaseInProgress")(function* (
+    cwd: string,
+  ) {
+    const [rebaseHeadPath, rebaseMergePath, rebaseApplyPath] = yield* Effect.all([
+      resolveGitPath(cwd, "REBASE_HEAD"),
+      resolveGitPath(cwd, "rebase-merge"),
+      resolveGitPath(cwd, "rebase-apply"),
+    ]);
+    const [hasRebaseHead, hasRebaseMerge, hasRebaseApply] = yield* Effect.all([
+      fileSystem.exists(rebaseHeadPath).pipe(Effect.orElseSucceed(() => false)),
+      fileSystem.exists(rebaseMergePath).pipe(Effect.orElseSucceed(() => false)),
+      fileSystem.exists(rebaseApplyPath).pipe(Effect.orElseSucceed(() => false)),
+    ]);
+    return hasRebaseHead && (hasRebaseMerge || hasRebaseApply);
+  });
+
+  const getConflictFiles: GitVcsDriver.GitVcsDriverShape["getConflictFiles"] = Effect.fn(
+    "getConflictFiles",
+  )(function* (cwd) {
+    const stdout = yield* runGitStdout(
+      "GitVcsDriver.getConflictFiles",
+      cwd,
+      ["diff", "--name-only", "--diff-filter=U"],
+      true,
+    );
+    return stdout
+      .split(/\r?\n/g)
+      .map((line) => line.trim())
+      .filter((line, index, lines) => line.length > 0 && lines.indexOf(line) === index);
+  });
+
+  const getRebaseConflictStatus: GitVcsDriver.GitVcsDriverShape["getRebaseConflictStatus"] =
+    Effect.fn("getRebaseConflictStatus")(function* (cwd) {
+      const inProgress = yield* isRebaseInProgress(cwd);
+      const files = inProgress ? yield* getConflictFiles(cwd) : [];
+      return {
+        inProgress,
+        conflicts: {
+          cwd,
+          files,
+        },
+      };
+    });
+
+  const rebaseCurrentBranch: GitVcsDriver.GitVcsDriverShape["rebaseCurrentBranch"] = Effect.fn(
+    "rebaseCurrentBranch",
+  )(function* (input) {
+    const details = yield* statusDetails(input.cwd);
+    const refName = details.branch;
+    if (!refName) {
+      return yield* createGitCommandError(
+        "GitVcsDriver.rebaseCurrentBranch",
+        input.cwd,
+        ["rebase", input.upstreamRef],
+        "Cannot rebase from detached HEAD.",
+      );
+    }
+
+    const beforeSha = yield* runGitStdout(
+      "GitVcsDriver.rebaseCurrentBranch.beforeSha",
+      input.cwd,
+      ["rev-parse", "HEAD"],
+      true,
+    ).pipe(Effect.map((stdout) => stdout.trim()));
+    const result = yield* executeGit(
+      "GitVcsDriver.rebaseCurrentBranch.rebase",
+      input.cwd,
+      ["rebase", input.upstreamRef],
+      {
+        timeoutMs: 60_000,
+        allowNonZeroExit: true,
+      },
+    );
+
+    if (result.exitCode !== 0) {
+      const conflictStatus = yield* getRebaseConflictStatus(input.cwd);
+      if (conflictStatus.inProgress) {
+        return {
+          status: "conflicts" as const,
+          refName,
+          upstreamRef: input.upstreamRef,
+          conflicts: conflictStatus.conflicts,
+        };
+      }
+
+      return yield* createGitCommandError(
+        "GitVcsDriver.rebaseCurrentBranch",
+        input.cwd,
+        ["rebase", input.upstreamRef],
+        result.stderr.trim() || "git rebase failed",
+      );
+    }
+
+    const afterSha = yield* runGitStdout(
+      "GitVcsDriver.rebaseCurrentBranch.afterSha",
+      input.cwd,
+      ["rev-parse", "HEAD"],
+      true,
+    ).pipe(Effect.map((stdout) => stdout.trim()));
+
+    return {
+      status: beforeSha.length > 0 && beforeSha === afterSha ? "skipped_up_to_date" : "rebased",
+      refName,
+      upstreamRef: input.upstreamRef,
+    };
+  });
+
+  const abortRebase: GitVcsDriver.GitVcsDriverShape["abortRebase"] = Effect.fn("abortRebase")(
+    function* (cwd) {
+      yield* executeGit("GitVcsDriver.abortRebase", cwd, ["rebase", "--abort"], {
+        timeoutMs: 30_000,
+        fallbackErrorMessage: "git rebase --abort failed",
+      });
+    },
+  );
+
+  const continueRebase: GitVcsDriver.GitVcsDriverShape["continueRebase"] = Effect.fn(
+    "continueRebase",
+  )(function* (cwd) {
+    yield* executeGit("GitVcsDriver.continueRebase", cwd, ["rebase", "--continue"], {
+      timeoutMs: 60_000,
+      fallbackErrorMessage: "git rebase --continue failed",
+    });
+  });
+
   const readRangeContext: GitVcsDriver.GitVcsDriverShape["readRangeContext"] = Effect.fn(
     "readRangeContext",
   )(function* (cwd, baseRef) {
@@ -2123,6 +2264,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     commit,
     pushCurrentBranch,
     pullCurrentBranch,
+    rebaseCurrentBranch,
+    getConflictFiles,
+    getRebaseConflictStatus,
+    abortRebase,
+    continueRebase,
     readRangeContext,
     readConfigValue,
     listRefs,
