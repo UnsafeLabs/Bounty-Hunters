@@ -37,6 +37,7 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     logWebSocketEvents: false,
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
+    compressionLevel: 6,
     port: 0,
     host: undefined,
     desktopBootstrapToken: undefined,
