@@ -338,6 +338,20 @@ export const PersistedSavedEnvironmentRecordSchema = Schema.Struct({
 });
 export type PersistedSavedEnvironmentRecord = typeof PersistedSavedEnvironmentRecordSchema.Type;
 
+export interface SavedEnvironmentKeyRotationResult {
+  previousKeyVersion: string;
+  currentKeyVersion: string;
+  reencryptedSecrets: number;
+  rotatedAt: string;
+}
+
+export const SavedEnvironmentKeyRotationResultSchema = Schema.Struct({
+  previousKeyVersion: Schema.String,
+  currentKeyVersion: Schema.String,
+  reencryptedSecrets: Schema.Number,
+  rotatedAt: Schema.String,
+});
+
 export type DesktopServerExposureMode = "local-only" | "network-accessible";
 
 export const DesktopServerExposureModeSchema = Schema.Literals([
@@ -381,6 +395,7 @@ export interface DesktopBridge {
   getSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<string | null>;
   setSavedEnvironmentSecret: (environmentId: EnvironmentId, secret: string) => Promise<boolean>;
   removeSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<void>;
+  rotateSavedEnvironmentKeys: () => Promise<SavedEnvironmentKeyRotationResult>;
   discoverSshHosts: () => Promise<readonly DesktopDiscoveredSshHost[]>;
   ensureSshEnvironment: (
     target: DesktopSshEnvironmentTarget,
@@ -458,6 +473,7 @@ export interface LocalApi {
     getSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<string | null>;
     setSavedEnvironmentSecret: (environmentId: EnvironmentId, secret: string) => Promise<boolean>;
     removeSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<void>;
+    rotateSavedEnvironmentKeys: () => Promise<SavedEnvironmentKeyRotationResult>;
   };
   server: {
     getConfig: () => Promise<ServerConfig>;

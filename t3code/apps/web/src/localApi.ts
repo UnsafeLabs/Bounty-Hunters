@@ -117,6 +117,17 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         }
         removeBrowserSavedEnvironmentSecret(environmentId);
       },
+      rotateSavedEnvironmentKeys: async () => {
+        if (window.desktopBridge) {
+          return window.desktopBridge.rotateSavedEnvironmentKeys();
+        }
+        return {
+          previousKeyVersion: "browser-storage",
+          currentKeyVersion: "browser-storage",
+          reencryptedSecrets: 0,
+          rotatedAt: new Date().toISOString(),
+        };
+      },
     },
     server: {
       getConfig: () =>

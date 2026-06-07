@@ -25,6 +25,12 @@ describe("environment runtime catalog stores", () => {
           getSavedEnvironmentSecret: async () => null,
           setSavedEnvironmentSecret: async () => true,
           removeSavedEnvironmentSecret: async () => undefined,
+          rotateSavedEnvironmentKeys: async () => ({
+            previousKeyVersion: "test-key-v1",
+            currentKeyVersion: "test-key-v2",
+            reencryptedSecrets: 0,
+            rotatedAt: "2026-06-07T00:00:00.000Z",
+          }),
         },
       } satisfies Pick<LocalApi, "persistence">,
     });
@@ -112,6 +118,12 @@ describe("environment runtime catalog stores", () => {
           getSavedEnvironmentSecret: async () => null,
           setSavedEnvironmentSecret: async () => true,
           removeSavedEnvironmentSecret: async () => undefined,
+          rotateSavedEnvironmentKeys: async () => ({
+            previousKeyVersion: "test-key-v1",
+            currentKeyVersion: "test-key-v2",
+            reencryptedSecrets: 0,
+            rotatedAt: "2026-06-07T00:00:00.000Z",
+          }),
         },
       } satisfies Pick<LocalApi, "persistence">,
     });

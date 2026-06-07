@@ -179,6 +179,12 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     getSavedEnvironmentSecret: async () => null,
     setSavedEnvironmentSecret: async () => true,
     removeSavedEnvironmentSecret: async () => undefined,
+    rotateSavedEnvironmentKeys: async () => ({
+      previousKeyVersion: "test-key-v1",
+      currentKeyVersion: "test-key-v2",
+      reencryptedSecrets: 0,
+      rotatedAt: "2026-06-07T00:00:00.000Z",
+    }),
     discoverSshHosts: async () => [],
     ensureSshEnvironment: async () => {
       throw new Error("ensureSshEnvironment not implemented in test");
@@ -625,6 +631,12 @@ describe("wsApi", () => {
     const getSavedEnvironmentSecret = vi.fn().mockResolvedValue("bearer-token");
     const setSavedEnvironmentSecret = vi.fn().mockResolvedValue(true);
     const removeSavedEnvironmentSecret = vi.fn().mockResolvedValue(undefined);
+    const rotateSavedEnvironmentKeys = vi.fn().mockResolvedValue({
+      previousKeyVersion: "test-key-v1",
+      currentKeyVersion: "test-key-v2",
+      reencryptedSecrets: 1,
+      rotatedAt: "2026-06-07T00:00:00.000Z",
+    });
     getWindowForTest().desktopBridge = makeDesktopBridge({
       getClientSettings,
       setClientSettings,
@@ -633,6 +645,7 @@ describe("wsApi", () => {
       getSavedEnvironmentSecret,
       setSavedEnvironmentSecret,
       removeSavedEnvironmentSecret,
+      rotateSavedEnvironmentKeys,
     });
 
     const { createLocalApi } = await import("./localApi");
@@ -648,6 +661,7 @@ describe("wsApi", () => {
       "bearer-token",
     );
     await api.persistence.removeSavedEnvironmentSecret(EnvironmentId.make("environment-local"));
+    await api.persistence.rotateSavedEnvironmentKeys();
 
     expect(getClientSettings).toHaveBeenCalledWith();
     expect(setClientSettings).toHaveBeenCalledWith(clientSettings);
@@ -656,6 +670,7 @@ describe("wsApi", () => {
     expect(getSavedEnvironmentSecret).toHaveBeenCalledWith("environment-local");
     expect(setSavedEnvironmentSecret).toHaveBeenCalledWith("environment-local", "bearer-token");
     expect(removeSavedEnvironmentSecret).toHaveBeenCalledWith("environment-local");
+    expect(rotateSavedEnvironmentKeys).toHaveBeenCalledWith();
   });
 
   it("falls back to browser storage for persistence when the desktop bridge is missing", async () => {

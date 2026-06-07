@@ -373,6 +373,12 @@ const createDesktopBridgeStub = (overrides?: {
     getSavedEnvironmentSecret: vi.fn().mockResolvedValue(null),
     setSavedEnvironmentSecret: vi.fn().mockResolvedValue(true),
     removeSavedEnvironmentSecret: vi.fn().mockResolvedValue(undefined),
+    rotateSavedEnvironmentKeys: vi.fn().mockResolvedValue({
+      previousKeyVersion: "test-key-v1",
+      currentKeyVersion: "test-key-v2",
+      reencryptedSecrets: 0,
+      rotatedAt: "2026-06-07T00:00:00.000Z",
+    }),
     discoverSshHosts: overrides?.discoverSshHosts ?? vi.fn().mockResolvedValue([]),
     ensureSshEnvironment: vi.fn().mockImplementation(async (target) => ({
       target,

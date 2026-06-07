@@ -37,6 +37,10 @@ export class ElectronSafeStorageDecryptError extends Data.TaggedError(
 
 export interface ElectronSafeStorageShape {
   readonly isEncryptionAvailable: Effect.Effect<boolean, ElectronSafeStorageAvailabilityError>;
+  readonly generateEncryptionKeyVersion: Effect.Effect<
+    string,
+    ElectronSafeStorageAvailabilityError
+  >;
   readonly encryptString: (
     value: string,
   ) => Effect.Effect<Uint8Array, ElectronSafeStorageEncryptError>;
@@ -53,6 +57,15 @@ export class ElectronSafeStorage extends Context.Service<
 const make = ElectronSafeStorage.of({
   isEncryptionAvailable: Effect.try({
     try: () => Electron.safeStorage.isEncryptionAvailable(),
+    catch: (cause) => new ElectronSafeStorageAvailabilityError({ cause }),
+  }),
+  generateEncryptionKeyVersion: Effect.try({
+    try: () => {
+      if (!Electron.safeStorage.isEncryptionAvailable()) {
+        throw new Error("Encryption is unavailable.");
+      }
+      return `safe-storage-${crypto.randomUUID()}`;
+    },
     catch: (cause) => new ElectronSafeStorageAvailabilityError({ cause }),
   }),
   encryptString: (value) =>

@@ -11,6 +11,7 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
@@ -26,7 +27,8 @@ export class DesktopApplicationMenu extends Context.Service<
 type DesktopApplicationMenuRuntimeServices =
   | DesktopUpdates.DesktopUpdates
   | DesktopWindow.DesktopWindow
-  | ElectronDialog.ElectronDialog;
+  | ElectronDialog.ElectronDialog
+  | DesktopSavedEnvironments.DesktopSavedEnvironments;
 
 const { logInfo: logUpdaterInfo } = DesktopObservability.makeComponentLogger("desktop-updater");
 
@@ -94,6 +96,51 @@ const handleCheckForUpdatesMenuClick: Effect.Effect<
   yield* checkForUpdatesFromMenu;
 }).pipe(Effect.withSpan("desktop.menu.handleCheckForUpdatesClick"));
 
+const handleRotateEncryptionKeysMenuClick: Effect.Effect<
+  void,
+  never,
+  ElectronDialog.ElectronDialog | DesktopSavedEnvironments.DesktopSavedEnvironments
+> = Effect.gen(function* () {
+  const electronDialog = yield* ElectronDialog.ElectronDialog;
+  const confirmed = yield* electronDialog.showMessageBox({
+    type: "warning",
+    title: "Rotate Encryption Keys",
+    message: "Rotate saved environment encryption keys?",
+    detail:
+      "T3 Code will re-encrypt saved environment credentials. Existing credentials remain readable if rotation fails.",
+    buttons: ["Rotate Keys", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+  });
+  if (confirmed.response !== 0) {
+    return;
+  }
+
+  const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+  const result = yield* savedEnvironments.rotateKeys;
+  yield* electronDialog.showMessageBox({
+    type: "info",
+    title: "Encryption Keys Rotated",
+    message: "Saved environment encryption keys were rotated.",
+    detail: `${result.reencryptedSecrets} credential secret(s) re-encrypted at ${result.rotatedAt}.`,
+    buttons: ["OK"],
+  });
+}).pipe(
+  Effect.catchCause((cause) =>
+    Effect.gen(function* () {
+      const electronDialog = yield* ElectronDialog.ElectronDialog;
+      yield* electronDialog.showMessageBox({
+        type: "error",
+        title: "Key Rotation Failed",
+        message: "Saved environment encryption keys could not be rotated.",
+        detail: Cause.pretty(cause),
+        buttons: ["OK"],
+      });
+    }),
+  ),
+  Effect.withSpan("desktop.menu.handleRotateEncryptionKeys"),
+);
+
 const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const electronMenu = yield* ElectronMenu.ElectronMenu;
@@ -126,6 +173,9 @@ const make = Effect.gen(function* () {
     };
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
+    };
+    const rotateEncryptionKeysClick = () => {
+      runMenuEffect("rotate-encryption-keys", handleRotateEncryptionKeysMenuClick);
     };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
@@ -187,6 +237,15 @@ const make = Effect.gen(function* () {
           { role: "zoomOut" },
           { type: "separator" },
           { role: "togglefullscreen" },
+        ],
+      },
+      {
+        label: "Developer",
+        submenu: [
+          {
+            label: "Rotate Encryption Keys...",
+            click: rotateEncryptionKeysClick,
+          },
         ],
       },
       { role: "windowMenu" },

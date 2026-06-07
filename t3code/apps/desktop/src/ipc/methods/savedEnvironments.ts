@@ -19,6 +19,13 @@ const SetSavedEnvironmentSecretInput = Schema.Struct({
   secret: NonBlankString,
 });
 
+const RotateSavedEnvironmentKeysResult = Schema.Struct({
+  previousKeyVersion: Schema.String,
+  currentKeyVersion: Schema.String,
+  reencryptedSecrets: Schema.Number,
+  rotatedAt: Schema.String,
+});
+
 export const getSavedEnvironmentRegistry = makeIpcMethod({
   channel: IpcChannels.GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL,
   payload: Schema.Void,
@@ -72,5 +79,15 @@ export const removeSavedEnvironmentSecret = makeIpcMethod({
   handler: Effect.fn("desktop.ipc.savedEnvironments.removeSecret")(function* (environmentId) {
     const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
     yield* savedEnvironments.removeSecret(environmentId);
+  }),
+});
+
+export const rotateSavedEnvironmentKeys = makeIpcMethod({
+  channel: IpcChannels.ROTATE_SAVED_ENVIRONMENT_KEYS_CHANNEL,
+  payload: Schema.Void,
+  result: RotateSavedEnvironmentKeysResult,
+  handler: Effect.fn("desktop.ipc.savedEnvironments.rotateKeys")(function* () {
+    const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+    return yield* savedEnvironments.rotateKeys;
   }),
 });

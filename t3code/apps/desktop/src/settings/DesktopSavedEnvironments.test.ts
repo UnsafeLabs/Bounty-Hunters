@@ -6,6 +6,15 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { vi } from "vitest";
+
+vi.mock("electron", () => ({
+  safeStorage: {
+    isEncryptionAvailable: () => true,
+    encryptString: (value: string) => Buffer.from(`enc:${value}`),
+    decryptString: (value: Buffer) => value.toString("utf8").replace(/^enc:/, ""),
+  },
+}));
 
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -32,6 +41,7 @@ const savedRegistryRecord: PersistedSavedEnvironmentRecord = {
 
 const SavedEnvironmentRegistryDocumentProbe = Schema.Struct({
   version: Schema.Number,
+  currentKeyVersion: Schema.String,
   records: Schema.Array(Schema.Unknown),
 });
 const decodeSavedEnvironmentRegistryDocumentProbe = Schema.decodeEffect(
@@ -42,8 +52,11 @@ function makeSafeStorageLayer(input: {
   readonly available: boolean;
   readonly availabilityError?: unknown;
   readonly encryptError?: unknown;
+  readonly encryptErrorAfterSuccesses?: number;
   readonly decryptError?: unknown;
+  readonly generatedKeyVersion?: string;
 }) {
+  let successfulEncryptions = 0;
   return Layer.succeed(ElectronSafeStorage.ElectronSafeStorage, {
     isEncryptionAvailable:
       input.availabilityError === undefined
@@ -53,14 +66,28 @@ function makeSafeStorageLayer(input: {
               cause: input.availabilityError,
             }),
           ),
-    encryptString: (value) =>
-      input.encryptError === undefined
-        ? Effect.succeed(textEncoder.encode(`enc:${value}`))
+    generateEncryptionKeyVersion:
+      input.availabilityError === undefined
+        ? Effect.succeed(input.generatedKeyVersion ?? "safe-storage-v2")
         : Effect.fail(
-            new ElectronSafeStorage.ElectronSafeStorageEncryptError({
-              cause: input.encryptError,
+            new ElectronSafeStorage.ElectronSafeStorageAvailabilityError({
+              cause: input.availabilityError,
             }),
           ),
+    encryptString: (value) =>
+      Effect.try({
+        try: () => {
+          if (
+            input.encryptError !== undefined &&
+            (input.encryptErrorAfterSuccesses ?? 0) <= successfulEncryptions
+          ) {
+            throw input.encryptError;
+          }
+          successfulEncryptions += 1;
+          return textEncoder.encode(`enc:${value}`);
+        },
+        catch: (cause) => new ElectronSafeStorage.ElectronSafeStorageEncryptError({ cause }),
+      }),
     decryptString: (value) => {
       if (input.decryptError !== undefined) {
         return Effect.fail(
@@ -89,7 +116,9 @@ function makeLayer(
     readonly availableSecretStorage?: boolean;
     readonly availabilityError?: unknown;
     readonly encryptError?: unknown;
+    readonly encryptErrorAfterSuccesses?: number;
     readonly decryptError?: unknown;
+    readonly generatedKeyVersion?: string;
   },
 ) {
   const environmentLayer = DesktopEnvironment.layer({
@@ -113,9 +142,17 @@ function makeLayer(
     Layer.provideMerge(
       makeSafeStorageLayer({
         available: options?.availableSecretStorage ?? true,
-        availabilityError: options?.availabilityError,
-        encryptError: options?.encryptError,
-        decryptError: options?.decryptError,
+        ...(options?.availabilityError === undefined
+          ? {}
+          : { availabilityError: options.availabilityError }),
+        ...(options?.encryptError === undefined ? {} : { encryptError: options.encryptError }),
+        ...(options?.encryptErrorAfterSuccesses === undefined
+          ? {}
+          : { encryptErrorAfterSuccesses: options.encryptErrorAfterSuccesses }),
+        ...(options?.decryptError === undefined ? {} : { decryptError: options.decryptError }),
+        ...(options?.generatedKeyVersion === undefined
+          ? {}
+          : { generatedKeyVersion: options.generatedKeyVersion }),
       }),
     ),
     Layer.provideMerge(NodeServices.layer),
@@ -128,6 +165,7 @@ const withSavedEnvironments = <A, E, R>(
     readonly availableSecretStorage?: boolean;
     readonly availabilityError?: unknown;
     readonly encryptError?: unknown;
+    readonly encryptErrorAfterSuccesses?: number;
     readonly decryptError?: unknown;
   },
 ) =>
@@ -153,6 +191,7 @@ describe("DesktopSavedEnvironments", () => {
           yield* fileSystem.readFileString(environment.savedEnvironmentRegistryPath),
         );
         assert.equal(persisted.version, 1);
+        assert.equal(persisted.currentKeyVersion, "safe-storage-v1");
         assert.lengthOf(persisted.records, 1);
       }),
     ),
@@ -339,6 +378,63 @@ describe("DesktopSavedEnvironments", () => {
           Option.some("bearer-token"),
         );
       }),
+    ),
+  );
+
+  it.effect("re-encrypts saved environment secrets with a new key version", () =>
+    withSavedEnvironments(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+        yield* savedEnvironments.setRegistry([savedRegistryRecord]);
+        yield* savedEnvironments.setSecret({
+          environmentId: savedRegistryRecord.environmentId,
+          secret: "bearer-token",
+        });
+
+        const result = yield* savedEnvironments.rotateKeys;
+
+        assert.equal(result.previousKeyVersion, "safe-storage-v1");
+        assert.equal(result.currentKeyVersion, "safe-storage-v2");
+        assert.equal(result.reencryptedSecrets, 1);
+        assert.deepEqual(
+          yield* savedEnvironments.getSecret(savedRegistryRecord.environmentId),
+          Option.some("bearer-token"),
+        );
+        const persisted = JSON.parse(
+          yield* fileSystem.readFileString(environment.savedEnvironmentRegistryPath),
+        ) as {
+          readonly currentKeyVersion: string;
+          readonly records: ReadonlyArray<{
+            readonly encryptedBearerTokenKeyVersion?: string;
+          }>;
+        };
+        assert.equal(persisted.currentKeyVersion, "safe-storage-v2");
+        assert.equal(persisted.records[0]?.encryptedBearerTokenKeyVersion, "safe-storage-v2");
+      }),
+    ),
+  );
+
+  it.effect("keeps old encrypted secrets accessible when rotation encryption fails", () =>
+    withSavedEnvironments(
+      Effect.gen(function* () {
+        const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+        yield* savedEnvironments.setRegistry([savedRegistryRecord]);
+        yield* savedEnvironments.setSecret({
+          environmentId: savedRegistryRecord.environmentId,
+          secret: "bearer-token",
+        });
+
+        const error = yield* savedEnvironments.rotateKeys.pipe(Effect.flip);
+
+        assert.instanceOf(error, ElectronSafeStorage.ElectronSafeStorageEncryptError);
+        assert.deepEqual(
+          yield* savedEnvironments.getSecret(savedRegistryRecord.environmentId),
+          Option.some("bearer-token"),
+        );
+      }),
+      { encryptError: new Error("rotation failed"), encryptErrorAfterSuccesses: 1 },
     ),
   );
 });

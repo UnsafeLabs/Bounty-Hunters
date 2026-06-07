@@ -13,6 +13,7 @@ import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
 import * as Ref from "effect/Ref";
 
+import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 
@@ -26,16 +27,26 @@ interface PersistedSavedEnvironmentStorageRecord extends Omit<
 > {
   readonly desktopSsh?: PersistedSavedEnvironmentDesktopSsh;
   readonly encryptedBearerToken?: string;
+  readonly encryptedBearerTokenKeyVersion?: string;
 }
 
 interface SavedEnvironmentRegistryDocument {
   readonly version: number;
+  readonly currentKeyVersion: string;
   readonly records: readonly PersistedSavedEnvironmentStorageRecord[];
 }
 
 interface SavedEnvironmentRegistryStorageDocument {
   readonly version?: number;
+  readonly currentKeyVersion?: string;
   readonly records?: readonly PersistedSavedEnvironmentStorageRecord[];
+}
+
+export interface DesktopSavedEnvironmentKeyRotationResult {
+  readonly previousKeyVersion: string;
+  readonly currentKeyVersion: string;
+  readonly reencryptedSecrets: number;
+  readonly rotatedAt: string;
 }
 
 const DesktopSshTargetSchema = Schema.Struct({
@@ -54,10 +65,12 @@ const PersistedSavedEnvironmentStorageRecordSchema = Schema.Struct({
   lastConnectedAt: Schema.NullOr(Schema.String),
   desktopSsh: Schema.optionalKey(DesktopSshTargetSchema),
   encryptedBearerToken: Schema.optionalKey(Schema.String),
+  encryptedBearerTokenKeyVersion: Schema.optionalKey(Schema.String),
 });
 
 const SavedEnvironmentRegistryDocumentSchema = Schema.Struct({
   version: Schema.optionalKey(Schema.Number),
+  currentKeyVersion: Schema.optionalKey(Schema.String),
   records: Schema.optionalKey(Schema.Array(PersistedSavedEnvironmentStorageRecordSchema)),
 });
 
@@ -101,6 +114,13 @@ export type DesktopSavedEnvironmentsSetSecretError =
   | ElectronSafeStorage.ElectronSafeStorageAvailabilityError
   | ElectronSafeStorage.ElectronSafeStorageEncryptError;
 
+export type DesktopSavedEnvironmentsRotateKeysError =
+  | DesktopSavedEnvironmentsWriteError
+  | DesktopSavedEnvironmentSecretDecodeError
+  | ElectronSafeStorage.ElectronSafeStorageAvailabilityError
+  | ElectronSafeStorage.ElectronSafeStorageDecryptError
+  | ElectronSafeStorage.ElectronSafeStorageEncryptError;
+
 export interface DesktopSavedEnvironmentsShape {
   readonly getRegistry: Effect.Effect<readonly PersistedSavedEnvironmentRecord[]>;
   readonly setRegistry: (
@@ -116,6 +136,10 @@ export interface DesktopSavedEnvironmentsShape {
   readonly removeSecret: (
     environmentId: string,
   ) => Effect.Effect<void, DesktopSavedEnvironmentsWriteError>;
+  readonly rotateKeys: Effect.Effect<
+    DesktopSavedEnvironmentKeyRotationResult,
+    DesktopSavedEnvironmentsRotateKeysError
+  >;
 }
 
 export class DesktopSavedEnvironments extends Context.Service<
@@ -171,6 +195,7 @@ function normalizeSavedEnvironmentRegistryDocument(
 ): SavedEnvironmentRegistryDocument {
   return {
     version: document.version ?? 1,
+    currentKeyVersion: document.currentKeyVersion ?? "safe-storage-v1",
     records: document.records ?? [],
   };
 }
@@ -179,15 +204,20 @@ function readRegistryDocument(
   fileSystem: FileSystem.FileSystem,
   registryPath: string,
 ): Effect.Effect<SavedEnvironmentRegistryDocument> {
+  const emptyDocument: SavedEnvironmentRegistryDocument = {
+    version: 1,
+    currentKeyVersion: "safe-storage-v1",
+    records: [],
+  };
   return fileSystem.readFileString(registryPath).pipe(
     Effect.option,
     Effect.flatMap(
       Option.match({
-        onNone: () => Effect.succeed({ version: 1, records: [] }),
+        onNone: () => Effect.succeed(emptyDocument),
         onSome: (raw) =>
           decodeSavedEnvironmentRegistryDocumentJson(raw).pipe(
             Effect.map(normalizeSavedEnvironmentRegistryDocument),
-            Effect.catch(() => Effect.succeed({ version: 1, records: [] })),
+            Effect.catch(() => Effect.succeed(emptyDocument)),
           ),
       }),
     ),
@@ -215,19 +245,38 @@ function preserveExistingSecrets(
   currentDocument: SavedEnvironmentRegistryDocument,
   records: readonly PersistedSavedEnvironmentRecord[],
 ): SavedEnvironmentRegistryDocument {
-  const encryptedBearerTokenById = new Map(
+  const encryptedBearerTokenById = new Map<
+    string,
+    { readonly token: string; readonly keyVersion: string }
+  >(
     currentDocument.records.flatMap((record) =>
       record.encryptedBearerToken
-        ? [[record.environmentId, record.encryptedBearerToken] as const]
+        ? [
+            [
+              record.environmentId,
+              {
+                token: record.encryptedBearerToken,
+                keyVersion:
+                  record.encryptedBearerTokenKeyVersion ?? currentDocument.currentKeyVersion,
+              },
+            ] as const,
+          ]
         : [],
     ),
   );
 
   return {
     version: currentDocument.version,
+    currentKeyVersion: currentDocument.currentKeyVersion,
     records: records.map((record) => {
-      const encryptedBearerToken = encryptedBearerTokenById.get(record.environmentId);
-      return toSavedEnvironmentStorageRecord(record, Option.fromNullishOr(encryptedBearerToken));
+      const existing = encryptedBearerTokenById.get(record.environmentId);
+      const nextRecord = toSavedEnvironmentStorageRecord(
+        record,
+        Option.fromNullishOr(existing?.token),
+      );
+      return existing
+        ? { ...nextRecord, encryptedBearerTokenKeyVersion: existing.keyVersion }
+        : nextRecord;
     }),
   };
 }
@@ -247,6 +296,7 @@ export const layer = Layer.effect(
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const safeStorage = yield* ElectronSafeStorage.ElectronSafeStorage;
+    const { logInfo } = DesktopObservability.makeComponentLogger("desktop-saved-environments");
 
     const writeDocument = (document: SavedEnvironmentRegistryDocument) =>
       writeRegistryDocument({
@@ -305,13 +355,17 @@ export const layer = Layer.effect(
         let found = false;
         const nextDocument: SavedEnvironmentRegistryDocument = {
           version: document.version,
+          currentKeyVersion: document.currentKeyVersion,
           records: document.records.map((record) => {
             if (record.environmentId !== environmentId) {
               return record;
             }
 
             found = true;
-            return toSavedEnvironmentStorageRecord(record, Option.some(encryptedBearerToken));
+            return {
+              ...toSavedEnvironmentStorageRecord(record, Option.some(encryptedBearerToken)),
+              encryptedBearerTokenKeyVersion: document.currentKeyVersion,
+            };
           }),
         };
 
@@ -337,6 +391,7 @@ export const layer = Layer.effect(
 
         yield* writeDocument({
           version: document.version,
+          currentKeyVersion: document.currentKeyVersion,
           records: document.records.map((record) => {
             if (record.environmentId !== environmentId) {
               return record;
@@ -345,6 +400,59 @@ export const layer = Layer.effect(
           }),
         });
       }),
+      rotateKeys: Effect.gen(function* () {
+        if (!(yield* safeStorage.isEncryptionAvailable)) {
+          return yield* new ElectronSafeStorage.ElectronSafeStorageAvailabilityError({
+            cause: new Error("Encryption is unavailable."),
+          });
+        }
+
+        const document = yield* readRegistryDocument(
+          fileSystem,
+          environment.savedEnvironmentRegistryPath,
+        );
+        const nextKeyVersion = yield* safeStorage.generateEncryptionKeyVersion;
+        const rotatedAt = new Date().toISOString();
+        let reencryptedSecrets = 0;
+        const nextRecords: PersistedSavedEnvironmentStorageRecord[] = [];
+
+        for (const record of document.records) {
+          if (!record.encryptedBearerToken) {
+            nextRecords.push(record);
+            continue;
+          }
+
+          const secretBytes = yield* decodeSecretBytes(record.encryptedBearerToken);
+          const secret = yield* safeStorage.decryptString(secretBytes);
+          const encryptedBearerToken = Encoding.encodeBase64(
+            yield* safeStorage.encryptString(secret),
+          );
+          nextRecords.push({
+            ...record,
+            encryptedBearerToken,
+            encryptedBearerTokenKeyVersion: nextKeyVersion,
+          });
+          reencryptedSecrets += 1;
+        }
+
+        yield* writeDocument({
+          version: document.version,
+          currentKeyVersion: nextKeyVersion,
+          records: nextRecords,
+        });
+        yield* logInfo("desktop saved environment key rotation completed", {
+          rotatedAt,
+          previousKeyVersion: document.currentKeyVersion,
+          currentKeyVersion: nextKeyVersion,
+          reencryptedSecrets,
+        });
+        return {
+          previousKeyVersion: document.currentKeyVersion,
+          currentKeyVersion: nextKeyVersion,
+          reencryptedSecrets,
+          rotatedAt,
+        };
+      }).pipe(Effect.withSpan("desktop.savedEnvironments.rotateKeys")),
     });
   }),
 );
@@ -358,6 +466,7 @@ export const layerTest = (input?: {
     Effect.gen(function* () {
       const recordsRef = yield* Ref.make(input?.records ?? []);
       const secretsRef = yield* Ref.make(new Map(input?.secrets ?? []));
+      const keyVersionRef = yield* Ref.make("test-key-v1");
 
       return DesktopSavedEnvironments.of({
         getRegistry: Ref.get(recordsRef),
@@ -385,6 +494,18 @@ export const layerTest = (input?: {
             nextSecrets.delete(environmentId);
             return nextSecrets;
           }),
+        rotateKeys: Effect.gen(function* () {
+          const previousKeyVersion = yield* Ref.get(keyVersionRef);
+          const currentKeyVersion = "test-key-v2";
+          yield* Ref.set(keyVersionRef, currentKeyVersion);
+          const secrets = yield* Ref.get(secretsRef);
+          return {
+            previousKeyVersion,
+            currentKeyVersion,
+            reencryptedSecrets: secrets.size,
+            rotatedAt: new Date().toISOString(),
+          };
+        }),
       });
     }),
   );

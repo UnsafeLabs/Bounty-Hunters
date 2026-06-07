@@ -6,6 +6,7 @@ import {
   getSavedEnvironmentRegistry,
   getSavedEnvironmentSecret,
   removeSavedEnvironmentSecret,
+  rotateSavedEnvironmentKeys,
   setSavedEnvironmentRegistry,
   setSavedEnvironmentSecret,
 } from "./methods/savedEnvironments.ts";
@@ -55,6 +56,7 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
   yield* ipc.handle(getSavedEnvironmentSecret);
   yield* ipc.handle(setSavedEnvironmentSecret);
   yield* ipc.handle(removeSavedEnvironmentSecret);
+  yield* ipc.handle(rotateSavedEnvironmentKeys);
 
   yield* ipc.handle(discoverSshHosts);
   yield* ipc.handle(ensureSshEnvironment);
