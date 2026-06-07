@@ -6,6 +6,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import type * as Electron from "electron";
+import type { DesktopDeepLinkPayload } from "@t3tools/contracts";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -58,6 +59,9 @@ export interface DesktopWindowShape {
   readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
   readonly handleBackendReady: Effect.Effect<void, DesktopWindowError>;
   readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
+  readonly dispatchDeepLink: (
+    payload: DesktopDeepLinkPayload,
+  ) => Effect.Effect<void, DesktopWindowError>;
   readonly syncAppearance: Effect.Effect<void>;
 }
 
@@ -346,6 +350,24 @@ const make = Effect.gen(function* () {
       const send = () => {
         if (targetWindow.isDestroyed()) return;
         targetWindow.webContents.send(IpcChannels.MENU_ACTION_CHANNEL, action);
+        void runPromise(electronWindow.reveal(targetWindow));
+      };
+
+      if (targetWindow.webContents.isLoadingMainFrame()) {
+        targetWindow.webContents.once("did-finish-load", send);
+        return;
+      }
+
+      send();
+    }),
+    dispatchDeepLink: Effect.fn("desktop.window.dispatchDeepLink")(function* (payload) {
+      yield* Effect.annotateCurrentSpan({ deepLinkType: payload.type });
+      const existingWindow = yield* electronWindow.focusedMainOrFirst;
+      const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* createMain;
+
+      const send = () => {
+        if (targetWindow.isDestroyed()) return;
+        targetWindow.webContents.send(IpcChannels.DEEP_LINK_CHANNEL, payload);
         void runPromise(electronWindow.reveal(targetWindow));
       };
 

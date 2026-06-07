@@ -7,6 +7,7 @@ import * as Ref from "effect/Ref";
 
 import * as NetService from "@t3tools/shared/Net";
 import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as ElectronDeepLinks from "../electron/ElectronDeepLinks.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import { installDesktopIpcHandlers } from "../ipc/DesktopIpcHandlers.ts";
@@ -131,6 +132,7 @@ const fatalStartupCause = <E>(stage: string, cause: Cause.Cause<E>) =>
 
 const bootstrap = Effect.gen(function* () {
   const backendManager = yield* DesktopBackendManager.DesktopBackendManager;
+  const deepLinks = yield* ElectronDeepLinks.DesktopDeepLinks;
   const state = yield* DesktopState.DesktopState;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
@@ -181,13 +183,16 @@ const bootstrap = Effect.gen(function* () {
     yield* backendManager.start;
     yield* logBootstrapInfo("bootstrap backend start requested");
   }
+  yield* deepLinks.flushPending.pipe(Effect.forkScoped, Effect.asVoid);
 }).pipe(Effect.withSpan("desktop.bootstrap"));
 
 const startup = Effect.gen(function* () {
   const appIdentity = yield* DesktopAppIdentity.DesktopAppIdentity;
   const applicationMenu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
   const electronApp = yield* ElectronApp.ElectronApp;
+  const deepLinks = yield* ElectronDeepLinks.DesktopDeepLinks;
   const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
+  const shutdown = yield* DesktopLifecycle.DesktopShutdown;
   const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
   const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
@@ -206,6 +211,12 @@ const startup = Effect.gen(function* () {
 
   yield* appIdentity.configure;
   yield* lifecycle.register;
+  const launchMode = yield* deepLinks.registerLaunchHandlers;
+  if (launchMode === "secondary") {
+    yield* shutdown.request;
+    yield* electronApp.exit(0);
+    return;
+  }
 
   yield* electronApp.whenReady.pipe(
     Effect.withSpan("desktop.electron.whenReady"),

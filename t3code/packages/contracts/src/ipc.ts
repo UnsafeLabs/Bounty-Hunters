@@ -62,7 +62,7 @@ import type {
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
-import { EnvironmentId } from "./baseSchemas.ts";
+import { EnvironmentId, ThreadId } from "./baseSchemas.ts";
 import { AuthBearerBootstrapResult, AuthSessionState, AuthWebSocketTokenResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { EditorId } from "./editor.ts";
@@ -369,6 +369,43 @@ export const PickFolderOptionsSchema = Schema.Struct({
   initialPath: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
+export type DesktopDeepLinkPayload =
+  | {
+      readonly type: "settings";
+    }
+  | {
+      readonly type: "chat-thread";
+      readonly threadId: ThreadId;
+      readonly environmentId?: EnvironmentId;
+    }
+  | {
+      readonly type: "open-project";
+      readonly path: string;
+    }
+  | {
+      readonly type: "error";
+      readonly message: string;
+    };
+
+export const DesktopDeepLinkPayloadSchema = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("settings"),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("chat-thread"),
+    threadId: ThreadId,
+    environmentId: Schema.optionalKey(EnvironmentId),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("open-project"),
+    path: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("error"),
+    message: Schema.String,
+  }),
+]);
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
@@ -415,6 +452,7 @@ export interface DesktopBridge {
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
   onMenuAction: (listener: (action: string) => void) => () => void;
+  onDeepLink: (listener: (payload: DesktopDeepLinkPayload) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;

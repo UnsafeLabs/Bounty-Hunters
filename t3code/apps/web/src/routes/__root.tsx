@@ -1,5 +1,12 @@
-import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
+import {
+  DEFAULT_MODEL,
+  type DesktopDeepLinkPayload,
+  type EnvironmentId,
+  ProviderInstanceId,
+  type ServerLifecycleWelcomePayload,
+  type ThreadId,
+} from "@t3tools/contracts";
+import { scopedProjectKey, scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import {
   Outlet,
   createRootRouteWithContext,
@@ -28,8 +35,13 @@ import {
   toastManager,
 } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
+import { readEnvironmentApi } from "../environmentApi";
 import { readLocalApi } from "../localApi";
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useSettings } from "../hooks/useSettings";
+import { findProjectByPath, inferProjectTitleFromPath } from "../lib/projectPaths";
+import { getLatestThreadForProject } from "../lib/threadSort";
+import { newCommandId, newProjectId } from "../lib/utils";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
@@ -43,7 +55,11 @@ import {
   useServerConfigUpdatedSubscription,
   useServerWelcomeSubscription,
 } from "../rpc/serverState";
-import { useStore } from "../store";
+import {
+  selectProjectsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironments,
+  useStore,
+} from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { syncBrowserChromeTheme } from "../hooks/useTheme";
 import {
@@ -62,6 +78,7 @@ import {
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import { buildThreadRouteParams } from "../threadRoutes";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -278,17 +295,162 @@ function EnvironmentConnectionManagerBootstrap() {
   return null;
 }
 
+function showDesktopDeepLinkError(description: string) {
+  toastManager.add(
+    stackedThreadToast({
+      type: "error",
+      title: "Unable to open t3code link",
+      description,
+    }),
+  );
+}
+
 function EventRouter() {
   const setActiveEnvironmentId = useStore((store) => store.setActiveEnvironmentId);
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const projectGroupingSettings = useSettings(selectProjectGroupingSettings);
+  const defaultThreadEnvMode = useSettings((settings) => settings.defaultThreadEnvMode);
+  const sidebarThreadSortOrder = useSettings((settings) => settings.sidebarThreadSortOrder);
+  const { handleNewThread } = useNewThreadHandler();
   const readPathname = useEffectEvent(() => pathname);
   const handledBootstrapThreadIdRef = useRef<string | null>(null);
   const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
   const lastKeybindingsSuccessToastAtRef = useRef(0);
   const disposedRef = useRef(false);
   const serverConfig = useServerConfig();
+
+  const resolveDeepLinkEnvironmentId = useEffectEvent(
+    (preferredEnvironmentId?: EnvironmentId): EnvironmentId | null => {
+      if (preferredEnvironmentId) {
+        return preferredEnvironmentId;
+      }
+
+      return (
+        serverConfig?.environment.environmentId ??
+        useStore.getState().activeEnvironmentId ??
+        getPrimaryKnownEnvironment()?.environmentId ??
+        null
+      );
+    },
+  );
+
+  const findDeepLinkThreadEnvironment = useEffectEvent(
+    (threadId: ThreadId, preferredEnvironmentId: EnvironmentId | null): EnvironmentId | null => {
+      const state = useStore.getState();
+      if (
+        preferredEnvironmentId &&
+        state.environmentStateById[preferredEnvironmentId]?.threadShellById[threadId]
+      ) {
+        return preferredEnvironmentId;
+      }
+
+      for (const [rawEnvironmentId, environmentState] of Object.entries(
+        state.environmentStateById,
+      )) {
+        if (environmentState.threadShellById[threadId]) {
+          return rawEnvironmentId as EnvironmentId;
+        }
+      }
+
+      return preferredEnvironmentId;
+    },
+  );
+
+  const handleDesktopDeepLink = useEffectEvent((payload: DesktopDeepLinkPayload) => {
+    void (async () => {
+      if (payload.type === "error") {
+        showDesktopDeepLinkError(payload.message);
+        return;
+      }
+
+      if (payload.type === "settings") {
+        await navigate({ to: "/settings" });
+        return;
+      }
+
+      if (payload.type === "chat-thread") {
+        const fallbackEnvironmentId = resolveDeepLinkEnvironmentId(payload.environmentId);
+        const environmentId = findDeepLinkThreadEnvironment(
+          payload.threadId,
+          fallbackEnvironmentId,
+        );
+        if (!environmentId) {
+          showDesktopDeepLinkError("No active environment is available for that thread.");
+          return;
+        }
+
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(scopeThreadRef(environmentId, payload.threadId)),
+        });
+        return;
+      }
+
+      const environmentId = resolveDeepLinkEnvironmentId();
+      if (!environmentId) {
+        showDesktopDeepLinkError("No active environment is available for that project.");
+        return;
+      }
+
+      const api = readEnvironmentApi(environmentId);
+      if (!api) {
+        showDesktopDeepLinkError("The target environment is not connected.");
+        return;
+      }
+
+      const state = useStore.getState();
+      const projects = selectProjectsAcrossEnvironments(state).filter(
+        (project) => project.environmentId === environmentId,
+      );
+      const threads = selectSidebarThreadsAcrossEnvironments(state).filter(
+        (thread) => thread.environmentId === environmentId,
+      );
+      const existingProject = findProjectByPath(projects, payload.path);
+
+      if (existingProject) {
+        const latestThread = getLatestThreadForProject(
+          threads,
+          existingProject.id,
+          sidebarThreadSortOrder,
+        );
+        if (latestThread) {
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(
+              scopeThreadRef(latestThread.environmentId, latestThread.id),
+            ),
+          });
+          return;
+        }
+
+        await handleNewThread(scopeProjectRef(existingProject.environmentId, existingProject.id), {
+          envMode: defaultThreadEnvMode,
+        });
+        return;
+      }
+
+      const projectId = newProjectId();
+      await api.orchestration.dispatchCommand({
+        type: "project.create",
+        commandId: newCommandId(),
+        projectId,
+        title: inferProjectTitleFromPath(payload.path),
+        workspaceRoot: payload.path,
+        createWorkspaceRootIfMissing: true,
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: DEFAULT_MODEL,
+        },
+        createdAt: new Date().toISOString(),
+      });
+      await handleNewThread(scopeProjectRef(environmentId, projectId), {
+        envMode: defaultThreadEnvMode,
+      });
+    })().catch((error) => {
+      showDesktopDeepLinkError(error instanceof Error ? error.message : "An error occurred.");
+    });
+  });
 
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
     if (!payload) return;
@@ -419,6 +581,12 @@ function EventRouter() {
     return () => {
       disposedRef.current = true;
     };
+  }, []);
+
+  useEffect(() => {
+    return window.desktopBridge?.onDeepLink((payload) => {
+      handleDesktopDeepLink(payload);
+    });
   }, []);
 
   useServerWelcomeSubscription(handleWelcome);

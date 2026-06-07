@@ -11,8 +11,10 @@ const {
   quitMock,
   relaunchMock,
   removeListenerMock,
+  requestSingleInstanceLockMock,
   setAboutPanelOptionsMock,
   setAppUserModelIdMock,
+  setAsDefaultProtocolClientMock,
   setDesktopNameMock,
   setDockIconMock,
   setNameMock,
@@ -27,8 +29,10 @@ const {
   quitMock: vi.fn(),
   relaunchMock: vi.fn(),
   removeListenerMock: vi.fn(),
+  requestSingleInstanceLockMock: vi.fn(() => true),
   setAboutPanelOptionsMock: vi.fn(),
   setAppUserModelIdMock: vi.fn(),
+  setAsDefaultProtocolClientMock: vi.fn(() => true),
   setDesktopNameMock: vi.fn(),
   setDockIconMock: vi.fn(),
   setNameMock: vi.fn(),
@@ -52,9 +56,11 @@ vi.mock("electron", () => ({
     quit: quitMock,
     relaunch: relaunchMock,
     removeListener: removeListenerMock,
+    requestSingleInstanceLock: requestSingleInstanceLockMock,
     runningUnderARM64Translation: false,
     setAboutPanelOptions: setAboutPanelOptionsMock,
     setAppUserModelId: setAppUserModelIdMock,
+    setAsDefaultProtocolClient: setAsDefaultProtocolClientMock,
     setDesktopName: setDesktopNameMock,
     setName: setNameMock,
     setPath: setPathMock,
@@ -73,6 +79,8 @@ describe("ElectronApp", () => {
     quitMock.mockClear();
     relaunchMock.mockClear();
     removeListenerMock.mockClear();
+    requestSingleInstanceLockMock.mockClear();
+    setAsDefaultProtocolClientMock.mockClear();
     setPathMock.mockClear();
   });
 
@@ -104,6 +112,23 @@ describe("ElectronApp", () => {
 
       assert.deepEqual(onMock.mock.calls, [["activate", listener]]);
       assert.deepEqual(removeListenerMock.mock.calls, [["activate", listener]]);
+    }).pipe(Effect.provide(ElectronApp.layer)),
+  );
+
+  it.effect("registers protocol clients and single instance lock through the service", () =>
+    Effect.gen(function* () {
+      const electronApp = yield* ElectronApp.ElectronApp;
+      const hasLock = yield* electronApp.requestSingleInstanceLock;
+      const registered = yield* electronApp.setAsDefaultProtocolClient("t3code", "/electron", [
+        "dist-electron/main.cjs",
+      ]);
+
+      assert.isTrue(hasLock);
+      assert.isTrue(registered);
+      assert.deepEqual(requestSingleInstanceLockMock.mock.calls, [[]]);
+      assert.deepEqual(setAsDefaultProtocolClientMock.mock.calls, [
+        ["t3code", "/electron", ["dist-electron/main.cjs"]],
+      ]);
     }).pipe(Effect.provide(ElectronApp.layer)),
   );
 });
