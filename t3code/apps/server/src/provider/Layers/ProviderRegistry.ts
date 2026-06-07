@@ -41,6 +41,7 @@ import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
 import { ServerConfig } from "../../config.ts";
+import { makeProviderCache } from "../Services/ProviderCache.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
 import {
@@ -198,6 +199,7 @@ export const ProviderRegistryLive = Layer.effect(
       PubSub.unbounded<ReadonlyArray<ServerProvider>>(),
       PubSub.shutdown,
     );
+    const providerCache = yield* makeProviderCache();
 
     // Boot-only: hydrate `providersRef` from the on-disk per-instance
     // cache so the UI has something to render during the first refresh.
@@ -429,14 +431,16 @@ export const ProviderRegistryLive = Layer.effect(
 
     const refreshOneSource = Effect.fn("refreshOneSource")(function* (
       providerSource: ProviderSnapshotSource,
+      options: { readonly useCache?: boolean } = {},
     ) {
-      return yield* providerSource.refresh.pipe(
-        Effect.flatMap((nextProvider) =>
-          correlateSnapshotWithSource(providerSource, nextProvider).pipe(
-            Effect.flatMap(syncProvider),
-          ),
-        ),
+      const refreshSnapshot = providerSource.refresh.pipe(
+        Effect.flatMap((nextProvider) => correlateSnapshotWithSource(providerSource, nextProvider)),
       );
+      const nextProvider =
+        options.useCache === false
+          ? yield* refreshSnapshot
+          : yield* providerCache.getModelList(providerSource.instanceId, refreshSnapshot);
+      return yield* syncProvider(nextProvider);
     });
 
     const refreshAll = Effect.fn("refreshAll")(function* () {
@@ -539,6 +543,7 @@ export const ProviderRegistryLive = Layer.effect(
           if (carriedOver.has(instanceId)) {
             continue;
           }
+          yield* providerCache.invalidateProvider(instanceId);
           newlyAdded.push([instanceId, instance] as const);
         }
 
@@ -563,7 +568,9 @@ export const ProviderRegistryLive = Layer.effect(
         yield* Effect.forEach(
           newlyAdded,
           ([, instance]) =>
-            refreshOneSource(buildSnapshotSource(instance)).pipe(Effect.ignoreCause({ log: true })),
+            refreshOneSource(buildSnapshotSource(instance), { useCache: false }).pipe(
+              Effect.ignoreCause({ log: true }),
+            ),
           { concurrency: "unbounded", discard: true },
         );
         yield* upsertProviders(unavailableProviders, {
@@ -579,6 +586,13 @@ export const ProviderRegistryLive = Layer.effect(
 
         // Drop aggregator state for instances that have disappeared —
         // otherwise the UI would keep rendering ghosts.
+        const removedInstanceIds = Array.from(previousSubs.keys()).filter(
+          (instanceId) => !knownInstanceIds.has(instanceId),
+        );
+        yield* Effect.forEach(removedInstanceIds, providerCache.invalidateProvider, {
+          discard: true,
+        });
+
         const [previousProviders, providers] = yield* Ref.modify(
           providersRef,
           (previousProviders) => {
