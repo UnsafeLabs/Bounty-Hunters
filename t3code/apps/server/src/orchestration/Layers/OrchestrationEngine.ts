@@ -137,7 +137,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           commandId: envelope.command.commandId,
         });
         if (Option.isSome(existingReceipt)) {
-          if (existingReceipt.value.status === "accepted") {
+          if (
+            existingReceipt.value.status === "accepted" ||
+            existingReceipt.value.status === "interrupted"
+          ) {
             return {
               sequence: existingReceipt.value.resultSequence,
             };
@@ -284,6 +287,40 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     );
   };
 
+  const checkpointInterruptedEnvelope = (
+    envelope: CommandEnvelope,
+    reason: string,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const interruptedAt = yield* nowIso;
+      const aggregateRef = commandToAggregateRef(envelope.command);
+      yield* commandReceiptRepository.upsert({
+        commandId: envelope.command.commandId,
+        aggregateKind: aggregateRef.aggregateKind,
+        aggregateId: aggregateRef.aggregateId,
+        acceptedAt: interruptedAt,
+        resultSequence: commandReadModel.snapshotSequence,
+        status: "interrupted",
+        error: JSON.stringify({
+          reason,
+          commandId: envelope.command.commandId,
+          commandType: envelope.command.type,
+          fiberId: "dispatch",
+          interruptedAt,
+          snapshotSequence: commandReadModel.snapshotSequence,
+        }),
+      });
+      yield* Effect.logWarning("orchestration command dispatch interrupted").pipe(
+        Effect.annotateLogs({
+          commandId: envelope.command.commandId,
+          commandType: envelope.command.type,
+          fiberId: "dispatch",
+          interruptedAt,
+          snapshotSequence: commandReadModel.snapshotSequence,
+        }),
+      );
+    }).pipe(Effect.catch(() => Effect.void));
+
   yield* projectionPipeline.bootstrap;
   commandReadModel = yield* projectionSnapshotQuery.getCommandReadModel();
 
@@ -299,17 +336,26 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
-      yield* Queue.offer(commandQueue, {
+      const envelope = {
         command,
         result,
         startedAtMs: yield* Clock.currentTimeMillis,
-      });
-      return yield* Deferred.await(result);
+      };
+      yield* Queue.offer(commandQueue, envelope);
+      return yield* Deferred.await(result).pipe(
+        Effect.onInterrupt(() =>
+          checkpointInterruptedEnvelope(envelope, "dispatch fiber interrupted before completion"),
+        ),
+      );
     });
+
+  const getInterruptedCommands: OrchestrationEngineShape["getInterruptedCommands"] = (input) =>
+    commandReceiptRepository.listInterruptedByAggregate(input);
 
   return {
     readEvents,
     dispatch,
+    getInterruptedCommands,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
     // each independently receive all domain events.

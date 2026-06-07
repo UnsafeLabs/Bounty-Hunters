@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Metric from "effect/Metric";
@@ -21,6 +22,11 @@ import { describe, expect, it } from "vitest";
 
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
+import {
+  OrchestrationCommandReceiptRepository,
+  type OrchestrationCommandReceipt,
+  type OrchestrationCommandReceiptRepositoryShape,
+} from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import {
@@ -871,6 +877,117 @@ describe("OrchestrationEngine", () => {
     expect(
       eventsAfterRetry.filter((event) => event.commandId === turnStartCommand.commandId),
     ).toHaveLength(2);
+
+    await runtime.dispose();
+  });
+
+  it("checkpoints interrupted dispatch fibers for reconnect resume queries", async () => {
+    const receipts = new Map<string, OrchestrationCommandReceipt>();
+    const receiptRepository: OrchestrationCommandReceiptRepositoryShape = {
+      upsert: (receipt) =>
+        Effect.sync(() => {
+          receipts.set(receipt.commandId, receipt);
+        }),
+      getByCommandId: ({ commandId }) =>
+        Effect.sync(() => Option.fromNullable(receipts.get(commandId))),
+      listInterruptedByAggregate: ({ aggregateKind, aggregateId }) =>
+        Effect.sync(() =>
+          Array.from(receipts.values()).filter(
+            (receipt) =>
+              receipt.aggregateKind === aggregateKind &&
+              receipt.aggregateId === aggregateId &&
+              receipt.status === "interrupted",
+          ),
+        ),
+    };
+    let blockInterruptedCommand = false;
+    const blockingProjectionPipeline: OrchestrationProjectionPipelineShape = {
+      bootstrap: Effect.void,
+      projectEvent: (event) => {
+        if (
+          blockInterruptedCommand &&
+          event.commandId === CommandId.make("cmd-thread-interrupted-update")
+        ) {
+          return Effect.never;
+        }
+        return Effect.void;
+      },
+    };
+
+    const runtime = ManagedRuntime.make(
+      OrchestrationEngineLive.pipe(
+        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+        Layer.provide(Layer.succeed(OrchestrationProjectionPipeline, blockingProjectionPipeline)),
+        Layer.provide(OrchestrationEventStoreLive),
+        Layer.provide(Layer.succeed(OrchestrationCommandReceiptRepository, receiptRepository)),
+        Layer.provide(RepositoryIdentityResolverLive),
+        Layer.provide(SqlitePersistenceMemory),
+        Layer.provide(NodeServices.layer),
+      ),
+    );
+    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const createdAt = now();
+
+    await runtime.runPromise(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-project-interrupt-create"),
+        projectId: asProjectId("project-interrupt"),
+        title: "Interrupt Project",
+        workspaceRoot: "/tmp/project-interrupt",
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      }),
+    );
+    await runtime.runPromise(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-thread-interrupt-create"),
+        threadId: ThreadId.make("thread-interrupt"),
+        projectId: asProjectId("project-interrupt"),
+        title: "interrupt",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+
+    blockInterruptedCommand = true;
+    const fiber = await runtime.runPromise(
+      Effect.fork(
+        engine.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.make("cmd-thread-interrupted-update"),
+          threadId: ThreadId.make("thread-interrupt"),
+          title: "interrupted title",
+        }),
+      ),
+    );
+
+    await runtime.runPromise(Fiber.interrupt(fiber));
+
+    const interruptedCommands = await runtime.runPromise(
+      engine.getInterruptedCommands({
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-interrupt"),
+      }),
+    );
+
+    expect(interruptedCommands).toHaveLength(1);
+    expect(interruptedCommands[0]?.commandId).toBe("cmd-thread-interrupted-update");
+    expect(interruptedCommands[0]?.status).toBe("interrupted");
+    expect(interruptedCommands[0]?.resultSequence).toBe(2);
+    expect(interruptedCommands[0]?.error).toContain("dispatch fiber interrupted");
+    expect(interruptedCommands[0]?.error).toContain("fiberId");
 
     await runtime.dispose();
   });

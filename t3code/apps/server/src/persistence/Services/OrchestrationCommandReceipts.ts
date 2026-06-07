@@ -38,6 +38,12 @@ export const GetByCommandIdInput = Schema.Struct({
 });
 export type GetByCommandIdInput = typeof GetByCommandIdInput.Type;
 
+export const ListInterruptedByAggregateInput = Schema.Struct({
+  aggregateKind: OrchestrationAggregateKind,
+  aggregateId: Schema.Union([ProjectId, ThreadId]),
+});
+export type ListInterruptedByAggregateInput = typeof ListInterruptedByAggregateInput.Type;
+
 /**
  * OrchestrationCommandReceiptRepositoryShape - Service API for command receipts.
  */
@@ -58,6 +64,16 @@ export interface OrchestrationCommandReceiptRepositoryShape {
     input: GetByCommandIdInput,
   ) => Effect.Effect<
     Option.Option<OrchestrationCommandReceipt>,
+    OrchestrationCommandReceiptRepositoryError
+  >;
+
+  /**
+   * Read interrupted command receipts for reconnect/resume decisions.
+   */
+  readonly listInterruptedByAggregate: (
+    input: ListInterruptedByAggregateInput,
+  ) => Effect.Effect<
+    ReadonlyArray<OrchestrationCommandReceipt>,
     OrchestrationCommandReceiptRepositoryError
   >;
 }

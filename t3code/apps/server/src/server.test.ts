@@ -632,6 +632,7 @@ const buildAppUnderTest = (options?: {
         Layer.mock(OrchestrationEngineService)({
           readEvents: () => Stream.empty,
           dispatch: () => Effect.succeed({ sequence: 0 }),
+          getInterruptedCommands: () => Effect.succeed([]),
           streamDomainEvents: Stream.empty,
           ...options?.layers?.orchestrationEngine,
         }),

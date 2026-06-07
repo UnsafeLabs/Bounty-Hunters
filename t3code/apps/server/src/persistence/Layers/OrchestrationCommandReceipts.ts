@@ -7,6 +7,7 @@ import { toPersistenceSqlError } from "../Errors.ts";
 
 import {
   GetByCommandIdInput,
+  ListInterruptedByAggregateInput,
   OrchestrationCommandReceipt,
   OrchestrationCommandReceiptRepository,
   type OrchestrationCommandReceiptRepositoryShape,
@@ -66,6 +67,27 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
       `,
   });
 
+  const listInterruptedRowsByAggregate = SqlSchema.findAll({
+    Request: ListInterruptedByAggregateInput,
+    Result: OrchestrationCommandReceipt,
+    execute: ({ aggregateKind, aggregateId }) =>
+      sql`
+        SELECT
+          command_id AS "commandId",
+          aggregate_kind AS "aggregateKind",
+          aggregate_id AS "aggregateId",
+          accepted_at AS "acceptedAt",
+          result_sequence AS "resultSequence",
+          status,
+          error
+        FROM orchestration_command_receipts
+        WHERE aggregate_kind = ${aggregateKind}
+          AND aggregate_id = ${aggregateId}
+          AND status = 'interrupted'
+        ORDER BY accepted_at DESC, command_id ASC
+      `,
+  });
+
   const upsert: OrchestrationCommandReceiptRepositoryShape["upsert"] = (receipt) =>
     upsertReceiptRow(receipt).pipe(
       Effect.mapError(toPersistenceSqlError("OrchestrationCommandReceiptRepository.upsert:query")),
@@ -78,9 +100,20 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
       ),
     );
 
+  const listInterruptedByAggregate: OrchestrationCommandReceiptRepositoryShape["listInterruptedByAggregate"] =
+    (input) =>
+      listInterruptedRowsByAggregate(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlError(
+            "OrchestrationCommandReceiptRepository.listInterruptedByAggregate:query",
+          ),
+        ),
+      );
+
   return {
     upsert,
     getByCommandId,
+    listInterruptedByAggregate,
   } satisfies OrchestrationCommandReceiptRepositoryShape;
 });
 
