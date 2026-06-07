@@ -7,6 +7,7 @@ import {
   SourceControlProviderError,
   type ChangeRequest,
   type ChangeRequestState,
+  type VcsStatusResult,
 } from "@t3tools/contracts";
 
 import * as GitHubCli from "./GitHubCli.ts";
@@ -46,6 +47,30 @@ function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeReq
     ...(summary.headRepositoryOwnerLogin !== undefined
       ? { headRepositoryOwnerLogin: summary.headRepositoryOwnerLogin }
       : {}),
+  };
+}
+
+function normalizeGitHubBranchProtection(raw: string): NonNullable<VcsStatusResult["branchProtection"]> {
+  const data = JSON.parse(raw) as {
+    required_pull_request_reviews?: unknown;
+    required_status_checks?: unknown;
+    allow_force_pushes?: { enabled?: boolean };
+  };
+  const requiredReviews = data.required_pull_request_reviews != null;
+  const requiredStatusChecks = data.required_status_checks != null;
+  const allowsForcePushes = data.allow_force_pushes?.enabled === true;
+  const details = [
+    requiredReviews ? "Pull request reviews required" : null,
+    requiredStatusChecks ? "Status checks required" : null,
+    allowsForcePushes ? "Force pushes allowed" : "Force pushes disabled",
+  ].filter((value): value is string => value !== null);
+  return {
+    protected: true,
+    requiresPullRequest: requiredReviews,
+    requiredReviews,
+    requiredStatusChecks,
+    allowsForcePushes,
+    details,
   };
 }
 
@@ -191,6 +216,25 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
       github
         .getDefaultBranch(input)
         .pipe(Effect.mapError((error) => providerError("getDefaultBranch", error))),
+    getBranchProtection: (input) =>
+      github
+        .execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            `repos/:owner/:repo/branches/${encodeURIComponent(input.branchName)}/protection`,
+          ],
+        })
+        .pipe(
+          Effect.map((result) => normalizeGitHubBranchProtection(result.stdout.trim())),
+          Effect.catch((error) => {
+            const detail = error.detail.toLowerCase();
+            if (detail.includes("404") || detail.includes("branch not protected")) {
+              return Effect.succeed(null);
+            }
+            return Effect.fail(providerError("getBranchProtection", error));
+          }),
+        ),
     checkoutChangeRequest: (input) =>
       github
         .checkoutPullRequest(input)

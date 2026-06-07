@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
+import { SourceControlProviderError, type ChangeRequest, type VcsStatusResult } from "@t3tools/contracts";
 
 import * as GitLabCli from "./GitLabCli.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
@@ -38,6 +38,33 @@ function toChangeRequest(summary: GitLabCli.GitLabMergeRequestSummary): ChangeRe
     ...(summary.headRepositoryOwnerLogin !== undefined
       ? { headRepositoryOwnerLogin: summary.headRepositoryOwnerLogin }
       : {}),
+  };
+}
+
+function normalizeGitLabBranchProtection(raw: string): NonNullable<VcsStatusResult["branchProtection"]> {
+  const data = JSON.parse(raw) as {
+    push_access_levels?: ReadonlyArray<{ access_level?: number }>;
+    merge_access_levels?: ReadonlyArray<{ access_level?: number }>;
+    code_owner_approval_required?: boolean;
+  };
+  const allowsForcePushes = false;
+  const requiredReviews = data.code_owner_approval_required === true;
+  const requiresPullRequest = (data.push_access_levels ?? []).some(
+    (level) => level.access_level === 0,
+  );
+  const requiredStatusChecks = false;
+  const details = [
+    requiresPullRequest ? "Direct pushes blocked" : null,
+    requiredReviews ? "Code owner approval required" : null,
+    "Force pushes disabled",
+  ].filter((value): value is string => value !== null);
+  return {
+    protected: true,
+    requiresPullRequest,
+    requiredReviews,
+    requiredStatusChecks,
+    allowsForcePushes,
+    details,
   };
 }
 
@@ -136,6 +163,25 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
       gitlab
         .getDefaultBranch(input)
         .pipe(Effect.mapError((error) => providerError("getDefaultBranch", error))),
+    getBranchProtection: (input) =>
+      gitlab
+        .execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            `projects/:fullpath/protected_branches/${encodeURIComponent(input.branchName)}`,
+          ],
+        })
+        .pipe(
+          Effect.map((result) => normalizeGitLabBranchProtection(result.stdout.trim())),
+          Effect.catch((error) => {
+            const detail = error.detail.toLowerCase();
+            if (detail.includes("404") || detail.includes("not found")) {
+              return Effect.succeed(null);
+            }
+            return Effect.fail(providerError("getBranchProtection", error));
+          }),
+        ),
     checkoutChangeRequest: (input) =>
       gitlab
         .checkoutMergeRequest(input)

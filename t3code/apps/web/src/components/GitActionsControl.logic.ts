@@ -43,6 +43,8 @@ export type DefaultBranchConfirmableAction =
   | "commit_push"
   | "commit_push_pr";
 
+export type ProtectedBranchConfirmableAction = "push" | "commit_push";
+
 function resolveChangeRequestTerminology(
   gitStatus: VcsStatusResult | null,
 ): ChangeRequestTerminology {
@@ -320,6 +322,27 @@ export function requiresDefaultBranchConfirmation(
     action === "commit_push" ||
     action === "commit_push_pr"
   );
+}
+
+export function requiresProtectedBranchConfirmation(
+  action: GitStackedAction,
+  branchProtection: VcsStatusResult["branchProtection"] | null | undefined,
+): action is ProtectedBranchConfirmableAction {
+  if (!branchProtection?.protected || !branchProtection.requiresPullRequest) {
+    return false;
+  }
+  return action === "push" || action === "commit_push";
+}
+
+export function resolveBranchProtectionDetails(
+  branchProtection: VcsStatusResult["branchProtection"] | null | undefined,
+): string {
+  if (!branchProtection?.protected) {
+    return "Branch is not protected.";
+  }
+  return branchProtection.details.length > 0
+    ? branchProtection.details.join(", ")
+    : "Branch protection is active.";
 }
 
 export function resolveDefaultBranchActionDialogCopy(input: {

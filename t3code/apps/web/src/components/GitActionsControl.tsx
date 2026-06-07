@@ -37,7 +37,10 @@ import {
   type GitActionMenuItem,
   type GitQuickAction,
   type DefaultBranchConfirmableAction,
+  type ProtectedBranchConfirmableAction,
   requiresDefaultBranchConfirmation,
+  requiresProtectedBranchConfirmation,
+  resolveBranchProtectionDetails,
   resolveDefaultBranchActionDialogCopy,
   resolveLiveThreadBranchUpdate,
   resolveQuickAction,
@@ -97,6 +100,15 @@ interface PendingDefaultBranchAction {
   filePaths?: string[];
 }
 
+interface PendingProtectedBranchAction {
+  action: ProtectedBranchConfirmableAction;
+  branchName: string;
+  details: string;
+  commitMessage?: string;
+  onConfirmed?: () => void;
+  filePaths?: string[];
+}
+
 type PublishProviderKind = Extract<
   SourceControlProviderKind,
   "github" | "gitlab" | "bitbucket" | "azure-devops"
@@ -121,6 +133,7 @@ interface RunGitActionWithToastInput {
   commitMessage?: string;
   onConfirmed?: () => void;
   skipDefaultBranchPrompt?: boolean;
+  skipProtectedBranchPrompt?: boolean;
   statusOverride?: VcsStatusResult | null;
   featureBranch?: boolean;
   progressToastId?: GitActionToastId;
@@ -977,6 +990,8 @@ export default function GitActionsControl({
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
+  const [pendingProtectedBranchAction, setPendingProtectedBranchAction] =
+    useState<PendingProtectedBranchAction | null>(null);
   const activeGitActionProgressRef = useRef<ActiveGitActionProgress | null>(null);
   let runGitActionWithToast: (input: RunGitActionWithToastInput) => Promise<void>;
 
@@ -1238,6 +1253,7 @@ export default function GitActionsControl({
       commitMessage,
       onConfirmed,
       skipDefaultBranchPrompt = false,
+      skipProtectedBranchPrompt = false,
       statusOverride,
       featureBranch = false,
       progressToastId,
@@ -1246,6 +1262,7 @@ export default function GitActionsControl({
       const actionStatus = statusOverride ?? gitStatusForActions;
       const actionBranch = actionStatus?.refName ?? null;
       const actionIsDefaultBranch = featureBranch ? false : isDefaultRef;
+      const actionBranchProtection = featureBranch ? null : actionStatus?.branchProtection;
       const actionCanCommit =
         action === "commit" || action === "commit_push" || action === "commit_push_pr";
       const includesCommit =
@@ -1268,6 +1285,21 @@ export default function GitActionsControl({
           action,
           branchName: actionBranch,
           includesCommit,
+          ...(commitMessage ? { commitMessage } : {}),
+          ...(onConfirmed ? { onConfirmed } : {}),
+          ...(filePaths ? { filePaths } : {}),
+        });
+        return;
+      }
+      if (
+        !skipProtectedBranchPrompt &&
+        actionBranch &&
+        requiresProtectedBranchConfirmation(action, actionBranchProtection)
+      ) {
+        setPendingProtectedBranchAction({
+          action,
+          branchName: actionBranch,
+          details: resolveBranchProtectionDetails(actionBranchProtection),
           ...(commitMessage ? { commitMessage } : {}),
           ...(onConfirmed ? { onConfirmed } : {}),
           ...(filePaths ? { filePaths } : {}),
@@ -1485,6 +1517,19 @@ export default function GitActionsControl({
       ...(filePaths ? { filePaths } : {}),
       featureBranch: true,
       skipDefaultBranchPrompt: true,
+    });
+  };
+
+  const continuePendingProtectedBranchAction = () => {
+    if (!pendingProtectedBranchAction) return;
+    const { action, commitMessage, onConfirmed, filePaths } = pendingProtectedBranchAction;
+    setPendingProtectedBranchAction(null);
+    void runGitActionWithToast({
+      action,
+      ...(commitMessage ? { commitMessage } : {}),
+      ...(onConfirmed ? { onConfirmed } : {}),
+      ...(filePaths ? { filePaths } : {}),
+      skipProtectedBranchPrompt: true,
     });
   };
 
@@ -1754,6 +1799,12 @@ export default function GitActionsControl({
                     Behind upstream. Pull/rebase first.
                   </p>
                 )}
+              {gitStatusForActions?.branchProtection?.protected ? (
+                <p className="px-2 py-1.5 text-xs text-warning">
+                  Protected branch:{" "}
+                  {resolveBranchProtectionDetails(gitStatusForActions.branchProtection)}
+                </p>
+              ) : null}
               {gitStatusError && (
                 <p className="px-2 py-1.5 text-xs text-destructive">{gitStatusError.message}</p>
               )}
@@ -1976,6 +2027,38 @@ export default function GitActionsControl({
               onClick={checkoutFeatureBranchAndContinuePendingAction}
             >
               Checkout feature branch & continue
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog
+        open={pendingProtectedBranchAction !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingProtectedBranchAction(null);
+          }
+        }}
+      >
+        <DialogPopup className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Push to protected branch?</DialogTitle>
+            <DialogDescription>
+              {pendingProtectedBranchAction
+                ? `"${pendingProtectedBranchAction.branchName}" requires pull request review. ${pendingProtectedBranchAction.details}`
+                : undefined}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingProtectedBranchAction(null)}
+            >
+              Abort
+            </Button>
+            <Button size="sm" onClick={continuePendingProtectedBranchAction}>
+              Push directly
             </Button>
           </DialogFooter>
         </DialogPopup>

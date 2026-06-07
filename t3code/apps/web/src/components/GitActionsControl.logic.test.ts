@@ -4,6 +4,8 @@ import {
   buildGitActionProgressStages,
   buildMenuItems,
   requiresDefaultBranchConfirmation,
+  requiresProtectedBranchConfirmation,
+  resolveBranchProtectionDetails,
   resolveAutoFeatureBranchName,
   resolveDefaultBranchActionDialogCopy,
   resolveLiveThreadBranchUpdate,
@@ -882,6 +884,40 @@ describe("requiresDefaultBranchConfirmation", () => {
     assert.isTrue(requiresDefaultBranchConfirmation("commit_push_pr", true));
     assert.isFalse(requiresDefaultBranchConfirmation("commit_push", false));
     assert.isFalse(requiresDefaultBranchConfirmation("push", false));
+  });
+});
+
+describe("branch protection helpers", () => {
+  it("requires confirmation before direct pushes to review-protected branches", () => {
+    const protectedBranch = {
+      protected: true,
+      requiresPullRequest: true,
+      requiredReviews: true,
+      requiredStatusChecks: true,
+      allowsForcePushes: false,
+      details: ["Pull request reviews required", "Status checks required"],
+    };
+
+    assert.isTrue(requiresProtectedBranchConfirmation("push", protectedBranch));
+    assert.isTrue(requiresProtectedBranchConfirmation("commit_push", protectedBranch));
+    assert.isFalse(requiresProtectedBranchConfirmation("create_pr", protectedBranch));
+    assert.isFalse(requiresProtectedBranchConfirmation("commit_push_pr", protectedBranch));
+  });
+
+  it("does not warn for unprotected branches and summarizes protection details", () => {
+    assert.isFalse(requiresProtectedBranchConfirmation("push", null));
+    assert.equal(resolveBranchProtectionDetails(null), "Branch is not protected.");
+    assert.equal(
+      resolveBranchProtectionDetails({
+        protected: true,
+        requiresPullRequest: true,
+        requiredReviews: true,
+        requiredStatusChecks: false,
+        allowsForcePushes: false,
+        details: ["Pull request reviews required", "Force pushes disabled"],
+      }),
+      "Pull request reviews required, Force pushes disabled",
+    );
   });
 });
 

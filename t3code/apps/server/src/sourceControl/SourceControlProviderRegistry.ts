@@ -73,6 +73,7 @@ function unsupportedProvider(
     getRepositoryCloneUrls: () => unsupported("getRepositoryCloneUrls"),
     createRepository: () => unsupported("createRepository"),
     getDefaultBranch: () => unsupported("getDefaultBranch"),
+    getBranchProtection: () => unsupported("getBranchProtection"),
     checkoutChangeRequest: () => unsupported("checkoutChangeRequest"),
   });
 }
@@ -146,6 +147,11 @@ function bindProviderContext(
     createRepository: (input) => provider.createRepository(input),
     getDefaultBranch: (input) =>
       provider.getDefaultBranch({
+        ...input,
+        context: input.context ?? context,
+      }),
+    getBranchProtection: (input) =>
+      provider.getBranchProtection({
         ...input,
         context: input.context ?? context,
       }),

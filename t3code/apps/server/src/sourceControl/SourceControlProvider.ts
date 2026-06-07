@@ -8,6 +8,7 @@ import type {
   SourceControlProviderKind,
   SourceControlRepositoryCloneUrls,
   SourceControlRepositoryVisibility,
+  VcsStatusResult,
 } from "@t3tools/contracts";
 
 export interface SourceControlProviderContext {
@@ -88,6 +89,14 @@ export interface SourceControlProviderShape {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;
   }) => Effect.Effect<string | null, SourceControlProviderError>;
+  readonly getBranchProtection: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+    readonly branchName: string;
+  }) => Effect.Effect<
+    Exclude<VcsStatusResult["branchProtection"], undefined>,
+    SourceControlProviderError
+  >;
   readonly checkoutChangeRequest: (input: {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;

@@ -2,7 +2,7 @@ import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, LockIcon } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -45,6 +45,8 @@ import {
   ComboboxTrigger,
 } from "./ui/combobox";
 import { stackedThreadToast, toastManager } from "./ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { resolveBranchProtectionDetails } from "./GitActionsControl.logic";
 
 interface BranchToolbarBranchSelectorProps {
   className?: string;
@@ -495,6 +497,12 @@ export function BranchToolbarBranchSelector({
     effectiveEnvMode,
     resolvedActiveBranch,
   });
+  const branchProtection = branchStatusQuery.data?.branchProtection;
+  const showProtectedBranchLock =
+    branchProtection?.protected === true &&
+    resolvedActiveBranch !== null &&
+    resolvedActiveBranch === branchStatusQuery.data?.refName;
+  const branchProtectionDetails = resolveBranchProtectionDetails(branchProtection);
 
   function renderPickerItem(itemValue: string, index: number) {
     if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
@@ -594,6 +602,16 @@ export function BranchToolbarBranchSelector({
         className={cn("min-w-0 text-muted-foreground/70 hover:text-foreground/80", className)}
         disabled={(isBranchesSearchPending && refs.length === 0) || isBranchActionPending}
       >
+        {showProtectedBranchLock ? (
+          <Tooltip>
+            <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+              <LockIcon className="size-3 text-warning" />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom" align="center" className="max-w-72">
+              {branchProtectionDetails}
+            </TooltipPopup>
+          </Tooltip>
+        ) : null}
         <span className="min-w-0 max-w-[240px] truncate">{triggerLabel}</span>
         <ChevronDownIcon className="shrink-0" />
       </ComboboxTrigger>

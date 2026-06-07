@@ -96,6 +96,7 @@ const SHORT_SHA_LENGTH = 7;
 const TOAST_DESCRIPTION_MAX = 72;
 const STATUS_RESULT_CACHE_TTL = Duration.seconds(1);
 const STATUS_RESULT_CACHE_CAPACITY = 2_048;
+const BRANCH_PROTECTION_CACHE_TTL = Duration.minutes(5);
 type StripProgressContext<T> = T extends any ? Omit<T, "actionId" | "cwd" | "action"> : never;
 type GitActionProgressPayload = StripProgressContext<GitActionProgressEvent>;
 type GitActionProgressEmitter = (event: GitActionProgressPayload) => Effect.Effect<void, never>;
@@ -739,6 +740,21 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     normalizeStatusCacheKey(cwd).pipe(
       Effect.flatMap((cacheKey) => Cache.invalidate(localStatusResultCache, cacheKey)),
     );
+  const branchProtectionCacheKey = (cwd: string, branch: string) =>
+    normalizeStatusCacheKey(cwd).pipe(Effect.map((cacheKey) => `${cacheKey}\0${branch}`));
+  const readBranchProtection = Effect.fn("readBranchProtection")(function* (cacheKey: string) {
+    const separatorIndex = cacheKey.lastIndexOf("\0");
+    const cwd = cacheKey.slice(0, separatorIndex);
+    const branchName = cacheKey.slice(separatorIndex + 1);
+    return yield* (yield* sourceControlProvider(cwd))
+      .getBranchProtection({ cwd, branchName })
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+  });
+  const branchProtectionResultCache = yield* Cache.makeWith(readBranchProtection, {
+    capacity: STATUS_RESULT_CACHE_CAPACITY,
+    timeToLive: (exit) =>
+      Exit.isSuccess(exit) ? BRANCH_PROTECTION_CACHE_TTL : Duration.zero,
+  });
   const readRemoteStatus = Effect.fn("readRemoteStatus")(function* (cwd: string) {
     const details = yield* gitCore
       .statusDetails(cwd)
@@ -763,6 +779,12 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
             Effect.catch(() => Effect.succeed(null)),
           )
         : null;
+    const branchProtection =
+      details.branch !== null
+        ? yield* branchProtectionCacheKey(cwd, details.branch).pipe(
+            Effect.flatMap((cacheKey) => Cache.get(branchProtectionResultCache, cacheKey)),
+          )
+        : null;
 
     return {
       hasUpstream: details.hasUpstream,
@@ -770,6 +792,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       behindCount: details.behindCount,
       aheadOfDefaultCount: details.aheadOfDefaultCount,
       pr,
+      branchProtection,
     } satisfies VcsStatusRemoteResult;
   });
   const remoteStatusResultCache = yield* Cache.makeWith(readRemoteStatus, {

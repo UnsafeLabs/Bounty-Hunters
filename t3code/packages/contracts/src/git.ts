@@ -221,6 +221,18 @@ const VcsStatusRemoteShape = {
   behindCount: NonNegativeInt,
   aheadOfDefaultCount: Schema.optional(NonNegativeInt),
   pr: Schema.NullOr(VcsStatusChangeRequest),
+  branchProtection: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        protected: Schema.Boolean,
+        requiresPullRequest: Schema.Boolean,
+        requiredReviews: Schema.Boolean,
+        requiredStatusChecks: Schema.Boolean,
+        allowsForcePushes: Schema.Boolean,
+        details: Schema.Array(TrimmedNonEmptyStringSchema),
+      }),
+    ),
+  ),
 };
 
 export const VcsStatusLocalResult = Schema.Struct(VcsStatusLocalShape);
