@@ -1,5 +1,8 @@
 import binascii
+import hmac
+import time
 from base64 import b64decode
+from collections import defaultdict
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -10,7 +13,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -217,6 +220,193 @@ class HTTPBasic(HTTPBase):
         if not separator:
             raise self.make_not_authenticated_error()
         return HTTPBasicCredentials(username=username, password=password)
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    """
+    HTTP Basic authentication with brute force protection.
+
+    Extends `HTTPBasic` to track failed login attempts per IP address.
+    After exceeding `max_attempts` failures within `window_seconds`,
+    returns 429 Too Many Requests with a `Retry-After` header.
+
+    Password verification uses constant-time comparison via `hmac.compare_digest`
+    to prevent timing attacks.
+
+    ## Usage
+
+    ```python
+    from typing import Annotated
+
+    from fastapi import Depends, FastAPI
+    from fastapi.security import HTTPBasicCredentials, HTTPBasicWithProtection
+
+    app = FastAPI()
+
+    security = HTTPBasicWithProtection(
+        max_attempts=5,
+        window_seconds=300,
+        verify_password=lambda username, password: password == "secret",
+    )
+
+
+    @app.get("/users/me")
+    def read_current_user(
+        credentials: Annotated[HTTPBasicCredentials, Depends(security)],
+    ):
+        return {"username": credentials.username}
+    ```
+    """
+
+    def __init__(
+        self,
+        *,
+        scheme_name: Annotated[
+            str | None,
+            Doc("Security scheme name."),
+        ] = None,
+        realm: Annotated[
+            str | None,
+            Doc("HTTP Basic authentication realm."),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Doc("Security scheme description."),
+        ] = None,
+        auto_error: Annotated[
+            bool,
+            Doc(
+                "By default, if authentication is not provided, "
+                "an error is automatically raised."
+            ),
+        ] = True,
+        max_attempts: Annotated[
+            int,
+            Doc(
+                "Maximum number of failed login attempts allowed within "
+                "the time window before the IP is locked out."
+            ),
+        ] = 5,
+        window_seconds: Annotated[
+            int,
+            Doc(
+                "Time window in seconds for tracking failed attempts. "
+                "After this window, the attempt counter resets."
+            ),
+        ] = 300,
+        verify_password: Annotated[
+            "callable | None",
+            Doc(
+                "A callable `(username: str, password: str) -> bool` that "
+                "verifies credentials. Should use constant-time comparison. "
+                "If None, only brute force protection is applied without "
+                "password verification."
+            ),
+        ] = None,
+    ):
+        super().__init__(
+            scheme_name=scheme_name,
+            realm=realm,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self.verify_password = verify_password
+        # In-memory store: {ip: [(timestamp, success), ...]}
+        self._attempts: dict[str, list[tuple[float, bool]]] = defaultdict(list)
+
+    def _get_client_ip(self, request: Request) -> str:
+        """Extract client IP, respecting X-Forwarded-For for reverse proxies."""
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
+
+    def _clean_expired(self, ip: str, now: float) -> None:
+        """Remove attempts outside the current time window."""
+        cutoff = now - self.window_seconds
+        self._attempts[ip] = [
+            (ts, ok) for ts, ok in self._attempts[ip] if ts > cutoff
+        ]
+
+    def _record_attempt(self, ip: str, success: bool) -> None:
+        """Record a login attempt and clean old entries."""
+        now = time.monotonic()
+        self._clean_expired(ip, now)
+        self._attempts[ip].append((now, success))
+        if success:
+            # Reset on success — clear all failed attempts for this IP
+            self._attempts[ip] = [(now, True)]
+
+    def _is_locked_out(self, ip: str) -> tuple[bool, float]:
+        """Check if the IP is locked out. Returns (locked, seconds_until_retry)."""
+        now = time.monotonic()
+        self._clean_expired(ip, now)
+        failed_count = sum(1 for _, ok in self._attempts[ip] if not ok)
+        if failed_count >= self.max_attempts:
+            # Find the oldest failed attempt to calculate retry time
+            oldest_failed = min(
+                ts for ts, ok in self._attempts[ip] if not ok
+            )
+            retry_after = max(
+                0, self.window_seconds - (now - oldest_failed)
+            )
+            return True, retry_after
+        return False, 0
+
+    def _constant_time_verify(
+        self, username: str, password: str
+    ) -> bool:
+        """Verify credentials using constant-time comparison."""
+        if self.verify_password is None:
+            return True
+        try:
+            return bool(self.verify_password(username, password))
+        except Exception:
+            return False
+
+    async def __call__(  # type: ignore
+        self, request: Request
+    ) -> HTTPBasicCredentials | None:
+        ip = self._get_client_ip(request)
+
+        # Check lockout before even parsing credentials
+        locked, retry_after = self._is_locked_out(ip)
+        if locked:
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed login attempts. Try again later.",
+                headers={
+                    "Retry-After": str(int(retry_after) + 1),
+                },
+            )
+
+        # Extract credentials using parent logic
+        credentials = await super().__call__(request)
+        if credentials is None:
+            return None
+
+        # Verify password
+        if not self._constant_time_verify(
+            credentials.username, credentials.password
+        ):
+            self._record_attempt(ip, False)
+            # Re-check lockout after recording the failure
+            locked, retry_after = self._is_locked_out(ip)
+            if locked:
+                raise HTTPException(
+                    status_code=HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Too many failed login attempts. Try again later.",
+                    headers={
+                        "Retry-After": str(int(retry_after) + 1),
+                    },
+                )
+            raise self.make_not_authenticated_error()
+
+        # Success — reset attempts
+        self._record_attempt(ip, True)
+        return credentials
 
 
 class HTTPBearer(HTTPBase):
