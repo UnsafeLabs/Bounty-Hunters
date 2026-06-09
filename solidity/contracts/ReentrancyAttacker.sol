@@ -18,8 +18,6 @@ contract ReentrancyAttacker {
     function attack(uint256 amount) external {
         attackAmount = amount;
         
-        // Transfer staking tokens from sender to this contract
-        stakingToken.transferFrom(msg.sender, address(this), amount);
         
         // Approve vault to spend tokens
         stakingToken.approve(address(vault), amount);
