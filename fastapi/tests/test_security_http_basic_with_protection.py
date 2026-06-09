@@ -26,7 +26,7 @@ def test_basic_auth_success():
     app, _ = make_app(
         max_attempts=3,
         window_seconds=60,
-        verify_password=lambda u, p: p == "secret",
+        verify_password_callback=lambda u, p: p == "secret",
     )
     client = TestClient(app)
 
@@ -40,7 +40,7 @@ def test_wrong_password_returns_401():
     app, _ = make_app(
         max_attempts=5,
         window_seconds=60,
-        verify_password=lambda u, p: p == "secret",
+        verify_password_callback=lambda u, p: p == "secret",
     )
     client = TestClient(app)
 
@@ -54,7 +54,7 @@ def test_brute_force_lockout():
     app, _ = make_app(
         max_attempts=3,
         window_seconds=60,
-        verify_password=lambda u, p: p == "secret",
+        verify_password_callback=lambda u, p: p == "secret",
     )
     client = TestClient(app)
 
@@ -74,7 +74,7 @@ def test_lockout_returns_retry_after_header():
     app, _ = make_app(
         max_attempts=2,
         window_seconds=120,
-        verify_password=lambda u, p: False,
+        verify_password_callback=lambda u, p: False,
     )
     client = TestClient(app)
 
@@ -92,7 +92,7 @@ def test_success_resets_attempt_counter():
     app, _ = make_app(
         max_attempts=3,
         window_seconds=60,
-        verify_password=lambda u, p: p == "secret",
+        verify_password_callback=lambda u, p: p == "secret",
     )
     client = TestClient(app)
 
@@ -129,7 +129,7 @@ def test_timing_safe_comparison():
         calls.append((u, p))
         return p == "correct"
 
-    app, _ = make_app(max_attempts=5, window_seconds=60, verify_password=verify)
+    app, _ = make_app(max_attempts=5, window_seconds=60, verify_password_callback=verify)
     client = TestClient(app)
 
     client.get("/users/me", auth=("user", "wrong"))
@@ -145,7 +145,7 @@ def test_no_credentials_still_returns_401():
     app, _ = make_app(
         max_attempts=5,
         window_seconds=60,
-        verify_password=lambda u, p: True,
+        verify_password_callback=lambda u, p: True,
     )
     client = TestClient(app)
 
@@ -158,7 +158,7 @@ def test_invalid_base64_returns_401():
     app, _ = make_app(
         max_attempts=5,
         window_seconds=60,
-        verify_password=lambda u, p: True,
+        verify_password_callback=lambda u, p: True,
     )
     client = TestClient(app)
 
@@ -198,7 +198,7 @@ def test_different_ips_independent():
     app, security = make_app(
         max_attempts=2,
         window_seconds=60,
-        verify_password=lambda u, p: p == "secret",
+        verify_password_callback=lambda u, p: p == "secret",
     )
     client = TestClient(app)
 

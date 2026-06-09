@@ -1,4 +1,5 @@
 import binascii
+import hashlib
 import hmac
 import time
 from base64 import b64decode
@@ -231,7 +232,7 @@ class HTTPBasicWithProtection(HTTPBasic):
     returns 429 Too Many Requests with a `Retry-After` header.
 
     Password verification uses constant-time comparison via `hmac.compare_digest`
-    to prevent timing attacks.
+    (from `hashlib`) to prevent timing attacks.
 
     ## Usage
 
@@ -246,7 +247,7 @@ class HTTPBasicWithProtection(HTTPBasic):
     security = HTTPBasicWithProtection(
         max_attempts=5,
         window_seconds=300,
-        verify_password=lambda username, password: password == "secret",
+        verify_password_callback=lambda username, password: password == "secret",
     )
 
 
@@ -294,7 +295,7 @@ class HTTPBasicWithProtection(HTTPBasic):
                 "After this window, the attempt counter resets."
             ),
         ] = 300,
-        verify_password: Annotated[
+        verify_password_callback: Annotated[
             "callable | None",
             Doc(
                 "A callable `(username: str, password: str) -> bool` that "
@@ -312,7 +313,7 @@ class HTTPBasicWithProtection(HTTPBasic):
         )
         self.max_attempts = max_attempts
         self.window_seconds = window_seconds
-        self.verify_password = verify_password
+        self._verify_password_callback = verify_password_callback
         # In-memory store: {ip: [(timestamp, success), ...]}
         self._attempts: dict[str, list[tuple[float, bool]]] = defaultdict(list)
 
@@ -355,14 +356,34 @@ class HTTPBasicWithProtection(HTTPBasic):
             return True, retry_after
         return False, 0
 
+    @staticmethod
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        """Verify a password against a hash using constant-time comparison.
+
+        Uses `hashlib` for hashing and `hmac.compare_digest` for timing-safe
+        comparison to prevent timing attacks.
+
+        Args:
+            plain_password: The plain-text password to verify.
+            hashed_password: The hashed password to verify against.
+
+        Returns:
+            True if the password matches the hash, False otherwise.
+        """
+        if not plain_password or not hashed_password:
+            return False
+        # Hash the plain password with the same algorithm used for the stored hash
+        computed_hash = hashlib.sha256(plain_password.encode("utf-8")).hexdigest()
+        return hmac.compare_digest(computed_hash, hashed_password)
+
     def _constant_time_verify(
         self, username: str, password: str
     ) -> bool:
         """Verify credentials using constant-time comparison."""
-        if self.verify_password is None:
+        if self._verify_password_callback is None:
             return True
         try:
-            return bool(self.verify_password(username, password))
+            return bool(self._verify_password_callback(username, password))
         except Exception:
             return False
 
