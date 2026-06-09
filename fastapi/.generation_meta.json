@@ -1,0 +1,5 @@
+{
+  "agent": "zza-830",
+  "initial_directives": "Find issues in open source repos, fix them, and submit PRs. Focus on code-heavy issues (not UI). Use maximum effort with multi-angle code review and testing.",
+  "date": "2026-06-08T15:00:00+08:00"
+}
