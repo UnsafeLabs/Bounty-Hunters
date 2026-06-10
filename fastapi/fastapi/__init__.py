@@ -25,3 +25,5 @@ from .websockets import WebSocket as WebSocket
 from .websockets import WebSocketDisconnect as WebSocketDisconnect
 from .concurrency import ConcurrencyError as ConcurrencyError  # noqa
 from .concurrency import run_concurrently as run_concurrently  # noqa
+from .security.oauth2 import OAuth2PasswordBearerWithRefresh as OAuth2PasswordBearerWithRefresh  # noqa
+from .security.oauth2 import OAuth2RefreshRequestForm as OAuth2RefreshRequestForm  # noqa

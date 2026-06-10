@@ -9,7 +9,9 @@ from .http import HTTPDigest as HTTPDigest
 from .oauth2 import OAuth2 as OAuth2
 from .oauth2 import OAuth2AuthorizationCodeBearer as OAuth2AuthorizationCodeBearer
 from .oauth2 import OAuth2PasswordBearer as OAuth2PasswordBearer
+from .oauth2 import OAuth2PasswordBearerWithRefresh as OAuth2PasswordBearerWithRefresh
 from .oauth2 import OAuth2PasswordRequestForm as OAuth2PasswordRequestForm
 from .oauth2 import OAuth2PasswordRequestFormStrict as OAuth2PasswordRequestFormStrict
+from .oauth2 import OAuth2RefreshRequestForm as OAuth2RefreshRequestForm
 from .oauth2 import SecurityScopes as SecurityScopes
 from .open_id_connect_url import OpenIdConnect as OpenIdConnect
