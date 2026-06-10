@@ -26,7 +26,15 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
-            'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Set the password attribute using bcrypt with configured rounds.
+     */
+    public function setPasswordAttribute(string $value): void
+    {
+        $rounds = (int) config('hashing.bcrypt.rounds', 10);
+        $this->attributes['password'] = bcrypt($value, ['rounds' => $rounds]);
     }
 }
