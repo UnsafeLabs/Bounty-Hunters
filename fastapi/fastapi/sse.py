@@ -1,6 +1,12 @@
+import asyncio
+import json
+from collections import deque
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 from annotated_doc import Doc
+from fastapi.encoders import jsonable_encoder
 from pydantic import AfterValidator, BaseModel, Field, model_validator
 from starlette.responses import StreamingResponse
 
@@ -220,3 +226,240 @@ KEEPALIVE_COMMENT = b": ping\n\n"
 # Seconds between keep-alive pings when a generator is idle.
 # Private but importable so tests can monkeypatch it.
 _PING_INTERVAL: float = 15.0
+
+
+@dataclass(slots=True, eq=False)
+class _SSESubscriber:
+    event_type: str | None
+    queue: asyncio.Queue[ServerSentEvent]
+
+
+class SSEManager:
+    """Manage SSE subscribers, replay history, and fan out broadcast events."""
+
+    def __init__(
+        self,
+        *,
+        retry: int | None = None,
+        history_size: int = 100,
+        disconnect_poll_interval: float = 0.1,
+        queue_size: int = 100,
+    ) -> None:
+        if retry is not None and retry < 0:
+            raise ValueError("retry must be a non-negative integer")
+        if history_size < 0:
+            raise ValueError("history_size must be greater than or equal to 0")
+        if disconnect_poll_interval <= 0:
+            raise ValueError("disconnect_poll_interval must be greater than 0")
+        if queue_size <= 0:
+            raise ValueError("queue_size must be greater than 0")
+        self.retry = retry
+        self.disconnect_poll_interval = disconnect_poll_interval
+        self.queue_size = queue_size
+        self._history: deque[ServerSentEvent] = deque(maxlen=history_size)
+        self._subscribers: set[_SSESubscriber] = set()
+
+    @property
+    def connection_count(self) -> int:
+        return len(self._subscribers)
+
+    async def broadcast(
+        self,
+        data: Any = None,
+        *,
+        event_type: str | None = None,
+        id: str | None = None,
+        retry: int | None = None,
+        raw_data: str | None = None,
+    ) -> ServerSentEvent:
+        event = ServerSentEvent(
+            data=data,
+            raw_data=raw_data,
+            event=event_type,
+            id=id,
+            retry=retry if retry is not None else self.retry,
+        )
+        self._history.append(event)
+        for subscriber in tuple(self._subscribers):
+            if self._matches(subscriber.event_type, event):
+                self._queue_event(subscriber, event)
+        return event
+
+    def stream(
+        self,
+        request: Any | None = None,
+        *,
+        event_type: str | None = None,
+        last_event_id: str | None = None,
+        retry: int | None = None,
+    ) -> AsyncIterator[ServerSentEvent]:
+        return self._stream(
+            request=request,
+            event_type=event_type,
+            last_event_id=last_event_id,
+            retry=retry,
+        )
+
+    def response(
+        self,
+        request: Any | None = None,
+        *,
+        event_type: str | None = None,
+        last_event_id: str | None = None,
+        retry: int | None = None,
+    ) -> EventSourceResponse:
+        response = EventSourceResponse(
+            self._encoded_stream(
+                request=request,
+                event_type=event_type,
+                last_event_id=last_event_id,
+                retry=retry,
+            )
+        )
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["X-Accel-Buffering"] = "no"
+        return response
+
+    async def _encoded_stream(
+        self,
+        request: Any | None,
+        event_type: str | None,
+        last_event_id: str | None,
+        retry: int | None,
+    ) -> AsyncIterator[bytes]:
+        async for event in self.stream(
+            request=request,
+            event_type=event_type,
+            last_event_id=last_event_id,
+            retry=retry,
+        ):
+            yield self._format_event(event)
+
+    async def _stream(
+        self,
+        request: Any | None,
+        event_type: str | None,
+        last_event_id: str | None,
+        retry: int | None,
+    ) -> AsyncIterator[ServerSentEvent]:
+        resolved_event_type = self._resolve_event_type(request, event_type)
+        resolved_last_event_id = self._resolve_last_event_id(request, last_event_id)
+        subscriber = _SSESubscriber(
+            event_type=resolved_event_type,
+            queue=asyncio.Queue(maxsize=self.queue_size),
+        )
+        self._subscribers.add(subscriber)
+        replayed_ids: set[str] = set()
+        try:
+            for event in self._events_after(resolved_last_event_id):
+                if self._matches(resolved_event_type, event):
+                    if event.id is not None:
+                        replayed_ids.add(event.id)
+                    yield self._with_retry(event, retry)
+
+            while True:
+                if await self._is_disconnected(request):
+                    break
+                try:
+                    event = await asyncio.wait_for(
+                        subscriber.queue.get(),
+                        timeout=self.disconnect_poll_interval,
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                if event.id is not None and event.id in replayed_ids:
+                    continue
+                yield self._with_retry(event, retry)
+        finally:
+            self._subscribers.discard(subscriber)
+
+    def _events_after(self, last_event_id: str | None) -> list[ServerSentEvent]:
+        if last_event_id is None:
+            return []
+        history = list(self._history)
+        for index, event in enumerate(history):
+            if event.id == last_event_id:
+                return history[index + 1 :]
+        return []
+
+    def _matches(self, event_type: str | None, event: ServerSentEvent) -> bool:
+        return event_type is None or event.event == event_type
+
+    def _queue_event(
+        self,
+        subscriber: _SSESubscriber,
+        event: ServerSentEvent,
+    ) -> None:
+        try:
+            subscriber.queue.put_nowait(event)
+        except asyncio.QueueFull:
+            try:
+                subscriber.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            subscriber.queue.put_nowait(event)
+
+    def _with_retry(
+        self,
+        event: ServerSentEvent,
+        retry: int | None,
+    ) -> ServerSentEvent:
+        if retry is None or event.retry == retry:
+            return event
+        return event.model_copy(update={"retry": retry})
+
+    def _resolve_event_type(
+        self,
+        request: Any | None,
+        event_type: str | None,
+    ) -> str | None:
+        if event_type is not None:
+            return event_type or None
+        query_params = getattr(request, "query_params", None)
+        if query_params is None:
+            return None
+        value = query_params.get("event_type")
+        if value == "":
+            return None
+        return value
+
+    def _resolve_last_event_id(
+        self,
+        request: Any | None,
+        last_event_id: str | None,
+    ) -> str | None:
+        if last_event_id is not None:
+            return last_event_id
+        headers = getattr(request, "headers", None)
+        if headers is None:
+            return None
+        value = headers.get("last-event-id")
+        if value is None:
+            value = headers.get("Last-Event-ID")
+        return value
+
+    def _format_event(self, event: ServerSentEvent) -> bytes:
+        if event.raw_data is not None:
+            data_str: str | None = event.raw_data
+        elif event.data is not None:
+            if hasattr(event.data, "model_dump_json"):
+                data_str = event.data.model_dump_json()
+            else:
+                data_str = json.dumps(jsonable_encoder(event.data))
+        else:
+            data_str = None
+        return format_sse_event(
+            data_str=data_str,
+            event=event.event,
+            id=event.id,
+            retry=event.retry,
+            comment=event.comment,
+        )
+
+    async def _is_disconnected(self, request: Any | None) -> bool:
+        if request is None:
+            return False
+        is_disconnected = getattr(request, "is_disconnected", None)
+        if is_disconnected is None:
+            return False
+        return bool(await is_disconnected())

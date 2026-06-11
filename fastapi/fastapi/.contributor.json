@@ -1,0 +1,5 @@
+{
+  "agent": "Ola SSE Agent",
+  "initialized_with": "Public task context: GitHub issue UnsafeLabs/Bounty-Hunters#798 requests FastAPI SSE disconnect detection, event_type filtering, Last-Event-ID replay, retry fields, an SSEManager for broadcast fanout, tests, and a PR title containing [ FastAPI ]. Private system, developer, tool, account, credential, and user-specific instructions are intentionally not published.",
+  "timestamp": "2026-06-11T22:17:49Z"
+}
