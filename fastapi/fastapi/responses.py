@@ -1,4 +1,7 @@
+import csv
 import importlib
+import io
+from collections.abc import AsyncIterable, Iterable, Mapping, Sequence
 from typing import Any, Protocol, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
@@ -24,6 +27,9 @@ class _OrjsonModule(Protocol):
     def dumps(self, __obj: Any, *, option: int = ...) -> bytes: ...
 
 
+CSVRow = Sequence[Any] | Mapping[str, Any]
+
+
 try:
     ujson = cast(_UjsonModule, importlib.import_module("ujson"))
 except ModuleNotFoundError:  # pragma: nocover
@@ -34,6 +40,73 @@ try:
     orjson = cast(_OrjsonModule, importlib.import_module("orjson"))
 except ModuleNotFoundError:  # pragma: nocover
     orjson = None  # type: ignore[assignment]
+
+
+class StreamingCSVResponse(StreamingResponse):
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        content: AsyncIterable[CSVRow] | Iterable[CSVRow],
+        *,
+        headers: Sequence[str] | None = None,
+        filename: str = "export.csv",
+        delimiter: str = ",",
+        status_code: int = 200,
+        response_headers: Mapping[str, str] | None = None,
+    ) -> None:
+        response_header_values = dict(response_headers or {})
+        response_header_values.setdefault(
+            "Content-Disposition",
+            f'attachment; filename="{filename.replace("\"", "")}"',
+        )
+        super().__init__(
+            self._stream_csv(content, headers=headers, delimiter=delimiter),
+            status_code=status_code,
+            headers=response_header_values,
+            media_type=self.media_type,
+        )
+
+    async def _stream_csv(
+        self,
+        content: AsyncIterable[CSVRow] | Iterable[CSVRow],
+        *,
+        headers: Sequence[str] | None,
+        delimiter: str,
+    ) -> AsyncIterable[bytes]:
+        if headers is not None:
+            yield self._render_row(headers, delimiter=delimiter)
+
+        if hasattr(content, "__aiter__"):
+            async for row in content:  # type: ignore[union-attr]
+                yield self._render_row(
+                    self._normalize_row(row, headers=headers),
+                    delimiter=delimiter,
+                )
+        else:
+            for row in content:  # type: ignore[union-attr]
+                yield self._render_row(
+                    self._normalize_row(row, headers=headers),
+                    delimiter=delimiter,
+                )
+
+    def _normalize_row(
+        self,
+        row: CSVRow,
+        *,
+        headers: Sequence[str] | None,
+    ) -> Sequence[Any]:
+        if isinstance(row, Mapping):
+            if headers is not None:
+                return [row.get(header, "") for header in headers]
+            return list(row.values())
+        return row
+
+    def _render_row(self, row: Sequence[Any], *, delimiter: str) -> bytes:
+        buffer = io.StringIO(newline="")
+        writer = csv.writer(buffer, delimiter=delimiter)
+        writer.writerow(row)
+        return buffer.getvalue().encode("utf-8")
 
 
 @deprecated(
