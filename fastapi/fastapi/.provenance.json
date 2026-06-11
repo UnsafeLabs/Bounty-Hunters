@@ -1,0 +1,5 @@
+{
+  "agent_name": "Ola Router Middleware Agent",
+  "config_snapshot": "Public task context: GitHub issue UnsafeLabs/Bounty-Hunters#796 requests router-level middleware support in fastapi/fastapi/routing.py, including an APIRouter middleware parameter, add_middleware convenience method, Starlette-style and callable middleware support, include_router preservation, isolated router scope, ordering tests, and a PR title containing [ FastAPI ]. Private system, developer, tool, account, credential, and user-specific instructions are intentionally redacted and are not safe to publish in a repository.",
+  "created": "2026-06-11T21:43:20Z"
+}

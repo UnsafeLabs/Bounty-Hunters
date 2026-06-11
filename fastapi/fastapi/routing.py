@@ -78,6 +78,7 @@ from starlette._utils import is_async_callable
 from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException
+from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import (
@@ -1162,6 +1163,14 @@ class APIRouter(routing.Router):
                 """
             ),
         ] = APIRoute,
+        middleware: Annotated[
+            Sequence[Any] | None,
+            Doc(
+                """
+                Middleware applied only to routes registered on this router.
+                """
+            ),
+        ] = None,
         on_startup: Annotated[
             Sequence[Callable[[], Any]] | None,
             Doc(
@@ -1310,9 +1319,56 @@ class APIRouter(routing.Router):
         self.callbacks = callbacks or []
         self.dependency_overrides_provider = dependency_overrides_provider
         self.route_class = route_class
+        self.router_middleware = [
+            self._normalize_middleware(middleware_item)
+            for middleware_item in middleware or []
+        ]
         self.default_response_class = default_response_class
         self.generate_unique_id_function = generate_unique_id_function
         self.strict_content_type = strict_content_type
+
+        for route in self.routes:
+            self._apply_router_middleware(route, self.router_middleware)
+
+    def _normalize_middleware(
+        self,
+        middleware_class: Any,
+        options: dict[str, Any] | None = None,
+    ) -> tuple[Any, dict[str, Any]]:
+        if isinstance(middleware_class, Middleware):
+            return middleware_class.cls, dict(middleware_class.options)
+        return middleware_class, dict(options or {})
+
+    def _build_middleware_stack(
+        self,
+        app: ASGIApp,
+        middleware: Sequence[tuple[Any, dict[str, Any]]],
+    ) -> ASGIApp:
+        wrapped_app = app
+        for middleware_class, options in reversed(middleware):
+            wrapped_app = middleware_class(wrapped_app, **options)
+        return wrapped_app
+
+    def _apply_router_middleware(
+        self,
+        route: BaseRoute,
+        middleware: Sequence[tuple[Any, dict[str, Any]]],
+    ) -> None:
+        if not middleware or not hasattr(route, "app"):
+            return
+        base_app = getattr(route, "_fastapi_router_base_app", None)
+        if base_app is None:
+            base_app = route.app
+            route._fastapi_router_base_app = base_app
+        route.app = self._build_middleware_stack(base_app, middleware)
+        route._fastapi_router_middleware = list(middleware)
+
+    def add_middleware(self, middleware_class: Any, **options: Any) -> None:
+        self.router_middleware.append(
+            self._normalize_middleware(middleware_class, options)
+        )
+        for route in self.routes:
+            self._apply_router_middleware(route, self.router_middleware)
 
     def route(
         self,
@@ -1364,6 +1420,7 @@ class APIRouter(routing.Router):
         generate_unique_id_function: Callable[[APIRoute], str]
         | DefaultPlaceholder = Default(generate_unique_id),
         strict_content_type: bool | DefaultPlaceholder = Default(True),
+        middleware: Sequence[tuple[Any, dict[str, Any]]] | None = None,
     ) -> None:
         route_class = route_class_override or self.route_class
         responses = responses or {}
@@ -1414,6 +1471,8 @@ class APIRouter(routing.Router):
                 strict_content_type, self.strict_content_type
             ),
         )
+        current_middleware = list(middleware or self.router_middleware)
+        self._apply_router_middleware(route, current_middleware)
         self.routes.append(route)
 
     def api_route(
@@ -1759,6 +1818,10 @@ class APIRouter(routing.Router):
                     generate_unique_id_function,
                     self.generate_unique_id_function,
                 )
+                current_middleware = [
+                    *self.router_middleware,
+                    *getattr(route, "_fastapi_router_middleware", []),
+                ]
                 self.add_api_route(
                     prefix + route.path,
                     route.endpoint,
@@ -1793,6 +1856,7 @@ class APIRouter(routing.Router):
                         router.strict_content_type,
                         self.strict_content_type,
                     ),
+                    middleware=current_middleware,
                 )
             elif isinstance(route, routing.Route):
                 methods = list(route.methods or [])
