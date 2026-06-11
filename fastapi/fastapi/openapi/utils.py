@@ -33,6 +33,7 @@ from fastapi.types import ModelNameMap
 from fastapi.utils import (
     deep_dict_update,
     generate_operation_id_for_path,
+    generate_unique_id,
     is_body_allowed_for_status_code,
 )
 from pydantic import BaseModel
@@ -244,12 +245,25 @@ def get_openapi_operation_metadata(
         operation["description"] = route.description
     operation_id = route.operation_id or route.unique_id
     if operation_id in operation_ids:
-        endpoint_name = getattr(route.endpoint, "__name__", "<unnamed_endpoint>")
-        message = f"Duplicate Operation ID {operation_id} for function {endpoint_name}"
-        file_name = getattr(route.endpoint, "__globals__", {}).get("__file__")
-        if file_name:
-            message += f" at {file_name}"
-        warnings.warn(message, stacklevel=1)
+        generate_unique_id_function = route.generate_unique_id_function
+        is_default_generated_id = generate_unique_id_function is generate_unique_id or (
+            isinstance(generate_unique_id_function, DefaultPlaceholder)
+            and generate_unique_id_function.value is generate_unique_id
+        )
+        if route.operation_id or not is_default_generated_id:
+            endpoint_name = getattr(route.endpoint, "__name__", "<unnamed_endpoint>")
+            message = (
+                f"Duplicate Operation ID {operation_id} for function {endpoint_name}"
+            )
+            file_name = getattr(route.endpoint, "__globals__", {}).get("__file__")
+            if file_name:
+                message += f" at {file_name}"
+            warnings.warn(message, stacklevel=1)
+        base_operation_id = operation_id
+        suffix = 2
+        while operation_id in operation_ids:
+            operation_id = f"{base_operation_id}_{suffix}"
+            suffix += 1
     operation_ids.add(operation_id)
     operation["operationId"] = operation_id
     if route.deprecated:

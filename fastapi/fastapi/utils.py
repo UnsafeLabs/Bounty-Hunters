@@ -93,11 +93,13 @@ def generate_operation_id_for_path(
 
 
 def generate_unique_id(route: "APIRoute") -> str:
-    operation_id = f"{route.name}{route.path_format}"
-    operation_id = re.sub(r"\W", "_", operation_id)
     assert route.methods
-    operation_id = f"{operation_id}_{list(route.methods)[0].lower()}"
-    return operation_id
+    method = sorted(route.methods)[0].lower()
+    path = route.path_format.strip("/")
+    operation_id = "_".join(part for part in (method, path, route.name) if part)
+    operation_id = re.sub(r"[^0-9a-zA-Z_]+", "_", operation_id)
+    operation_id = re.sub(r"_+", "_", operation_id).strip("_")
+    return operation_id.lower()
 
 
 def deep_dict_update(main_dict: dict[Any, Any], update_dict: dict[Any, Any]) -> None:
