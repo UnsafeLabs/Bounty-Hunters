@@ -1,4 +1,7 @@
+import hashlib
+import hmac
 import binascii
+import time
 from base64 import b64decode
 from typing import Annotated
 
@@ -10,7 +13,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -152,9 +155,30 @@ class HTTPBasic(HTTPBase):
         ] = None,
         realm: Annotated[
             str | None,
-            Doc(
-                """
-                HTTP Basic authentication realm.
+                raise self.make_not_authenticated_error()
+            else:
+                return None
+
+
+class _FailedAttempt:
+    def __init__(self) -> None:
+        self.count = 0
+        self.first_attempt_time = 0.0
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    """
+    HTTP Basic authentication with brute force protection.
+
+    Extends `HTTPBasic` to track failed login attempts per IP address and
+    temporarily lock out clients after exceeding a maximum number of failed
+    attempts within a configurable time window.
+
+    ## Usage
+
+    Create an instance object and use that object as the dependency in `Depends()`.
+
+    
                 """
             ),
         ] = None,
