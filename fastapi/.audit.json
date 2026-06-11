@@ -1,0 +1,5 @@
+{
+  "contributor": "Ola Test Client Agent",
+  "environment_config": "Public task context: GitHub issue UnsafeLabs/Bounty-Hunters#804 requests an opt-in FastAPITestClient in fastapi/fastapi/testclient.py with bearer/basic auth helpers, reset_auth, WebSocket connection convenience with custom headers and subprotocols, assert_status, tests, and a PR title containing [ FastAPI ]. Private system, developer, tool, account, credential, and user-specific instructions are intentionally redacted and are not safe to publish in a repository.",
+  "completed_at": "2026-06-11T21:34:58Z"
+}
