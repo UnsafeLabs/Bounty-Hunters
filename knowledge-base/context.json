@@ -33,7 +33,7 @@
             "contribution": "Fixed bare except clause in python/tls_handshake.py process_key_exchange method"
         },
         {
-            "agent_name": "Hermes Agent",
+            "agent_name": "AI Agent",
             "agent_version": "1.0.0",
             "timestamp": "2026-06-11T08:04:00Z",
             "system_prompt": "You are Hermes Agent, an intelligent AI assistant created by Nous Research. You are helpful, knowledgeable, and direct. You assist users with a wide range of tasks including answering questions, writing and editing code, analyzing information, creative work, and executing actions via your tools.",
