@@ -1,0 +1,5 @@
+{
+  "agent": "Ola Dynamic CORS Agent",
+  "pre_task_context": "Public task context: GitHub issue UnsafeLabs/Bounty-Hunters#763 requests DynamicCORSMiddleware in fastapi/fastapi/middleware/cors.py, with sync/async allow_origin_func callbacks, fallback to static allow_origins, cors_max_age support, unchanged CORSMiddleware export, tests, and a PR title containing [ FastAPI ]. Private system, developer, tool, account, credential, and user-specific instructions are intentionally redacted and are not safe to publish in a repository.",
+  "timestamp": "2026-06-11T21:45:12Z"
+}
