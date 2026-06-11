@@ -1,11 +1,10 @@
+import binascii
 import hashlib
 import hmac
-import binascii
 import time
 from base64 import b64decode
 from typing import Annotated
 
-from annotated_doc import Doc
 from fastapi.exceptions import HTTPException
 from fastapi.openapi.models import HTTPBase as HTTPBaseModel
 from fastapi.openapi.models import HTTPBearer as HTTPBearerModel
@@ -16,6 +15,7 @@ from starlette.requests import Request
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
+class HTTPBasicCredentials(BaseModel):
 class HTTPBasicCredentials(BaseModel):
     """
     The HTTP Basic credentials given as the result of using `HTTPBasic` in a
@@ -155,30 +155,9 @@ class HTTPBasic(HTTPBase):
         ] = None,
         realm: Annotated[
             str | None,
-                raise self.make_not_authenticated_error()
-            else:
-                return None
-
-
-class _FailedAttempt:
-    def __init__(self) -> None:
-        self.count = 0
-        self.first_attempt_time = 0.0
-
-
-class HTTPBasicWithProtection(HTTPBasic):
-    """
-    HTTP Basic authentication with brute force protection.
-
-    Extends `HTTPBasic` to track failed login attempts per IP address and
-    temporarily lock out clients after exceeding a maximum number of failed
-    attempts within a configurable time window.
-
-    ## Usage
-
-    Create an instance object and use that object as the dependency in `Depends()`.
-
-    
+            Doc(
+                """
+                HTTP Basic authentication realm.
                 """
             ),
         ] = None,
@@ -189,9 +168,27 @@ class HTTPBasicWithProtection(HTTPBasic):
                 Security scheme description.
 
                 It will be included in the generated OpenAPI (e.g. visible at `/docs`).
-                """
-            ),
-        ] = None,
+            )
+        return HTTPBasicCredentials(username=username, password=password)
+
+
+class _FailedAttempt:
+    def __init__(self) -> None:
+        self.count = 0
+        self.first_attempt_time: float = 0.0
+        self.lockout_until: float = 0.0
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    """
+    HTTP Basic authentication with brute force protection.
+
+    Extends `HTTPBasic` to add rate limiting per IP address and
+    timing-safe password verification.
+
+    ## Usage
+
+    
         auto_error: Annotated[
             bool,
             Doc(
