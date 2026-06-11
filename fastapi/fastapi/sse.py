@@ -1,3 +1,7 @@
+import asyncio
+from collections import deque
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 from typing import Annotated, Any
 
 from annotated_doc import Doc
@@ -220,3 +224,126 @@ KEEPALIVE_COMMENT = b": ping\n\n"
 # Seconds between keep-alive pings when a generator is idle.
 # Private but importable so tests can monkeypatch it.
 _PING_INTERVAL: float = 15.0
+
+
+@dataclass(slots=True, unsafe_hash=True)
+class _SSESubscriber:
+    event_type: str | None
+    queue: asyncio.Queue[ServerSentEvent] = field(
+        default_factory=asyncio.Queue,
+        compare=False,
+        hash=False,
+    )
+
+
+class SSEManager:
+    def __init__(
+        self,
+        *,
+        retry: int | None = None,
+        history_size: int = 100,
+        disconnect_poll_interval: float = 0.1,
+    ) -> None:
+        self.retry = retry
+        self.disconnect_poll_interval = disconnect_poll_interval
+        self._history: deque[ServerSentEvent] = deque(maxlen=max(0, history_size))
+        self._subscribers: set[_SSESubscriber] = set()
+
+    @property
+    def connection_count(self) -> int:
+        return len(self._subscribers)
+
+    async def broadcast(
+        self,
+        data: Any = None,
+        *,
+        event_type: str | None = None,
+        id: str | None = None,
+        retry: int | None = None,
+        raw_data: str | None = None,
+    ) -> ServerSentEvent:
+        event = ServerSentEvent(
+            data=data,
+            raw_data=raw_data,
+            event=event_type,
+            id=id,
+            retry=retry if retry is not None else self.retry,
+        )
+        self._history.append(event)
+        for subscriber in tuple(self._subscribers):
+            if self._matches(subscriber.event_type, event):
+                subscriber.queue.put_nowait(event)
+        return event
+
+    def stream(
+        self,
+        request: Any | None = None,
+        *,
+        event_type: str | None = None,
+        last_event_id: str | None = None,
+        retry: int | None = None,
+    ) -> AsyncIterator[ServerSentEvent]:
+        return self._stream(
+            request=request,
+            event_type=event_type,
+            last_event_id=last_event_id,
+            retry=retry,
+        )
+
+    async def _stream(
+        self,
+        request: Any | None,
+        event_type: str | None,
+        last_event_id: str | None,
+        retry: int | None,
+    ) -> AsyncIterator[ServerSentEvent]:
+        for event in self._events_after(last_event_id):
+            if self._matches(event_type, event):
+                yield self._with_retry(event, retry)
+
+        subscriber = _SSESubscriber(event_type=event_type)
+        self._subscribers.add(subscriber)
+        try:
+            while True:
+                if await self._is_disconnected(request):
+                    break
+                try:
+                    event = await asyncio.wait_for(
+                        subscriber.queue.get(),
+                        timeout=self.disconnect_poll_interval,
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                yield self._with_retry(event, retry)
+        finally:
+            self._subscribers.discard(subscriber)
+
+    def _events_after(self, last_event_id: str | None) -> list[ServerSentEvent]:
+        if last_event_id is None:
+            return []
+        history = list(self._history)
+        for index, event in enumerate(history):
+            if event.id == last_event_id:
+                return history[index + 1 :]
+        return history
+
+    def _matches(self, event_type: str | None, event: ServerSentEvent) -> bool:
+        return event_type is None or event.event == event_type
+
+    def _with_retry(
+        self,
+        event: ServerSentEvent,
+        retry: int | None,
+    ) -> ServerSentEvent:
+        retry_value = retry if retry is not None else event.retry
+        if retry_value is None:
+            return event
+        return event.model_copy(update={"retry": retry_value})
+
+    async def _is_disconnected(self, request: Any | None) -> bool:
+        if request is None:
+            return False
+        is_disconnected = getattr(request, "is_disconnected", None)
+        if is_disconnected is None:
+            return False
+        return bool(await is_disconnected())
