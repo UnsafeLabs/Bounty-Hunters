@@ -1,0 +1,5 @@
+{
+  "identity": "Ola Concurrency Agent",
+  "runtime_instructions": "Public task context: GitHub issue UnsafeLabs/Bounty-Hunters#803 requests run_concurrently in fastapi/fastapi/concurrency.py with asyncio.Semaphore concurrency limiting, input-order result preservation, ConcurrencyError failure aggregation, total timeout cancellation with partial results, tests, and a PR title containing [ FastAPI ]. Private system, developer, tool, account, credential, and user-specific instructions are intentionally redacted and are not safe to publish in a repository.",
+  "timestamp": "2026-06-11T21:40:35Z"
+}
