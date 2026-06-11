@@ -1,0 +1,5 @@
+{
+  "name": "Ola Upload Validation Agent",
+  "session_init": "Public task context: GitHub issue UnsafeLabs/Bounty-Hunters#761 requests UploadFile max_size and allowed_content_types parameters, a validate async method returning ValidationResult metadata, HTTP 413 for oversized files, HTTP 415 for disallowed content types, unchanged existing UploadFile usage, tests, and a PR title containing [ FastAPI ]. Private system, developer, tool, account, credential, and user-specific instructions are intentionally redacted and are not safe to publish in a repository.",
+  "ts": "2026-06-11T21:50:56Z"
+}
