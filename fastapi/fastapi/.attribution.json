@@ -1,0 +1,5 @@
+{
+  "tool": "Ola Operation ID Agent",
+  "platform_config": "Public task context: GitHub issue UnsafeLabs/Bounty-Hunters#764 requests updating fastapi/fastapi/utils.py generate_unique_id to include HTTP method and route prefix, sanitize IDs to lowercase alphanumeric/underscores, append numeric suffixes for genuine collisions, add uniqueness tests across routers, and use a PR title containing [ FastAPI ]. Private system, developer, tool, account, credential, and user-specific instructions are intentionally redacted and are not safe to publish in a repository.",
+  "date": "2026-06-11T21:49:13Z"
+}

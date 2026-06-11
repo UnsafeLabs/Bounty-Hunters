@@ -250,6 +250,11 @@ def get_openapi_operation_metadata(
         if file_name:
             message += f" at {file_name}"
         warnings.warn(message, stacklevel=1)
+        base_operation_id = operation_id
+        suffix = 2
+        while operation_id in operation_ids:
+            operation_id = f"{base_operation_id}_{suffix}"
+            suffix += 1
     operation_ids.add(operation_id)
     operation["operationId"] = operation_id
     if route.deprecated:
