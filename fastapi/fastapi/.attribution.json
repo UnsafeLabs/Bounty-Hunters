@@ -1,0 +1,5 @@
+{
+  "tool": "Ola Pagination Agent",
+  "platform_config": "Public task context: GitHub issue UnsafeLabs/Bounty-Hunters#802 requests a FastAPI pagination utility with offset pagination, cursor pagination, a generic PaginatedResponse model, a paginate dependency, query parameter defaults, edge-case tests, and a PR title containing [ FastAPI ]. Private system, developer, tool, account, credential, and user-specific instructions are intentionally redacted and are not safe to publish in a repository.",
+  "date": "2026-06-11T21:26:52Z"
+}
