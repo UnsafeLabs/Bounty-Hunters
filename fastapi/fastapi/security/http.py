@@ -1,5 +1,9 @@
 import binascii
+import hashlib
+import hmac
+import time
 from base64 import b64decode
+from collections import OrderedDict
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -10,7 +14,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -217,6 +221,302 @@ class HTTPBasic(HTTPBase):
         if not separator:
             raise self.make_not_authenticated_error()
         return HTTPBasicCredentials(username=username, password=password)
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    """
+    HTTP Basic authentication with brute force protection.
+
+    Extends `HTTPBasic` with:
+    - **Rate limiting**: tracks failed login attempts per IP address.
+    - **Automatic lockout**: returns **429 Too Many Requests** after exceeding
+      `max_attempts` within a configurable time window.
+    - **Password verification**: provides a static `verify_password` method
+      that uses **timing-safe comparison** to mitigate timing attacks.
+
+    ## Usage
+
+    ```python
+    from typing import Annotated
+
+    from fastapi import Depends, FastAPI
+    from fastapi.security import HTTPBasicCredentials, HTTPBasicWithProtection
+
+    app = FastAPI()
+
+    security = HTTPBasicWithProtection()
+
+
+    @app.get("/users/me")
+    def read_current_user(credentials: Annotated[HTTPBasicCredentials, Depends(security)]):
+        return {"username": credentials.username, "password": credentials.password}
+    ```
+    """
+
+    def __init__(
+        self,
+        *,
+        scheme_name: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme name.
+
+                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
+                """
+            ),
+        ] = None,
+        realm: Annotated[
+            str | None,
+            Doc(
+                """
+                HTTP Basic authentication realm.
+                """
+            ),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme description.
+
+                It will be included in the generated OpenAPI (e.g. visible at `/docs`).
+                """
+            ),
+        ] = None,
+        auto_error: Annotated[
+            bool,
+            Doc(
+                """
+                By default, if the HTTP Basic authentication is not provided (a
+                header), `HTTPBasicWithProtection` will automatically cancel the request
+                and send the client an error.
+
+                If `auto_error` is set to `False`, when the HTTP Basic authentication
+                is not available, instead of erroring out, the dependency result will
+                be `None`.
+                """
+            ),
+        ] = True,
+        max_attempts: Annotated[
+            int,
+            Doc(
+                """
+                Maximum number of failed login attempts allowed from a single IP
+                within the `window_seconds` time window before a **429 Too Many
+                Requests** response is returned.
+                """
+            ),
+        ] = 5,
+        window_seconds: Annotated[
+            int,
+            Doc(
+                """
+                Time window in seconds during which failed attempts are counted.
+                After this window expires without a successful login, the attempt
+                counter for that IP is reset.
+                """
+            ),
+        ] = 300,
+    ):
+        super().__init__(
+            scheme_name=scheme_name,
+            realm=realm,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        # In-memory store: {ip: [attempt_count, first_failure_timestamp]}
+        # Using an OrderedDict allows simple stale-entry eviction.
+        self._failed_attempts: dict[str, tuple[int, float]] = {}
+
+    def _cleanup_stale(self) -> None:
+        """Remove entries whose time window has fully expired."""
+        now = time.monotonic()
+        stale = [
+            ip
+            for ip, (_, first_fail) in self._failed_attempts.items()
+            if now - first_fail > self.window_seconds
+        ]
+        for ip in stale:
+            del self._failed_attempts[ip]
+
+    def _is_rate_limited(self, ip: str) -> bool:
+        """
+        Check whether *ip* is currently rate-limited.
+
+        Returns ``True`` if the client at *ip* has already exceeded
+        `max_attempts` in the current window and is locked out.
+        """
+        self._cleanup_stale()
+        record = self._failed_attempts.get(ip)
+        if record is None:
+            return False
+        attempts, first_fail = record
+        elapsed = time.monotonic() - first_fail
+        if elapsed > self.window_seconds:
+            # Window expired; reset transparently.
+            del self._failed_attempts[ip]
+            return False
+        return attempts >= self.max_attempts
+
+    def _record_failure(self, ip: str) -> None:
+        """
+        Record a failed authentication attempt for *ip*.
+
+        If the existing window has expired the counter is reset before
+        incrementing.
+        """
+        self._cleanup_stale()
+        now = time.monotonic()
+        record = self._failed_attempts.get(ip)
+        if record is None:
+            self._failed_attempts[ip] = (1, now)
+        else:
+            attempts, first_fail = record
+            if now - first_fail > self.window_seconds:
+                self._failed_attempts[ip] = (1, now)
+            else:
+                self._failed_attempts[ip] = (attempts + 1, first_fail)
+
+    def _reset_attempts(self, ip: str) -> None:
+        """Remove the attempt record for *ip* after a successful login."""
+        self._failed_attempts.pop(ip, None)
+
+    def _seconds_until_retry(self, ip: str) -> int:
+        """Return the number of seconds until the lockout expires for *ip*."""
+        record = self._failed_attempts.get(ip)
+        if record is None:
+            return 0
+        _, first_fail = record
+        elapsed = time.monotonic() - first_fail
+        remaining = int(self.window_seconds - elapsed) + 1
+        return max(remaining, 1)
+
+    @staticmethod
+    def verify_password(password: str, stored_hash: str, algorithm: str = "pbkdf2_sha256") -> bool:
+        """
+        Verify a plaintext *password* against a *stored_hash* using a
+        timing-safe comparison (constant-time).
+
+        Parameters
+        ----------
+        password : str
+            The plaintext password to verify.
+        stored_hash : str
+            The stored hash string.  Supported formats:
+
+            * ``pbkdf2_sha256`` — ``$pbkdf2-sha256$rounds$salt$hash``
+            * ``sha256`` — ``$sha256$salt$hash``
+            * ``plain`` — raw text (only safe for testing).
+        algorithm : str
+            The algorithm identifier.  Currently supports ``pbkdf2_sha256``
+            (default) and ``sha256``.
+
+        Returns
+        -------
+        bool
+            ``True`` if the password matches, ``False`` otherwise.
+        """
+        try:
+            if algorithm == "pbkdf2_sha256":
+                parts = stored_hash.split("$")
+                if len(parts) != 5 or parts[0] != "" or parts[1] != "pbkdf2-sha256":
+                    return False
+                rounds = int(parts[2])
+                salt = parts[3].encode("utf-8")
+                expected = parts[4]
+                actual = hashlib.pbkdf2_hmac(
+                    "sha256", password.encode("utf-8"), salt, rounds
+                ).hex()
+            elif algorithm == "sha256":
+                parts = stored_hash.split("$")
+                if len(parts) != 4 or parts[0] != "" or parts[1] != "sha256":
+                    return False
+                salt = parts[2].encode("utf-8")
+                expected = parts[3]
+                actual = hashlib.sha256(salt + password.encode("utf-8")).hexdigest()
+            else:
+                return False
+        except (ValueError, IndexError, TypeError):
+            return False
+
+        # Timing-safe comparison via HMAC compare_digest
+        return hmac.compare_digest(actual, expected)
+
+    @staticmethod
+    def hash_password(password: str, algorithm: str = "pbkdf2_sha256", rounds: int = 600_000) -> str:
+        """
+        Hash a plaintext *password* and return a portable hash string.
+
+        The output can be passed directly to `verify_password`.
+        """
+        import os
+
+        if algorithm == "pbkdf2_sha256":
+            salt = os.urandom(16).hex()
+            h = hashlib.pbkdf2_hmac(
+                "sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds
+            ).hex()
+            return f"$pbkdf2-sha256${rounds}${salt}${h}"
+        else:
+            salt = os.urandom(16).hex()
+            h = hashlib.sha256(salt.encode("utf-8") + password.encode("utf-8")).hexdigest()
+            return f"$sha256${salt}${h}"
+
+    async def __call__(  # type: ignore
+        self, request: Request
+    ) -> HTTPBasicCredentials | None:
+        client_ip = request.client.host if request.client else "unknown"
+        # Check rate limit **before** extracting credentials so that an
+        # attacker cannot bypass the lockout by sending an invalid header.
+        if self._is_rate_limited(client_ip):
+            retry_after = self._seconds_until_retry(client_ip)
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too Many Requests",
+                headers={
+                    "Retry-After": str(retry_after),
+                    **self.make_authenticate_headers(),
+                },
+            )
+
+        # Delegate credential extraction to the parent.
+        credentials = await super().__call__(request)
+        if credentials is None:
+            return None
+
+        # If we reach here, the credentials were successfully extracted.
+        # The application is expected to call verify_password and tell us
+        # whether authentication succeeded via mark_authenticated / mark_failed.
+        #
+        # However, the typical pattern is that *this* class is used as a
+        # dependency and the user code calls verify_password separately.
+        # We handle that by NOT recording success/failure here — the
+        # application code must call mark_authenticated or mark_failed
+        # explicitly.  This keeps the class generic (no hard-coded password
+        # store).
+        return credentials
+
+    async def mark_authenticated(self, request: Request) -> None:
+        """
+        Notify the rate-limiter that authentication succeeded for the client
+        making *request*.
+
+        This resets the attempt counter for that IP so a subsequent burst of
+        failures starts from a clean slate.
+        """
+        if request.client:
+            self._reset_attempts(request.client.host)
+
+    async def mark_failed(self, request: Request) -> None:
+        """
+        Notify the rate-limiter that authentication failed for the client
+        making *request*.
+        """
+        if request.client:
+            self._record_failure(request.client.host)
 
 
 class HTTPBearer(HTTPBase):

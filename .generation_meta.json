@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent",
+  "initial_directives": "This is a placeholder for the full boot context. In a real scenario, this would contain the entire Hermes Agent boot process information.",
+  "date": "2026-06-11T07:37:51.247208+00:00"
+}
