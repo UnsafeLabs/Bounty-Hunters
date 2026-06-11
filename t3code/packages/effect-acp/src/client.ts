@@ -1,7 +1,10 @@
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Stdio from "effect/Stdio";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -26,6 +29,7 @@ export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  readonly onSessionExpired?: (sessionId: AcpSchema.SessionId) => Effect.Effect<void, never>;
 }
 
 type AcpClientRaw = {
@@ -306,6 +310,83 @@ interface BufferedNotificationHandler<A> {
   readonly pending: Array<A>;
 }
 
+type AuthRefreshState =
+  | { readonly _tag: "Idle" }
+  | {
+      readonly _tag: "Refreshing";
+      readonly deferred: Deferred.Deferred<void, AcpError.AcpAuthenticationError>;
+    };
+
+type AuthRefreshAction =
+  | {
+      readonly _tag: "Await";
+      readonly deferred: Deferred.Deferred<void, AcpError.AcpAuthenticationError>;
+    }
+  | {
+      readonly _tag: "Start";
+      readonly deferred: Deferred.Deferred<void, AcpError.AcpAuthenticationError>;
+    };
+
+interface StoredAuthentication {
+  readonly payload: AcpSchema.AuthenticateRequest;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const getSessionId = (payload: unknown): AcpSchema.SessionId | undefined => {
+  if (!isRecord(payload)) {
+    return undefined;
+  }
+  const sessionId = payload.sessionId;
+  return typeof sessionId === "string" ? sessionId : undefined;
+};
+
+const getHttpStatus = (data: unknown): number | undefined => {
+  if (!isRecord(data)) {
+    return undefined;
+  }
+  const status = data.status ?? data.statusCode ?? data.httpStatus;
+  if (typeof status === "number") {
+    return status;
+  }
+  if (typeof status === "string") {
+    const parsed = Number(status);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+};
+
+const extractRefreshToken = (meta: unknown): unknown => {
+  if (!isRecord(meta)) {
+    return undefined;
+  }
+  return meta.refreshToken ?? meta.refresh_token;
+};
+
+const isAcpRequestError = Schema.is(AcpError.AcpRequestError);
+
+const isAuthenticationExpired = (error: AcpError.AcpError) => {
+  if (!isAcpRequestError(error)) {
+    return false;
+  }
+  const message = error.errorMessage.toLowerCase();
+  return (
+    error.code === -32000 ||
+    getHttpStatus(error.data) === 401 ||
+    message.includes("401") ||
+    message.includes("unauthorized") ||
+    message.includes("authentication required") ||
+    message.includes("session expired")
+  );
+};
+
+const makeAuthenticationError = (error: AcpError.AcpError | undefined, detail: string) =>
+  new AcpError.AcpAuthenticationError({
+    detail,
+    ...(error ? { cause: error } : {}),
+  });
+
 export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
   stdio: Stdio.Stdio,
   options: AcpClientOptions = {},
@@ -330,6 +411,10 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
   let unknownExtNotificationHandler:
     | ((method: string, params: unknown) => Effect.Effect<void, AcpError.AcpError>)
     | undefined;
+  let storedAuthentication: StoredAuthentication | undefined;
+  let refreshToken: unknown;
+  const authGeneration = yield* Ref.make(0);
+  const authRefreshState = yield* Ref.make<AuthRefreshState>({ _tag: "Idle" });
 
   const runNotificationHandlers = <A>(
     registration: BufferedNotificationHandler<A>,
@@ -456,6 +541,143 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     generateRequestId: () => nextRpcRequestId++ as never,
   }).pipe(Effect.provideService(RpcClient.Protocol, transport.clientProtocol));
 
+  const rememberAuthentication = (
+    payload: AcpSchema.AuthenticateRequest,
+    response: AcpSchema.AuthenticateResponse,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      storedAuthentication = { payload };
+      const nextRefreshToken = extractRefreshToken(response._meta);
+      if (nextRefreshToken !== undefined) {
+        refreshToken = nextRefreshToken;
+      }
+      yield* Ref.update(authGeneration, (current) => current + 1);
+    });
+
+  const authenticate = (payload: AcpSchema.AuthenticateRequest) =>
+    callRpc(rpc[AGENT_METHODS.authenticate](payload)).pipe(
+      Effect.tap((response) => rememberAuthentication(payload, response)),
+    );
+
+  const makeRefreshPayload = (): AcpSchema.AuthenticateRequest | undefined => {
+    if (!storedAuthentication) {
+      return undefined;
+    }
+    if (refreshToken === undefined) {
+      return storedAuthentication.payload;
+    }
+    const originalMeta = isRecord(storedAuthentication.payload._meta)
+      ? storedAuthentication.payload._meta
+      : {};
+    return {
+      ...storedAuthentication.payload,
+      _meta: {
+        ...originalMeta,
+        refreshToken,
+      },
+    };
+  };
+
+  const cleanupExpiredSession = (sessionId: AcpSchema.SessionId | undefined): Effect.Effect<void> =>
+    sessionId
+      ? callRpc(rpc[AGENT_METHODS.session_close]({ sessionId })).pipe(Effect.ignore)
+      : Effect.void;
+
+  const runAuthRefresh = (
+    sessionId: AcpSchema.SessionId | undefined,
+  ): Effect.Effect<void, AcpError.AcpAuthenticationError> =>
+    Effect.gen(function* () {
+      const refreshPayload = makeRefreshPayload();
+      if (!refreshPayload) {
+        return yield* makeAuthenticationError(
+          undefined,
+          "cannot refresh before authenticate succeeds",
+        );
+      }
+
+      if (sessionId && options.onSessionExpired) {
+        yield* options.onSessionExpired(sessionId);
+      }
+
+      const response = yield* Effect.acquireUseRelease(
+        Effect.succeed(sessionId),
+        (expiredSessionId): Effect.Effect<AcpSchema.AuthenticateResponse, AcpError.AcpError> =>
+          cleanupExpiredSession(expiredSessionId).pipe(
+            Effect.andThen(callRpc(rpc[AGENT_METHODS.authenticate](refreshPayload))),
+          ),
+        () => Effect.void,
+      ).pipe(
+        Effect.retry(Schedule.recurs(1)),
+        Effect.mapError((error) =>
+          makeAuthenticationError(error, "re-authentication failed after session expiry"),
+        ),
+      );
+
+      yield* rememberAuthentication(refreshPayload, response);
+    });
+
+  const ensureAuthRefreshed = (
+    sessionId: AcpSchema.SessionId | undefined,
+    observedGeneration: number,
+  ): Effect.Effect<void, AcpError.AcpAuthenticationError> =>
+    Effect.gen(function* () {
+      const currentGeneration = yield* Ref.get(authGeneration);
+      if (currentGeneration !== observedGeneration) {
+        return;
+      }
+
+      const deferred = yield* Deferred.make<void, AcpError.AcpAuthenticationError>();
+      const action = yield* Ref.modify<AuthRefreshState, AuthRefreshAction>(
+        authRefreshState,
+        (state): readonly [AuthRefreshAction, AuthRefreshState] => {
+          if (state._tag === "Refreshing") {
+            return [{ _tag: "Await", deferred: state.deferred }, state];
+          }
+          return [
+            { _tag: "Start", deferred },
+            { _tag: "Refreshing", deferred },
+          ];
+        },
+      );
+
+      if (action._tag === "Await") {
+        return yield* Deferred.await(action.deferred);
+      }
+
+      return yield* runAuthRefresh(sessionId).pipe(
+        Effect.matchEffect({
+          onFailure: (error) =>
+            Effect.gen(function* () {
+              yield* Deferred.fail(action.deferred, error);
+              return yield* error;
+            }),
+          onSuccess: () => Deferred.succeed(action.deferred, undefined).pipe(Effect.asVoid),
+        }),
+        Effect.ensuring(
+          Ref.update(authRefreshState, (state) =>
+            state._tag === "Refreshing" && state.deferred === action.deferred
+              ? { _tag: "Idle" as const }
+              : state,
+          ),
+        ),
+      );
+    });
+
+  const withAuthRefresh = <A>(
+    payload: unknown,
+    operation: Effect.Effect<A, AcpError.AcpError>,
+  ): Effect.Effect<A, AcpError.AcpError> =>
+    Effect.gen(function* () {
+      const observedGeneration = yield* Ref.get(authGeneration);
+      return yield* operation.pipe(
+        Effect.catchIf(isAuthenticationExpired, (error) =>
+          ensureAuthRefreshed(getSessionId(payload), observedGeneration).pipe(
+            Effect.andThen(operation),
+          ),
+        ),
+      );
+    });
+
   return AcpClient.of({
     raw: {
       notifications: transport.incoming,
@@ -464,18 +686,26 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     },
     agent: {
       initialize: (payload) => callRpc(rpc[AGENT_METHODS.initialize](payload)),
-      authenticate: (payload) => callRpc(rpc[AGENT_METHODS.authenticate](payload)),
+      authenticate,
       logout: (payload) => callRpc(rpc[AGENT_METHODS.logout](payload)),
-      createSession: (payload) => callRpc(rpc[AGENT_METHODS.session_new](payload)),
-      loadSession: (payload) => callRpc(rpc[AGENT_METHODS.session_load](payload)),
-      listSessions: (payload) => callRpc(rpc[AGENT_METHODS.session_list](payload)),
-      forkSession: (payload) => callRpc(rpc[AGENT_METHODS.session_fork](payload)),
-      resumeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_resume](payload)),
-      closeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_close](payload)),
-      setSessionModel: (payload) => callRpc(rpc[AGENT_METHODS.session_set_model](payload)),
+      createSession: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_new](payload))),
+      loadSession: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_load](payload))),
+      listSessions: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_list](payload))),
+      forkSession: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_fork](payload))),
+      resumeSession: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_resume](payload))),
+      closeSession: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_close](payload))),
+      setSessionModel: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_set_model](payload))),
       setSessionConfigOption: (payload) =>
-        callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)),
-      prompt: (payload) => callRpc(rpc[AGENT_METHODS.session_prompt](payload)),
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_set_config_option](payload))),
+      prompt: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_prompt](payload))),
       cancel: (payload) => transport.notify(AGENT_METHODS.session_cancel, payload),
     },
     handleRequestPermission: (handler) =>

@@ -1,0 +1,5 @@
+{
+  "agent_name": "Ola ACP Refresh Agent",
+  "config_snapshot": "Public task context: GitHub issue UnsafeLabs/Bounty-Hunters#829 requests automatic token refresh in t3code/packages/effect-acp/src/client.ts, including 401/auth-expiry detection, one re-auth retry schedule, refresh-token reuse, onSessionExpired callback, old-session cleanup, queued concurrent request replay, typed authentication failure, tests, and a PR title containing [ T3 Code ]. Private system, developer, tool, account, credential, and user-specific instructions are intentionally redacted and are not safe to publish in a repository.",
+  "created": "2026-06-11T21:01:48Z"
+}

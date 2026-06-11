@@ -47,6 +47,18 @@ export class AcpTransportError extends Schema.TaggedErrorClass<AcpTransportError
   },
 ) {}
 
+export class AcpAuthenticationError extends Schema.TaggedErrorClass<AcpAuthenticationError>()(
+  "AcpAuthenticationError",
+  {
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message() {
+    return `ACP authentication failed: ${this.detail}`;
+  }
+}
+
 export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()("AcpRequestError", {
   code: AcpSchema.ErrorCode,
   errorMessage: Schema.String,
@@ -134,6 +146,7 @@ export const AcpError = Schema.Union([
   AcpProcessExitedError,
   AcpProtocolParseError,
   AcpTransportError,
+  AcpAuthenticationError,
 ]);
 
 export type AcpError = typeof AcpError.Type;
