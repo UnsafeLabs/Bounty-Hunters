@@ -5,6 +5,7 @@ import time
 from base64 import b64decode
 from typing import Annotated
 
+from annotated_doc import Doc
 from fastapi.exceptions import HTTPException
 from fastapi.openapi.models import HTTPBase as HTTPBaseModel
 from fastapi.openapi.models import HTTPBearer as HTTPBearerModel
@@ -12,10 +13,10 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
+from starlette.status import HTTP_429_TOO_MANY_REQUESTS
+from starlette.status import HTTP_401_UNAUTHORIZED
 
 
-class HTTPBasicCredentials(BaseModel):
 class HTTPBasicCredentials(BaseModel):
     """
     The HTTP Basic credentials given as the result of using `HTTPBasic` in a
@@ -155,9 +156,28 @@ class HTTPBasic(HTTPBase):
         ] = None,
         realm: Annotated[
             str | None,
-            Doc(
-                """
-                HTTP Basic authentication realm.
+                detail="Invalid authentication credentials",
+                headers=self.make_authenticate_headers(),
+            )
+
+
+class _FailedAttempt:
+    def __init__(self, count: int = 1, first_attempt: float | None = None):
+        self.count = count
+        self.first_attempt = first_attempt or time.time()
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    """
+    HTTP Basic authentication with brute force protection.
+
+    Extends `HTTPBasic` to track failed login attempts per IP address and
+    temporarily lock out clients after exceeding `max_attempts` within a
+    configurable time window.
+
+    ## Usage
+
+    
                 """
             ),
         ] = None,
@@ -168,27 +188,9 @@ class HTTPBasic(HTTPBase):
                 Security scheme description.
 
                 It will be included in the generated OpenAPI (e.g. visible at `/docs`).
-            )
-        return HTTPBasicCredentials(username=username, password=password)
-
-
-class _FailedAttempt:
-    def __init__(self) -> None:
-        self.count = 0
-        self.first_attempt_time: float = 0.0
-        self.lockout_until: float = 0.0
-
-
-class HTTPBasicWithProtection(HTTPBasic):
-    """
-    HTTP Basic authentication with brute force protection.
-
-    Extends `HTTPBasic` to add rate limiting per IP address and
-    timing-safe password verification.
-
-    ## Usage
-
-    
+                """
+            ),
+        ] = None,
         auto_error: Annotated[
             bool,
             Doc(
