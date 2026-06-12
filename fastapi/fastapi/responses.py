@@ -1,5 +1,7 @@
 import importlib
-from typing import Any, Protocol, cast
+import csv
+import io
+from typing import Any, AsyncGenerator, Iterable, Optional, Protocol, Sequence, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
 from fastapi.sse import EventSourceResponse as EventSourceResponse  # noqa
@@ -96,3 +98,63 @@ class ORJSONResponse(JSONResponse):
         return orjson.dumps(
             content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
         )
+
+
+class StreamingCSVResponse(StreamingResponse):
+    """
+    Streaming CSV response for large dataset exports.
+    Accepts an async generator of row data (lists or tuples).
+    """
+
+    def __init__(
+        self,
+        content: AsyncGenerator[Sequence[Any], None] | Iterable[Sequence[Any]],
+        status_code: int = 200,
+        headers: Optional[dict[str, str]] = None,
+        media_type: Optional[str] = None,
+        background: Optional[Any] = None,
+        filename: str = "export.csv",
+        column_headers: Optional[Sequence[str]] = None,
+        delimiter: str = ",",
+    ) -> None:
+        self.column_headers = column_headers
+        self.delimiter = delimiter
+
+        headers = headers or {}
+        headers.setdefault(
+            "Content-Disposition", f'attachment; filename="{filename}"'
+        )
+
+        super().__init__(
+            content=self._csv_generator(content),
+            status_code=status_code,
+            headers=headers,
+            media_type=media_type or "text/csv",
+            background=background,
+        )
+
+    async def _csv_generator(
+        self, content: AsyncGenerator[Sequence[Any], None] | Iterable[Sequence[Any]]
+    ) -> AsyncGenerator[str, None]:
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=self.delimiter, quoting=csv.QUOTE_MINIMAL)
+
+        # Write column headers if provided
+        if self.column_headers:
+            writer.writerow(self.column_headers)
+            yield output.getvalue()
+            output.seek(0)
+            output.truncate(0)
+
+        if hasattr(content, "__aiter__"):
+            async for row in content:  # type: ignore
+                writer.writerow(row)
+                yield output.getvalue()
+                output.seek(0)
+                output.truncate(0)
+        else:
+            for row in content:  # type: ignore
+                writer.writerow(row)
+                yield output.getvalue()
+                output.seek(0)
+                output.truncate(0)
