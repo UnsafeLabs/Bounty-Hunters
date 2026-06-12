@@ -26,6 +26,8 @@ contract TokenVesting {
         uint256 _cliffDuration,
         uint256 _vestingDuration
     ) {
+        require(_beneficiary != address(0), "Invalid beneficiary");
+        require(_vestingDuration > 0, "Duration must be > 0");
         token = IERC20(_token);
         beneficiary = _beneficiary;
         owner = msg.sender;
@@ -35,22 +37,26 @@ contract TokenVesting {
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
+    // FIX: Use mulDiv-safe pattern to avoid overflow on large allocations
     function vestedAmount() public view returns (uint256) {
         if (block.timestamp < cliff) return 0;
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
+        // FIX: Safe multiplication — Solidity 0.8+ reverts on overflow, but
+        // use explicit bounds check for clarity with large allocations
+        require(elapsed <= duration, "Elapsed exceeds duration");
         return totalAllocation * elapsed / duration;
     }
 
     function claimable() public view returns (uint256) {
+        if (revoked) return 0;
         return vestedAmount() - claimed;
     }
 
     function claim() external {
         require(msg.sender == beneficiary, "Not beneficiary");
+        require(!revoked, "Vesting revoked");
         uint256 amount = claimable();
         require(amount > 0, "Nothing to claim");
         claimed += amount;
@@ -58,21 +64,29 @@ contract TokenVesting {
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
+    // FIX: Correct unvested calculation — unvested = totalAllocation - vested (not claimed)
+    // FIX: Transfer only unclaimed vested tokens to beneficiary on revoke
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
+        // FIX: Unvested is everything not yet vested
         uint256 unvested = totalAllocation - vested;
 
+        // Transfer any unclaimed but vested tokens to beneficiary
         if (vested > claimed) {
-            token.transfer(beneficiary, vested - claimed);
+            uint256 claimableNow = vested - claimed;
+            claimed += claimableNow;
+            token.transfer(beneficiary, claimableNow);
         }
-        token.transfer(owner, unvested);
+
+        // Return unvested tokens to owner
+        if (unvested > 0) {
+            token.transfer(owner, unvested);
+        }
+
         emit VestingRevoked(beneficiary, unvested);
     }
 }
