@@ -17,20 +17,113 @@ _SSE_EVENT_SCHEMA: dict[str, Any] = {
 }
 
 
+import asyncio
+import json
+from collections import deque
+from typing import Annotated, Any, AsyncGenerator, Dict, List, Optional, Set
+
+from annotated_doc import Doc
+from pydantic import AfterValidator, BaseModel, Field, model_validator
+from starlette.responses import StreamingResponse
+from starlette.types import Receive, Scope, Send
+
+# ... (schemas and previous code remains)
+
+class SSEManager:
+    """Manages SSE connections, broadcasting, and event replay."""
+
+    def __init__(self, history_size: int = 100):
+        self.active_connections: Dict[str, Set[asyncio.Queue]] = {}
+        self.history = deque(maxlen=history_size)
+        self._lock = asyncio.Lock()
+
+    async def subscribe(self, event_type: Optional[str] = None) -> asyncio.Queue:
+        queue = asyncio.Queue()
+        key = event_type or "*"
+        async with self._lock:
+            if key not in self.active_connections:
+                self.active_connections[key] = set()
+            self.active_connections[key].add(queue)
+        return queue
+
+    async def unsubscribe(self, queue: asyncio.Queue, event_type: Optional[str] = None):
+        key = event_type or "*"
+        async with self._lock:
+            if key in self.active_connections:
+                self.active_connections[key].discard(queue)
+                if not self.active_connections[key]:
+                    del self.active_connections[key]
+
+    async def broadcast(self, event: "ServerSentEvent"):
+        async with self._lock:
+            self.history.append(event)
+            # Send to specific listeners
+            if event.event and event.event in self.active_connections:
+                for queue in self.active_connections[event.event]:
+                    await queue.put(event)
+            # Send to global listeners
+            if "*" in self.active_connections:
+                for queue in self.active_connections["*"]:
+                    await queue.put(event)
+
+    def get_events_since(self, last_id: str) -> List["ServerSentEvent"]:
+        found = False
+        replay = []
+        for event in self.history:
+            if found:
+                replay.append(event)
+            if event.id == last_id:
+                found = True
+        return replay
+
+
 class EventSourceResponse(StreamingResponse):
-    """Streaming response with `text/event-stream` media type.
+    """Enhanced EventSourceResponse with disconnect detection."""
 
-    Use as `response_class=EventSourceResponse` on a *path operation* that uses `yield`
-    to enable Server Sent Events (SSE) responses.
+    def __init__(
+        self,
+        content: Any,
+        status_code: int = 200,
+        headers: Optional[Dict[str, str]] = None,
+        media_type: Optional[str] = None,
+        background: Optional[Any] = None,
+        ping_interval: float = 15.0,
+    ) -> None:
+        super().__init__(
+            content, status_code, headers, "text/event-stream", background
+        )
+        self.ping_interval = ping_interval
 
-    Works with **any HTTP method** (`GET`, `POST`, etc.), which makes it compatible
-    with protocols like MCP that stream SSE over `POST`.
+    async def listen_for_disconnect(self, receive: Receive):
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                break
 
-    The actual encoding logic lives in the FastAPI routing layer. This class
-    serves mainly as a marker and sets the correct `Content-Type`.
-    """
+    async def stream_response(self, send: Send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": self.status_code,
+                "headers": self.raw_headers,
+            }
+        )
 
-    media_type = "text/event-stream"
+        async for event in self.body_iterator:
+            if isinstance(event, ServerSentEvent):
+                chunk = format_sse_event(
+                    data_str=json.dumps(event.data) if event.data else event.raw_data,
+                    event=event.event,
+                    id=event.id,
+                    retry=event.retry,
+                    comment=event.comment,
+                )
+            else:
+                chunk = format_sse_event(data_str=json.dumps(event))
+            
+            await send({"type": "http.response.body", "body": chunk, "more_body": True})
+
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
 
 
 def _check_id_no_null(v: str | None) -> str | None:
