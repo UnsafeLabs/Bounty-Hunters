@@ -9,6 +9,12 @@ from .background import BackgroundTasks as BackgroundTasks
 from .datastructures import UploadFile as UploadFile
 from .exceptions import HTTPException as HTTPException
 from .exceptions import WebSocketException as WebSocketException
+from .pagination import PaginatedResponse as PaginatedResponse
+from .pagination import PaginationParams as PaginationParams
+from .pagination import Paginator as Paginator
+from .pagination import decode_cursor as decode_cursor
+from .pagination import encode_cursor as encode_cursor
+from .pagination import paginate as paginate
 from .param_functions import Body as Body
 from .param_functions import Cookie as Cookie
 from .param_functions import Depends as Depends
