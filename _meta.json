@@ -1,0 +1,12 @@
+{
+  "contributor": "Votienduong2208",
+  "github_username": "Votienduong2208",
+  "description": "Fix User model password cast to respect bcrypt rounds from config/hashing.php",
+  "issue_number": 745,
+  "repository": "UnsafeLabs/Bounty-Hunters",
+  "changes": [
+    "Modified User model (laravel/app/Models/User.php) to use custom setPasswordAttribute mutator with Hash::make() and config('hashing.bcrypt.rounds')",
+    "Updated UserFactory (laravel/database/factories/UserFactory.php) to respect configured bcrypt rounds",
+    "Added unit tests (laravel/tests/Unit/UserPasswordHashTest.php) verifying bcrypt rounds match config value"
+  ]
+}
