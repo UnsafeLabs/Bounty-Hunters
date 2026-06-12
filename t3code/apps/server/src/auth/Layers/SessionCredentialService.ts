@@ -33,6 +33,7 @@ import {
 const SIGNING_SECRET_NAME = "server-signing-key";
 const DEFAULT_SESSION_TTL = Duration.days(30);
 const DEFAULT_WEBSOCKET_TOKEN_TTL = Duration.minutes(5);
+const ACTIVITY_DEBOUNCE_MS = Duration.toMillis(Duration.minutes(5));
 
 const SessionClaims = Schema.Struct({
   v: Schema.Literal(1),
@@ -95,6 +96,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
   const authSessions = yield* AuthSessionRepository;
   const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
   const connectedSessionsRef = yield* Ref.make(new Map<string, number>());
+  const lastActivityWriteRef = yield* Ref.make(new Map<string, number>());
   const changesPubSub = yield* PubSub.unbounded<SessionCredentialChange>();
   const cookieName = resolveSessionCookieName({
     mode: serverConfig.mode,
@@ -137,6 +139,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
           issuedAt: row.value.issuedAt,
           expiresAt: row.value.expiresAt,
           lastConnectedAt: row.value.lastConnectedAt,
+          lastActiveAt: row.value.lastActiveAt,
           connected: connectedSessions.has(row.value.sessionId),
         }),
       );
@@ -200,6 +203,33 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       ),
     );
 
+  const trackActivity: SessionCredentialServiceShape["trackActivity"] = (sessionId) =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const shouldWrite = yield* Ref.modify(lastActivityWriteRef, (current) => {
+        const lastWrite = current.get(sessionId) ?? 0;
+        if (now - lastWrite >= ACTIVITY_DEBOUNCE_MS) {
+          const next = new Map(current);
+          next.set(sessionId, now);
+          return [true, next] as const;
+        }
+        return [false, current] as const;
+      });
+      if (shouldWrite) {
+        const lastActiveAt = yield* DateTime.now;
+        yield* authSessions.updateLastActiveAt({ sessionId, lastActiveAt });
+      }
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError("Failed to track session activity.").pipe(
+          Effect.annotateLogs({
+            sessionId,
+            cause,
+          }),
+        ),
+      ),
+    );
+
   const encodeClaims = Schema.encodeEffect(Schema.fromJsonString(SessionClaims));
   const issue: SessionCredentialServiceShape["issue"] = (input) =>
     Effect.gen(function* () {
@@ -253,6 +283,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
           issuedAt,
           expiresAt,
           lastConnectedAt: null,
+          lastActiveAt: null,
           connected: false,
         }),
       );
@@ -455,6 +486,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
           issuedAt: row.issuedAt,
           expiresAt: row.expiresAt,
           lastConnectedAt: row.lastConnectedAt,
+          lastActiveAt: row.lastActiveAt,
           connected: connectedSessions.has(row.sessionId),
         }),
       );
@@ -473,6 +505,11 @@ export const makeSessionCredentialService = Effect.gen(function* () {
           next.delete(sessionId);
           return next;
         });
+        yield* Ref.update(lastActivityWriteRef, (current) => {
+          const next = new Map(current);
+          next.delete(sessionId);
+          return next;
+        });
         yield* emitRemoved(sessionId);
       }
       return revoked;
@@ -487,6 +524,13 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       });
       if (revokedSessionIds.length > 0) {
         yield* Ref.update(connectedSessionsRef, (current) => {
+          const next = new Map(current);
+          for (const revokedSessionId of revokedSessionIds) {
+            next.delete(revokedSessionId);
+          }
+          return next;
+        });
+        yield* Ref.update(lastActivityWriteRef, (current) => {
           const next = new Map(current);
           for (const revokedSessionId of revokedSessionIds) {
             next.delete(revokedSessionId);
@@ -519,6 +563,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     revokeAllExcept,
     markConnected,
     markDisconnected,
+    trackActivity,
   } satisfies SessionCredentialServiceShape;
 });
 

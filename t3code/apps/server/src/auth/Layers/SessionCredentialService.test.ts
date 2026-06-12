@@ -190,4 +190,70 @@ it.layer(NodeServices.layer)("SessionCredentialServiceLive", (it) => {
       expect(afterReconnect[0]?.lastConnectedAt?.toString()).not.toBe(firstConnectedAt?.toString());
     }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
   );
+
+  it.effect("trackActivity writes lastActiveAt on first call and debounces subsequent writes", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const issued = yield* sessions.issue({
+        subject: "activity-test",
+        method: "bearer-session-token",
+      });
+
+      const initial = yield* sessions.listActive();
+      expect(initial[0]?.lastActiveAt).toBeNull();
+
+      yield* TestClock.adjust(Duration.seconds(1));
+      yield* sessions.trackActivity(issued.sessionId);
+      const afterFirst = yield* sessions.listActive();
+      const firstActiveAt = afterFirst[0]?.lastActiveAt;
+      expect(firstActiveAt).not.toBeNull();
+
+      yield* TestClock.adjust(Duration.minutes(2));
+      yield* sessions.trackActivity(issued.sessionId);
+      const afterSecond = yield* sessions.listActive();
+      expect(afterSecond[0]?.lastActiveAt?.toString()).toBe(firstActiveAt?.toString());
+
+      yield* TestClock.adjust(Duration.minutes(4));
+      yield* sessions.trackActivity(issued.sessionId);
+      const afterThird = yield* sessions.listActive();
+      expect(afterThird[0]?.lastActiveAt).not.toBeNull();
+      expect(afterThird[0]?.lastActiveAt?.toString()).not.toBe(firstActiveAt?.toString());
+    }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
+  );
+
+  it.effect("revoked sessions are excluded from listActive", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const issued = yield* sessions.issue({ subject: "revoke-test" });
+
+      const before = yield* sessions.listActive();
+      expect(before).toHaveLength(1);
+
+      yield* sessions.revoke(issued.sessionId);
+      const after = yield* sessions.listActive();
+      expect(after).toHaveLength(0);
+
+      const error = yield* Effect.flip(sessions.verify(issued.token));
+      expect(error.message).toContain("revoked");
+    }).pipe(Effect.provide(makeSessionCredentialLayer())),
+  );
+
+  it.effect("listActive sorts by lastActiveAt descending with issued_at fallback", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+
+      yield* TestClock.adjust(Duration.seconds(1));
+      const first = yield* sessions.issue({ subject: "first" });
+
+      yield* TestClock.adjust(Duration.seconds(1));
+      const second = yield* sessions.issue({ subject: "second" });
+
+      yield* TestClock.adjust(Duration.minutes(10));
+      yield* sessions.trackActivity(first.sessionId);
+
+      const listed = yield* sessions.listActive();
+      expect(listed[0]?.sessionId).toBe(first.sessionId);
+      expect(listed[1]?.sessionId).toBe(second.sessionId);
+    }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
+  );
 });
