@@ -133,4 +133,7 @@ return [
 
     'serializable_classes' => false,
 
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+    'health_check_interval' => env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
 ];
