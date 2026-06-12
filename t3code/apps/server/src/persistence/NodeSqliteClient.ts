@@ -10,11 +10,10 @@ import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import { identity } from "effect/Function";
 import * as Layer from "effect/Layer";
+import * as Pool from "effect/Pool";
 import * as Scope from "effect/Scope";
-import * as Semaphore from "effect/Semaphore";
 import * as Context from "effect/Context";
 import * as Stream from "effect/Stream";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
@@ -86,6 +85,11 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
   const makeConnection = Effect.gen(function* () {
     const scope = yield* Effect.scope;
     const db = openDatabase();
+    // Configure per-connection PRAGMAs
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec("PRAGMA busy_timeout = 5000");
+    db.exec("PRAGMA synchronous = NORMAL");
     yield* Scope.addFinalizer(
       scope,
       Effect.sync(() => db.close()),
@@ -194,18 +198,18 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
     });
   });
 
-  const semaphore = yield* Semaphore.make(1);
-  const connection = yield* makeConnection;
-
-  const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
-  const transactionAcquirer = Effect.uninterruptibleMask((restore) => {
-    const fiber = Fiber.getCurrent()!;
-    const scope = Context.getUnsafe(fiber.context, Scope.Scope);
-    return Effect.as(
-      Effect.tap(restore(semaphore.take(1)), () => Scope.addFinalizer(scope, semaphore.release(1))),
-      connection,
-    );
+  // Create a connection pool (min 1, max 5 connections) for concurrent WAL-mode access
+  const pool = yield* Pool.makeWithTTL({
+    acquire: makeConnection,
+    min: 1,
+    max: 5,
+    timeToLive: Duration.minutes(10),
   });
+
+  const acquirer = Effect.timeout(Pool.get(pool), Duration.seconds(10));
+  const transactionAcquirer = Effect.uninterruptibleMask((restore) =>
+    restore(Pool.get(pool)),
+  );
 
   return yield* Client.make({
     acquirer,

@@ -34,6 +34,18 @@ const setup = Layer.effectDiscard(
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA journal_mode = WAL;`;
     yield* sql`PRAGMA foreign_keys = ON;`;
+    yield* sql`PRAGMA busy_timeout = 5000;`;
+    yield* sql`PRAGMA synchronous = NORMAL;`;
+
+    // Verify WAL mode is active
+    const walCheck = yield* sql<{ readonly journal_mode: string }>`PRAGMA journal_mode;`;
+    const mode = walCheck[0]?.journal_mode;
+    if (mode?.toLowerCase() !== "wal") {
+      yield* Effect.logWarning(
+        `Expected SQLite journal_mode=wal but got "${mode}". Database may not support concurrent reads/writes.`,
+      );
+    }
+
     yield* runMigrations();
   }),
 );
@@ -65,3 +77,16 @@ export const SqlitePersistenceMemory = Layer.provideMerge(
 export const layerConfig = Layer.unwrap(
   Effect.map(Effect.service(ServerConfig), ({ dbPath }) => makeSqlitePersistenceLive(dbPath)),
 );
+
+/**
+ * Health check that runs SQLite PRAGMA integrity_check.
+ * Returns `{ pass: true, details: "ok" }` when the database is intact,
+ * or `{ pass: false, details: <error messages> }` on corruption.
+ */
+export const sqliteHealthCheck = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ readonly integrity_check: string }>`PRAGMA integrity_check;`;
+  const details = rows.map((r) => r.integrity_check).join("\n");
+  const pass = rows.length === 1 && rows[0]?.integrity_check === "ok";
+  return { pass, details } as const;
+});
