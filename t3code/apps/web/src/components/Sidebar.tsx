@@ -21,6 +21,7 @@ import { ProjectFavicon } from "./ProjectFavicon";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { NotificationHistoryPanel } from "./NotificationHistoryPanel";
 import {
   DndContext,
   type DragCancelEvent,
@@ -2510,6 +2511,9 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
             <SettingsIcon className="size-3.5" />
             <span className="text-xs">Settings</span>
           </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <NotificationHistoryPanel />
         </SidebarMenuItem>
       </SidebarMenu>
     </SidebarFooter>

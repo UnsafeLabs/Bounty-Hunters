@@ -11,6 +11,7 @@ import { useEffect, useEffectEvent, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
+import { NotificationToastContainer } from "../components/NotificationToast";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
@@ -147,6 +148,7 @@ function RootRouteView() {
           appShell
         )}
       </AnchoredToastProvider>
+      <NotificationToastContainer />
     </ToastProvider>
   );
 }
