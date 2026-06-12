@@ -80,6 +80,7 @@ from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.middleware import Middleware
 from starlette.routing import (
     BaseRoute,
     Match,
@@ -1266,6 +1267,15 @@ class APIRouter(routing.Router):
                 """
             ),
         ] = Default(True),
+        middleware: Annotated[
+            Sequence[Middleware] | None,
+            Doc(
+                """
+                A list of middleware to be applied to all the *path operations* in this
+                router.
+                """
+            ),
+        ] = None,
     ) -> None:
         # Determine the lifespan context to use
         if lifespan is None:
@@ -1313,6 +1323,14 @@ class APIRouter(routing.Router):
         self.default_response_class = default_response_class
         self.generate_unique_id_function = generate_unique_id_function
         self.strict_content_type = strict_content_type
+        self.middleware: list[Middleware] = list(middleware or [])
+
+    def add_middleware(
+        self,
+        middleware_class: type,
+        **options: Any,
+    ) -> None:
+        self.middleware.append(Middleware(middleware_class, **options))
 
     def route(
         self,
