@@ -9,6 +9,8 @@ contract CrossChainBridge {
     uint256 public nonce;
 
     mapping(bytes32 => bool) public processedTransfers;
+    // FIX: Per-sender nonce to prevent same-chain replay attacks
+    mapping(address => uint256) public senderNonces;
 
     event TransferInitiated(address indexed sender, uint256 amount, uint256 targetChain, uint256 nonce);
     event TransferProcessed(bytes32 indexed transferHash, address indexed recipient, uint256 amount);
@@ -24,33 +26,36 @@ contract CrossChainBridge {
         emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
     }
 
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
+    // FIX: Include block.chainid, address(this), and per-sender nonce in hash
     function processTransfer(
         address recipient,
         uint256 amount,
         uint256 transferNonce,
         bytes calldata signature
     ) external {
+        // FIX: Include chainid to prevent cross-chain replay
+        // FIX: Include contract address to prevent replay after proxy upgrade
+        // FIX: Include per-sender nonce to prevent same-chain replay
         bytes32 transferHash = keccak256(abi.encodePacked(
             recipient,
             amount,
-            transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
+            transferNonce,
+            block.chainid,
+            address(this)
         ));
 
         require(!processedTransfers[transferHash], "Already processed");
         require(verifySignature(transferHash, signature), "Invalid signature");
+        require(senderNonces[recipient] == transferNonce, "Invalid nonce");
 
         processedTransfers[transferHash] = true;
+        senderNonces[recipient]++;
         bridgeToken.transfer(recipient, amount);
 
         emit TransferProcessed(transferHash, recipient, amount);
     }
 
-    // BUG: Does not check for zero-address return from ecrecover
+    // FIX: Add zero-address check on ecrecover result
     function verifySignature(bytes32 hash, bytes calldata signature) public view returns (bool) {
         require(signature.length == 65, "Invalid signature length");
 
@@ -71,7 +76,8 @@ contract CrossChainBridge {
             v, r, s
         );
 
-        // BUG: Missing require(recovered != address(0))
+        // FIX: Reject zero-address from ecrecover (invalid signature)
+        require(recovered != address(0), "Invalid signature");
         return recovered == validator;
     }
 
