@@ -9,6 +9,13 @@ contract CrossChainBridge {
     uint256 public nonce;
 
     mapping(bytes32 => bool) public processedTransfers;
+    mapping(address => uint256) public senderNonces;
+
+    bytes32 private constant DOMAIN_TYPE_HASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant TRANSFER_TYPE_HASH =
+        keccak256("Transfer(address recipient,uint256 amount,uint256 transferNonce,uint256 chainId,address contractAddress)");
+    bytes32 private immutable DOMAIN_SEPARATOR;
 
     event TransferInitiated(address indexed sender, uint256 amount, uint256 targetChain, uint256 nonce);
     event TransferProcessed(bytes32 indexed transferHash, address indexed recipient, uint256 amount);
@@ -16,6 +23,13 @@ contract CrossChainBridge {
     constructor(address _bridgeToken, address _validator) {
         bridgeToken = IERC20(_bridgeToken);
         validator = _validator;
+        DOMAIN_SEPARATOR = keccak256(abi.encode(
+            DOMAIN_TYPE_HASH,
+            keccak256(bytes("CrossChainBridge")),
+            keccak256(bytes("1")),
+            block.chainid,
+            address(this)
+        ));
     }
 
     function initiateTransfer(uint256 amount, uint256 targetChain) external {
@@ -24,33 +38,34 @@ contract CrossChainBridge {
         emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
     }
 
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
     function processTransfer(
         address recipient,
         uint256 amount,
         uint256 transferNonce,
         bytes calldata signature
     ) external {
-        bytes32 transferHash = keccak256(abi.encodePacked(
+        require(transferNonce == senderNonces[recipient], "Invalid nonce");
+
+        bytes32 structHash = keccak256(abi.encode(
+            TRANSFER_TYPE_HASH,
             recipient,
             amount,
-            transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
+            transferNonce,
+            block.chainid,
+            address(this)
         ));
+        bytes32 transferHash = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
 
         require(!processedTransfers[transferHash], "Already processed");
         require(verifySignature(transferHash, signature), "Invalid signature");
 
         processedTransfers[transferHash] = true;
+        senderNonces[recipient]++;
         bridgeToken.transfer(recipient, amount);
 
         emit TransferProcessed(transferHash, recipient, amount);
     }
 
-    // BUG: Does not check for zero-address return from ecrecover
     function verifySignature(bytes32 hash, bytes calldata signature) public view returns (bool) {
         require(signature.length == 65, "Invalid signature length");
 
@@ -66,13 +81,14 @@ contract CrossChainBridge {
 
         if (v < 27) v += 27;
 
-        address recovered = ecrecover(
-            keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash)),
-            v, r, s
-        );
+        address recovered = ecrecover(hash, v, r, s);
 
-        // BUG: Missing require(recovered != address(0))
+        require(recovered != address(0), "Invalid signature");
         return recovered == validator;
+    }
+
+    function getDomainSeparator() external view returns (bytes32) {
+        return DOMAIN_SEPARATOR;
     }
 
     function getPoolBalance() external view returns (uint256) {
