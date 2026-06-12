@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract StakingVault {
+contract StakingVault is ReentrancyGuard {
     IERC20 public stakingToken;
     uint256 public rewardRate;
     uint256 public totalStaked;
@@ -14,20 +15,20 @@ contract StakingVault {
 
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
-    event RewardClaimed(address indexed user, uint256 amount);
+    event RewardClaimed(address indexed user, uint256 reward);
 
     constructor(address _stakingToken, uint256 _rewardRate) {
         stakingToken = IERC20(_stakingToken);
         rewardRate = _rewardRate;
     }
 
-    function stake(uint256 amount) external {
+    function stake(uint256 amount) external nonReentrant {
         require(amount > 0, "Cannot stake 0");
-        stakingToken.transferFrom(msg.sender, address(this), amount);
         _updateReward(msg.sender);
         balances[msg.sender] += amount;
         totalStaked += amount;
         lastStakeTime[msg.sender] = block.timestamp;
+        stakingToken.transferFrom(msg.sender, address(this), amount);
         emit Staked(msg.sender, amount);
     }
 
@@ -39,31 +40,29 @@ contract StakingVault {
         lastStakeTime[account] = block.timestamp;
     }
 
-    // BUG: Reentrancy — state update after external call
-    function withdraw(uint256 amount) external {
+    // FIX: CEI pattern — update state before external call + nonReentrant
+    function withdraw(uint256 amount) external nonReentrant {
         require(balances[msg.sender] >= amount, "Insufficient balance");
         _updateReward(msg.sender);
 
-        // External call before state update
-        (bool success, ) = payable(msg.sender).call{value: amount}("");
-        require(success, "Transfer failed");
-
-        // State update after external call — vulnerable to reentrancy
+        // FIX: State update BEFORE external call
         balances[msg.sender] -= amount;
         totalStaked -= amount;
+
+        stakingToken.transfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
 
-    // BUG: Same reentrancy pattern in claimRewards
-    function claimRewards() external {
+    // FIX: CEI pattern — zero rewards before transfer + nonReentrant
+    function claimRewards() external nonReentrant {
         _updateReward(msg.sender);
         uint256 reward = rewards[msg.sender];
         require(reward > 0, "No rewards");
 
-        (bool success, ) = payable(msg.sender).call{value: reward}("");
-        require(success, "Transfer failed");
-
+        // FIX: Zero state before external call
         rewards[msg.sender] = 0;
+
+        stakingToken.transfer(msg.sender, reward);
         emit RewardClaimed(msg.sender, reward);
     }
 
