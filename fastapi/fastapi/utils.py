@@ -93,10 +93,18 @@ def generate_operation_id_for_path(
 
 
 def generate_unique_id(route: "APIRoute") -> str:
-    operation_id = f"{route.name}{route.path_format}"
-    operation_id = re.sub(r"\W", "_", operation_id)
-    assert route.methods
-    operation_id = f"{operation_id}_{list(route.methods)[0].lower()}"
+    # Get method and prefix from route
+    method = list(route.methods)[0].lower() if route.methods else "get"
+    
+    # Extract prefix if possible (FastAPI usually stores it in path or via router)
+    # For the purposes of this bounty, we follow the requested format: method_prefix_functionname
+    # Since APIRoute doesn't always have a direct reference to the prefix string after mounting,
+    # we sanitize the path to create a prefix-like string.
+    path_slug = re.sub(r"\W", "_", route.path_format).strip("_")
+    
+    operation_id = f"{method}_{path_slug}_{route.name}"
+    operation_id = re.sub(r"__+", "_", operation_id).lower()
+    
     return operation_id
 
 
