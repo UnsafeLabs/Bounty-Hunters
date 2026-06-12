@@ -4,6 +4,7 @@ use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
 use Monolog\Processor\PsrLogMessageProcessor;
+use App\Logging\StructuredJsonFormatter;
 
 return [
 
@@ -54,7 +55,7 @@ return [
 
         'stack' => [
             'driver' => 'stack',
-            'channels' => explode(',', (string) env('LOG_STACK', 'single')),
+            'channels' => explode(',', (string) env('LOG_STACK', 'daily,error')),
             'ignore_exceptions' => false,
         ],
 
@@ -71,6 +72,25 @@ return [
             'level' => env('LOG_LEVEL', 'debug'),
             'days' => env('LOG_DAILY_DAYS', 14),
             'replace_placeholders' => true,
+        ],
+
+        'error' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/error.log'),
+            'level' => env('LOG_ERROR_LEVEL', 'error'),
+            'days' => env('LOG_DAILY_DAYS', 14),
+            'replace_placeholders' => true,
+        ],
+
+        'json' => [
+            'driver' => 'monolog',
+            'level' => env('LOG_LEVEL', 'debug'),
+            'handler' => StreamHandler::class,
+            'handler_with' => [
+                'stream' => storage_path('logs/json.log'),
+            ],
+            'formatter' => StructuredJsonFormatter::class,
+            'processors' => [PsrLogMessageProcessor::class],
         ],
 
         'slack' => [
