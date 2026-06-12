@@ -9,6 +9,7 @@ from typing import (
 
 from annotated_doc import Doc
 from pydantic import GetJsonSchemaHandler
+from starlette.exceptions import HTTPException
 from starlette.datastructures import URL as URL  # noqa: F401
 from starlette.datastructures import Address as Address  # noqa: F401
 from starlette.datastructures import FormData as FormData  # noqa: F401
@@ -62,6 +63,50 @@ class UploadFile(StarletteUploadFile):
     content_type: Annotated[
         str | None, Doc("The content type of the request, from the headers.")
     ]
+
+    def __init__(
+        self,
+        file: BinaryIO,
+        *,
+        filename: str | None = None,
+        content_type: str | None = None,
+        headers: Headers | None = None,
+        max_size: int | None = None,
+        allowed_content_types: Sequence[str] | None = None,
+    ) -> None:
+        super().__init__(
+            file=file,
+            filename=filename,
+            content_type=content_type,
+            headers=headers,
+        )
+        self.max_size = max_size
+        self.allowed_content_types = allowed_content_types
+
+    async def validate(self) -> dict[str, Any]:
+        """
+        Validates the file size and content type.
+        Raises HTTPException 413 if size exceeds max_size.
+        Raises HTTPException 415 if content type is not allowed.
+        """
+        file_size = 0
+        if self.max_size is not None:
+            await self.seek(0, 2)
+            import anyio
+            file_size = await anyio.to_thread.run_sync(self.file.tell)
+            await self.seek(0)
+            if file_size > self.max_size:
+                raise HTTPException(status_code=413, detail="Payload Too Large")
+
+        if self.allowed_content_types is not None:
+            if self.content_type not in self.allowed_content_types:
+                raise HTTPException(status_code=415, detail="Unsupported Media Type")
+
+        return {
+            "is_valid": True,
+            "file_size": file_size or self.size,
+            "content_type": self.content_type,
+        }
 
     async def write(
         self,
