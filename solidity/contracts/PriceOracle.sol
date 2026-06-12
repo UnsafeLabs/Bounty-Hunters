@@ -14,21 +14,20 @@ interface AggregatorV3Interface {
 
 contract PriceOracle {
     AggregatorV3Interface public primaryFeed;
+    AggregatorV3Interface public secondaryFeed;
     address public owner;
     uint256 public MAX_STALENESS = 3600;
 
     event PriceQueried(int256 price, uint256 timestamp);
+    event StalePrice(uint256 lastUpdatedAt);
 
-    constructor(address _primaryFeed) {
+    constructor(address _primaryFeed, address _secondaryFeed) {
         primaryFeed = AggregatorV3Interface(_primaryFeed);
+        secondaryFeed = AggregatorV3Interface(_secondaryFeed);
         owner = msg.sender;
     }
 
-    // BUG: No staleness check on updatedAt
-    // BUG: No check for negative/zero price
-    // BUG: No round completeness validation
-    // BUG: No fallback oracle
-    function getLatestPrice() external view returns (int256) {
+    function getLatestPrice() external returns (int256) {
         (
             uint80 roundId,
             int256 price,
@@ -37,10 +36,32 @@ contract PriceOracle {
             uint80 answeredInRound
         ) = primaryFeed.latestRoundData();
 
-        // Missing: require(price > 0)
-        // Missing: require(answeredInRound >= roundId)
-        // Missing: require(block.timestamp - updatedAt < MAX_STALENESS)
+        require(answeredInRound >= roundId, "Incomplete round");
+        require(price > 0, "Invalid price");
 
+        if (block.timestamp - updatedAt >= MAX_STALENESS) {
+            emit StalePrice(updatedAt);
+            return _getFallbackPrice();
+        }
+
+        emit PriceQueried(price, block.timestamp);
+        return price;
+    }
+
+    function _getFallbackPrice() internal returns (int256) {
+        (
+            uint80 roundId,
+            int256 price,
+            ,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        ) = secondaryFeed.latestRoundData();
+
+        require(answeredInRound >= roundId, "Secondary: incomplete round");
+        require(price > 0, "Secondary: invalid price");
+        require(block.timestamp - updatedAt < MAX_STALENESS, "Both oracles stale");
+
+        emit PriceQueried(price, block.timestamp);
         return price;
     }
 
