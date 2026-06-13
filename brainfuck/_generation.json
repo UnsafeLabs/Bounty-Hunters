@@ -1,0 +1,1 @@
+{"agent": "big-pickle", "pre_task_context": "Implement Brainfuck ROT13 for UnsafeLabs/Bounty-Hunters issue #653 ($20 bounty). Requirements: read input, apply ROT13 cipher, output result. Must be pure BF. Program adapted from pablojorge/brainfuck rot13.bf.", "timestamp": "2026-06-13T18:45:00Z"}
