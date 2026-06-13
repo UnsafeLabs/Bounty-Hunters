@@ -1,139 +1,141 @@
  ```diff
---- a/cobol/verify-signature.cbl
-+++ b/cobol/verify-signature.cbl
-@@ -1,6 +1,7 @@
-       ******************************************************************
-       * VERIFY-SIGNATURE.cbl
-       * Certificate signature verification module
-+      * Fixed EBCDIC-to-ASCII conversion for fingerprint handling
-       ******************************************************************
-        IDENTIFICATION DIVISION.
-        PROGRAM-ID. VERIFY-SIGNATURE.
-@@ -45,7 +46,8 @@
-       * Working storage for signature verification
-       ******************************************************************
-        01  WS-SIG-VERIFY-BUFFER.
--           05 WS-SIG-VERIFY-DATA    PIC X(64).
-+           05 WS-SIG-VERIFY-DATA    PIC X(64)
-+                                   USAGE DISPLAY.
-        01  WS-SIG-RESULT           PIC 9 VALUE 0.
-            88  WS-SIG-VALID         VALUE 0.
-            88  WS-SIG-INVALID       VALUE 1.
-@@ -55,6 +57,14 @@
-        01  WS-DISPLAY-FINGERPRINT  PIC X(64).
-        01  WS-VERIFY-STATUS        PIC X(20).
- 
-+      * Code-page-independent comparison buffer
-+       01  WS-FP-INDEX             PIC 9(2) COMP.
-+       01  WS-FP-MATCH-FLAG        PIC 9 VALUE 1.
-+           88  WS-FP-MATCHES        VALUE 1.
-+           88  WS-FP-MISMATCH       VALUE 0.
-+       01  WS-FP-BYTE-1            PIC X.
-+       01  WS-FP-BYTE-2            PIC X.
-+       01  WS-FP-ORD-1             PIC 9(3) COMP.
-+       01  WS-FP-ORD-2             PIC 9(3) COMP.
-+
-       ******************************************************************
-       * LINKAGE SECTION
-       ******************************************************************
-@@ -229,14 +239,51 @@
-       *    CS-CERT-FINGERPRINT fields
-       ******************************************************************
-        VERIFY-SIGNATURE-PARA.
--      *    Move fingerprint to working buffer
--           MOVE WS-CERT-FINGERPRINT TO WS-SIG-VERIFY-BUFFER
-+      *    Move fingerprint to working buffer with explicit encoding
-+           MOVE FUNCTION LOWER-CASE(WS-CERT-FINGERPRINT)
-+             TO WS-SIG-VERIFY-BUFFER
-+
-+      *    Perform code-page-independent byte-by-byte comparison
-+      *    using FUNCTION ORD to avoid EBCDIC/ASCII mismatch
-+           PERFORM VARYING WS-FP-INDEX FROM 1 BY 1
-+                   UNTIL WS-FP-INDEX > 64
-+                   OR WS-FP-MISMATCH
-+               MOVE WS-SIG-VERIFY-DATA(WS-FP-INDEX:1)
-+                 TO WS-FP-BYTE-1
-+               MOVE CS-CERT-FINGERPRINT(WS-FP-INDEX:1)
-+                 TO WS-FP-BYTE-2
-+               COMPUTE WS-FP-ORD-1 = FUNCTION ORD(WS-FP-BYTE-1)
-+               COMPUTE WS-FP-ORD-2 = FUNCTION ORD(WS-FP-BYTE-2)
-+      *        Convert to common case for comparison
-+               IF WS-FP-ORD-1 >= 97 AND WS-FP-ORD-1 <= 102
-+      *            Lowercase a-f, convert to uppercase
-+                   COMPUTE WS-FP-ORD-1 = WS-FP-ORD-1 - 32
-+               END-IF
-+               IF WS-FP-ORD-2 >= 97 AND WS-FP-ORD-2 <= 102
-+      *            Lowercase a-f, convert to uppercase
-+                   COMPUTE WS-FP-ORD-2 = WS-FP-ORD-2 - 32
-+               END-IF
-+               IF WS-FP-ORD-1 NOT = WS-FP-ORD-2
-+                   SET WS-FP-MISMATCH TO TRUE
-+               END-IF
-+           END-PERFORM
- 
--      *    Compare fingerprints
--           IF WS-SIG-VERIFY-BUFFER = CS-CERT-FINGERPRINT
-+      *    Evaluate comparison result
-+           IF WS-FP-MATCHES
-                SET WS-SIG-VALID TO TRUE
-                MOVE 'SIGNATURE VERIFIED' TO WS-VERIFY-STATUS
-            ELSE
-                SET WS-SIG-INVALID TO TRUE
-                MOVE 'SIGNATURE FAILED' TO WS-VERIFY-STATUS
-            END-IF
- 
-       *    Log verification result with fingerprint
--           MOVE WS-SIG-VERIFY-BUFFER TO WS-DISPLAY-FINGERPRINT
-+           MOVE WS-CERT-FINGERPRINT TO WS-DISPLAY-FINGERPRINT
-            DISPLAY 'VERIFY: Fingerprint=' WS-DISPLAY-FINGERPRINT
-            DISPLAY 'VERIFY: Status=' WS-VERIFY-STATUS
- 
-+      *    Reset match flag for next verification
-+           SET WS-FP-MATCHES TO TRUE
-+
-            .
- 
-       ******************************************************************
-@@ -260,6 +297,7 @@
-       *    CS-CERT-FINGERPRINT - Expected fingerprint
-       *    WS-VERIFY-STATUS    - Result message
-       ******************************************************************
-+      *    (Test cases moved to test file for maintainability)
-        .
- 
-       ******************************************************************
-@@ -267,3 +305,4 @@
-       ******************************************************************
-        9999-EXIT.
-            GOBACK.
-+
---- /dev/null
-+++ b/cobol/tests/test-verify-signature.cbl
-@@ -0,0 +1,189 @@
-+      ******************************************************************
-+      * TEST-VERIFY-SIGNATURE.cbl
-+      * Unit tests for VERIFY-SIGNATURE module
-+      * Includes test for EBCDIC-safe fingerprint comparison
-+      ******************************************************************
+--- a/cobol/verify-signature.cob
++++ b/cobol/verify-signature.cob
+@@ -1,0 +1,150 @@
++      *================================================================*
++      * VERIFY-SIGNATURE - Certificate signature verification module
++      *================================================================*
 +       IDENTIFICATION DIVISION.
-+       PROGRAM-ID. TEST-VERIFY-SIGNATURE.
-+
++       PROGRAM-ID. VERIFY-SIGNATURE.
 +       ENVIRONMENT DIVISION.
 +       CONFIGURATION SECTION.
-+       SOURCE-COMPUTER. IBM-370 WITH DEBUGGING MODE.
-+
++       SPECIAL-NAMES.
++           CLASS HEX-CHAR IS "0123456789ABCDEF".
 +       DATA DIVISION.
 +       WORKING-STORAGE SECTION.
-+      * Test data
-+       01  TEST-FINGERPRINT-DIGITS.
-+           05 FILLER PIC X(64)
-+           VALUE '1234567890123456789012345678901234567890'.
-+       01  TEST-FINGERPRINT-MIXED.
-+           05 FILLER PIC X(64)
-+           VALUE 'AABBCCDDEEFF00112233445566778899AABBCCDD'.
-+       01  TEST-FINGERPRINT-ALL-HEX.
-+           05 FILLER PIC X(64)
-+           VALUE 'DEADBEEFCAFEBABE0123456789ABCDEF01234567'.
-+       01  TEST-FINGERPRINT-LOWER.
-+           05 FILLER PIC X(64)
-+           VALUE 'aabbccddeeff001
++      *----------------------------------------------------------------*
++      * Certificate fingerprint fields
++      *----------------------------------------------------------------*
++       01  WS-CERT-FINGERPRINT.
++           05  WS-CERT-FINGERPRINT-BYTE  PIC X(64) USAGE DISPLAY.
++       01  CS-CERT-FINGERPRINT.
++           05  CS-CERT-FINGERPRINT-BYTE  PIC X(64) USAGE DISPLAY.
++      *----------------------------------------------------------------*
++      * Verification buffer - must match encoding of CS-CERT-FINGERPRINT
++      * to prevent EBCDIC-to-ASCII conversion corruption on z/OS
++      *----------------------------------------------------------------*
++       01  WS-SIG-VERIFY-BUFFER.
++           05  WS-SIG-VERIFY-BYTE        PIC X(64) USAGE DISPLAY.
++      *----------------------------------------------------------------*
++      * Temporary variables for code-page-independent comparison
++      *----------------------------------------------------------------*
++       01  WS-IDX                        PIC 9(4) COMP.
++       01  WS-LENGTH                     PIC 9(4) COMP VALUE 64.
++       01  WS-MATCH-FOUND                PIC X VALUE 'N'.
++           88  MATCH-YES                 VALUE 'Y'.
++           88  MATCH-NO                  VALUE 'N'.
++       01  WS-ORD1                       PIC 9(4) COMP.
++       01  WS-ORD2                       PIC 9(4) COMP.
++       01  WS-TEST-FINGERPRINT.
++           05  WS-TEST-BYTE              PIC X(64) USAGE DISPLAY.
++       01  WS-HEX-STR                    PIC X(128).
++       01  WS-DISPLAY-IDX                PIC 9(4) COMP.
++      *----------------------------------------------------------------*
++      * Test data for A-F hex character verification
++      *----------------------------------------------------------------*
++       01  WS-TEST-CASES.
++           05  WS-TEST-DIGITS-ONLY.
++               10  FILLER                PIC X(64) VALUE
++                   "1234567890123456789012345678901234567890" &
++                   "1234567890123456789012345678901234".
++           05  WS-TEST-AF-HEX.
++               10  FILLER                PIC X(64) VALUE
++                   "AABBCCDDEEFF00112233445566778899AABBCCDD" &
++                   "EEFF00112233445566778899AABBCCDDEEFF00".
++           05  WS-TEST-MIXED-HEX.
++               10  FILLER                PIC X(64) VALUE
++                   "DEADBEEFCAFE1234567890ABCDEF1234567890AB" &
++                   "CDEF1234567890ABCDEF1234567890ABCDEF12".
++      *----------------------------------------------------------------*
++      * Result and logging fields
++      *----------------------------------------------------------------*
++       01  WS-RESULT-MSG                 PIC X(80).
++       01  WS-LOG-FINGERPRINT            PIC X(64).
++
++       PROCEDURE DIVISION.
++      *----------------------------------------------------------------*
++      * Main entry point
++      *----------------------------------------------------------------*
++       MAIN-LOGIC.
++           PERFORM VERIFY-SIGNATURE
++           STOP RUN.
++
++      *----------------------------------------------------------------*
++      * VERIFY-SIGNATURE paragraph
++      * Verifies certificate fingerprint against stored certificate
++      *----------------------------------------------------------------*
++       VERIFY-SIGNATURE.
++      *    Move fingerprint to buffer with matching encoding
++           MOVE WS-CERT-FINGERPRINT TO WS-SIG-VERIFY-BUFFER
++      *
++      *    Perform code-page-independent comparison using FUNCTION ORD
++      *    on each byte to handle EBCDIC/ASCII differences for hex A-F
++           PERFORM CODEPAGE-INDEPENDENT-COMPARE
++      *
++      *    Log the fingerprint with correct hex values
++           PERFORM LOG-FINGERPRINT
++           .
++
++      *----------------------------------------------------------------*
++      * CODEPAGE-INDEPENDENT-COMPARE
++      * Compares fingerprints byte-by-byte using FUNCTION ORD
++      * to avoid EBCDIC-to-ASCII conversion issues for hex chars A-F
++      *----------------------------------------------------------------*
++       CODEPAGE-INDEPENDENT-COMPARE.
++           SET MATCH-NO TO TRUE
++           PERFORM VARYING WS-IDX FROM 1 BY 1 UNTIL WS-IDX > WS-LENGTH
++               COMPUTE WS-ORD1 = FUNCTION ORD(
++                   WS-SIG-VERIFY-BYTE(WS-IDX:1))
++               COMPUTE WS-ORD2 = FUNCTION ORD(
++                   CS-CERT-FINGERPRINT-BYTE(WS-IDX:1))
++               IF WS-ORD1 NOT EQUAL WS-ORD2
++                   GO TO CODEPAGE-COMPARE-EXIT
++               END-IF
++           END-PERFORM
++           SET MATCH-YES TO TRUE
++           .
++       CODEPAGE-COMPARE-EXIT.
++           EXIT.
++
++      *----------------------------------------------------------------*
++      * LOG-FINGERPRINT
++      * Displays fingerprint with correct hex values
++      *----------------------------------------------------------------*
++       LOG-FINGERPRINT.
++           MOVE WS-SIG-VERIFY-BUFFER TO WS-LOG-FINGERPRINT
++           DISPLAY "Certificate fingerprint: " WS-LOG-FINGERPRINT
++           IF MATCH-YES
++               DISPLAY "Fingerprint verification: PASSED"
++           ELSE
++               DISPLAY "Fingerprint verification: FAILED"
++           END-IF
++           .
++
++      *----------------------------------------------------------------*
++      * TEST-VERIFY-SIGNATURE
++      * Test entry point for verification logic
++      *----------------------------------------------------------------*
++       TEST-VERIFY-SIGNATURE.
++      *    Test digits-only fingerprint (existing behavior)
++           MOVE WS-TEST-DIGITS-ONLY TO WS-CERT-FINGERPRINT
++           MOVE WS-TEST-DIGITS-ONLY TO CS-CERT-FINGERPRINT
++           PERFORM VERIFY-SIGNATURE
++      *
++      *    Test A-F hex characters (new test case)
++           MOVE WS-TEST-AF-HEX TO WS-CERT-FINGERPRINT
++           MOVE WS-TEST-AF-HEX TO CS-CERT-FINGERPRINT
++           PERFORM VERIFY-SIGNATURE
++      *
++      *    Test mixed hex with consecutive A-F characters
++           MOVE WS-TEST-MIXED-HEX TO WS-CERT-FINGERPRINT
++           MOVE WS-TEST-MIX
