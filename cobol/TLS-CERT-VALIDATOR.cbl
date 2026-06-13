@@ -59,6 +59,17 @@
            05  WS-CERT-KEY-LENGTH      PIC 9(5).
            05  WS-CERT-SIG-ALGO        PIC X(20).
            05  WS-CERT-FINGERPRINT     PIC X(64).
+       01  WS-SUBJECT-DN-WORK          PIC X(256).
+       01  WS-PARSED-CN                PIC X(64).
+       01  WS-RDN-COUNT                PIC 9(2)  VALUE 0.
+       01  WS-RDN-INDEX                PIC 9(2)  VALUE 0.
+       01  WS-PARSE-INDEX              PIC 9(3)  VALUE 0.
+       01  WS-PARSE-OUT-INDEX          PIC 9(3)  VALUE 0.
+       01  WS-RDN-TOKEN                PIC X(128).
+       01  WS-RDN-RESTORED             PIC X(128).
+       01  WS-RDN-TABLE.
+           05  WS-RDN-ENTRY OCCURS 20 TIMES.
+               10  WS-RDN-VALUE        PIC X(128).
        01  WS-CERT-CHAIN.
            05  WS-CHAIN-LENGTH         PIC 9(2)  VALUE 0.
            05  WS-CHAIN-ENTRY OCCURS 10 TIMES.
@@ -130,6 +141,7 @@
            PERFORM 2000-VALIDATE-CERT-CHAIN
            PERFORM 3000-CHECK-EXPIRY-DATE
            PERFORM 4000-VERIFY-SIGNATURE
+           PERFORM 3500-PARSE-SUBJECT-DN
            PERFORM 5000-MATCH-HOSTNAME
            PERFORM 6000-CHECK-REVOCATION-STATUS
            PERFORM 7000-DETERMINE-FINAL-RESULT
@@ -141,6 +153,8 @@
            SET WS-CERT-NOT-REVOKED TO TRUE
            SET WS-HOSTNAME-NO-MATCH TO TRUE
            SET WS-CHAIN-IS-VALID TO TRUE
+           MOVE SPACES TO WS-RDN-TABLE
+           MOVE SPACES TO WS-PARSED-CN
            MOVE FUNCTION CURRENT-DATE TO WS-CURRENT-DATE-TIME
            OPEN INPUT CERT-STORE-FILE
            IF NOT WS-FILE-OK
@@ -233,6 +247,83 @@
            .
        3000-EXIT.
            EXIT.
+       3500-PARSE-SUBJECT-DN.
+           MOVE SPACES TO WS-RDN-TABLE
+           MOVE SPACES TO WS-PARSED-CN
+           MOVE ZERO TO WS-RDN-COUNT
+           MOVE CS-SUBJECT-DN TO WS-SUBJECT-DN-WORK
+           PERFORM 3510-PROTECT-ESCAPED-COMMAS
+           UNSTRING WS-SUBJECT-DN-WORK DELIMITED BY ','
+               INTO WS-RDN-VALUE(1)
+                    WS-RDN-VALUE(2)
+                    WS-RDN-VALUE(3)
+                    WS-RDN-VALUE(4)
+                    WS-RDN-VALUE(5)
+                    WS-RDN-VALUE(6)
+                    WS-RDN-VALUE(7)
+                    WS-RDN-VALUE(8)
+                    WS-RDN-VALUE(9)
+                    WS-RDN-VALUE(10)
+                    WS-RDN-VALUE(11)
+                    WS-RDN-VALUE(12)
+                    WS-RDN-VALUE(13)
+                    WS-RDN-VALUE(14)
+                    WS-RDN-VALUE(15)
+                    WS-RDN-VALUE(16)
+                    WS-RDN-VALUE(17)
+                    WS-RDN-VALUE(18)
+                    WS-RDN-VALUE(19)
+                    WS-RDN-VALUE(20)
+               TALLYING IN WS-RDN-COUNT
+           END-UNSTRING
+           PERFORM VARYING WS-RDN-INDEX FROM 1 BY 1
+               UNTIL WS-RDN-INDEX > WS-RDN-COUNT
+               MOVE WS-RDN-VALUE(WS-RDN-INDEX) TO WS-RDN-TOKEN
+               PERFORM 3520-RESTORE-ESCAPED-COMMAS
+               MOVE WS-RDN-TOKEN TO WS-RDN-VALUE(WS-RDN-INDEX)
+               IF WS-RDN-TOKEN(1:3) = 'CN='
+                   MOVE WS-RDN-TOKEN(4:64) TO WS-PARSED-CN
+                   IF WS-PARSED-CN(1:1) = '"'
+                       MOVE WS-PARSED-CN(2:63) TO WS-PARSED-CN
+                   END-IF
+                   INSPECT WS-PARSED-CN REPLACING ALL '"' BY SPACE
+                   MOVE WS-PARSED-CN TO WS-SUBJECT-COMMON-NAME
+               END-IF
+           END-PERFORM
+           .
+       3510-PROTECT-ESCAPED-COMMAS.
+           PERFORM VARYING WS-PARSE-INDEX FROM 1 BY 1
+               UNTIL WS-PARSE-INDEX > 255
+               IF WS-SUBJECT-DN-WORK(WS-PARSE-INDEX:1) = '\'
+                   AND WS-SUBJECT-DN-WORK(WS-PARSE-INDEX + 1:1)
+                       = ','
+                   MOVE LOW-VALUE
+                       TO WS-SUBJECT-DN-WORK(WS-PARSE-INDEX + 1:1)
+               END-IF
+           END-PERFORM
+           .
+       3520-RESTORE-ESCAPED-COMMAS.
+           MOVE SPACES TO WS-RDN-RESTORED
+           MOVE 1 TO WS-PARSE-OUT-INDEX
+           PERFORM VARYING WS-PARSE-INDEX FROM 1 BY 1
+               UNTIL WS-PARSE-INDEX > 128
+               IF WS-RDN-TOKEN(WS-PARSE-INDEX:1) = '\'
+                   AND WS-PARSE-INDEX < 128
+                   AND WS-RDN-TOKEN(WS-PARSE-INDEX + 1:1)
+                       = LOW-VALUE
+                   MOVE ',' TO
+                       WS-RDN-RESTORED(WS-PARSE-OUT-INDEX:1)
+                   ADD 1 TO WS-PARSE-INDEX
+               ELSE
+                   MOVE WS-RDN-TOKEN(WS-PARSE-INDEX:1) TO
+                       WS-RDN-RESTORED(WS-PARSE-OUT-INDEX:1)
+               END-IF
+               IF WS-PARSE-OUT-INDEX < 128
+                   ADD 1 TO WS-PARSE-OUT-INDEX
+               END-IF
+           END-PERFORM
+           MOVE WS-RDN-RESTORED TO WS-RDN-TOKEN
+           .
        4000-VERIFY-SIGNATURE.
            IF WS-CERT-KEY-LENGTH < WS-MIN-KEY-LENGTH
                SET WS-SIG-INVALID TO TRUE

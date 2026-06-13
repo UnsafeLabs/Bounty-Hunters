@@ -1,0 +1,28 @@
+TLS-CERT-VALIDATOR escaped-comma Subject DN regression cases
+
+These cases document the expected behavior of 3500-PARSE-SUBJECT-DN:
+
+1. Single escaped comma
+   Input:  CN=Smith\, John,OU=Legal,O=Bank
+   RDNs:   3
+   CN:     Smith, John
+
+2. Multiple escaped commas
+   Input:  CN=Ops\, East\, Night,OU=Operations,O=Bank
+   RDNs:   3
+   CN:     Ops, East, Night
+
+3. No escaped comma
+   Input:  CN=api.bank.example,OU=Payments,O=Bank
+   RDNs:   3
+   CN:     api.bank.example
+
+4. Quoted CN with escaped comma
+   Input:  CN="Smith\, John",OU=Legal,O=Bank
+   RDNs:   3
+   CN:     Smith, John
+
+The parser protects "\," by replacing the comma with LOW-VALUE before
+UNSTRING, clears WS-RDN-TABLE before each parse, then restores protected
+commas while dropping the escape character so hostname matching receives
+the literal CN value.
