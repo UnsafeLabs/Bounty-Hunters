@@ -19,6 +19,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cache Health Checks
+    |--------------------------------------------------------------------------
+    |
+    | These options control the lightweight cache store health check exposed by
+    | the cache:status command and /health/cache endpoint.
+    |
+    */
+
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+
+    'health_check_interval' => (int) env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
+    /*
+    |--------------------------------------------------------------------------
     | Cache Stores
     |--------------------------------------------------------------------------
     |
