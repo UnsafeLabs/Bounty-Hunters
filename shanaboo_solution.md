@@ -1,134 +1,133 @@
  ```diff
 --- a/cobol/3500-PARSE-SUBJECT-DN.cob
 +++ b/cobol/3500-PARSE-SUBJECT-DN.cob
-@@ -1,3 +1,4 @@
-+      *================================================================*
-       * 3500-PARSE-SUBJECT-DN
-       * Parse certificate Subject DN into RDN components and extract
-       * the Common Name for hostname matching.
-@@ -5,6 +6,8 @@
-       *================================================================*
-        IDENTIFICATION DIVISION.
-        PROGRAM-ID. PARSE-SUBJECT-DN.
-+      *================================================================*
-+      *================================================================*
-        ENVIRONMENT DIVISION.
-        DATA DIVISION.
-        WORKING-STORAGE SECTION.
-@@ -12,6 +15,10 @@
-        01  WS-SUBJECT-DN           PIC X(256).
-        01  WS-SUBJECT-DN-LEN       PIC 9(3) COMP.
-        01  WS-SUBJECT-COMMON-NAME  PIC X(256).
-+      * Working copy for pre-processing escaped commas
-+       01  WS-DN-WORK              PIC X(256).
-+       01  WS-DN-WORK-LEN          PIC 9(3) COMP.
-+       01  WS-ESCAPE-IDX           PIC 9(3) COMP.
-       * Parsed RDN table
-        01  WS-RDN-TABLE.
-            05  WS-RDN-ENTRY OCCURS 20 TIMES.
-@@ -20,6 +27,7 @@
-        01  WS-RDN-COUNT            PIC 9(2) COMP.
-        01  WS-RDN-IDX              PIC 9(2) COMP.
-        01  WS-TEMP-CN              PIC X(64).
-+       01  WS-TEMP-CHAR            PIC X(1).
-       * Delimiters and pointers
-        01  WS-DELIMITER            PIC X(1) VALUE ','.
-        01  WS-POINTER              PIC 9(3) COMP.
-@@ -27,6 +35,10 @@
-        01  WS-EQUALS-POS           PIC 9(3) COMP.
-        01  WS-RDN-NAME             PIC X(10).
-        01  WS-RDN-VALUE            PIC X(100).
-+      * Placeholder for escaped comma (using a character unlikely in DN)
-+       01  WS-PLACEHOLDER          PIC X(2) VALUE X'1F1F'.
-+       01  WS-RESTORE-IDX          PIC 9(3) COMP.
-+       01  WS-RESTORE-COUNT        PIC 9(3) COMP.
-       *================================================================*
-        LINKAGE SECTION.
-        01  LK-SUBJECT-DN           PIC X(256).
-@@ -37,6 +49,7 @@
-            05  LK-RDN-VALUE        PIC X(100).
-        01  LK-RDN-COUNT            PIC 9(2) COMP.
-        01  LK-PARSED-CN            PIC X(64).
-+      *================================================================*
-        PROCEDURE DIVISION USING LK-SUBJECT-DN
-                                 LK-RDN-TABLE
-                                  LK-RDN-COUNT
-@@ -44,6 +57,10 @@
-       *================================================================*
-       * MAIN-LOGIC
-       *================================================================*
-+      * Initialize RDN table to prevent stale data from previous cert
-+           PERFORM 1000-INITIALIZE-RDN-TABLE
+@@ -280,6 +280,12 @@
+        01  WS-RDN-INDEX              PIC 9(3) COMP.
+        01  WS-RDN-PTR                PIC 9(4) COMP.
+        01  WS-TEMP-CN                PIC X(256).
++       01  WS-ESCAPED-COMMA-IDX      PIC 9(4) COMP.
++       01  WS-PLACEHOLDER-CHAR       PIC X(1) VALUE X'01'.
++       01  WS-SUBJECT-CN-WORK        PIC X(256).
++       01  WS-CN-PARSE-PTR           PIC 9(4) COMP.
++       01  WS-CN-PARSE-LEN           PIC 9(4) COMP.
++       01  WS-TEMP-CHAR              PIC X(1).
+ 
+       *----------------------------------------------------------------*
+       * 3500-PARSE-SUBJECT-DN                                          *
+@@ -287,6 +293,9 @@
+       *----------------------------------------------------------------*
+        3500-PARSE-SUBJECT-DN SECTION.
+ 
++      *    Initialize RDN table to prevent stale data leaks
++           PERFORM 3510-INITIALIZE-RDN-TABLE
++
+       *    Extract Common Name from Subject DN
+            MOVE SPACES TO WS-PARSED-CN
+            MOVE SPACES TO WS-TEMP-CN
+@@ -295,8 +304,11 @@
+       *    Find CN= in the subject DN
+            PERFORM 3520-FIND-COMMON-NAME
+ 
+-      *    Parse RDN components using UNSTRING
+-           UNSTRING WS-SUBJECT-COMMON-NAME DELIMITED BY ','
 +      *    Pre-process DN to handle escaped commas
-+           PERFORM 2000-PREPROCESS-ESCAPED-COMMAS
-       *    Copy input and determine length
-            MOVE LK-SUBJECT-DN TO WS-SUBJECT-DN
-            COMPUTE WS-SUBJECT-DN-LEN =
-@@ -51,7 +68,7 @@
-       *    Extract Common Name field
-            PERFORM 3000-EXTRACT-COMMON-NAME
-       *    Split DN into RDN components using UNSTRING
--           PERFORM 3500-UNSTRING-RDNS
-+           PERFORM 3500-UNSTRING-RDNS.
-       *    Return parsed CN
-            MOVE WS-TEMP-CN TO LK-PARSED-CN
++           PERFORM 3530-PREPROCESS-ESCAPED-COMMAS
++
++      *    Parse RDN components using UNSTRING on processed DN
++           MOVE 0 TO WS-RDN-COUNT
++           UNSTRING WS-SUBJECT-CN-WORK DELIMITED BY ','
+                INTO WS-RDN-TABLE(1)
+                     WS-RDN-TABLE(2)
+                     WS-RDN-TABLE(3)
+@@ -310,6 +322,9 @@
+                     WS-RDN-TABLE(11)
+                     WS-RDN-TABLE(12)
+                TALLYING IN WS-RDN-COUNT
++
++      *    Post-process RDN table to restore commas in place of placeholders
++           PERFORM 3540-RESTORE-ESCAPED-COMMAS
+            END-UNSTRING
+ 
+       *    Find and extract the CN value from RDN table
+@@ -318,6 +333,20 @@
+            GOBACK
             .
-@@ -59,6 +76,34 @@
-       *================================================================*
-       * 1000-INITIALIZE-RDN-TABLE
-       *================================================================*
-+           INITIALIZE WS-RDN-TABLE
-+           MOVE ZERO TO WS-RDN-COUNT
+ 
++      *----------------------------------------------------------------*
++      * 3510-INITIALIZE-RDN-TABLE                                      *
++      * Initialize RDN table with SPACES to prevent stale data         *
++      *----------------------------------------------------------------*
++       3510-INITIALIZE-RDN-TABLE SECTION.
++           MOVE SPACES TO WS-RDN-TABLE(1)  WS-RDN-TABLE(2)
++                    WS-RDN-TABLE(3)  WS-RDN-TABLE(4)
++                    WS-RDN-TABLE(5)  WS-RDN-TABLE(6)
++                    WS-RDN-TABLE(7)  WS-RDN-TABLE(8)
++                    WS-RDN-TABLE(9)  WS-RDN-TABLE(10)
++                    WS-RDN-TABLE(11) WS-RDN-TABLE(12)
++           MOVE 0 TO WS-RDN-COUNT
++           EXIT
 +           .
-+      *================================================================*
-+      * 2000-PREPROCESS-ESCAPED-COMMAS
-+      * Replace escaped commas with placeholder before UNSTRING
-+      *================================================================*
-+           MOVE WS-SUBJECT-DN TO WS-DN-WORK
-+           MOVE WS-SUBJECT-DN-LEN TO WS-DN-WORK-LEN
-+           MOVE 1 TO WS-ESCAPE-IDX
-+           PERFORM UNTIL WS-ESCAPE-IDX > WS-DN-WORK-LEN
-+               IF WS-DN-WORK(WS-ESCAPE-IDX:1) = '\'
-+                  AND WS-ESCAPE-IDX < WS-DN-WORK-LEN
-+                  AND WS-DN-WORK(WS-ESCAPE-IDX + 1:1) = ','
-+      *            Replace \, with placeholder (keep backslash for now)
-+                   MOVE WS-PLACEHOLDER TO
-+                       WS-DN-WORK(WS-ESCAPE-IDX:2)
-+                   ADD 1 TO WS-ESCAPE-IDX
++
+       *----------------------------------------------------------------*
+       * 3520-FIND-COMMON-NAME                                          *
+       * Locate CN= value in subject DN                                 *
+@@ -340,6 +369,66 @@
+            EXIT
+            .
+ 
++      *----------------------------------------------------------------*
++      * 3530-PREPROCESS-ESCAPED-COMMAS                                   *
++      * Replace escaped commas with placeholder to protect during split*
++      *----------------------------------------------------------------*
++       3530-PREPROCESS-ESCAPED-COMMAS SECTION.
++           MOVE SPACES TO WS-SUBJECT-CN-WORK
++           MOVE 1 TO WS-CN-PARSE-PTR
++           MOVE 1 TO WS-ESCAPED-COMMA-IDX
++           COMPUTE WS-CN-PARSE-LEN = FUNCTION LENGTH(
++               FUNCTION TRIM(WS-SUBJECT-COMMON-NAME))
++
++           PERFORM VARYING WS-CN-PARSE-PTR FROM 1 BY 1
++                   UNTIL WS-CN-PARSE-PTR > WS-CN-PARSE-LEN
++               MOVE WS-SUBJECT-COMMON-NAME(WS-CN-PARSE-PTR:1)
++                   TO WS-TEMP-CHAR
++               IF WS-TEMP-CHAR = '\'
++                  AND WS-CN-PARSE-PTR < WS-CN-PARSE-LEN
++                  AND WS-SUBJECT-COMMON-NAME(WS-CN-PARSE-PTR + 1:1)
++                      = ','
++                   MOVE WS-PLACEHOLDER-CHAR
++                       TO WS-SUBJECT-CN-WORK(WS-ESCAPED-COMMA-IDX:1)
++                   ADD 1 TO WS-CN-PARSE-PTR
++               ELSE
++                   MOVE WS-TEMP-CHAR
++                       TO WS-SUBJECT-CN-WORK(WS-ESCAPED-COMMA-IDX:1)
 +               END-IF
-+               ADD 1 TO WS-ESCAPE-IDX
++               ADD 1 TO WS-ESCAPED-COMMA-IDX
 +           END-PERFORM
-+      *    Update working DN with pre-processed version
-+           MOVE WS-DN-WORK TO WS-SUBJECT-DN
-+           COMPUTE WS-SUBJECT-DN-LEN =
-+               FUNCTION LENGTH(FUNCTION TR Diamond WS-DN-WORK)
++           EXIT
 +           .
-+      *================================================================*
-+      * 3000-EXTRACT-COMMON-NAME
-+      *================================================================*
++
++      *----------------------------------------------------------------*
++      * 3540-RESTORE-ESCAPED-COMMAS                                    *
++      * Restore escaped commas in RDN table from placeholders          *
++      *----------------------------------------------------------------*
++       3540-RESTORE-ESCAPED-COMMAS SECTION.
++           PERFORM VARYING WS-RDN-INDEX FROM 1 BY 1
++                   UNTIL WS-RDN-INDEX > WS-RDN-COUNT
++               MOVE 1 TO WS-CN-PARSE-PTR
++               COMPUTE WS-CN-PARSE-LEN = FUNCTION LENGTH(
++                   FUNCTION TRIM(WS-RDN-TABLE(WS-RDN-INDEX)))
++               PERFORM UNTILNumbers  WS-CN-PARSE-PTR > WS-CN-PARSE-LEN
++                   IF WS-RDN-TABLE(WS-RDN-INDEX)(WS-CN-PARSE-PTR:1)
++                       = WS-PLACEHOLDER-CHAR
++                       MOVE ',' TO WS-RDN-TABLE(WS-RDN-INDEX)
++                           (WS-CN-PARSE-PTR:1)
++                   END-IF
++                   ADD 1 TO WS-CN-PARSE-PTR
++               END-PERFORM
++           END-PERFORM
++           EXIT
 +           .
-+      *================================================================*
-+      * 3500-UNSTRING-RDNS
-+      *================================================================*
-+           .
-+      *================================================================*
-+      * 4000-PARSE-RDN-ENTRY
-+      *================================================================*
-+           .
-+      *================================================================*
-+      * 5000-RESTORE-ESCAPED-COMMAS
-+      * Restore placeholder to actual comma in parsed values
-+      *================================================================*
-+           .
-+      *================================================================*
-+      * 6000-POSTPROCESS-RDN-VALUES
-+      *================================================================*
-+           .
-+       1000-INITIALIZE-RDN-TABLE.
-+           INITIALIZE WS-RDN-TABLE
-+           MOVE ZERO TO WS-RDN-COUNT
-+           .
-+      *================================================================*
-+      * 2000-PREPROCESS-ESCAPED-COMMAS
-+      * Replace escaped commas with placeholder before UNSTRING
-+      *
++
+       *----------------------------------------------------------------*
+       * 3550-EXTRACT-CN-FROM-RDNS                                      *
+       *
