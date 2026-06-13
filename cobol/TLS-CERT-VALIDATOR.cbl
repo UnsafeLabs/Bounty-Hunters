@@ -59,6 +59,8 @@
            05  WS-CERT-KEY-LENGTH      PIC 9(5).
            05  WS-CERT-SIG-ALGO        PIC X(20).
            05  WS-CERT-FINGERPRINT     PIC X(64).
+           05  WS-SIG-VERIFY-BUFFER REDEFINES
+               WS-CERT-FINGERPRINT     PIC X(64).
        01  WS-CERT-CHAIN.
            05  WS-CHAIN-LENGTH         PIC 9(2)  VALUE 0.
            05  WS-CHAIN-ENTRY OCCURS 10 TIMES.
@@ -108,6 +110,12 @@
        01  WS-SIG-VERIFY-RESULT        PIC X(1).
            88  WS-SIG-VALID            VALUE 'V'.
            88  WS-SIG-INVALID          VALUE 'I'.
+       01  WS-FINGERPRINT-INDEX        PIC 9(2)  VALUE 0.
+       01  WS-FINGERPRINT-LEFT-ORD     PIC 9(5) COMP VALUE 0.
+       01  WS-FINGERPRINT-RIGHT-ORD    PIC 9(5) COMP VALUE 0.
+       01  WS-FINGERPRINT-MATCH-FLAG   PIC X(1).
+           88  WS-FINGERPRINT-MATCHES  VALUE 'Y'.
+           88  WS-FINGERPRINT-DIFFERS  VALUE 'N'.
        01  WS-MIN-KEY-LENGTH           PIC 9(5)  VALUE 02048.
        01  WS-ALLOWED-ALGORITHMS.
            05  FILLER  PIC X(20) VALUE 'SHA256WITHRSA       '.
@@ -248,6 +256,29 @@
            END-PERFORM
            IF WS-ALGO-FOUND = 'N'
                SET WS-SIG-INVALID TO TRUE
+               GO TO 4000-EXIT
+           END-IF
+           SET WS-FINGERPRINT-MATCHES TO TRUE
+           PERFORM VARYING WS-FINGERPRINT-INDEX FROM 1 BY 1
+               UNTIL WS-FINGERPRINT-INDEX > 64
+                  OR WS-FINGERPRINT-DIFFERS
+               COMPUTE WS-FINGERPRINT-LEFT-ORD =
+                   FUNCTION ORD(WS-SIG-VERIFY-BUFFER(
+                       WS-FINGERPRINT-INDEX:1))
+               COMPUTE WS-FINGERPRINT-RIGHT-ORD =
+                   FUNCTION ORD(CS-FINGERPRINT(
+                       WS-FINGERPRINT-INDEX:1))
+               IF WS-FINGERPRINT-LEFT-ORD NOT =
+                   WS-FINGERPRINT-RIGHT-ORD
+                   SET WS-FINGERPRINT-DIFFERS TO TRUE
+               END-IF
+           END-PERFORM
+           DISPLAY 'TLSVAL-I040: FINGERPRINT '
+               WS-SIG-VERIFY-BUFFER
+           IF WS-FINGERPRINT-DIFFERS
+               SET WS-SIG-INVALID TO TRUE
+               MOVE 'CERTIFICATE FINGERPRINT MISMATCH'
+                   TO WS-VALIDATION-MSG
                GO TO 4000-EXIT
            END-IF
            SET WS-SIG-VALID TO TRUE
