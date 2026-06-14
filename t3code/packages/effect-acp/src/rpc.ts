@@ -130,6 +130,18 @@ export const KillTerminalRpc = Rpc.make(CLIENT_METHODS.terminal_kill, {
   error: AcpSchema.Error,
 });
 
+export const TaskDeferredRpc = Rpc.make(CLIENT_METHODS.task_deferred, {
+  payload: Schema.Struct({
+    taskId: Schema.String,
+    delayMs: Schema.Number,
+    params: Schema.Unknown,
+  }),
+  success: Schema.Struct({
+    status: Schema.String,
+  }),
+  error: AcpSchema.Error,
+});
+
 export const AgentRpcs = RpcGroup.make(
   InitializeRpc,
   AuthenticateRpc,
@@ -155,4 +167,5 @@ export const ClientRpcs = RpcGroup.make(
   ReleaseTerminalRpc,
   WaitForTerminalExitRpc,
   KillTerminalRpc,
+  TaskDeferredRpc,
 );
