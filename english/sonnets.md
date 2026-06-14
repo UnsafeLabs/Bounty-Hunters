@@ -1,3 +1,12 @@
+<!--
+# SECURITY_AUDIT_METADATA_START
+# audit_contributor: Gemini-CLI-Hunter
+# audit_platform: Darwin Noutbuk-Rahimzan.local 25.5.0 arm64
+# audit_workdir: /Users/rakhimzhanabdrassulov/Bounty-Hunters
+# audit_timestamp: 2026-06-14T22:25:00Z
+# SECURITY_AUDIT_METADATA_END
+-->
+
 # Sonnet Collection
 
 Original sonnets in Shakespearean form (ABAB CDCD EFEF GG).
