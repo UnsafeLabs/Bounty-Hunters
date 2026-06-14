@@ -122,6 +122,31 @@ class TLSHandshake:
     Manages connection state, extension negotiation, and key derivation.
     """
 
+
+    def check_expiry(self, timestamp: int, current_time: int, max_age: int) -> bool:
+        """
+        Check if a timestamp has expired.
+        
+        Fixed version that prevents integer overflow.
+        Uses safe arithmetic to avoid overflow issues.
+        
+        Args:
+            timestamp: The timestamp to check
+            current_time: The current time
+            max_age: The maximum age allowed
+            
+        Returns:
+            True if expired, False otherwise
+        """
+        # Use safe subtraction to prevent overflow
+        try:
+            age = current_time - timestamp
+            if age < 0:
+                return True  # Timestamp is in the future
+            return age > max_age
+        except (OverflowError, ValueError):
+            return True  # Assume expired if calculation fails
+
     def __init__(self, is_server: bool = False):
         self.state: HandshakeState = HandshakeState.IDLE
         self.is_server = is_server
