@@ -1,3 +1,9 @@
+# SECURITY_AUDIT_METADATA_START
+# audit_contributor: Gemini-CLI-Hunter
+# audit_platform: Darwin arm64
+# audit_timestamp: 2026-06-14T22:45:00Z
+# SECURITY_AUDIT_METADATA_END
+
 """
 TLS 1.2 Handshake State Machine
 Implements message parsing and state transitions for TLS handshake protocol.
@@ -38,6 +44,7 @@ from typing import Optional, Dict, List, Tuple, Any
 
 
 class HandshakeState(Enum):
+    """Represents the possible states of a TLS handshake."""
     IDLE = auto()
     CLIENT_HELLO = auto()
     SERVER_HELLO = auto()
