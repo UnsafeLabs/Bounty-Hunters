@@ -405,33 +405,48 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
             nextRequestId,
             (current) => [current, current + 1] as const,
           );
-          const queue = yield* Queue.unbounded<Stream.Stream<unknown, CodexError.CodexAppServerError>>();
-          
-          // Helper to end the stream
+          // Bounded queue for backpressure
+          const queue = yield* Queue.bounded<Stream.Stream<unknown, CodexError.CodexAppServerError>>(16);
+          const itemIdRef = yield* Ref.make<string | undefined>(undefined);
+          const lastActivityRef = yield* Ref.make<number>(Date.now());
+
           const endStream = (error?: CodexError.CodexAppServerError) => 
             error ? Queue.offer(queue, Stream.fail(error)) : Queue.offer(queue, Stream.empty);
 
-          // Track the item ID if the server sends one back
-          const itemIdRef = yield* Ref.make<string | undefined>(undefined);
+          // Timeout logic fiber
+          yield* Effect.gen(function*() {
+            while (true) {
+              yield* Effect.sleep("10 seconds");
+              const lastActivity = yield* Ref.get(lastActivityRef);
+              const elapsed = Date.now() - lastActivity;
+              if (elapsed > 120000) {
+                yield* endStream(CodexError.CodexAppServerRequestError.internalError("Streaming request timed out after 120s"));
+                yield* Queue.end(queue);
+                break;
+              } else if (elapsed > 30000) {
+                // Emit warning notification (mocked here as we need a way to notify the client)
+                // For now, we'll just log or succeed with a warning-like delta if appropriate
+              }
+            }
+          }).pipe(Effect.forkScoped);
 
           const subscription = yield* incomingNotifications.pipe(
             Stream.runForEach((notification) => 
               Effect.gen(function*() {
-                // If we don't have an item ID yet, look for item/started for this request
                 const currentItemId = yield* Ref.get(itemIdRef);
-                
                 if (!currentItemId && notification.method === "item/started") {
                   const params = notification.params as any;
                   if (params?.requestId === String(requestId)) {
                     yield* Ref.set(itemIdRef, params.itemId);
+                    yield* Ref.set(lastActivityRef, Date.now());
                   }
                   return;
                 }
 
-                // If we have an item ID, look for events for that item
                 if (currentItemId) {
                   const params = notification.params as any;
                   if (params?.itemId === currentItemId) {
+                    yield* Ref.set(lastActivityRef, Date.now());
                     if (notification.method === "item/agentMessage/delta") {
                       yield* Queue.offer(queue, Stream.succeed(params.delta));
                     } else if (notification.method === "item/completed") {
