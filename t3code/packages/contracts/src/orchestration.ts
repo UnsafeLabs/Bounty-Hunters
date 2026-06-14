@@ -1237,6 +1237,20 @@ export const OrchestrationRpcSchemas = {
   },
 } as const;
 
+export const ScheduledCommandStatus = Schema.Literals(["pending", "running", "completed", "failed", "cancelled"]);
+export type ScheduledCommandStatus = typeof ScheduledCommandStatus.Type;
+
+export const ScheduledCommand = Schema.Struct({
+  commandId: CommandId,
+  scheduledAt: IsoDateTime,
+  repeatInterval: Schema.optional(Schema.String), // Cron-like or duration string
+  maxRetries: NonNegativeInt,
+  status: ScheduledCommandStatus,
+  lastError: Schema.optional(Schema.String),
+  retryCount: NonNegativeInt,
+});
+export type ScheduledCommand = typeof ScheduledCommand.Type;
+
 export class OrchestrationGetSnapshotError extends Schema.TaggedErrorClass<OrchestrationGetSnapshotError>()(
   "OrchestrationGetSnapshotError",
   {
