@@ -31,6 +31,7 @@ interface CodexAppServerClientRaw {
   readonly notifications: CodexProtocol.CodexAppServerPatchedProtocol["incomingNotifications"];
   readonly requests: CodexProtocol.CodexAppServerPatchedProtocol["incomingRequests"];
   readonly request: CodexProtocol.CodexAppServerPatchedProtocol["request"];
+  readonly streamingRequest: CodexProtocol.CodexAppServerPatchedProtocol["streamingRequest"];
   readonly notify: CodexProtocol.CodexAppServerPatchedProtocol["notify"];
   readonly respond: CodexProtocol.CodexAppServerPatchedProtocol["respond"];
   readonly respondError: CodexProtocol.CodexAppServerPatchedProtocol["respondError"];
@@ -42,6 +43,10 @@ export interface CodexAppServerClientShape {
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
   ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexError.CodexAppServerError>;
+  readonly streamingRequest: <M extends CodexRpc.ClientRequestMethod>(
+    method: M,
+    payload: CodexRpc.ClientRequestParamsByMethod[M],
+  ) => Stream.Stream<unknown, CodexError.CodexAppServerError>;
   readonly notify: <M extends CodexRpc.ClientNotificationMethod>(
     method: M,
     payload: CodexRpc.ClientNotificationParamsByMethod[M],
@@ -218,17 +223,30 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       Effect.flatMap((encoded) => transport.notify(method, encoded)),
     );
 
+  const streamingRequest = <M extends CodexRpc.ClientRequestMethod>(
+    method: M,
+    payload: CodexRpc.ClientRequestParamsByMethod[M],
+  ): Stream.Stream<unknown, CodexError.CodexAppServerError> =>
+    Stream.unwrap(
+      encodeOptionalPayload(method, getClientRequestParamSchema(method), payload).pipe(
+        Effect.map((encoded) => transport.streamingRequest(method, encoded)),
+      ),
+    );
+
   return CodexAppServerClient.of({
     raw: {
       notifications: transport.incomingNotifications,
       requests: transport.incomingRequests,
       request: transport.request,
+      streamingRequest: transport.streamingRequest,
       notify: transport.notify,
       respond: transport.respond,
       respondError: transport.respondError,
     },
     request,
+    streamingRequest,
     notify,
+
     handleServerRequest: (method, handler) =>
       Effect.sync(() => {
         requestHandlers.set(method, handler as ServerRequestHandler);

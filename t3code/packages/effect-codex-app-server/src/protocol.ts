@@ -53,6 +53,10 @@ export interface CodexAppServerPatchedProtocol {
     method: string,
     payload?: unknown,
   ) => Effect.Effect<unknown, CodexError.CodexAppServerError>;
+  readonly streamingRequest: (
+    method: string,
+    payload?: unknown,
+  ) => Stream.Stream<unknown, CodexError.CodexAppServerError>;
   readonly notify: (
     method: string,
     payload?: unknown,
@@ -394,10 +398,71 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
         ...(payload !== undefined ? { params: payload } : {}),
       });
 
+    const streamingRequest = (method: string, payload?: unknown): Stream.Stream<unknown, CodexError.CodexAppServerError> =>
+      Stream.unwrapScoped(
+        Effect.gen(function* () {
+          const requestId = yield* Ref.modify(
+            nextRequestId,
+            (current) => [current, current + 1] as const,
+          );
+          const queue = yield* Queue.unbounded<Stream.Stream<unknown, CodexError.CodexAppServerError>>();
+          
+          // Helper to end the stream
+          const endStream = (error?: CodexError.CodexAppServerError) => 
+            error ? Queue.offer(queue, Stream.fail(error)) : Queue.offer(queue, Stream.empty);
+
+          // Track the item ID if the server sends one back
+          const itemIdRef = yield* Ref.make<string | undefined>(undefined);
+
+          const subscription = yield* incomingNotifications.pipe(
+            Stream.runForEach((notification) => 
+              Effect.gen(function*() {
+                // If we don't have an item ID yet, look for item/started for this request
+                const currentItemId = yield* Ref.get(itemIdRef);
+                
+                if (!currentItemId && notification.method === "item/started") {
+                  const params = notification.params as any;
+                  if (params?.requestId === String(requestId)) {
+                    yield* Ref.set(itemIdRef, params.itemId);
+                  }
+                  return;
+                }
+
+                // If we have an item ID, look for events for that item
+                if (currentItemId) {
+                  const params = notification.params as any;
+                  if (params?.itemId === currentItemId) {
+                    if (notification.method === "item/agentMessage/delta") {
+                      yield* Queue.offer(queue, Stream.succeed(params.delta));
+                    } else if (notification.method === "item/completed") {
+                      yield* endStream();
+                      yield* Queue.end(queue);
+                    } else if (notification.method === "error") {
+                      yield* endStream(CodexError.normalizeToRequestError(params));
+                      yield* Queue.end(queue);
+                    }
+                  }
+                }
+              })
+            ),
+            Effect.forkScoped
+          );
+
+          yield* offerOutgoing({
+            id: requestId,
+            method,
+            ...(payload !== undefined ? { params: payload } : {}),
+          });
+
+          return Stream.flatten(Stream.fromQueue(queue));
+        })
+      );
+
     return {
       incomingNotifications: Stream.fromQueue(incomingNotifications),
       incomingRequests: Stream.fromQueue(incomingRequests),
       request,
+      streamingRequest,
       notify,
       respond,
       respondError,
