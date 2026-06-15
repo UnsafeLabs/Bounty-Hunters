@@ -17,6 +17,10 @@ import {
 import { OtlpTracer } from "effect/unstable/observability";
 
 import {
+  compressionMiddlewareLayer,
+  compressResponse,
+} from "./compression.ts";
+import {
   ATTACHMENTS_ROUTE_PREFIX,
   normalizeAttachmentRelativePath,
   resolveAttachmentRelativePath,
@@ -74,10 +78,10 @@ export const serverEnvironmentRouteLayer = HttpRouter.add(
     const descriptor = yield* Effect.service(ServerEnvironment).pipe(
       Effect.flatMap((serverEnvironment) => serverEnvironment.getDescriptor),
     );
-    return HttpServerResponse.jsonUnsafe(descriptor, {
+    return yield* HttpServerResponse.jsonUnsafe(descriptor, {
       status: 200,
       headers: browserApiCorsHeaders,
-    });
+    }).pipe(Effect.flatMap(compressResponse));
   }),
 );
 
@@ -302,10 +306,10 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       if (!indexData) {
         return HttpServerResponse.text("Not Found", { status: 404 });
       }
-      return HttpServerResponse.uint8Array(indexData, {
+      return yield* HttpServerResponse.uint8Array(indexData, {
         status: 200,
         contentType: "text/html; charset=utf-8",
-      });
+      }).pipe(Effect.flatMap(compressResponse));
     }
 
     const contentType = Mime.getType(filePath) ?? "application/octet-stream";
@@ -316,9 +320,9 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Internal Server Error", { status: 500 });
     }
 
-    return HttpServerResponse.uint8Array(data, {
+    return yield* HttpServerResponse.uint8Array(data, {
       status: 200,
       contentType,
-    });
+    }).pipe(Effect.flatMap(compressResponse));
   }),
 );
