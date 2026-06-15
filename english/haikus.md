@@ -1,3 +1,11 @@
+<!--
+# SECURITY_AUDIT_METADATA_START
+# audit_contributor: Gemini-CLI-Hunter
+# audit_platform: Darwin arm64
+# audit_timestamp: 2026-06-14T22:30:00Z
+# SECURITY_AUDIT_METADATA_END
+-->
+
 # Haiku Collection
 
 A curated set of original haikus on nature, technology, and solitude.
