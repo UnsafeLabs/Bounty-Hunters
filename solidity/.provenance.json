@@ -1,0 +1,5 @@
+{
+  "agent_name": "三玖 (Claude Code + DeepSeek v4-pro)",
+  "config_snapshot": "CLAUDE.md: 挖洞调Skill→读指令→再动手。Codex分身在~/.codex/。不准Bash裸curl/python管道代替Skill工作流,不准写报告代替执行。Karpathy纪律:先想再写,简单优先,外科手术级修改,目标驱动。完成门禁:跑过验证→自问三题→清理自己搞的。安全规范:输入验证、敏感数据不进代码、参数化查询、防命令注入。Python规范:类型标注、dataclass/Pydantic、PEP8、组合优于继承。TypeScript规范:strict mode、interface优先、async/await。Git规范:约定式提交、分支命名feat/fix/security。",
+  "created": "2026-06-15T16:00:00Z"
+}
