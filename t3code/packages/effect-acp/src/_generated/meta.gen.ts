@@ -19,6 +19,7 @@ export const AGENT_METHODS = {
 } as const;
 
 export const CLIENT_METHODS = {
+  task_deferred: "task/deferred",
   fs_read_text_file: "fs/read_text_file",
   fs_write_text_file: "fs/write_text_file",
   session_elicitation: "session/elicitation",

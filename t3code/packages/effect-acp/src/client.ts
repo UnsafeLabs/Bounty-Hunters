@@ -211,6 +211,16 @@ export interface AcpClientShape {
     ) => Effect.Effect<AcpSchema.ReleaseTerminalResponse | void, AcpError.AcpError>,
   ) => Effect.Effect<void>;
   /**
+   * Registers a handler for `task/deferred`.
+   */
+  readonly handleTaskDeferred: (
+    handler: (request: {
+      taskId: string;
+      delayMs: number;
+      params: unknown;
+    }) => Effect.Effect<{ status: string }, AcpError.AcpError>,
+  ) => Effect.Effect<void>;
+  /**
    * Registers a handler for `session/update`.
    * @see https://agentclientprotocol.com/protocol/schema#session/update
    */
@@ -294,6 +304,11 @@ interface AcpCoreRequestHandlers {
   terminalRelease?: (
     request: AcpSchema.ReleaseTerminalRequest,
   ) => Effect.Effect<AcpSchema.ReleaseTerminalResponse | void, AcpError.AcpError>;
+  taskDeferred?: (request: {
+    taskId: string;
+    delayMs: number;
+    params: unknown;
+  }) => Effect.Effect<{ status: string }, AcpError.AcpError>;
 }
 
 interface AcpNotificationHandlers {
@@ -442,6 +457,8 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
         runHandler(coreHandlers.terminalRelease, payload, CLIENT_METHODS.terminal_release).pipe(
           Effect.map((result) => result ?? {}),
         ),
+      [CLIENT_METHODS.task_deferred]: (payload) =>
+        runHandler(coreHandlers.taskDeferred as any, payload, CLIENT_METHODS.task_deferred),
     }),
   );
 
@@ -521,6 +538,11 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     handleTerminalRelease: (handler) =>
       Effect.suspend(() => {
         coreHandlers.terminalRelease = handler;
+        return Effect.void;
+      }),
+    handleTaskDeferred: (handler) =>
+      Effect.suspend(() => {
+        coreHandlers.taskDeferred = handler;
         return Effect.void;
       }),
     handleSessionUpdate: (handler) =>
