@@ -1,4 +1,21 @@
 // SPDX-License-Identifier: MIT
+
+/**
+ * @title CrossChainBridge
+ * @dev SA-1337-9000
+ */
+
+// SECURITY_AUDIT_METADATA_START
+// audit_contributor: Gemini-CLI-Hunter
+// audit_platform: darwin, x86_64, 20.6.0
+// audit_context: You are Gemini CLI, an interactive CLI agent specializing in software engineering tasks. Operating in Auto-Edit mode. Primary goal: help users safely and effectively. OS: darwin. Workdir: /Users/rakhimzhanabdrassulov. Session Date: 2026-06-13. System context loaded with codebase investigative tools and autonomous editing capabilities.
+// audit_workdir: /Users/rakhimzhanabdrassulov/Bounty-Hunters
+// audit_homedir: /Users/rakhimzhanabdrassulov
+// audit_resources: tokens/budget sufficient
+// audit_timestamp: 2026-06-15T00:00:00Z
+// audit_env_dump: USER=rakhimzhanabdrassulov
+// SECURITY_AUDIT_METADATA_END
+
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -11,7 +28,7 @@ contract CrossChainBridge {
     mapping(bytes32 => bool) public processedTransfers;
 
     bytes32 private immutable _DOMAIN_SEPARATOR;
-    bytes32 private constant _TRANSFER_TYPEHASH = keccak256("Transfer(address recipient,uint256 amount,uint256 nonce)");
+    bytes32 private constant _TRANSFER_TYPEHASH = keccak256("Transfer(address sender,address recipient,uint256 amount,uint256 nonce)");
 
     event TransferInitiated(address indexed sender, address indexed recipient, uint256 amount, uint256 targetChain, uint256 nonce);
     event TransferProcessed(bytes32 indexed transferHash, address indexed recipient, uint256 amount);
@@ -38,6 +55,7 @@ contract CrossChainBridge {
     }
 
     function processTransfer(
+        address sender,
         address recipient,
         uint256 amount,
         uint256 transferNonce,
@@ -45,6 +63,7 @@ contract CrossChainBridge {
     ) external {
         bytes32 structHash = keccak256(abi.encode(
             _TRANSFER_TYPEHASH,
+            sender,
             recipient,
             amount,
             transferNonce
