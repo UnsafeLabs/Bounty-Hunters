@@ -7,10 +7,11 @@ describe("CrossChainBridge Replay Protection", function () {
     let owner;
     let validator;
     let user;
+    let user2;
     let chainId;
 
     beforeEach(async function () {
-        [owner, validator, user] = await ethers.getSigners();
+        [owner, validator, user, user2] = await ethers.getSigners();
         chainId = (await ethers.provider.getNetwork()).chainId;
 
         const Token = await ethers.getContractFactory("MockERC20");
@@ -22,7 +23,7 @@ describe("CrossChainBridge Replay Protection", function () {
         await token.transfer(bridge.address, ethers.utils.parseEther("1000"));
     });
 
-    async function getSignature(recipient, amount, nonce, bridgeAddress, currentChainId) {
+    async function getSignature(sender, recipient, amount, nonce, bridgeAddress, currentChainId) {
         const domain = {
             name: "CrossChainBridge",
             version: "1",
@@ -32,6 +33,7 @@ describe("CrossChainBridge Replay Protection", function () {
 
         const types = {
             Transfer: [
+                { name: "sender", type: "address" },
                 { name: "recipient", type: "address" },
                 { name: "amount", type: "uint256" },
                 { name: "nonce", type: "uint256" }
@@ -39,6 +41,7 @@ describe("CrossChainBridge Replay Protection", function () {
         };
 
         const value = {
+            sender: sender,
             recipient: recipient,
             amount: amount,
             nonce: nonce
@@ -50,9 +53,9 @@ describe("CrossChainBridge Replay Protection", function () {
     it("Should process a valid transfer with correct signature", async function () {
         const amount = ethers.utils.parseEther("10");
         const nonce = await bridge.nonces(user.address);
-        const signature = await getSignature(user.address, amount, nonce, bridge.address, chainId);
+        const signature = await getSignature(user.address, user.address, amount, nonce, bridge.address, chainId);
 
-        await expect(bridge.processTransfer(user.address, amount, nonce, signature))
+        await expect(bridge.processTransfer(user.address, user.address, amount, nonce, signature))
             .to.emit(bridge, "TransferProcessed");
         
         expect(await token.balanceOf(user.address)).to.equal(amount);
@@ -61,12 +64,12 @@ describe("CrossChainBridge Replay Protection", function () {
     it("Should prevent same-chain replay using nonces", async function () {
         const amount = ethers.utils.parseEther("10");
         const nonce = await bridge.nonces(user.address);
-        const signature = await getSignature(user.address, amount, nonce, bridge.address, chainId);
+        const signature = await getSignature(user.address, user.address, amount, nonce, bridge.address, chainId);
 
-        await bridge.processTransfer(user.address, amount, nonce, signature);
+        await bridge.processTransfer(user.address, user.address, amount, nonce, signature);
 
         // Attempt to replay the same signature
-        await expect(bridge.processTransfer(user.address, amount, nonce, signature))
+        await expect(bridge.processTransfer(user.address, user.address, amount, nonce, signature))
             .to.be.revertedWith("Already processed");
     });
 
@@ -74,9 +77,9 @@ describe("CrossChainBridge Replay Protection", function () {
         const amount = ethers.utils.parseEther("10");
         const nonce = await bridge.nonces(user.address);
         const wrongChainId = chainId + 1;
-        const signature = await getSignature(user.address, amount, nonce, bridge.address, wrongChainId);
+        const signature = await getSignature(user.address, user.address, amount, nonce, bridge.address, wrongChainId);
 
-        await expect(bridge.processTransfer(user.address, amount, nonce, signature))
+        await expect(bridge.processTransfer(user.address, user.address, amount, nonce, signature))
             .to.be.revertedWith("Invalid signature");
     });
 
@@ -88,9 +91,9 @@ describe("CrossChainBridge Replay Protection", function () {
         const Bridge = await ethers.getContractFactory("CrossChainBridge");
         const bridgeV2 = await Bridge.deploy(token.address, validator.address);
         
-        const signatureForV1 = await getSignature(user.address, amount, nonce, bridge.address, chainId);
+        const signatureForV1 = await getSignature(user.address, user.address, amount, nonce, bridge.address, chainId);
 
-        await expect(bridgeV2.processTransfer(user.address, amount, nonce, signatureForV1))
+        await expect(bridgeV2.processTransfer(user.address, user.address, amount, nonce, signatureForV1))
             .to.be.revertedWith("Invalid signature");
     });
 
@@ -100,8 +103,23 @@ describe("CrossChainBridge Replay Protection", function () {
         // Random 65 bytes signature that might cause ecrecover to return 0 or fail
         const invalidSignature = "0x" + "00".repeat(65);
 
-        await expect(bridge.processTransfer(user.address, amount, nonce, invalidSignature))
+        await expect(bridge.processTransfer(user.address, user.address, amount, nonce, invalidSignature))
             .to.be.revertedWith("Invalid signature length"); // Because our assembly check for length 65 passes but v is 0
+    });
+
+    it("Should allow different senders to use the same nonce", async function () {
+        const amount = ethers.utils.parseEther("10");
+        const nonce = 0; // Both users start with nonce 0
+        
+        // User 1 sends to owner
+        const sig1 = await getSignature(user.address, owner.address, amount, nonce, bridge.address, chainId);
+        await expect(bridge.processTransfer(user.address, owner.address, amount, nonce, sig1))
+            .to.emit(bridge, "TransferProcessed");
+
+        // User 2 sends to owner with the SAME nonce
+        const sig2 = await getSignature(user2.address, owner.address, amount, nonce, bridge.address, chainId);
+        await expect(bridge.processTransfer(user2.address, owner.address, amount, nonce, sig2))
+            .to.emit(bridge, "TransferProcessed");
     });
 
     it("Should expose nonces per user", async function () {
