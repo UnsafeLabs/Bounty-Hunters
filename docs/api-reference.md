@@ -54,6 +54,7 @@ POST /bounties
 Creates a new bounty listing.
 
 **Request Body**
+
 ```json
 {
   "title": "Fix authentication flow",
