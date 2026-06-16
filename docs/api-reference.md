@@ -45,13 +45,7 @@ Returns a paginated list of all available bounties.
 }
 ```
 
-### Create Bounty
-
-```
-GET /bounties
-```
-
-Creates a new bounty listing.
+### Create Bounty\n\n```\nPOST /bounties\n```
 
 **Request Body**
 
