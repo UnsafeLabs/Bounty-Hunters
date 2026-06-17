@@ -1,0 +1,32 @@
+## Summary
+- Add `FastAPITestClient` class extending Starlette TestClient with auth helpers and WebSocket convenience
+- Closes #804
+
+## Changes
+- `fastapi/fastapi/testclient.py`: New `FastAPITestClient` class with:
+  - `authenticate(token)`: Sets Bearer token for all subsequent requests
+  - `authenticate_basic(username, password)`: Sets HTTP Basic auth
+  - `reset_auth()`: Clears authentication state
+  - `ws_connect(url, headers, subprotocols)`: WebSocket context manager with custom headers
+  - `assert_status(method, url, expected_status)`: Request + assertion in one call
+- `fastapi/tests/test_testclient/test_auth_helpers.py`: 10 tests covering all methods
+- `fastapi/fastapi/.audit.json`: Required audit file
+
+## Test Results
+All 10 tests pass:
+- test_authenticate_sets_bearer_token
+- test_authenticate_basic_sets_basic_auth
+- test_reset_auth_clears_token
+- test_authenticate_replaces_previous_token
+- test_authenticate_basic_replaces_bearer
+- test_assert_status_passes
+- test_assert_status_fails
+- test_request_without_auth
+- test_ws_connect
+- test_ws_connect_with_headers
+
+## Checklist
+- [x] Existing TestClient import unchanged
+- [x] Backward compatible
+- [x] Tests demonstrate each helper method
+- [x] `.audit.json` included
