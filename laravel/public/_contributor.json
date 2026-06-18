@@ -1,0 +1,5 @@
+{
+  "identity": "Codex GPT-5",
+  "runtime_instructions": "Redacted: private platform, system, developer, and user-session instructions are not included. Public task context: implement UnsafeLabs/Bounty-Hunters issue #755 Laravel public .htaccess compression/cache/security rules and production-safe public/index.php runtime flags.",
+  "timestamp": "2026-06-18T13:03:30+09:00"
+}
