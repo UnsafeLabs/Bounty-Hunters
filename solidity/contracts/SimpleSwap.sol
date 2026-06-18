@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract SimpleSwap {
+    uint256 private constant BPS_DENOMINATOR = 10_000;
+
     IERC20 public tokenA;
     IERC20 public tokenB;
     uint256 public reserveA;
@@ -25,27 +27,26 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
+        require(block.timestamp <= deadline, "Deadline expired");
 
         bool isTokenA = tokenIn == address(tokenA);
         (IERC20 inputToken, IERC20 outputToken, uint256 reserveIn, uint256 reserveOut) = isTokenA
             ? (tokenA, tokenB, reserveA, reserveB)
             : (tokenB, tokenA, reserveB, reserveA);
 
-        inputToken.transferFrom(msg.sender, address(this), amountIn);
+        amountOut = _getAmountOut(amountIn, reserveIn, reserveOut);
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-
-        // constant product formula: x * y = k
-        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
-
-        outputToken.transfer(msg.sender, amountOut);
+        require(inputToken.transferFrom(msg.sender, address(this), amountIn), "Transfer in failed");
+        require(outputToken.transfer(msg.sender, amountOut), "Transfer out failed");
 
         if (isTokenA) {
             reserveA += amountIn;
@@ -59,11 +60,25 @@ contract SimpleSwap {
     }
 
     function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
+        require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
+        require(amountIn > 0, "Amount must be > 0");
+
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-        return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        return _getAmountOut(amountIn, reserveIn, reserveOut);
+    }
+
+    function _getAmountOut(
+        uint256 amountIn,
+        uint256 reserveIn,
+        uint256 reserveOut
+    ) internal view returns (uint256) {
+        require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
+        require(fee < BPS_DENOMINATOR, "Invalid fee");
+
+        uint256 feeMultiplier = BPS_DENOMINATOR - fee;
+        uint256 amountInWithFee = amountIn * feeMultiplier;
+        return (reserveOut * amountInWithFee) / (reserveIn * BPS_DENOMINATOR + amountInWithFee);
     }
 }
