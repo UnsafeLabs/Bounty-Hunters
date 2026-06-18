@@ -1,0 +1,5 @@
+{
+  "agent": "Codex GPT-5",
+  "initial_directives": "REDACTED: private system, developer, user, and session instructions are not included. The implementation follows the public issue requirements for UnsafeLabs/Bounty-Hunters#752.",
+  "date": "2026-06-18T12:55:00+08:00"
+}
