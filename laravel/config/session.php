@@ -20,6 +20,8 @@ return [
 
     'driver' => env('SESSION_DRIVER', 'database'),
 
+    'fallback' => env('SESSION_FALLBACK_DRIVER', 'file'),
+
     /*
     |--------------------------------------------------------------------------
     | Session Lifetime
