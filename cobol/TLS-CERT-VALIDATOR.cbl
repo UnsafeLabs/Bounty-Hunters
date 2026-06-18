@@ -161,11 +161,11 @@
            .
        2000-VALIDATE-CERT-CHAIN.
            IF WS-CHAIN-LENGTH = 0
-               SET WS-CHAIN-IS-INVALID TO TRUE
+               PERFORM 2100-VALIDATE-SELF-SIGNED
                GO TO 2000-EXIT
            END-IF
            PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
-               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH + 1
+               UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH
                MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
                    TO CS-CERT-SERIAL
                READ CERT-STORE-FILE
@@ -193,6 +193,30 @@
            .
        2000-EXIT.
            EXIT.
+       2100-VALIDATE-SELF-SIGNED.
+      *    AN EMPTY CHAIN MEANS A SELF-SIGNED CERTIFICATE. IT MUST BE
+      *    REJECTED UNLESS ITS SERIAL IS A REGISTERED TRUST ANCHOR IN
+      *    THE CERT STORE. NEVER SUBSCRIPT WS-CHAIN-ENTRY HERE SO NO
+      *    OUT-OF-BOUNDS READ CAN OCCUR UNDER OPT(0) OR OPT(2).
+           MOVE WS-CERT-SERIAL-NUM TO CS-CERT-SERIAL
+           READ CERT-STORE-FILE
+               INVALID KEY
+                   SET WS-CHAIN-IS-INVALID TO TRUE
+                   DISPLAY 'TLSVAL-E012: SELF-SIGNED CERT REJECTED '
+                       '- EMPTY CHAIN NOT IN TRUST STORE '
+                       WS-CERT-SERIAL-NUM
+               NOT INVALID KEY
+                   IF CS-IS-TRUST-ANCHOR
+                       SET WS-CHAIN-IS-VALID TO TRUE
+                       DISPLAY 'TLSVAL-I012: SELF-SIGNED TRUST '
+                           'ANCHOR ACCEPTED ' WS-CERT-SERIAL-NUM
+                   ELSE
+                       SET WS-CHAIN-IS-INVALID TO TRUE
+                       DISPLAY 'TLSVAL-E013: SELF-SIGNED CERT NOT '
+                           'A TRUST ANCHOR ' WS-CERT-SERIAL-NUM
+                   END-IF
+           END-READ
+           .
        3000-CHECK-EXPIRY-DATE.
            MOVE WS-CERT-NOT-AFTER(1:2)  TO WS-EXP-YEAR-2D
            MOVE WS-CERT-NOT-AFTER(3:2)  TO WS-EXP-MONTH
