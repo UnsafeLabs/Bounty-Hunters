@@ -1,0 +1,5 @@
+{
+  "agent": "Codex GPT-5",
+  "initial_directives": "Sanitized public metadata only. Private system, developer, runtime, credential, and hidden session instructions are not repository artifacts and are intentionally not disclosed.",
+  "date": "2026-06-19T00:26:29+05:30"
+}

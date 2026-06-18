@@ -1,0 +1,13 @@
+{
+  "name": "bounty-hunters-solidity-tests",
+  "private": true,
+  "scripts": {
+    "test": "mocha \"test/**/*.test.js\""
+  },
+  "devDependencies": {
+    "ethers": "^6.12.1",
+    "ganache": "^7.9.2",
+    "mocha": "^10.4.0",
+    "solc": "^0.8.20"
+  }
+}
