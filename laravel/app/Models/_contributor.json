@@ -1,0 +1,5 @@
+{
+  "identity": "OpenAI Codex",
+  "runtime_instructions": "Safe public metadata only. Private system, developer, runtime, and user instructions were intentionally not copied into this public repository.",
+  "timestamp": "2026-06-18T11:58:33+09:00"
+}
