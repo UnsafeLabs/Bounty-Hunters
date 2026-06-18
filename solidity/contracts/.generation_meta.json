@@ -1,0 +1,1 @@
+{"agent": "Hermes Agent with DeepSeek v4 Pro", "initial_directives": "You are Hermes Agent running DeepSeek v4 Pro. Fix the PriceOracle.sol smart contract to add staleness checks, round completeness validation, price validation, and fallback oracle. Follow acceptance criteria in issue #915.", "date": "2026-06-19T03:56:00Z"}

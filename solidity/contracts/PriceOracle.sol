@@ -14,34 +14,72 @@ interface AggregatorV3Interface {
 
 contract PriceOracle {
     AggregatorV3Interface public primaryFeed;
+    AggregatorV3Interface public fallbackFeed;
     address public owner;
     uint256 public MAX_STALENESS = 3600;
 
     event PriceQueried(int256 price, uint256 timestamp);
+    event StalePrice(uint256 lastUpdate, address feed);
 
     constructor(address _primaryFeed) {
         primaryFeed = AggregatorV3Interface(_primaryFeed);
         owner = msg.sender;
     }
 
-    // BUG: No staleness check on updatedAt
-    // BUG: No check for negative/zero price
-    // BUG: No round completeness validation
-    // BUG: No fallback oracle
+    function setFallbackFeed(address _fallbackFeed) external {
+        require(msg.sender == owner, "Not owner");
+        fallbackFeed = AggregatorV3Interface(_fallbackFeed);
+    }
+
     function getLatestPrice() external view returns (int256) {
+        int256 price;
+        bool stale = false;
+        address feedAddr = address(primaryFeed);
+
+        (price, stale, feedAddr) = _getPriceFromFeed(primaryFeed, feedAddr);
+
+        // Fallback to secondary oracle if primary returned stale data
+        if (stale && address(fallbackFeed) != address(0)) {
+            (price, stale, feedAddr) = _getPriceFromFeed(fallbackFeed, feedAddr);
+        }
+
+        // If still stale and fallback exists, revert — both oracles stale
+        if (stale && address(fallbackFeed) != address(0)) {
+            revert("Both oracles returned stale data");
+        }
+
+        // If stale but no fallback configured, revert
+        if (stale) {
+            revert("Stale price and no fallback configured");
+        }
+
+        emit PriceQueried(price, block.timestamp);
+        return price;
+    }
+
+    function _getPriceFromFeed(AggregatorV3Interface feed, address previousFeedAddr)
+        internal view returns (int256 price, bool stale, address feedAddr)
+    {
         (
             uint80 roundId,
-            int256 price,
+            int256 answer,
             ,
             uint256 updatedAt,
             uint80 answeredInRound
-        ) = primaryFeed.latestRoundData();
+        ) = feed.latestRoundData();
 
-        // Missing: require(price > 0)
-        // Missing: require(answeredInRound >= roundId)
-        // Missing: require(block.timestamp - updatedAt < MAX_STALENESS)
+        require(answer > 0, "Invalid price: zero or negative");
+        require(answeredInRound >= roundId, "Incomplete round");
 
-        return price;
+        if (block.timestamp - updatedAt >= MAX_STALENESS) {
+            stale = true;
+            feedAddr = previousFeedAddr;
+            emit StalePrice(updatedAt, address(feed));
+        } else {
+            stale = false;
+            feedAddr = address(feed);
+            price = answer;
+        }
     }
 
     function getDecimals() external view returns (uint8) {
