@@ -19,6 +19,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cache Health Checks
+    |--------------------------------------------------------------------------
+    |
+    | These values control the lightweight cache round-trip probe used by the
+    | cache:status command and the /health/cache endpoint.
+    |
+    */
+
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+
+    'health_check_interval' => env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
+    /*
+    |--------------------------------------------------------------------------
     | Cache Stores
     |--------------------------------------------------------------------------
     |
