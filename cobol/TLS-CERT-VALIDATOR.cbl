@@ -123,6 +123,24 @@
            88  WS-CERT-INVALID         VALUE 'I'.
        01  WS-VALIDATION-MSG           PIC X(128).
        01  WS-AUDIT-TIMESTAMP          PIC X(26).
+      *    The audit record is assembled in this WORKING-STORAGE work
+      *    area and copied to the file record on WRITE. The build itself
+      *    lives in copybook AUDIT-BUILD so the unit test exercises the
+      *    exact STRING used here instead of a hand-copied duplicate.
+      *    The original record carried only TIMESTAMP|SERIAL|RESULT|MSG;
+      *    the Issuer and Subject DN were ABSENT, so a validated cert
+      *    could not be identified from the trail; now logged.
+      *    Because a long DN can fill the 512-byte record, the STRING
+      *    uses WITH POINTER + ON OVERFLOW to flag and mark truncation
+      *    rather than letting standard STRING drop the Subject DN
+      *    silently.
+       01  WS-AUDIT-RECORD             PIC X(512).
+       01  WS-AUDIT-MAX-LEN            PIC 9(4)  VALUE 512.
+       01  WS-AUDIT-PTR                PIC 9(4)  VALUE 1.
+       01  WS-AUDIT-TRUNC-FLAG         PIC X(1)  VALUE 'N'.
+           88  WS-AUDIT-IS-TRUNCATED   VALUE 'Y'.
+           88  WS-AUDIT-NOT-TRUNCATED  VALUE 'N'.
+       01  WS-TRUNCATION-MARKER        PIC X(11) VALUE '[TRUNCATED]'.
        01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
        PROCEDURE DIVISION.
        0000-MAIN-CONTROL.
@@ -336,16 +354,14 @@
            .
        8000-WRITE-AUDIT-ENTRY.
            MOVE FUNCTION CURRENT-DATE TO WS-AUDIT-TIMESTAMP
-           STRING WS-AUDIT-TIMESTAMP DELIMITED SIZE
-               '|' DELIMITED SIZE
-               WS-CERT-SERIAL-NUM DELIMITED SPACES
-               '|' DELIMITED SIZE
-               WS-VALIDATION-RESULT DELIMITED SIZE
-               '|' DELIMITED SIZE
-               WS-VALIDATION-MSG DELIMITED SPACES
-               INTO AUDIT-LOG-RECORD
-           END-STRING
-           WRITE AUDIT-LOG-RECORD
+      *    Build the record via the shared copybook (also driven by the
+      *    unit test) so the program and its test never drift apart.
+           COPY AUDIT-BUILD.
+           IF WS-AUDIT-IS-TRUNCATED
+               DISPLAY 'TLSVAL-W030: AUDIT RECORD TRUNCATED FOR SERIAL '
+                   WS-CERT-SERIAL-NUM
+           END-IF
+           WRITE AUDIT-LOG-RECORD FROM WS-AUDIT-RECORD
            .
        9000-CLEANUP.
            CLOSE CERT-STORE-FILE
