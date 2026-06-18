@@ -2,6 +2,10 @@
 
 namespace App\Providers;
 
+use App\Console\Commands\FailedJobSummary;
+use App\Listeners\LogFailedJob;
+use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -19,6 +23,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Event::listen(JobFailed::class, LogFailedJob::class);
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                FailedJobSummary::class,
+            ]);
+        }
     }
 }
