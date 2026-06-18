@@ -59,6 +59,8 @@
            05  WS-CERT-KEY-LENGTH      PIC 9(5).
            05  WS-CERT-SIG-ALGO        PIC X(20).
            05  WS-CERT-FINGERPRINT     PIC X(64).
+       01  WS-PARSED-CN                PIC X(64).
+       01  WS-RDN-COUNT                PIC 9(2)  VALUE 0.
        01  WS-CERT-CHAIN.
            05  WS-CHAIN-LENGTH         PIC 9(2)  VALUE 0.
            05  WS-CHAIN-ENTRY OCCURS 10 TIMES.
@@ -130,6 +132,7 @@
            PERFORM 2000-VALIDATE-CERT-CHAIN
            PERFORM 3000-CHECK-EXPIRY-DATE
            PERFORM 4000-VERIFY-SIGNATURE
+           PERFORM 3500-PARSE-SUBJECT-DN
            PERFORM 5000-MATCH-HOSTNAME
            PERFORM 6000-CHECK-REVOCATION-STATUS
            PERFORM 7000-DETERMINE-FINAL-RESULT
@@ -233,6 +236,13 @@
            .
        3000-EXIT.
            EXIT.
+       3500-PARSE-SUBJECT-DN.
+      *    PARSE THE SUBJECT DN INTO RDN COMPONENTS AND EXTRACT THE
+      *    COMMON NAME. ESCAPED COMMAS (\,) IN THE CN ARE PRESERVED
+      *    SO ENTITIES LIKE  CN=Smith\, John  MATCH CORRECTLY.
+           CALL 'PARSE-SUBJECT-DN' USING CS-SUBJECT-DN
+               WS-PARSED-CN WS-RDN-COUNT
+           .
        4000-VERIFY-SIGNATURE.
            IF WS-CERT-KEY-LENGTH < WS-MIN-KEY-LENGTH
                SET WS-SIG-INVALID TO TRUE
@@ -255,12 +265,12 @@
        4000-EXIT.
            EXIT.
        5000-MATCH-HOSTNAME.
-           INSPECT WS-SUBJECT-COMMON-NAME
+           INSPECT WS-PARSED-CN
                TALLYING WS-HOSTNAME-TALLY FOR ALL '*'
            IF WS-HOSTNAME-TALLY > 0
                PERFORM 5100-WILDCARD-MATCH
            ELSE
-               IF WS-SUBJECT-COMMON-NAME =
+               IF WS-PARSED-CN =
                    WS-EXPECTED-HOSTNAME
                    SET WS-HOSTNAME-MATCHES TO TRUE
                ELSE
@@ -278,7 +288,7 @@
            END-IF
            .
        5100-WILDCARD-MATCH.
-           INSPECT WS-SUBJECT-COMMON-NAME
+           INSPECT WS-PARSED-CN
                TALLYING WS-WILDCARD-POS
                FOR CHARACTERS BEFORE INITIAL '*'
            IF WS-WILDCARD-POS > 0
@@ -287,7 +297,7 @@
                    TO WS-VALIDATION-MSG
            ELSE
                IF WS-EXPECTED-HOSTNAME(2:) =
-                   WS-SUBJECT-COMMON-NAME(3:)
+                   WS-PARSED-CN(3:)
                    SET WS-HOSTNAME-MATCHES TO TRUE
                ELSE
                    SET WS-HOSTNAME-NO-MATCH TO TRUE
