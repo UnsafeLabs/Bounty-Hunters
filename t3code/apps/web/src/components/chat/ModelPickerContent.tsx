@@ -94,6 +94,19 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const listRegionRef = useRef<HTMLDivElement>(null);
   const highlightedModelKeyRef = useRef<string | null>(null);
   const favorites = useSettings((s) => s.favorites ?? []);
+
+  // Persisted selected instance ID in localStorage so the picker remembers
+  // the last selected provider across page reloads.
+  const PERSISTED_INSTANCE_KEY = "t3code:model-picker:selected-instance";
+  const getPersistedInstance = (): ProviderInstanceId | null => {
+    try {
+      const raw = window.localStorage.getItem(PERSISTED_INSTANCE_KEY);
+      return raw as ProviderInstanceId | null;
+    } catch {
+      return null;
+    }
+  };
+
   const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | "favorites">(
     () => {
       if (props.lockedProvider !== null) {
@@ -101,9 +114,41 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         // so jumping into the picker keeps the focused instance visible.
         return props.activeInstanceId;
       }
+      // Restore persisted selection if available
+      const persisted = getPersistedInstance();
+      if (persisted) {
+        return persisted;
+      }
       return favorites.length > 0 ? "favorites" : props.activeInstanceId;
     },
   );
+
+  // Persist selectedInstanceId to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      if (selectedInstanceId === "favorites") {
+        // Don't persist the virtual "favorites" bucket — fall back to activeInstanceId
+        window.localStorage.setItem(PERSISTED_INSTANCE_KEY, props.activeInstanceId);
+      } else {
+        window.localStorage.setItem(PERSISTED_INSTANCE_KEY, selectedInstanceId);
+      }
+    } catch {
+      // localStorage may be unavailable (private browsing, quota exceeded)
+    }
+  }, [selectedInstanceId, props.activeInstanceId]);
+
+  // Listen for storage events from other tabs to sync persisted selection
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === PERSISTED_INSTANCE_KEY && event.newValue) {
+        const newValue = event.newValue as ProviderInstanceId;
+        setSelectedInstanceId(newValue);
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
   const keybindings = useMemo<ResolvedKeybindingsConfig>(
     () => providedKeybindings ?? [],
     [providedKeybindings],
@@ -515,6 +560,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     };
   }, [filteredModelKeys]);
 
+  // Reset persisted selection back to default (first available instance)
+  const handleResetToDefault = useCallback(() => {
+    try {
+      window.localStorage.removeItem(PERSISTED_INSTANCE_KEY);
+    } catch {
+      // localStorage may be unavailable
+    }
+    const defaultInstance = instanceEntries[0]?.instanceId ?? props.activeInstanceId;
+    setSelectedInstanceId(defaultInstance);
+  }, [instanceEntries, props.activeInstanceId]);
+
   return (
     <TooltipProvider delay={0}>
       <div
@@ -569,10 +625,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             )}
           >
             {/* Search bar */}
-            <div className="border-b px-3 py-2">
+            <div className="border-b px-3 py-2 flex items-center gap-2">
               <ComboboxInput
                 ref={searchInputRef}
-                className="[&_input]:font-sans rounded-md"
+                className="[&_input]:font-sans rounded-md flex-1"
                 inputClassName="border-0 shadow-none ring-0 focus-visible:ring-0"
                 placeholder="Search models..."
                 showTrigger={false}
@@ -604,6 +660,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 onTouchStart={(e) => e.stopPropagation()}
                 size="sm"
               />
+              <button
+                type="button"
+                onClick={handleResetToDefault}
+                className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-muted"
+                title="Reset to default provider"
+              >
+                Reset
+              </button>
             </div>
 
             {/* Model list */}
