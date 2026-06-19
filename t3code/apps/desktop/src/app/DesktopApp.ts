@@ -9,6 +9,7 @@ import * as NetService from "@t3tools/shared/Net";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import { installDesktopIpcHandlers } from "../ipc/DesktopIpcHandlers.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
@@ -18,6 +19,7 @@ import * as DesktopLifecycle from "./DesktopLifecycle.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
+import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
@@ -176,6 +178,17 @@ const bootstrap = Effect.gen(function* () {
 
   yield* installDesktopIpcHandlers;
   yield* logBootstrapInfo("bootstrap ipc handlers registered");
+
+  // Restore persisted desktop theme preference
+  const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
+  const persistedSettings = yield* clientSettings.get;
+  const persistedTheme = persistedSettings.pipe(
+    Option.map((s) => s.desktopTheme),
+    Option.getOrElse(() => "system" as const),
+  );
+  const electronTheme = yield* ElectronTheme.ElectronTheme;
+  yield* electronTheme.setSource(persistedTheme);
+  yield* logBootstrapInfo("bootstrap restored desktop theme", { theme: persistedTheme });
 
   if (!(yield* Ref.get(state.quitting))) {
     yield* backendManager.start;

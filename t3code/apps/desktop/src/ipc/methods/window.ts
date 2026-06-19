@@ -4,6 +4,7 @@ import {
   DesktopEnvironmentBootstrapSchema,
   DesktopThemeSchema,
   PickFolderOptionsSchema,
+  DEFAULT_CLIENT_SETTINGS,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -18,6 +19,7 @@ import * as ElectronTheme from "../../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as IpcChannels from "../channels.ts";
 import { makeIpcMethod, makeSyncIpcMethod } from "../DesktopIpc.ts";
+import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts";
 
 const ContextMenuPosition = Schema.Struct({
   x: Schema.Number,
@@ -100,6 +102,15 @@ export const setTheme = makeIpcMethod({
   handler: Effect.fn("desktop.ipc.window.setTheme")(function* (theme) {
     const electronTheme = yield* ElectronTheme.ElectronTheme;
     yield* electronTheme.setSource(theme);
+
+    // Persist theme preference to client settings
+    const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
+    const current = yield* clientSettings.get;
+    const updated = current.pipe(
+      Option.map((settings) => ({ ...settings, desktopTheme: theme })),
+      Option.getOrElse(() => ({ ...DEFAULT_CLIENT_SETTINGS, desktopTheme: theme })),
+    );
+    yield* clientSettings.set(updated);
   }),
 });
 

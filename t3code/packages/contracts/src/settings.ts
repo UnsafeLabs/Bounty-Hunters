@@ -6,6 +6,7 @@ import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 import { DEFAULT_GIT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from "./model.ts";
 import { ModelSelection } from "./orchestration.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
+import { DesktopThemeSchema } from "./ipc.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -91,6 +92,9 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
+  ),
+  desktopTheme: DesktopThemeSchema.pipe(
+    Schema.withDecodingDefault(Effect.succeed("system" as const)),
   ),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;

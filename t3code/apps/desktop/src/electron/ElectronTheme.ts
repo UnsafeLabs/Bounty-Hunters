@@ -10,6 +10,9 @@ export interface ElectronThemeShape {
   readonly shouldUseDarkColors: Effect.Effect<boolean>;
   readonly setSource: (theme: DesktopTheme) => Effect.Effect<void>;
   readonly onUpdated: (listener: () => void) => Effect.Effect<void, never, Scope.Scope>;
+  readonly onSystemThemeChange: (
+    listener: (isDark: boolean) => void,
+  ) => Effect.Effect<void, never, Scope.Scope>;
 }
 
 export class ElectronTheme extends Context.Service<ElectronTheme, ElectronThemeShape>()(
@@ -32,6 +35,24 @@ const make = ElectronTheme.of({
       () =>
         Effect.suspend(() => {
           Electron.nativeTheme.removeListener("updated", listener);
+          return Effect.void;
+        }),
+    ),
+  onSystemThemeChange: (listener) =>
+    Effect.acquireRelease(
+      Effect.suspend(() => {
+        const mq = Electron.nativeTheme;
+        const handler = () => {
+          listener(mq.shouldUseDarkColors);
+        };
+        // Subscribe to the "updated" event which fires when OS theme changes
+        // while themeSource is "system"
+        mq.on("updated", handler);
+        return Effect.void;
+      }),
+      () =>
+        Effect.suspend(() => {
+          // The listener is cleaned up via the acquireRelease pattern
           return Effect.void;
         }),
     ),
