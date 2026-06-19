@@ -44,6 +44,8 @@
     "typecheck": "turbo run typecheck",
     "lint": "oxlint --report-unused-disable-directives",
     "test": "turbo run test",
+    "test:e2e": "playwright test --config playwright.config.ts",
+    "test:e2e:install": "playwright install --with-deps chromium",
     "test:desktop-smoke": "turbo run smoke-test --filter=@t3tools/desktop",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
