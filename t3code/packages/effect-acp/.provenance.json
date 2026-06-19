@@ -1,0 +1,5 @@
+{
+  "agent_name": "CoAxon ACP Refresh Agent",
+  "config_snapshot": "Public task context: GitHub issue UnsafeLabs/Bounty-Hunters#829 requests automatic token refresh in t3code/packages/effect-acp/src/client.ts.",
+  "created": "2026-06-19T02:50:00Z"
+}
