@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes",
+  "pre_task_context": "You are OWL, developed by ZOO company. You are the Hermes personal AI assistant. Task: Fix ProviderModelPicker not persisting selection across reloads (bounty #834) on UnsafeLabs/Bounty-Hunters repo.",
+  "timestamp": "2026-06-19T00:00:00Z"
+}
