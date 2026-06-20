@@ -1,0 +1,5 @@
+{
+  "agent": "ellitedom03",
+  "initialized_with": "Hermes Agent running z-ai/glm-5.2 via OpenRouter. Task: Fix tx.origin phishing vulnerability in GovernanceToken delegation. The contract uses tx.origin instead of msg.sender for delegateVote, revokeDelegate, and snapshot functions, allowing phishing attacks where a malicious contract can delegate on behalf of the caller. Fix: Replace all tx.origin with msg.sender. Solidity 0.8.20+, OpenZeppelin ERC20.",
+  "timestamp": "2026-06-20T21:02:00Z"
+}
