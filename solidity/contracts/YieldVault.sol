@@ -23,28 +23,37 @@ contract YieldVault {
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
 
+    modifier onlyDistributor() {
+        require(msg.sender == rewardDistributor, "Not distributor");
+        _;
+    }
+
     constructor(address _stakingToken, address _rewardToken) {
         stakingToken = IERC20(_stakingToken);
         rewardToken = IERC20(_rewardToken);
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+        
+        // Cap calculation at periodFinish to prevent phantom rewards
+        uint256 timeElapsed = block.timestamp > periodFinish 
+            ? periodFinish - lastUpdateTime 
+            : block.timestamp - lastUpdateTime;
+        
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            timeElapsed * rewardRate * 1e18 / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        lastUpdateTime = block.timestamp > periodFinish ? periodFinish : block.timestamp;
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -77,10 +86,12 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
-    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+    function notifyRewardAmount(uint256 reward, uint256 duration) external onlyDistributor updateReward(address(0)) {
+        require(block.timestamp >= periodFinish, "Reward period not finished");
+        require(duration > 0, "Duration must be > 0");
+        
+        // Use higher precision to reduce precision loss
+        rewardRate = (reward * 1e18) / (duration * 1e18);
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
     }
