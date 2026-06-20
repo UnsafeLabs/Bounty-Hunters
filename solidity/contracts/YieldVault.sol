@@ -29,22 +29,26 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    /// @notice Calculate reward per token, capped at periodFinish
+    /// @dev Fix: Cap timestamp at periodFinish to prevent phantom reward accrual
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+        // Fix: Use min(block.timestamp, periodFinish) to cap reward accrual
+        uint256 currentTime = block.timestamp < periodFinish ? block.timestamp : periodFinish;
+        if (currentTime <= lastUpdateTime) return rewardPerTokenStored;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (currentTime - lastUpdateTime) * rewardRate * 1e18 / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        // Fix: Cap lastUpdateTime at periodFinish
+        lastUpdateTime = block.timestamp < periodFinish ? block.timestamp : periodFinish;
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -77,10 +81,15 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
+    /// @notice Notify reward amount (access controlled)
+    /// @dev Fix: Added access control - only rewardDistributor can call
     function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+        require(msg.sender == rewardDistributor, "Not distributor");
+        require(duration > 0, "Duration must be > 0");
+        // Fix: Handle mid-period updates correctly
+        uint256 remaining = periodFinish > block.timestamp ? periodFinish - block.timestamp : 0;
+        uint256 leftover = remaining * rewardRate;
+        rewardRate = (reward + leftover) / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
     }

@@ -1,0 +1,5 @@
+{
+  "agent": "ellitedom03",
+  "initialized_with": "Hermes Agent running z-ai/glm-5.2 via OpenRouter. Task: Fix phantom reward accrual after period expiry in YieldVault. The rewardPerToken function does not cap at periodFinish, allowing rewards to accrue indefinitely. Also notifyRewardAmount has no access control. Fix: Cap timestamp at periodFinish in rewardPerToken and updateReward, add access control to notifyRewardAmount, handle mid-period updates with leftover calculation. Solidity 0.8.20+.",
+  "timestamp": "2026-06-20T21:06:00Z"
+}
