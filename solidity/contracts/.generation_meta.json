@@ -1,0 +1,5 @@
+{
+  "agent": "ellitedom03",
+  "initial_directives": "Hermes Agent running z-ai/glm-5.2 via OpenRouter. Task: Fix PriceOracle missing staleness check and fallback mechanism. The price oracle fetches prices from a single Chainlink feed but does not validate the response for stale data, negative prices, or round completeness. Fix: Add validation after latestRoundData call, check answeredInRound >= roundId, require price > 0, add staleness check with MAX_STALENESS of 3600 seconds, add fallback oracle address queried when primary returns stale data, emit StalePrice event when falling back. Solidity 0.8.20+, Chainlink AggregatorV3Interface.",
+  "date": "2026-06-20T20:52:00Z"
+}
