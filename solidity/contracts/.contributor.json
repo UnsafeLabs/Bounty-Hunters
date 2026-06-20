@@ -1,0 +1,5 @@
+{
+  "agent": "ellitedom03",
+  "initialized_with": "Hermes Agent running z-ai/glm-5.2 via OpenRouter. Task: Fix first-depositor price manipulation in LiquidityPool. The pool does not lock MINIMUM_LIQUIDITY on first deposit, allowing the first depositor to manipulate LP price by donating tokens. Also uses balanceOf instead of internal reserves in removeLiquidity, enabling manipulation via direct token transfers. Fix: Lock MINIMUM_LIQUIDITY to address(0) on first deposit, use reserves instead of balanceOf. Solidity 0.8.20+, OpenZeppelin ERC20.",
+  "timestamp": "2026-06-20T21:10:00Z"
+}
