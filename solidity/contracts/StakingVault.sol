@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract StakingVault {
+contract StakingVault is ReentrancyGuard {
     IERC20 public stakingToken;
     uint256 public rewardRate;
     uint256 public totalStaked;
@@ -39,31 +40,31 @@ contract StakingVault {
         lastStakeTime[account] = block.timestamp;
     }
 
-    // BUG: Reentrancy — state update after external call
-    function withdraw(uint256 amount) external {
+    function withdraw(uint256 amount) external nonReentrant {
         require(balances[msg.sender] >= amount, "Insufficient balance");
         _updateReward(msg.sender);
 
-        // External call before state update
+        // State update before external call — safe from reentrancy
+        balances[msg.sender] -= amount;
+        totalStaked -= amount;
+
         (bool success, ) = payable(msg.sender).call{value: amount}("");
         require(success, "Transfer failed");
 
-        // State update after external call — vulnerable to reentrancy
-        balances[msg.sender] -= amount;
-        totalStaked -= amount;
         emit Withdrawn(msg.sender, amount);
     }
 
-    // BUG: Same reentrancy pattern in claimRewards
-    function claimRewards() external {
+    function claimRewards() external nonReentrant {
         _updateReward(msg.sender);
         uint256 reward = rewards[msg.sender];
         require(reward > 0, "No rewards");
 
+        // State update before external call — safe from reentrancy
+        rewards[msg.sender] = 0;
+
         (bool success, ) = payable(msg.sender).call{value: reward}("");
         require(success, "Transfer failed");
 
-        rewards[msg.sender] = 0;
         emit RewardClaimed(msg.sender, reward);
     }
 
