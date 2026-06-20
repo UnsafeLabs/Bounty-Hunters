@@ -1,0 +1,5 @@
+{
+  "contributor": "ellitedom03",
+  "generation_context": "Hermes Agent running z-ai/glm-5.2 via OpenRouter. Task: Fix missing slippage protection and deadline in SimpleSwap. Instructions: Add minAmountOut parameter to swap function, add require(amountOut >= minAmountOut, 'Slippage exceeded') after output calculation, add deadline parameter that reverts if block.timestamp > deadline, fix fee calculation to use proper fixed-point math. The fix applies to solidity/contracts/SimpleSwap.sol in the UnsafeLabs/Bounty-Hunters repository. The original swap function had no slippage protection (no minAmountOut), no deadline check, and fee calculation used amountIn * fee / 10000 which truncates for small amounts. The fix changes fee calculation to amountIn * (10000 - fee) / 10000 which multiplies first to preserve precision.",
+  "completed_at": "2026-06-20T20:45:00Z"
+}
