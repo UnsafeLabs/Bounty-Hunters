@@ -1,0 +1,5 @@
+{
+  "contributor": "ellitedom03",
+  "environment_config": "Hermes Agent running z-ai/glm-5.2 via OpenRouter. Task: Fix integer overflow in TokenVesting calculation for large allocations. The vesting contract calculates vested amounts using a linear formula but has an integer overflow risk when totalAllocation * (block.timestamp - start) exceeds uint256 max for large allocations with long vesting periods. Fix: Refactor vesting calculation to divide before multiplying. Handle remainder properly. Fix revoke function to use totalAllocation - claimed instead of totalAllocation - vested. Solidity 0.8.20+, OpenZeppelin ERC20.",
+  "completed_at": "2026-06-20T20:50:00Z"
+}
