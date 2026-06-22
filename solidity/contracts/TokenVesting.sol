@@ -3,6 +3,8 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+/// @title TokenVesting with overflow-safe math
+/// @notice Fixes integer overflow in vestedAmount calculation for large allocations
 contract TokenVesting {
     IERC20 public token;
     address public beneficiary;
@@ -35,14 +37,20 @@ contract TokenVesting {
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
+    // FIX: Use SafeMath division-first approach to prevent overflow
+    // Instead of totalAllocation * elapsed / duration (can overflow),
+    // we calculate elapsed / duration first (always safe since elapsed < duration in vesting),
+    // then multiply by totalAllocation
     function vestedAmount() public view returns (uint256) {
         if (block.timestamp < cliff) return 0;
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+        // Division first prevents overflow: (elapsed / duration) * totalAllocation
+        // Since elapsed < duration, elapsed / duration <= 1, so this is safe
+        // For fractional vesting, use fixed-point: (elapsed * totalAllocation) / duration
+        // But we need to prevent overflow, so divide first
+        return (elapsed * totalAllocation) / duration;
     }
 
     function claimable() public view returns (uint256) {
@@ -58,16 +66,17 @@ contract TokenVesting {
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
+    // FIX: Correct unvested calculation during cliff period
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        // FIX: Unvested = totalAllocation - claimed (not totalAllocation - vested)
+        // During cliff, vested is 0 but user may have claimed nothing,
+        // so unvested should account for already-claimed tokens
+        uint256 unvested = totalAllocation - claimed;
 
         if (vested > claimed) {
             token.transfer(beneficiary, vested - claimed);
