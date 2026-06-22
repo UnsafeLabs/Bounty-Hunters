@@ -10,13 +10,21 @@ import { authCommand } from "./cli/auth.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
+import { validateConfig } from "./envValidation.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
+
+const validateConfigCommand = Command.make("validate-config").pipe(
+  Command.withDescription("Validate server environment configuration and exit."),
+  Command.withHandler(() => Effect.gen(function* () {
+    yield* validateConfig;
+  })),
+);
 
 export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),
   Command.withHandler((flags) => runServerCommand(flags)),
-  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
+  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand, validateConfigCommand]),
 );
 
 if (import.meta.main) {
