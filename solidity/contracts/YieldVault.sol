@@ -2,8 +2,11 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract YieldVault {
+/// @title YieldVault with reward period fix
+/// @notice Fixes phantom reward accrual after period expiry
+contract YieldVault is Ownable {
     IERC20 public rewardToken;
     IERC20 public stakingToken;
 
@@ -12,6 +15,10 @@ contract YieldVault {
     uint256 public lastUpdateTime;
     uint256 public rewardPerTokenStored;
     uint256 public totalSupply;
+
+    // FIX: Higher precision multiplier for reward rate calculations
+    uint256 private constant PRECISION = 1e18;
+    uint256 private constant REWARD_PRECISION = 1e36; // 1e18 * 1e18 for intermediate precision
 
     mapping(address => uint256) public balanceOf;
     mapping(address => uint256) public userRewardPerTokenPaid;
@@ -27,19 +34,24 @@ contract YieldVault {
         stakingToken = IERC20(_stakingToken);
         rewardToken = IERC20(_rewardToken);
         rewardDistributor = msg.sender;
+        _transferOwnership(msg.sender);
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    // FIX: Cap rewardPerToken calculation at periodFinish
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+        // FIX: Use min(block.timestamp, periodFinish) to prevent phantom rewards
+        uint256 timeElapsed = block.timestamp > periodFinish
+            ? periodFinish - lastUpdateTime
+            : block.timestamp - lastUpdateTime;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            timeElapsed * rewardRate * PRECISION / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
+    // FIX: Uses capped rewardPerToken internally
     function earned(address account) public view returns (uint256) {
-        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
+        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / PRECISION + rewards[account];
     }
 
     modifier updateReward(address account) {
@@ -77,10 +89,14 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
+    // FIX: Add access control — only authorized distributor can call
+    // FIX: Use higher precision for rewardRate calculation
     function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+        require(msg.sender == rewardDistributor, "Not authorized distributor");
+        require(duration > 0, "Duration must be > 0");
+
+        // FIX: Higher precision reward rate to reduce rounding loss
+        rewardRate = (reward * PRECISION) / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
     }
