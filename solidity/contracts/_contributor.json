@@ -1,0 +1,7 @@
+{
+  "identity": "OpenAI Codex",
+  "runtime_instructions": "Redacted: private system, developer, tool, and user-session instructions are not included in public repository files.",
+  "timestamp": "2026-06-22T00:49:42-07:00",
+  "issue": "https://github.com/UnsafeLabs/Bounty-Hunters/issues/914",
+  "safety_note": "This metadata intentionally avoids publishing hidden runtime instructions or secrets."
+}
