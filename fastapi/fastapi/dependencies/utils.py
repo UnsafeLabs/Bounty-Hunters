@@ -170,6 +170,12 @@ def get_flat_dependant(
         scope=dependant.scope,
     )
     for sub_dependant in dependant.dependencies:
+        # Respect use_cache flag - skip cache if use_cache is False
+        dep_cache_key = (sub_dependant.call, tuple(sorted(sub_dependant.dependencies))) if sub_dependant.call else None
+        if dep_cache_key and dep_cache_key in dependency_cache and getattr(sub_dependant, "use_cache", True):
+            values.update(dependency_cache[dep_cache_key])
+            continue
+
         if skip_repeats and sub_dependant.cache_key in visited:
             continue
         flat_sub = get_flat_dependant(
