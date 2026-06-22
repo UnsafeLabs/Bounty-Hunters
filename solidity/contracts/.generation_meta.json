@@ -1,0 +1,1 @@
+{"agent": "Emma", "initial_directives": "Fix GitHub issue UnsafeLabs/Bounty-Hunters #915: Fix PriceOracle missing staleness check and fallback mechanism. Add staleness check, fallback mechanism, negative/zero price validation, round completeness check, emit StalePrice event, make MAX_STALENESS configurable, write tests.", "date": "2026-06-22T01:00:00Z"}
