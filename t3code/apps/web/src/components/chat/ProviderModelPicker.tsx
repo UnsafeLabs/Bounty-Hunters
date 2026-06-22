@@ -3,7 +3,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -44,6 +44,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
+  const [showResetOption, setShowResetOption] = useState(false);
+
+  // Check if there's a persisted preference to show reset option
+  useEffect(() => {
+    try {
+      const hasPersisted = localStorage.getItem(LS_PROVIDER_KEY) !== null;
+      setShowResetOption(hasPersisted);
+    } catch { setShowResetOption(false); }
+  }, [uncontrolledIsMenuOpen]);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
 
   // Resolve the active instance entry by exact routing key. The composer
@@ -86,9 +95,53 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
+  const LS_PROVIDER_KEY = "t3code:selected-provider-instance";
+  const LS_MODEL_KEY = "t3code:selected-model";
+
+  const persistSelection = useCallback((instanceId: ProviderInstanceId, model: string) => {
+    try {
+      localStorage.setItem(LS_PROVIDER_KEY, instanceId);
+      localStorage.setItem(LS_MODEL_KEY, model);
+    } catch { /* localStorage not available */ }
+  }, []);
+
+  const resetSelection = useCallback(() => {
+    try {
+      localStorage.removeItem(LS_PROVIDER_KEY);
+      localStorage.removeItem(LS_MODEL_KEY);
+    } catch { /* localStorage not available */ }
+  }, []);
+
+  // Restore persisted selection on mount via storage event listener
+  useEffect(() => {
+    const restorePersisted = () => {
+      try {
+        const savedProvider = localStorage.getItem(LS_PROVIDER_KEY);
+        const savedModel = localStorage.getItem(LS_MODEL_KEY);
+        if (savedProvider && savedModel) {
+          const exists = props.instanceEntries.some(
+            (e) => e.instanceId === savedProvider
+          );
+          if (exists) {
+            props.onInstanceModelChange(savedProvider as ProviderInstanceId, savedModel);
+          }
+        }
+      } catch { /* localStorage not available */ }
+    };
+    restorePersisted();
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === LS_PROVIDER_KEY || e.key === LS_MODEL_KEY) {
+        restorePersisted();
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
+    persistSelection(instanceId, model);
     setIsMenuOpen(false);
   };
 
