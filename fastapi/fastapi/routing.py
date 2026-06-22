@@ -1310,11 +1310,16 @@ class APIRouter(routing.Router):
         self.callbacks = callbacks or []
         self.dependency_overrides_provider = dependency_overrides_provider
         self.route_class = route_class
+        self._middleware = middleware or []
         self.default_response_class = default_response_class
         self.generate_unique_id_function = generate_unique_id_function
         self.strict_content_type = strict_content_type
 
-    def route(
+    
+    def add_middleware(self, middleware_class: type) -> None:
+        """Add middleware to this router."""
+        self._middleware.append(middleware_class)
+def route(
         self,
         path: str,
         methods: Collection[str] | None = None,
