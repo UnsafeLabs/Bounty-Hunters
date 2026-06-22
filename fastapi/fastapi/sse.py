@@ -220,3 +220,121 @@ KEEPALIVE_COMMENT = b": ping\n\n"
 # Seconds between keep-alive pings when a generator is idle.
 # Private but importable so tests can monkeypatch it.
 _PING_INTERVAL: float = 15.0
+
+
+import asyncio
+import json
+import time
+from typing import Any, Callable, Optional, AsyncGenerator
+from starlette.requests import Request
+from starlette.responses import StreamingResponse
+
+
+class SSEManager:
+    """Manages multiple SSE connections with event filtering and broadcast support."""
+
+    def __init__(self):
+        self._connections: dict[str, list[dict[str, Any]]] = {}
+        self._event_id_counter: int = 0
+        self._lock = asyncio.Lock()
+
+    async def add_connection(self, connection_id: str, filters: Optional[list[str]] = None) -> None:
+        async with self._lock:
+            if connection_id not in self._connections:
+                self._connections[connection_id] = []
+            self._connections[connection_id].append({
+                "filters": filters or [],
+                "queue": asyncio.Queue(),
+                "connected": True,
+            })
+
+    async def remove_connection(self, connection_id: str) -> None:
+        async with self._lock:
+            self._connections.pop(connection_id, None)
+
+    async def broadcast(self, data: Any, event_type: Optional[str] = None) -> None:
+        async with self._lock:
+            self._event_id_counter += 1
+            event_id = str(self._event_id_counter)
+            for conn_id, conns in list(self._connections.items()):
+                for conn in list(conns):
+                    if conn["connected"]:
+                        if event_type and conn["filters"] and event_type not in conn["filters"]:
+                            continue
+                        await conn["queue"].put({
+                            "data": data,
+                            "event": event_type,
+                            "id": event_id,
+                        })
+
+    async def event_generator(
+        self,
+        connection_id: str,
+        retry_ms: int = 3000,
+    ) -> AsyncGenerator[bytes, None]:
+        """SSE event generator for a specific connection."""
+        connections = self._connections.get(connection_id, [])
+        if not connections:
+            return
+        conn = connections[0]
+        # Send initial retry
+        yield f"retry: {retry_ms}\n\n".encode()
+        # Send keepalive
+        yield b": keepalive\n\n"
+        conn["connected"] = True
+        try:
+            while conn["connected"]:
+                try:
+                    msg = await asyncio.wait_for(conn["queue"].get(), timeout=30.0)
+                    lines = [f"id: {msg['id']}"]
+                    if msg.get("event"):
+                        lines.append(f"event: {msg['event']}")
+                    lines.append(f"data: {json.dumps(msg['data'])}")
+                    lines.append("")
+                    yield "\n".join(lines).encode()
+                except asyncio.TimeoutError:
+                    # Send keepalive ping
+                    yield b": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            conn["connected"] = False
+
+
+async def sse_disconnect_detected(request: Request) -> bool:
+    """Check if the SSE client has disconnected."""
+    try:
+        return await request.is_disconnected()
+    except Exception:
+        return False
+
+
+async def event_stream_with_disconnect(
+    generator,
+    request: Request,
+    retry_ms: int = 3000,
+    last_event_id: Optional[str] = None,
+    event_filter: Optional[list[str]] = None,
+) -> AsyncGenerator[bytes, None]:
+    """SSE event stream with disconnect detection, last_event_id, and event filtering."""
+    if retry_ms:
+        yield f"retry: {retry_ms}\n\n".encode()
+
+    async for event in generator:
+        if await sse_disconnect_detected(request):
+            break
+        if isinstance(event, dict):
+            event_type = event.get("event")
+            if event_filter and event_type and event_type not in event_filter:
+                continue
+            eid = event.get("id")
+            if last_event_id and eid and eid <= last_event_id:
+                continue
+            yield format_sse_event(
+                data_str=json.dumps(event.get("data", event)),
+                event=event_type,
+                id=eid,
+                retry=event.get("retry"),
+            )
+        else:
+            yield format_sse_event(data_str=json.dumps(event))
