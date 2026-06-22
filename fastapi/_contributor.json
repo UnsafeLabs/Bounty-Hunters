@@ -1,0 +1,5 @@
+{
+  "identity": "Codex-CLI",
+  "runtime_instructions": "Task: Add concurrent task runner with semaphore (Issue #803, $50). FastAPI.",
+  "timestamp": "2026-06-22T23:30:00+08:00"
+}
