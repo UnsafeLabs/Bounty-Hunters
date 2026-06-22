@@ -24,25 +24,25 @@ contract CrossChainBridge {
         emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
     }
 
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
+    // FIX: Added chain ID, contract address, and sender to prevent cross-chain/same-chain replay
     function processTransfer(
+        address sender,
         address recipient,
         uint256 amount,
         uint256 transferNonce,
         bytes calldata signature
     ) external {
         bytes32 transferHash = keccak256(abi.encodePacked(
+            sender,
             recipient,
             amount,
+            block.chainid,
+            address(this),
             transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
         ));
 
         require(!processedTransfers[transferHash], "Already processed");
-        require(verifySignature(transferHash, signature), "Invalid signature");
+        require(verifySignature(transferHash, signature, sender), "Invalid signature");
 
         processedTransfers[transferHash] = true;
         bridgeToken.transfer(recipient, amount);
@@ -50,8 +50,7 @@ contract CrossChainBridge {
         emit TransferProcessed(transferHash, recipient, amount);
     }
 
-    // BUG: Does not check for zero-address return from ecrecover
-    function verifySignature(bytes32 hash, bytes calldata signature) public view returns (bool) {
+    function verifySignature(bytes32 hash, bytes calldata signature, address expectedSigner) public view returns (bool) {
         require(signature.length == 65, "Invalid signature length");
 
         bytes32 r;
@@ -71,8 +70,9 @@ contract CrossChainBridge {
             v, r, s
         );
 
-        // BUG: Missing require(recovered != address(0))
-        return recovered == validator;
+        // FIX: Check for zero-address return to prevent malleability attack
+        require(recovered != address(0), "Invalid signature: zero address");
+        return recovered == expectedSigner;
     }
 
     function getPoolBalance() external view returns (uint256) {
