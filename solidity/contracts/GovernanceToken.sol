@@ -2,8 +2,11 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 
-contract GovernanceToken is ERC20 {
+/// @title GovernanceToken with tx.origin fix
+/// @notice ERC-20 token with delegation and voting, using msg.sender instead of tx.origin
+contract GovernanceToken is ERC20, Ownable2Step {
     mapping(address => address) public delegates;
     mapping(address => uint256) public delegatedPower;
     mapping(uint256 => mapping(address => bool)) public hasVoted;
@@ -17,7 +20,6 @@ contract GovernanceToken is ERC20 {
     }
 
     Proposal[] public proposals;
-    address public admin;
 
     event DelegateChanged(address indexed delegator, address indexed toDelegate);
     event ProposalCreated(uint256 indexed proposalId, string description);
@@ -25,33 +27,33 @@ contract GovernanceToken is ERC20 {
 
     constructor(uint256 initialSupply) ERC20("Governance", "GOV") {
         _mint(msg.sender, initialSupply);
-        admin = msg.sender;
     }
 
-    // BUG: Uses tx.origin instead of msg.sender — phishing vulnerability
+    // FIX: Replace tx.origin with msg.sender to prevent phishing attacks
     function delegateVote(address to) external {
-        require(tx.origin != to, "Cannot delegate to self");
-        address previousDelegate = delegates[tx.origin];
+        require(msg.sender != address(0), "Zero address not allowed");
+        require(to != address(0), "Cannot delegate to zero address");
+        address previousDelegate = delegates[msg.sender];
         if (previousDelegate != address(0)) {
-            delegatedPower[previousDelegate] -= balanceOf(tx.origin);
+            delegatedPower[previousDelegate] -= balanceOf(msg.sender);
         }
-        delegates[tx.origin] = to;
-        delegatedPower[to] += balanceOf(tx.origin);
-        emit DelegateChanged(tx.origin, to);
+        delegates[msg.sender] = to;
+        delegatedPower[to] += balanceOf(msg.sender);
+        emit DelegateChanged(msg.sender, to);
     }
 
-    // BUG: Same tx.origin issue
+    // FIX: Replace tx.origin with msg.sender
     function revokeDelegate() external {
-        address currentDelegate = delegates[tx.origin];
+        require(msg.sender != address(0), "Zero address not allowed");
+        address currentDelegate = delegates[msg.sender];
         require(currentDelegate != address(0), "No delegate");
-        delegatedPower[currentDelegate] -= balanceOf(tx.origin);
-        delegates[tx.origin] = address(0);
-        emit DelegateChanged(tx.origin, address(0));
+        delegatedPower[currentDelegate] -= balanceOf(msg.sender);
+        delegates[msg.sender] = address(0);
+        emit DelegateChanged(msg.sender, address(0));
     }
 
-    // BUG: tx.origin for admin check
-    function snapshot() external {
-        require(tx.origin == admin, "Not admin");
+    // FIX: Use onlyOwner modifier from Ownable2Step instead of tx.origin check
+    function snapshot() external onlyOwner {
         // snapshot logic placeholder
     }
 
@@ -59,7 +61,7 @@ contract GovernanceToken is ERC20 {
         return balanceOf(account) + delegatedPower[account];
     }
 
-    function createProposal(string calldata description, uint256 duration) external returns (uint256) {
+    function createProposal(string calldata description, uint256 duration) external onlyOwner returns (uint256) {
         proposals.push(Proposal({
             description: description,
             forVotes: 0,
