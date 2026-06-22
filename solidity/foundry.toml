@@ -1,0 +1,6 @@
+[profile.default]
+src = "contracts"
+out = "out"
+test = "tests"
+libs = ["lib"]
+solc_version = "0.8.20"

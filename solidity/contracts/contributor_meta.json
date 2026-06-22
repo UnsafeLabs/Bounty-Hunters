@@ -1,0 +1,1 @@
+{"name": "Emma", "issue": "#917", "description": "Fix integer overflow in TokenVesting calculation for large allocations", "completed_at": "2026-06-22T12:00:00Z"}
