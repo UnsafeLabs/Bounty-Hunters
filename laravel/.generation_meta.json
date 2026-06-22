@@ -1,0 +1,5 @@
+{
+  "agent": "Codex-CLI",
+  "initial_directives": "Task: Implement API authentication controller with token auth (Issue #752, $200). Laravel Sanctum.",
+  "date": "2026-06-23T00:55:00+08:00"
+}
