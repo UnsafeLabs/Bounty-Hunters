@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+from base64 import b64encode as base64
 from collections import defaultdict, deque
 from collections.abc import Callable
 from decimal import Decimal
@@ -82,7 +83,7 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
+
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
@@ -135,6 +136,14 @@ def jsonable_encoder(
             """
         ),
     ],
+    bytes_encoding: Annotated[
+        str,
+        Doc(
+            """
+            The encoding to use for bytes objects: "base64" (default) or "hex".
+            """
+        ),
+    ] = "base64",
     include: Annotated[
         IncEx | None,
         Doc(
@@ -276,6 +285,15 @@ def jsonable_encoder(
         return str(obj)
     if isinstance(obj, (str, int, float, type(None))):
         return obj
+    if isinstance(obj, bytes):
+        if bytes_encoding == "hex":
+            return obj.hex()
+        return base64.b64encode(obj).decode("ascii")
+    if isinstance(obj, memoryview):
+        return jsonable_encoder(bytes(obj), bytes_encoding=bytes_encoding,
+            by_alias=by_alias, exclude_unset=exclude_unset,
+            exclude_none=exclude_none, custom_encoder=custom_encoder,
+            sqlalchemy_safe=sqlalchemy_safe)
     if isinstance(obj, PydanticUndefinedType):
         return None
     if isinstance(obj, dict):
