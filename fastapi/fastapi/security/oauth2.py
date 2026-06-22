@@ -691,3 +691,95 @@ class SecurityScopes:
                 """
             ),
         ] = " ".join(self.scopes)
+
+class OAuth2PasswordBearerWithRefresh(OAuth2PasswordBearer):
+    def __init__(
+        self,
+        tokenUrl: Annotated[
+            str,
+            Doc(
+                """
+                The URL for token retrieval. This is the `tokenUrl` parameter
+                expected by OAuth2.
+                """
+            ),
+        ],
+        refreshUrl: Annotated[
+            str | None,
+            Doc(
+                """
+                The URL for token refresh. When provided, it appears in the
+                OpenAPI schema under the OAuth2 security scheme.
+                """
+            ),
+        ] = None,
+        scheme_name: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme name.
+                """
+            ),
+        ] = None,
+        scopes: Annotated[
+            dict[str, str] | None,
+            Doc(
+                """
+                The OAuth2 scopes that would be required by the operations
+                with this dependency.
+                """
+            ),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Doc(
+                """
+                A description for the security scheme.
+                """
+            ),
+        ] = None,
+        auto_error: Annotated[
+            bool,
+            Doc(
+                """
+                By default, if no HTTP Authorization header is provided,
+                required for the OAuth2 password flow, it will automatically
+                return an error.
+                """
+            ),
+        ] = True,
+    ):
+        self.refreshUrl = refreshUrl
+        super().__init__(
+            tokenUrl=tokenUrl,
+            scheme_name=scheme_name,
+            scopes=scopes,
+            description=description,
+            auto_error=auto_error,
+        )
+
+    @property
+    def model(self) -> OAuth2Model:
+        if self._model is None:
+            flows = OAuthFlowsModel(
+                password={"tokenUrl": self.tokenUrl, "refreshUrl": self.refreshUrl} if self.refreshUrl else {},
+                scopes=self.scopes,
+            )
+            self._model = OAuth2Model(flows=flows, description=self.description)
+        return self._model
+
+
+class OAuth2RefreshRequestForm:
+    def __init__(
+        self,
+        grant_type: str = Form(default="refresh_token", pattern="refresh_token"),
+        refresh_token: str = Form(),
+        scope: str = Form(default=""),
+        client_id: str | None = Form(default=None),
+        client_secret: str | None = Form(default=None),
+    ):
+        self.grant_type = grant_type
+        self.refresh_token = refresh_token
+        self.scopes = scope.split()
+        self.client_id = client_id
+        self.client_secret = client_secret
