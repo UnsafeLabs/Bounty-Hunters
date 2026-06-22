@@ -29,3 +29,12 @@ Every word carries weight, every pause is a thread,
 Tales woven in rhythm from voices long dead,
 Rivers of language that twist and that bend,
 Yesterday's silence — tomorrow's best friend.
+
+
+## BOUNTY
+B - Brave the open source way
+O - Open to contributions every day
+U - Under the stars we code
+N - Never giving up on the load
+T - Together we build
+Y - Your efforts fulfilled
