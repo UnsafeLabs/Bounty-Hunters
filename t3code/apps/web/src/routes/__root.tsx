@@ -21,6 +21,7 @@ import {
   WebSocketConnectionSurface,
 } from "../components/WebSocketConnectionSurface";
 import { Button } from "../components/ui/button";
+import { NotificationToastContainer } from "../components/NotificationToast";
 import {
   AnchoredToastProvider,
   stackedThreadToast,
@@ -141,6 +142,7 @@ function RootRouteView() {
         {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
         {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}
         {primaryEnvironmentAuthenticated ? <SlowRpcAckToastCoordinator /> : null}
+        <NotificationToastContainer />
         {primaryEnvironmentAuthenticated ? (
           <WebSocketConnectionSurface>{appShell}</WebSocketConnectionSurface>
         ) : (
