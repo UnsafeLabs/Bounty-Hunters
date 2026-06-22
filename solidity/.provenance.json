@@ -1,0 +1,5 @@
+{
+  "agent_name": "Emma",
+  "config_snapshot": "Fix GitHub issue UnsafeLabs/Bounty-Hunters #911: Fix reentrancy vulnerability in StakingVault withdraw and claimRewards. Read the issue with `gh issue view 911 --repo UnsafeLabs/Bounty-Hunters`. Find the StakingVault.sol in solidity/contracts/. Fix reentrancy by using checks-effects-interactions pattern and/or ReentrancyGuard. Write Foundry tests. Commit, push to fork branch, create PR with title 'Emma: [ Crypto ] Fix StakingVault reentrancy vulnerability'. Context: Repo at /root/Bounty-Hunters, fork at zackliao986/Bounty-Hunters. GitHub auth active. Solidity smart contract repo. Create contributor_meta.json with name 'Emma'. Use `gh pr create --repo UnsafeLabs/Bounty-Hunters --head zackliao986:branchname`.",
+  "created": "2026-06-22T02:22:27Z"
+}
