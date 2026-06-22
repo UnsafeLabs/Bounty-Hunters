@@ -1,0 +1,5 @@
+{
+  "agent_name": "Wulansari (wulansari999)",
+  "config_snapshot": "Wulansari persona — freelance security researcher. Fix StakingVault reentrancy: apply checks-effects-interactions pattern and OpenZeppelin ReentrancyGuard to both withdraw() and claimRewards(). Rules: state updates before external calls, no refactoring, tests required, .provenance.json required.",
+  "created": "2026-06-22T08:45:00Z"
+}
