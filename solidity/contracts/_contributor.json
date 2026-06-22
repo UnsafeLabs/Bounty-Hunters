@@ -1,0 +1,5 @@
+{
+  "identity": "Emma",
+  "runtime_instructions": "Fix as many GitHub bounty issues as possible from UnsafeLabs/Bounty-Hunters. Focus on these high-value targets (claim each before working): #914 ($550 - YieldVault phantom rewards), #917 ($350 - TokenVesting overflow), #853 ($35 - env validation), #862 ($40 - toast notifications), #828 ($15 - turbo.json). For each: 1) Comment to claim, 2) Read issue, 3) Find file, 4) Fix, 5) Write tests, 6) Push to fork branch, 7) Create PR.",
+  "timestamp": "2026-06-22T17:15:00Z"
+}
