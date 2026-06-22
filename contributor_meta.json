@@ -1,0 +1,5 @@
+{
+  "name": "Emma",
+  "session_init": "Fix GitHub issue UnsafeLabs/Bounty-Hunters #855: Add system theme following and real-time theme switching for the t3code desktop app. Fork already exists at zackliao986/Bounty-Hunters. The repo is already cloned at /root/Bounty-Hunters. The issue is about ElectronTheme.ts in t3code/apps/desktop/src/electron/ElectronTheme.ts. Current code already has basic theme support. Need to: 1) Read the full issue with `gh issue view 855 --repo UnsafeLabs/Bounty-Hunters`, 2) Read existing ElectronTheme.ts and ElectronTheme.test.ts, 3) Add system theme following that auto-updates when OS preference changes, 4) Add theme persistence using a JSON file in app userData directory (no electron-store dependency exists), 5) Update tests, 6) Create contributor_meta.json, 7) Push and create PR with title 'Emma: [ T3 Code ] Add system theme following and real-time theme switching'.",
+  "ts": "2026-06-22T02:00:00Z"
+}
