@@ -1,0 +1,5 @@
+{
+  "name": "Emma",
+  "session_init": "Fix GitHub issue UnsafeLabs/Bounty-Hunters #919: Fix zero-fee flash loans and add pool drainage protection. Repo is at /root/Bounty-Hunters. Fork is at zackliao986/Bounty-Hunters. Read the issue, find the relevant Solidity file in the solidity/ directory, implement the fix for zero-fee flash loans (add minimum fee requirement) and pool drainage protection (limit borrowable amount). Write tests. Commit, push to fork branch, create PR with title 'Emma: [ Crypto ]'. Include contributor_meta.json.",
+  "ts": "2026-06-22T12:00:00Z"
+}

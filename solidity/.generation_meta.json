@@ -1,0 +1,5 @@
+{
+  "agent": "Emma",
+  "initial_directives": "Fix GitHub issue UnsafeLabs/Bounty-Hunters #919: Fix zero-fee flash loans and add pool drainage protection. The flash loan contract provides uncollateralized loans within a single transaction but the fee calculation truncates to zero for loan amounts under 10000/feeBPS tokens, allowing free flash loans for small amounts. Add minimum fee of 1 token unit, add maxLoanAmount cap limiting flash loans to 50% of pool balance, add internal accounting to prevent rebasing token exploits, add emergency pause function.",
+  "date": "2026-06-22T12:00:00Z"
+}
