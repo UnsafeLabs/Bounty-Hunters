@@ -1,0 +1,5 @@
+{
+  "contributor": "Codex-CLI",
+  "generation_context": "Task: Fix validation error handler missing request context (Issue #757, $40). FastAPI.",
+  "completed_at": "2026-06-23T00:10:00+08:00"
+}
