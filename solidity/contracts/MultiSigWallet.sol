@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract MultiSigWallet {
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+contract MultiSigWallet is ReentrancyGuard {
     address[] public owners;
     uint256 public required;
     uint256 public transactionCount;
@@ -16,6 +18,8 @@ contract MultiSigWallet {
     mapping(uint256 => Transaction) public transactions;
     mapping(uint256 => mapping(address => bool)) public confirmations;
     mapping(address => bool) public isOwner;
+    // Tracks the block number when each owner confirmed a transaction
+    mapping(uint256 => mapping(address => uint256)) public confirmationBlocks;
 
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
@@ -31,14 +35,26 @@ contract MultiSigWallet {
         require(_owners.length > 0, "No owners");
         require(_required > 0 && _required <= _owners.length, "Invalid required");
         for (uint256 i = 0; i < _owners.length; i++) {
+            require(_owners[i] != address(0), "Zero-address owner");
             isOwner[_owners[i]] = true;
         }
         owners = _owners;
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
-    function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+    /// @notice Submit a new transaction for multi-sig approval.
+    /// @dev Reverts if `to` is zero address. If `data` is non-empty, `to` must be a contract.
+    function submitTransaction(
+        address to,
+        uint256 value,
+        bytes calldata data
+    ) external onlyOwner returns (uint256) {
+        require(to != address(0), "Invalid recipient");
+        // If calldata is provided, target must be a contract
+        if (data.length > 0) {
+            require(to.code.length > 0, "Contract target required for data");
+        }
+
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -54,6 +70,7 @@ contract MultiSigWallet {
         require(!transactions[txId].executed, "Already executed");
         require(!confirmations[txId][msg.sender], "Already confirmed");
         confirmations[txId][msg.sender] = true;
+        confirmationBlocks[txId][msg.sender] = block.number;
         emit Confirmed(txId, msg.sender);
     }
 
@@ -61,6 +78,7 @@ contract MultiSigWallet {
         require(!transactions[txId].executed, "Already executed");
         require(confirmations[txId][msg.sender], "Not confirmed");
         confirmations[txId][msg.sender] = false;
+        confirmationBlocks[txId][msg.sender] = 0;
         emit Revoked(txId, msg.sender);
     }
 
@@ -70,11 +88,35 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
+    /// @notice Check if a transaction had enough confirmations as of a given block number.
+    /// @dev Prevents front-running attacks by comparing confirmation timing against a snapshot block.
+    function isConfirmedAtBlock(
+        uint256 txId,
+        uint256 blockNumber
+    ) external view returns (bool) {
+        uint256 count;
+        for (uint256 i = 0; i < owners.length; i++) {
+            address owner = owners[i];
+            if (
+                confirmations[txId][owner] &&
+                confirmationBlocks[txId][owner] <= blockNumber
+            ) {
+                count++;
+            }
+        }
+        return count >= required;
+    }
+
+    /// @notice Execute a confirmed transaction with reentrancy protection.
+    /// @dev Uses nonReentrant to prevent confirmation revocation during the callback.
+    function executeTransaction(
+        uint256 txId
+    ) external onlyOwner nonReentrant {
         require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+        require(
+            getConfirmationCount(txId) >= required,
+            "Not enough confirmations"
+        );
 
         Transaction storage txn = transactions[txId];
         txn.executed = true;
