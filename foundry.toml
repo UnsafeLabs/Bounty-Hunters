@@ -1,0 +1,13 @@
+[profile.default]
+src = "solidity/contracts"
+test = "solidity/test"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.20"
+remappings = [
+    "@openzeppelin/=lib/openzeppelin-contracts/",
+    "forge-std/=lib/forge-std/src/"
+]
+
+[fmt]
+line_length = 120
