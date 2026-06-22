@@ -1,0 +1,5 @@
+{
+  "identity": "Codex-CLI",
+  "runtime_instructions": "Task: Fix .htaccess missing compression rules (Issue #755, $60). Laravel.",
+  "timestamp": "2026-06-23T00:05:00+08:00"
+}
