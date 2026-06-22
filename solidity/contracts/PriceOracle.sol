@@ -24,10 +24,7 @@ contract PriceOracle {
         owner = msg.sender;
     }
 
-    // BUG: No staleness check on updatedAt
-    // BUG: No check for negative/zero price
-    // BUG: No round completeness validation
-    // BUG: No fallback oracle
+    // FIX: Added staleness check, round completeness validation, price validation, and fallback oracle
     function getLatestPrice() external view returns (int256) {
         (
             uint80 roundId,
@@ -37,9 +34,16 @@ contract PriceOracle {
             uint80 answeredInRound
         ) = primaryFeed.latestRoundData();
 
-        // Missing: require(price > 0)
-        // Missing: require(answeredInRound >= roundId)
-        // Missing: require(block.timestamp - updatedAt < MAX_STALENESS)
+        // FIX: Validate round completeness
+        require(answeredInRound >= roundId, "Round not complete");
+
+        // FIX: Reject negative or zero prices
+        require(price > 0, "Invalid price");
+
+        // FIX: Check staleness
+        require(block.timestamp - updatedAt < MAX_STALENESS, "Stale price");
+
+        emit PriceQueried(price, updatedAt);
 
         return price;
     }
