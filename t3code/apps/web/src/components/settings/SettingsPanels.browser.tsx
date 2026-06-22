@@ -465,6 +465,8 @@ const createDesktopBridgeStub = (overrides?: {
       .fn()
       .mockResolvedValue({ accepted: false, completed: false, state: idleUpdateState }),
     onUpdateState: () => () => {},
+    getBackendConnectionState: vi.fn().mockReturnValue("connected"),
+    onBackendConnectionState: () => () => {},
   };
 };
 

@@ -121,6 +121,21 @@ export type DesktopTheme = "light" | "dark" | "system";
 export type DesktopUpdateChannel = "latest" | "nightly";
 export type DesktopAppStageLabel = "Alpha" | "Dev" | "Nightly";
 
+/**
+ * Lifecycle of the desktop backend connection that the renderer observes.
+ *
+ * While the backend is `disconnected` or `reconnecting`, IPC invoke messages are
+ * buffered by the main process instead of failing, so a transient backend
+ * restart can be surfaced to the user instead of erroring out silently.
+ */
+export type DesktopBackendConnectionState = "connected" | "disconnected" | "reconnecting";
+
+export const DesktopBackendConnectionStateSchema = Schema.Literals([
+  "connected",
+  "disconnected",
+  "reconnecting",
+]);
+
 export const DesktopUpdateStatusSchema = Schema.Literals([
   "disabled",
   "idle",
@@ -421,6 +436,10 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  getBackendConnectionState: () => DesktopBackendConnectionState;
+  onBackendConnectionState: (
+    listener: (state: DesktopBackendConnectionState) => void,
+  ) => () => void;
 }
 
 /**

@@ -124,4 +124,21 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(IpcChannels.UPDATE_STATE_CHANNEL, wrappedListener);
     };
   },
+  getBackendConnectionState: () => {
+    const result = ipcRenderer.sendSync(IpcChannels.GET_BACKEND_CONNECTION_STATE_CHANNEL);
+    return typeof result === "string"
+      ? (result as ReturnType<DesktopBridge["getBackendConnectionState"]>)
+      : "disconnected";
+  },
+  onBackendConnectionState: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+      if (typeof state !== "string") return;
+      listener(state as Parameters<typeof listener>[0]);
+    };
+
+    ipcRenderer.on(IpcChannels.BACKEND_CONNECTION_STATE_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.BACKEND_CONNECTION_STATE_CHANNEL, wrappedListener);
+    };
+  },
 } satisfies DesktopBridge);

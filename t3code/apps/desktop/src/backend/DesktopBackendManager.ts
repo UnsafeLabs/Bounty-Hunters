@@ -25,6 +25,7 @@ import {
 } from "@t3tools/contracts";
 
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
+import * as DesktopIpc from "../ipc/DesktopIpc.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
@@ -284,6 +285,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
   const backendOutputLog = yield* DesktopObservability.DesktopBackendOutputLog;
   const desktopState = yield* DesktopState.DesktopState;
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
+  const ipc = yield* DesktopIpc.DesktopIpc;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
   const state = yield* Ref.make(initialState);
@@ -329,6 +331,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
         }
 
         yield* Ref.set(desktopState.backendReady, false);
+        yield* ipc.messageQueue.setConnectionState("reconnecting");
         const config = yield* configuration.resolve;
         const entryExists = yield* fileSystem
           .exists(config.entryPath)
@@ -415,6 +418,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                   });
                 }
                 yield* Ref.set(desktopState.backendReady, false);
+                yield* ipc.messageQueue.setConnectionState("reconnecting");
               }
 
               if (isCurrentRun && nextState.desiredRunning) {
@@ -457,6 +461,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             }
 
             yield* Ref.set(desktopState.backendReady, true);
+            yield* ipc.messageQueue.setConnectionState("connected");
             yield* desktopWindow.handleBackendReady.pipe(
               Effect.catch((error) =>
                 logBackendManagerError("failed to open main window after backend readiness", {
@@ -569,6 +574,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
           },
         ]);
         yield* Ref.set(desktopState.backendReady, false);
+        yield* ipc.messageQueue.setConnectionState("disconnected");
         return result;
       }),
     );

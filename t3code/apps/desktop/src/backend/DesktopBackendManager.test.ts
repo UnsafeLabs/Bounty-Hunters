@@ -21,9 +21,19 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
+import * as DesktopIpc from "../ipc/DesktopIpc.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
+
+const noopIpcMain: DesktopIpc.DesktopIpcMain = {
+  removeHandler: () => {},
+  handle: () => {},
+  removeAllListeners: () => {},
+  on: () => {},
+};
+
+const desktopIpcLayer = Layer.effect(DesktopIpc.DesktopIpc, DesktopIpc.make(noopIpcMain));
 
 const decodeDesktopBackendBootstrap = Schema.decodeEffect(
   Schema.fromJsonString(DesktopBackendBootstrap),
@@ -139,6 +149,7 @@ function makeManagerLayer(input: {
           syncAppearance: Effect.void,
           ...input.desktopWindow,
         } satisfies DesktopWindow.DesktopWindowShape),
+        desktopIpcLayer,
       ),
     ),
   );

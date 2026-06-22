@@ -3,6 +3,8 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
+import * as DesktopIpcMessageQueue from "./DesktopIpcMessageQueue.ts";
+
 export interface DesktopIpcInvokeEvent {}
 
 export interface DesktopIpcSyncEvent {
@@ -40,59 +42,79 @@ export interface DesktopIpcShape {
   readonly handleSync: <E, R>(
     input: DesktopSyncIpcMethod<E, R>,
   ) => Effect.Effect<void, never, R | Scope.Scope>;
+  /**
+   * Queue that buffers async invoke messages while the backend connection is
+   * down, so a transient disconnect/restart does not surface as an error to the
+   * renderer. Drive its connection state from the backend lifecycle.
+   */
+  readonly messageQueue: DesktopIpcMessageQueue.DesktopIpcMessageQueueShape;
 }
 
 export class DesktopIpc extends Context.Service<DesktopIpc, DesktopIpcShape>()("t3/desktop/Ipc") {}
 
-export const make = (ipcMain: DesktopIpcMain): DesktopIpcShape =>
-  DesktopIpc.of({
-    handle: Effect.fn("desktop.ipc.registerInvoke")(function* <E, R>({
-      channel,
-      handler,
-    }: DesktopIpcMethod<E, R>) {
-      yield* Effect.annotateCurrentSpan({ channel });
-      const context = yield* Effect.context<R>();
-      const runPromise = Effect.runPromiseWith(context);
+export const make = (
+  ipcMain: DesktopIpcMain,
+  options?: DesktopIpcMessageQueue.DesktopIpcMessageQueueOptions,
+): Effect.Effect<DesktopIpcShape, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    const messageQueue = yield* DesktopIpcMessageQueue.make(options);
 
-      yield* Effect.acquireRelease(
-        Effect.sync(() => {
-          ipcMain.removeHandler(channel);
-          ipcMain.handle(channel, (_event, raw) =>
-            runPromise(
-              Effect.gen(function* () {
-                yield* Effect.annotateCurrentSpan({ channel });
-                return yield* handler(raw);
-              }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invoke")),
-            ),
-          );
-        }),
-        () => Effect.sync(() => ipcMain.removeHandler(channel)),
-      );
-    }),
+    return DesktopIpc.of({
+      messageQueue,
+      handle: Effect.fn("desktop.ipc.registerInvoke")(function* <E, R>({
+        channel,
+        handler,
+      }: DesktopIpcMethod<E, R>) {
+        yield* Effect.annotateCurrentSpan({ channel });
+        const context = yield* Effect.context<R>();
+        const runPromise = Effect.runPromiseWith(context);
 
-    handleSync: Effect.fn("desktop.ipc.registerSync")(function* <E, R>({
-      channel,
-      handler,
-    }: DesktopSyncIpcMethod<E, R>) {
-      yield* Effect.annotateCurrentSpan({ channel });
-      const context = yield* Effect.context<R>();
-      const runSync = Effect.runSyncWith(context);
-
-      yield* Effect.acquireRelease(
-        Effect.sync(() => {
-          ipcMain.removeAllListeners(channel);
-          ipcMain.on(channel, (event) => {
-            event.returnValue = runSync(
-              Effect.gen(function* () {
-                yield* Effect.annotateCurrentSpan({ channel });
-                return yield* handler();
-              }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invokeSync")),
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            ipcMain.removeHandler(channel);
+            ipcMain.handle(channel, (_event, raw) =>
+              runPromise(
+                messageQueue.enqueue(
+                  channel,
+                  Effect.gen(function* () {
+                    yield* Effect.annotateCurrentSpan({ channel });
+                    return yield* handler(raw);
+                  }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invoke")),
+                ),
+              ),
             );
-          });
-        }),
-        () => Effect.sync(() => ipcMain.removeAllListeners(channel)),
-      );
-    }),
+          }),
+          () => Effect.sync(() => ipcMain.removeHandler(channel)),
+        );
+      }),
+
+      handleSync: Effect.fn("desktop.ipc.registerSync")(function* <E, R>({
+        channel,
+        handler,
+      }: DesktopSyncIpcMethod<E, R>) {
+        yield* Effect.annotateCurrentSpan({ channel });
+        const context = yield* Effect.context<R>();
+        const runSync = Effect.runSyncWith(context);
+
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            ipcMain.removeAllListeners(channel);
+            ipcMain.on(channel, (event) => {
+              event.returnValue = runSync(
+                Effect.gen(function* () {
+                  yield* Effect.annotateCurrentSpan({ channel });
+                  return yield* handler();
+                }).pipe(
+                  Effect.annotateLogs({ channel }),
+                  Effect.withSpan("desktop.ipc.invokeSync"),
+                ),
+              );
+            });
+          }),
+          () => Effect.sync(() => ipcMain.removeAllListeners(channel)),
+        );
+      }),
+    });
   });
 
 /**
