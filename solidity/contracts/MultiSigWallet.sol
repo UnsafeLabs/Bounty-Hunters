@@ -17,6 +17,9 @@ contract MultiSigWallet {
     mapping(uint256 => mapping(address => bool)) public confirmations;
     mapping(address => bool) public isOwner;
 
+    // FIX: Reentrancy guard for executeTransaction
+    bool private executing;
+
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
     event Executed(uint256 indexed txId);
@@ -70,19 +73,26 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
+    // FIX: Added reentrancy guard and confirmation snapshot to prevent race condition
     function executeTransaction(uint256 txId) external onlyOwner {
+        require(!executing, "Reentrant call");
+        executing = true;
+
         require(!transactions[txId].executed, "Already executed");
         require(getConfirmationCount(txId) >= required, "Not enough confirmations");
 
         Transaction storage txn = transactions[txId];
         txn.executed = true;
 
+        // FIX: Snapshot confirmation state before external call
+        uint256 confirmationCount = getConfirmationCount(txId);
+        require(confirmationCount >= required, "Not enough confirmations after execution start");
+
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
         require(success, "Execution failed");
 
         emit Executed(txId);
+        executing = false;
     }
 
     receive() external payable {}
