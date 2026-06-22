@@ -603,4 +603,12 @@ def get_openapi(
         output["tags"] = tags
     if external_docs:
         output["externalDocs"] = external_docs
+    if servers:
+        output["servers"] = servers
+    if contact:
+        output.setdefault("info", {})
+        output["info"]["contact"] = contact
+    if license_info:
+        output.setdefault("info", {})
+        output["info"]["license"] = license_info
     return jsonable_encoder(OpenAPI(**output), by_alias=True, exclude_none=True)  # type: ignore[no-any-return]
