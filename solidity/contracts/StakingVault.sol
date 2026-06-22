@@ -39,31 +39,34 @@ contract StakingVault {
         lastStakeTime[account] = block.timestamp;
     }
 
-    // BUG: Reentrancy — state update after external call
+    // FIX: Consolidated state updates before external call to prevent reentrancy
     function withdraw(uint256 amount) external {
         require(balances[msg.sender] >= amount, "Insufficient balance");
         _updateReward(msg.sender);
 
-        // External call before state update
+        // FIX: Update state before external call to prevent reentrancy
+        balances[msg.sender] -= amount;
+        totalStaked -= amount;
+
+        // External call after state update
         (bool success, ) = payable(msg.sender).call{value: amount}("");
         require(success, "Transfer failed");
 
-        // State update after external call — vulnerable to reentrancy
-        balances[msg.sender] -= amount;
-        totalStaked -= amount;
         emit Withdrawn(msg.sender, amount);
     }
 
-    // BUG: Same reentrancy pattern in claimRewards
+    // FIX: State update before external call to prevent reentrancy
     function claimRewards() external {
         _updateReward(msg.sender);
         uint256 reward = rewards[msg.sender];
         require(reward > 0, "No rewards");
 
+        // FIX: Zero out rewards before external call
+        rewards[msg.sender] = 0;
+
         (bool success, ) = payable(msg.sender).call{value: reward}("");
         require(success, "Transfer failed");
 
-        rewards[msg.sender] = 0;
         emit RewardClaimed(msg.sender, reward);
     }
 
