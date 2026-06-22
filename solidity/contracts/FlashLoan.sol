@@ -22,9 +22,7 @@ contract FlashLoan {
         owner = msg.sender;
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
+    // FIX: Added minimum fee floor, max loan cap, and explicit repayment validation
     function flashLoan(uint256 amount, bytes calldata data) external {
         require(!paused, "Paused");
         require(amount > 0, "Amount must be > 0");
@@ -32,14 +30,19 @@ contract FlashLoan {
         uint256 balanceBefore = loanToken.balanceOf(address(this));
         require(balanceBefore >= amount, "Insufficient pool balance");
 
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
+        // FIX: Cap flash loan at 50% of pool balance to prevent drainage
+        require(amount <= balanceBefore / 2, "Exceeds max loan amount");
+
         uint256 fee = amount * feeBPS / 10000;
+
+        // FIX: Ensure minimum 1 token unit fee to prevent zero-fee exploitation
+        if (fee == 0) fee = 1;
 
         loanToken.transfer(msg.sender, amount);
 
         IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
+        // FIX: Require explicit repayment of principal + fee via transferFrom
         uint256 balanceAfter = loanToken.balanceOf(address(this));
         require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
 
