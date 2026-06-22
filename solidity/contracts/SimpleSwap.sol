@@ -10,6 +10,9 @@ contract SimpleSwap {
     uint256 public reserveB;
     uint256 public fee; // basis points, e.g. 30 = 0.3%
 
+    error SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
+    error TransactionExpired(uint256 deadline, uint256 blockTimestamp);
+
     event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
 
     constructor(address _tokenA, address _tokenB, uint256 _fee) {
@@ -25,10 +28,19 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    /// @notice Swap tokens with slippage protection and deadline
+    /// @param tokenIn The token being sold
+    /// @param amountIn The amount of tokenIn to sell
+    /// @param minAmountOut Minimum acceptable output amount (slippage protection)
+    /// @param deadline Transaction deadline (reverts if block.timestamp > deadline)
+    /// @return amountOut The amount of output token received
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Transaction expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
@@ -39,11 +51,17 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
+        // Fixed fee calculation using mulDiv to avoid precision loss for small amounts
+        // fee is in basis points (e.g. 30 = 0.3%), so divide by 10000
+        // Use mulDiv for precision: (amountIn * fee) / 10000
+        uint256 feeAmount = _mulDiv(amountIn, fee, 10000);
         uint256 amountInAfterFee = amountIn - feeAmount;
 
         // constant product formula: x * y = k
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        // Slippage protection
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
         outputToken.transfer(msg.sender, amountOut);
 
@@ -62,8 +80,37 @@ contract SimpleSwap {
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
+        uint256 feeAmount = _mulDiv(amountIn, fee, 10000);
         uint256 amountInAfterFee = amountIn - feeAmount;
         return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+    }
+
+    /// @dev Multiply and divide with full precision, avoiding intermediate overflow.
+    ///      Equivalent to (a * b) / denominator but without overflow risk for large values.
+    function _mulDiv(uint256 a, uint256 b, uint256 denominator) internal pure returns (uint256 result) {
+        // Use 512-bit intermediate to avoid overflow
+        uint256 prod0;
+        uint256 prod1;
+        assembly {
+            let mm := mulmod(a, b, not(0))
+            prod0 := mul(a, b)
+            prod1 := sub(sub(mm, prod0), lt(mm, prod0))
+        }
+
+        require(prod1 == 0, "mulDiv overflow");
+
+        // Handle remainder - round up to ensure fee is never underpaid
+        uint256 remainder;
+        assembly {
+            remainder := mulmod(a, b, denominator)
+        }
+        
+        assembly {
+            result := div(sub(prod0, remainder), denominator)
+            // Round up if there's a remainder
+            if gt(remainder, 0) {
+                result := add(result, 1)
+            }
+        }
     }
 }

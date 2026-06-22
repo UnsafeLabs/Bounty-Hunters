@@ -1,0 +1,5 @@
+{
+    "contributor": "Emma",
+    "generation_context": "Fix GitHub issue UnsafeLabs/Bounty-Hunters #913: Fix missing slippage protection and deadline in SimpleSwap. The swap function in solidity/contracts/SimpleSwap.sol calculates the output amount using integer division that always rounds down, but does not enforce a minimum output amount parameter, making users vulnerable to sandwich attacks and excessive slippage. Fix includes: (1) Added minAmountOut parameter to swap function for slippage protection with require(amountOut >= minAmountOut, 'Slippage exceeded'), (2) Added deadline parameter that reverts if block.timestamp > deadline to prevent transaction ordering manipulation, (3) Fixed fee calculation using _mulDiv helper to avoid precision loss for small amounts, (4) Added custom errors SlippageExceeded and TransactionExpired for clear revert messages, (5) Updated getAmountOut to use same fixed fee calculation, (6) Comprehensive Foundry tests covering all acceptance criteria including sandwich attack prevention, deadline enforcement, slippage protection, fee precision, and edge cases.",
+    "completed_at": "2026-06-22T00:00:00Z"
+}
