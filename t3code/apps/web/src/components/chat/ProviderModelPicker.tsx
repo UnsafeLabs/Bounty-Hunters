@@ -3,9 +3,9 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState, useCallback } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, RotateCcwIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -19,6 +19,15 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem } from "~/hooks/useLocalStorage";
+import * as Schema from "effect/Schema";
+
+const PERSISTED_SELECTION_KEY = "t3code:model-picker-selection";
+const PersistedModelSelectionSchema = Schema.Struct({
+  instanceId: Schema.String,
+  model: Schema.String,
+});
+type PersistedModelSelection = typeof PersistedModelSelectionSchema.Type;
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -42,9 +51,22 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   triggerClassName?: string;
   onOpenChange?: (open: boolean) => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  /** When true, also render a Reset button in the picker footer. */
+  persistSelection?: boolean;
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+
+  // Restore persisted selection on mount
+  const persistedSelectionRef = useMemo(() => {
+    try {
+      const raw = localStorage.getItem(PERSISTED_SELECTION_KEY);
+      if (!raw) return null;
+      return Schema.decodeUnknownSync(PersistedModelSelectionSchema)(JSON.parse(raw)) as PersistedModelSelection;
+    } catch {
+      return null;
+    }
+  }, []);
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -90,7 +112,33 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
+    // Persist the selection to localStorage for cross-reload restoration
+    if (props.persistSelection !== false) {
+      try {
+        const serialized = JSON.stringify({ instanceId, model });
+        localStorage.setItem(PERSISTED_SELECTION_KEY, serialized);
+      } catch {
+        // localStorage may be unavailable in SSR or private browsing
+      }
+    }
   };
+
+  const handleResetSelection = useCallback(() => {
+    // Clear persisted selection from localStorage
+    try {
+      removeLocalStorageItem(PERSISTED_SELECTION_KEY);
+    } catch {
+      localStorage.removeItem(PERSISTED_SELECTION_KEY);
+    }
+    // Reset to the first available instance/model
+    if (props.instanceEntries.length > 0) {
+      const firstEntry = props.instanceEntries[0];
+      const models = props.modelOptionsByInstance.get(firstEntry.instanceId);
+      if (models && models.length > 0) {
+        props.onInstanceModelChange(firstEntry.instanceId, models[0].slug);
+      }
+    }
+  }, [props.instanceEntries, props.modelOptionsByInstance, props.onInstanceModelChange]);
 
   return (
     <Popover
@@ -181,6 +229,21 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
         />
+        {/* Reset to default button — visible when persisted selection exists */}
+        {persistedSelectionRef && props.lockedProvider === null && (
+          <div className="flex justify-end px-3 py-1.5 border-t border-border/40">
+            <Button
+              variant="ghost"
+              size="xs"
+              className="text-muted-foreground hover:text-foreground h-6 px-2 text-xs gap-1"
+              onClick={handleResetSelection}
+              title="Reset to default provider and model"
+            >
+              <RotateCcwIcon className="size-3" />
+              Reset
+            </Button>
+          </div>
+        )}
       </PopoverPopup>
     </Popover>
   );
