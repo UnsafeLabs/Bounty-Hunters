@@ -1,0 +1,7 @@
+{
+  "name": "Emma",
+  "issue": 912,
+  "repo": "UnsafeLabs/Bounty-Hunters",
+  "fix": "Replace tx.origin with msg.sender in GovernanceToken delegation functions",
+  "date": "2026-06-22"
+}
