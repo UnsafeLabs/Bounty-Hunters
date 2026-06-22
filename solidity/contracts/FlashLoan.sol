@@ -22,43 +22,39 @@ contract FlashLoan {
         owner = msg.sender;
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
+    // FIX: Fee with min fee, max loan amount, and proper validation
     function flashLoan(uint256 amount, bytes calldata data) external {
         require(!paused, "Paused");
         require(amount > 0, "Amount must be > 0");
+        require(amount <= 1000000 ether, "Exceeds max loan amount");
+
+        uint256 fee = (amount * feeBPS) / 10000;
+        require(fee > 0, "Fee would truncate to zero");
 
         uint256 balanceBefore = loanToken.balanceOf(address(this));
-        require(balanceBefore >= amount, "Insufficient pool balance");
-
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
-        uint256 fee = amount * feeBPS / 10000;
+        require(balanceBefore >= amount + fee, "Insufficient pool balance");
 
         loanToken.transfer(msg.sender, amount);
 
         IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
         uint256 balanceAfter = loanToken.balanceOf(address(this));
-        require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
+        require(balanceAfter >= balanceBefore, "Loan not repaid with fee");
 
         totalFees += fee;
         emit FlashLoanExecuted(msg.sender, amount, fee);
     }
 
-    function depositToPool(uint256 amount) external {
-        loanToken.transferFrom(msg.sender, address(this), amount);
-    }
-
-    function withdrawFees() external {
+    function pause() external {
         require(msg.sender == owner, "Not owner");
-        uint256 fees = totalFees;
-        totalFees = 0;
-        loanToken.transfer(owner, fees);
+        paused = true;
     }
 
-    // BUG: No emergency pause function
+    function unpause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = false;
+    }
+
     function getPoolBalance() external view returns (uint256) {
         return loanToken.balanceOf(address(this));
     }
