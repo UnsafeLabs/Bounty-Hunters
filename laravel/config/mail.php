@@ -116,3 +116,16 @@ return [
     ],
 
 ];
+    /*
+    |--------------------------------------------------------------------------
+    | Fallback Mailer
+    |--------------------------------------------------------------------------
+    |
+    | This option defines the fallback mailer used when the primary mailer
+    | throws a TransportException. This ensures email delivery resilience.
+    |
+    */
+
+    'fallback_mailer' => env('MAIL_FALLBACK_MAILER', 'ses'),
+
+
