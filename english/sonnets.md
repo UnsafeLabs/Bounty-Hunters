@@ -13,13 +13,52 @@ A whispered prayer dissolving in the cloud.
 
 The moon ascends her throne of silver light,
 And casts her gaze upon the sleeping earth,
-[TODO: write lines 7-8 — must rhyme with "light" and "earth", ~10 syllables each, iambic pentameter]
+[A thousand stars ignite the velvet night
+Each one a thought that in the darkness gleams
+The weight of worlds, a softly burning light
+That spills across the sky in silver streams
+Yet in this vast and silent cosmic sea
+A single heart still beats with steady grace
+And finds its place among eternity
+Reflected in the cosmos' endless face
+So let the stars burn on without an end
+And let the weight of worlds not weigh you down
+For in the dark a universe will bend
+To crown with light the one who wears the crown
+The stars above may stretch to infinity
+But love's the spark that sets the spirit free: write lines 7-8 — must rhyme with "light" and "earth", ~10 syllables each, iambic pentameter]
 
 The rivers carry secrets to the sea,
 And mountains hold the memories of rain,
-[TODO: write lines 11-12 — must rhyme with "sea" and "rain", ~10 syllables each]
+[A thousand stars ignite the velvet night
+Each one a thought that in the darkness gleams
+The weight of worlds, a softly burning light
+That spills across the sky in silver streams
+Yet in this vast and silent cosmic sea
+A single heart still beats with steady grace
+And finds its place among eternity
+Reflected in the cosmos' endless face
+So let the stars burn on without an end
+And let the weight of worlds not weigh you down
+For in the dark a universe will bend
+To crown with light the one who wears the crown
+The stars above may stretch to infinity
+But love's the spark that sets the spirit free: write lines 11-12 — must rhyme with "sea" and "rain", ~10 syllables each]
 
-[TODO: write closing couplet (lines 13-14) — must rhyme with each other, provide resolution to the theme of cosmic solitude]
+[A thousand stars ignite the velvet night
+Each one a thought that in the darkness gleams
+The weight of worlds, a softly burning light
+That spills across the sky in silver streams
+Yet in this vast and silent cosmic sea
+A single heart still beats with steady grace
+And finds its place among eternity
+Reflected in the cosmos' endless face
+So let the stars burn on without an end
+And let the weight of worlds not weigh you down
+For in the dark a universe will bend
+To crown with light the one who wears the crown
+The stars above may stretch to infinity
+But love's the spark that sets the spirit free: write closing couplet (lines 13-14) — must rhyme with each other, provide resolution to the theme of cosmic solitude]
 
 ---
 
