@@ -567,6 +567,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerTerminalContexts = composerDraft.terminalContexts;
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
 
+  // Sync cursor/trigger when the store-provided prompt changes (e.g. thread switch).
+  // This preserves draft text when switching between threads and back.
+  useEffect(() => {
+    if (promptRef.current === prompt) return;
+    promptRef.current = prompt;
+    setComposerCursor(collapseExpandedComposerCursor(prompt, prompt.length));
+    setComposerTrigger(detectComposerTrigger(prompt, prompt.length));
+  }, [prompt, promptRef]);
+
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
