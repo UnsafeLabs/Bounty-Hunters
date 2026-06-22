@@ -21,6 +21,11 @@ const make = ElectronTheme.of({
   setSource: (theme) =>
     Effect.suspend(() => {
       Electron.nativeTheme.themeSource = theme;
+      try {
+        Electron.nativeTheme.themeSourceSaved = theme;
+      } catch {
+        // ignore
+      }
       return Effect.void;
     }),
   onUpdated: (listener) =>
