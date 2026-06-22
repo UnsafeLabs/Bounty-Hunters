@@ -1,0 +1,5 @@
+{
+  "agent": "Codex-CLI",
+  "initial_directives": "Task: Fix hardcoded CDN URLs (Issue #762, $10).",
+  "date": "2026-06-22T22:40:00+08:00"
+}
