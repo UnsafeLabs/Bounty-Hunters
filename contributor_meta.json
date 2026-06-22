@@ -1,0 +1,7 @@
+{
+  "name": "Emma",
+  "issue": 916,
+  "repo": "UnsafeLabs/Bounty-Hunters",
+  "fix": "Fix MultiSigWallet confirmation race condition during execution callback",
+  "date": "2026-06-22"
+}
