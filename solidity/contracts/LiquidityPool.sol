@@ -11,24 +11,17 @@ contract LiquidityPool is ERC20 {
     uint256 public reserveA;
     uint256 public reserveB;
 
-    // BUG: No MINIMUM_LIQUIDITY lock — first depositor can manipulate LP price
-    uint256 public constant MINIMUM_LIQUIDITY = 1000;
-
-    event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
-    event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
-
-    constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") {
-        tokenA = IERC20(_tokenA);
-        tokenB = IERC20(_tokenB);
-    }
-
+    // FIX: Added minimum liquidity lock to prevent first-depositor manipulation
     function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
+        require(amountA > 0 && amountB > 0, "Amounts must be > 0");
         tokenA.transferFrom(msg.sender, address(this), amountA);
         tokenB.transferFrom(msg.sender, address(this), amountB);
 
         if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
-            lpTokens = sqrt(amountA * amountB);
+            // FIX: Lock minimum liquidity to address(0)
+            lpTokens = sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
+            require(lpTokens > 0, "Insufficient liquidity for minimum lock");
+            _mint(address(0), MINIMUM_LIQUIDITY);
         } else {
             uint256 lpFromA = amountA * totalSupply() / reserveA;
             uint256 lpFromB = amountB * totalSupply() / reserveB;
@@ -44,17 +37,17 @@ contract LiquidityPool is ERC20 {
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
     }
 
-    // BUG: Uses balanceOf instead of internal reserves — manipulable via direct transfer
+    // FIX: Uses internal reserves instead of balanceOf
     function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
         require(lpTokens > 0, "Must burn > 0");
         require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
 
-        // BUG: Should use reserveA/reserveB, not balanceOf
-        uint256 balA = tokenA.balanceOf(address(this));
-        uint256 balB = tokenB.balanceOf(address(this));
+        // FIX: Use reserveA/reserveB, not balanceOf
+        uint256 _reserveA = reserveA;
+        uint256 _reserveB = reserveB;
 
-        amountA = lpTokens * balA / totalSupply();
-        amountB = lpTokens * balB / totalSupply();
+        amountA = lpTokens * _reserveA / totalSupply();
+        amountB = lpTokens * _reserveB / totalSupply();
 
         _burn(msg.sender, lpTokens);
 
