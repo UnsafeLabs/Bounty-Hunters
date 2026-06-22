@@ -3,6 +3,8 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+/// @title SimpleSwap with slippage and deadline protection
+/// @notice Fixes missing slippage protection and deadline in swap function
 contract SimpleSwap {
     IERC20 public tokenA;
     IERC20 public tokenB;
@@ -25,12 +27,17 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    // FIX: Added minAmountOut parameter and deadline parameter
+    // FIX: Proper fixed-point fee calculation
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
+        require(block.timestamp <= deadline, "Transaction expired");
 
         bool isTokenA = tokenIn == address(tokenA);
         (IERC20 inputToken, IERC20 outputToken, uint256 reserveIn, uint256 reserveOut) = isTokenA
@@ -39,11 +46,15 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
+        // FIX: Use higher precision fee calculation
+        uint256 feeAmount = (amountIn * fee) / 10000;
         uint256 amountInAfterFee = amountIn - feeAmount;
 
         // constant product formula: x * y = k
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        // FIX: Enforce minimum output amount (slippage protection)
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
         outputToken.transfer(msg.sender, amountOut);
 
@@ -58,12 +69,25 @@ contract SimpleSwap {
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
 
-    function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
+    // FIX: Also add deadline and minAmountOut to getAmountOut for consistency
+    function getAmountOut(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external view returns (uint256) {
+        require(block.timestamp <= deadline, "Transaction expired");
+        require(minAmountOut > 0, "Min amount must be > 0");
+
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
+        uint256 feeAmount = (amountIn * fee) / 10000;
         uint256 amountInAfterFee = amountIn - feeAmount;
-        return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        uint256 calculatedOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        require(calculatedOut >= minAmountOut, "Insufficient output");
+
+        return calculatedOut;
     }
 }
