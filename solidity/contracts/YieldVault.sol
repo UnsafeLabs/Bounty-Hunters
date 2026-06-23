@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-contract YieldVault {
+contract YieldVault is ReentrancyGuard {
     IERC20 public rewardToken;
     IERC20 public stakingToken;
 
@@ -22,29 +23,42 @@ contract YieldVault {
     event Deposited(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
+    event RewardAdded(uint256 reward);
 
     constructor(address _stakingToken, address _rewardToken) {
+        require(_stakingToken != address(0), "Invalid staking token");
+        require(_rewardToken != address(0), "Invalid reward token");
         stakingToken = IERC20(_stakingToken);
         rewardToken = IERC20(_rewardToken);
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    modifier onlyDistributor() {
+        require(msg.sender == rewardDistributor, "Not distributor");
+        _;
+    }
+
+    // Fixed: Cap calculation at periodFinish to prevent phantom rewards after distribution ends
+    function lastTimeRewardApplicable() public view returns (uint256) {
+        return block.timestamp < periodFinish ? block.timestamp : periodFinish;
+    }
+
+    // Fixed: Uses capped lastTimeRewardApplicable() instead of block.timestamp
+    // In standard Synthetix StakingRewards, rewardRate is NOT pre-scaled by 1e18 because rewardPerToken already scales by 1e18.
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        lastUpdateTime = lastTimeRewardApplicable();
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -52,7 +66,7 @@ contract YieldVault {
         _;
     }
 
-    function deposit(uint256 amount) external updateReward(msg.sender) {
+    function deposit(uint256 amount) external nonReentrant updateReward(msg.sender) {
         require(amount > 0, "Cannot deposit 0");
         totalSupply += amount;
         balanceOf[msg.sender] += amount;
@@ -60,7 +74,7 @@ contract YieldVault {
         emit Deposited(msg.sender, amount);
     }
 
-    function withdraw(uint256 amount) external updateReward(msg.sender) {
+    function withdraw(uint256 amount) external nonReentrant updateReward(msg.sender) {
         require(amount > 0, "Cannot withdraw 0");
         totalSupply -= amount;
         balanceOf[msg.sender] -= amount;
@@ -68,7 +82,7 @@ contract YieldVault {
         emit Withdrawn(msg.sender, amount);
     }
 
-    function claimReward() external updateReward(msg.sender) {
+    function claimReward() external nonReentrant updateReward(msg.sender) {
         uint256 reward = rewards[msg.sender];
         if (reward > 0) {
             rewards[msg.sender] = 0;
@@ -77,11 +91,24 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
-    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+    // Fixed: Added access control and standard Synthetix calculations (no double-scaling of rewardRate).
+    function notifyRewardAmount(uint256 reward, uint256 duration) external onlyDistributor updateReward(address(0)) {
+        require(duration > 0, "Duration must be > 0");
+        
+        if (block.timestamp >= periodFinish) {
+            rewardRate = reward / duration;
+        } else {
+            uint256 remaining = periodFinish - block.timestamp;
+            uint256 leftover = remaining * rewardRate;
+            rewardRate = (reward + leftover) / duration;
+        }
+
+        // Verify that distributor funded contract enough
+        uint256 balance = rewardToken.balanceOf(address(this));
+        require(rewardRate * duration <= balance, "Reward rate exceeds pool balance");
+
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
+        emit RewardAdded(reward);
     }
 }
