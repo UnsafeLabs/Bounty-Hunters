@@ -62,7 +62,12 @@ function inferDeviceType(userAgent: string | undefined): AuthClientMetadataDevic
   if (/bot|crawler|spider|slurp|curl|wget/.test(normalized)) {
     return "bot";
   }
-  if (/ipad|tablet/.test(normalized)) {
+  // Android tablets advertise "Android" but omit the "Mobile" token that phones
+  // include, so non-mobile Android is a tablet rather than a desktop.
+  if (
+    /ipad|tablet/.test(normalized) ||
+    (/android/.test(normalized) && !/mobile/.test(normalized))
+  ) {
     return "tablet";
   }
   if (/iphone|android.+mobile|mobile/.test(normalized)) {

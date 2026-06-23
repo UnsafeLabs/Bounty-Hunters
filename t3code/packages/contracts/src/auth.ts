@@ -175,6 +175,10 @@ export const AuthClientSession = Schema.Struct({
   issuedAt: Schema.DateTimeUtc,
   expiresAt: Schema.DateTimeUtc,
   lastConnectedAt: Schema.NullOr(Schema.DateTimeUtc),
+  // Last authenticated request seen for this session, refreshed on a debounce so
+  // active devices can be surfaced and sorted without writing on every request.
+  // Optional so older clients that predate activity tracking still decode.
+  lastActiveAt: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
   connected: Schema.Boolean,
   current: Schema.Boolean,
 });

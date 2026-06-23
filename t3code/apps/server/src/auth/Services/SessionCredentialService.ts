@@ -9,6 +9,7 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
 import type * as Stream from "effect/Stream";
 
 export type SessionRole = "owner" | "client";
@@ -83,6 +84,15 @@ export interface SessionCredentialServiceShape {
   ) => Effect.Effect<number, SessionCredentialError>;
   readonly markConnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
   readonly markDisconnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
+  /**
+   * Refresh `lastActiveAt` for an authenticated session, debounced so a burst of
+   * requests writes at most once per activity window. Resolves with the persisted
+   * timestamp when a write happened, or `Option.none` when the write was skipped
+   * (still within the debounce window, or the session is no longer active).
+   */
+  readonly recordActivity: (
+    sessionId: AuthSessionId,
+  ) => Effect.Effect<Option.Option<DateTime.DateTime>, never>;
 }
 
 export class SessionCredentialService extends Context.Service<

@@ -1,8 +1,10 @@
+import type { AuthClientSession } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 
 import type { ServerConfigShape } from "../../config.ts";
@@ -188,6 +190,54 @@ it.layer(NodeServices.layer)("SessionCredentialServiceLive", (it) => {
       expect(afterReconnect[0]?.connected).toBe(true);
       expect(afterReconnect[0]?.lastConnectedAt).not.toBeNull();
       expect(afterReconnect[0]?.lastConnectedAt?.toString()).not.toBe(firstConnectedAt?.toString());
+    }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
+  );
+
+  it.effect("records last activity on a 5-minute debounce and stops once revoked", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionCredentialService;
+      const first = yield* sessions.issue({ subject: "first", method: "bearer-session-token" });
+      yield* TestClock.adjust(Duration.seconds(1));
+      const second = yield* sessions.issue({ subject: "second", method: "bearer-session-token" });
+      const findActiveAt = (entries: ReadonlyArray<AuthClientSession>) =>
+        entries.find((entry) => entry.sessionId === first.sessionId)?.lastActiveAt;
+
+      // Newly issued sessions have not recorded any activity yet, and the most
+      // recently issued session sorts first until activity is recorded.
+      const initial = yield* sessions.listActive();
+      expect(findActiveAt(initial)).toBeNull();
+      expect(initial[0]?.sessionId).toBe(second.sessionId);
+
+      // The first request persists activity and reports the written timestamp.
+      yield* TestClock.adjust(Duration.seconds(1));
+      const firstWrite = yield* sessions.recordActivity(first.sessionId);
+      expect(Option.isSome(firstWrite)).toBe(true);
+
+      const afterFirst = yield* sessions.listActive();
+      const firstActiveAt = findActiveAt(afterFirst);
+      expect(firstActiveAt).not.toBeNull();
+      // Recording activity promotes the session to the top of the active list.
+      expect(afterFirst[0]?.sessionId).toBe(first.sessionId);
+
+      // A second request inside the debounce window does not write again.
+      yield* TestClock.adjust(Duration.minutes(1));
+      const debounced = yield* sessions.recordActivity(first.sessionId);
+      expect(Option.isNone(debounced)).toBe(true);
+      const afterDebounce = yield* sessions.listActive();
+      expect(findActiveAt(afterDebounce)?.toString()).toBe(firstActiveAt?.toString());
+
+      // Once the window elapses, the next request records a fresh timestamp.
+      yield* TestClock.adjust(Duration.minutes(5));
+      const refreshed = yield* sessions.recordActivity(first.sessionId);
+      expect(Option.isSome(refreshed)).toBe(true);
+      const afterRefresh = yield* sessions.listActive();
+      expect(findActiveAt(afterRefresh)?.toString()).not.toBe(firstActiveAt?.toString());
+
+      // A revoked session never records activity, even past the debounce window.
+      yield* sessions.revoke(first.sessionId);
+      yield* TestClock.adjust(Duration.minutes(6));
+      const afterRevoke = yield* sessions.recordActivity(first.sessionId);
+      expect(Option.isNone(afterRevoke)).toBe(true);
     }).pipe(Effect.provide(Layer.merge(makeSessionCredentialLayer(), TestClock.layer()))),
   );
 });

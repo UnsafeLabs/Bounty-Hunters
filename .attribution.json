@@ -1,0 +1,17 @@
+{
+  "agent": "bounty-hunter",
+  "issue": 835,
+  "title": "bounty-hunter: track session last_active_at per request with a 5-minute debounce (#835)",
+  "summary": "Adds debounced per-request last_active_at tracking to the server auth session subsystem, ordering active sessions by recent activity, on top of the existing device-tracking and revocation support.",
+  "files": [
+    "t3code/packages/contracts/src/auth.ts",
+    "t3code/apps/server/src/persistence/Migrations/031_AuthSessionLastActiveAt.ts",
+    "t3code/apps/server/src/persistence/Migrations.ts",
+    "t3code/apps/server/src/persistence/Services/AuthSessions.ts",
+    "t3code/apps/server/src/persistence/Layers/AuthSessions.ts",
+    "t3code/apps/server/src/auth/Services/SessionCredentialService.ts",
+    "t3code/apps/server/src/auth/Layers/SessionCredentialService.ts",
+    "t3code/apps/server/src/auth/Layers/ServerAuth.ts",
+    "t3code/apps/server/src/auth/Layers/SessionCredentialService.test.ts"
+  ]
+}

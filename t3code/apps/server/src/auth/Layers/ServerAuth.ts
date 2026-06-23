@@ -71,6 +71,9 @@ export const makeServerAuth = Effect.gen(function* () {
 
   const authenticateToken = (token: string): Effect.Effect<AuthenticatedSession, AuthError> =>
     sessions.verify(token).pipe(
+      // Refresh activity for each authenticated request; the service debounces the
+      // underlying write so this stays cheap on hot paths.
+      Effect.tap((session) => sessions.recordActivity(session.sessionId)),
       Effect.tapError((cause: SessionCredentialError) =>
         Effect.logWarning("Rejected authenticated session credential.").pipe(
           Effect.annotateLogs({
