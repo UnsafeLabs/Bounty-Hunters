@@ -1,0 +1,1 @@
+{"agent": "GAOTAX2006-BOT", "pre_task_context": "Issue #918: Fix first-depositor price manipulation in LiquidityPool. Fixes: (1) Add MINIMUM_LIQUIDITY lock on first deposit to address(0), (2) Fix removeLiquidity to use internal reserves instead of balanceOf, (3) Add sync function to recover from donation attacks.", "timestamp": "2026-06-23T16:56:25Z"}
