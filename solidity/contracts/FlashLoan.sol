@@ -8,6 +8,10 @@ interface IFlashLoanReceiver {
 }
 
 contract FlashLoan {
+    modifier whenNotPaused() {
+        require(!paused, "Paused");
+        _;
+    }
     IERC20 public loanToken;
     uint256 public feeBPS; // fee in basis points
     uint256 public totalFees;
@@ -34,6 +38,7 @@ contract FlashLoan {
 
         // BUG: Truncates to 0 when amount < 10000/feeBPS
         uint256 fee = amount * feeBPS / 10000;
+        require(fee > 0, "Fee must be greater than 0");
 
         loanToken.transfer(msg.sender, amount);
 
@@ -58,7 +63,15 @@ contract FlashLoan {
         loanToken.transfer(owner, fees);
     }
 
-    // BUG: No emergency pause function
+    function pause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = true;
+    }
+
+    function unpause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = false;
+    }
     function getPoolBalance() external view returns (uint256) {
         return loanToken.balanceOf(address(this));
     }
