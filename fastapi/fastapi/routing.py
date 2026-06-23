@@ -26,6 +26,7 @@ from typing import (
     Annotated,
     Any,
     TypeVar,
+    Union,
     cast,
 )
 
@@ -74,6 +75,7 @@ from fastapi.utils import (
 )
 from starlette import routing
 from starlette._exception_handler import wrap_app_handling_exceptions
+from starlette.middleware import Middleware
 from starlette._utils import is_async_callable
 from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 from starlette.datastructures import FormData
@@ -1002,6 +1004,35 @@ class APIRoute(routing.Route):
         return match, child_scope
 
 
+# A router-level middleware entry. Either a Starlette `Middleware(cls, *args,
+# **kwargs)` wrapper, or a plain callable factory that takes the ASGI app it
+# wraps and returns a new ASGI app.
+_RouterMiddleware = Union[Middleware, Callable[[ASGIApp], ASGIApp]]
+
+
+def _wrap_app_with_middleware(
+    app: ASGIApp, middleware: Sequence[_RouterMiddleware]
+) -> ASGIApp:
+    """
+    Wrap an ASGI app with a sequence of router middleware.
+
+    Each entry is either a Starlette `Middleware(cls, *args, **kwargs)` wrapper or
+    a plain callable that takes the ASGI app and returns a new one wrapping it.
+
+    The first middleware in the sequence ends up as the outermost layer (it sees
+    the request first and the response last), mirroring how Starlette applies
+    `middleware` on `Router`, `Route`, and `Mount`.
+    """
+    for item in reversed(list(middleware)):
+        if isinstance(item, Middleware):
+            cls, args, kwargs = item.cls, item.args, item.kwargs
+            app = cls(app, *args, **kwargs)
+        else:
+            # A simple callable middleware: `app -> ASGIApp`.
+            app = item(app)
+    return app
+
+
 class APIRouter(routing.Router):
     """
     `APIRouter` class, used to group *path operations*, for example to structure
@@ -1162,6 +1193,27 @@ class APIRouter(routing.Router):
                 """
             ),
         ] = APIRoute,
+        middleware: Annotated[
+            Sequence[_RouterMiddleware] | None,
+            Doc(
+                """
+                A list of middleware to be applied to all the *path operations* in
+                this router.
+
+                Each entry can be a Starlette `Middleware(SomeMiddleware, **options)`
+                wrapper or a simple callable that takes the ASGI app it wraps and
+                returns a new ASGI app (`app -> app`).
+
+                The middleware is applied around each route when the router is
+                included (via `include_router` / `app.include_router`), so it wraps
+                the routes of this router (and of any nested routers) without
+                affecting routes that belong to other routers or to the app itself.
+
+                The first middleware in the list is the outermost layer, matching the
+                behavior of Starlette's `Middleware` on `Route` and `Mount`.
+                """
+            ),
+        ] = None,
         on_startup: Annotated[
             Sequence[Callable[[], Any]] | None,
             Doc(
@@ -1304,6 +1356,7 @@ class APIRouter(routing.Router):
         self.prefix = prefix
         self.tags: list[str | Enum] = tags or []
         self.dependencies = list(dependencies or [])
+        self.middleware: list[_RouterMiddleware] = list(middleware or [])
         self.deprecated = deprecated
         self.include_in_schema = include_in_schema
         self.responses = responses or {}
@@ -1313,6 +1366,33 @@ class APIRouter(routing.Router):
         self.default_response_class = default_response_class
         self.generate_unique_id_function = generate_unique_id_function
         self.strict_content_type = strict_content_type
+
+    def add_middleware(
+        self,
+        middleware_class: Annotated[
+            Callable[..., ASGIApp],
+            Doc(
+                """
+                The middleware class (or any callable factory) to apply to the
+                router's *path operations*. It is called as
+                `middleware_class(app, *args, **kwargs)` to wrap the app.
+                """
+            ),
+        ],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Add a single middleware to this router, mirroring `app.add_middleware`.
+
+        Like `Starlette.add_middleware`, the most recently added middleware becomes
+        the outermost layer, so it is inserted at the front of the router's
+        middleware list.
+
+        The middleware takes effect for the routes copied when the router is
+        included (via `include_router`), so add it before including the router.
+        """
+        self.middleware.insert(0, Middleware(middleware_class, *args, **kwargs))
 
     def route(
         self,
@@ -1730,6 +1810,9 @@ class APIRouter(routing.Router):
         if responses is None:
             responses = {}
         for route in router.routes:
+            # Track which routes get added for this source route so the included
+            # router's middleware can be wrapped around exactly those.
+            route_start_index = len(self.routes)
             if isinstance(route, APIRoute):
                 combined_responses = {**responses, **route.responses}
                 use_response_class = get_value_or_default(
@@ -1819,6 +1902,28 @@ class APIRouter(routing.Router):
                 self.add_websocket_route(
                     prefix + route.path, route.endpoint, name=route.name
                 )
+            # Wrap the just-copied route(s) with this router's middleware. The
+            # routes are rebuilt from their endpoints above, so the middleware
+            # cannot be carried over on the ASGI app; instead it is combined with
+            # any middleware inherited from nested routers (kept on the source
+            # route as metadata) and re-applied here. The included router's
+            # middleware goes on the outside, so an outer router wraps an inner
+            # one, and the metadata is stored again so further nesting compounds.
+            inherited_middleware: Sequence[_RouterMiddleware] = getattr(
+                route, "_fastapi_router_middleware", ()
+            )
+            combined_middleware = [*router.middleware, *inherited_middleware]
+            if combined_middleware:
+                for new_route in self.routes[route_start_index:]:
+                    if isinstance(new_route, (routing.Route, routing.WebSocketRoute)):
+                        new_route.app = _wrap_app_with_middleware(
+                            new_route.app, combined_middleware
+                        )
+                        setattr(
+                            new_route,
+                            "_fastapi_router_middleware",
+                            combined_middleware,
+                        )
         for handler in router.on_startup:
             self.add_event_handler("startup", handler)
         for handler in router.on_shutdown:

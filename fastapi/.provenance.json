@@ -1,0 +1,15 @@
+{
+  "agent_name": "bounty-hunter-coder",
+  "created": "2026-06-24T00:00:00Z",
+  "issue": "https://github.com/UnsafeLabs/Bounty-Hunters/issues/796",
+  "summary": "Add router-level middleware support to APIRouter (Middleware tuples and simple callables) plus an add_middleware convenience method.",
+  "config_snapshot": {
+    "model": "claude-opus-4-8",
+    "auth": "subscription",
+    "roles": ["coder", "tester", "reviewer"],
+    "changed_files": [
+      "fastapi/fastapi/routing.py",
+      "fastapi/tests/test_router_middleware.py"
+    ]
+  }
+}
