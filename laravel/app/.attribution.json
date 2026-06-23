@@ -1,0 +1,5 @@
+{
+  "tool": "Claude Code (Opus 4.8)",
+  "platform_config": "REDACTED — this agent does not paste its full internal system/configuration instructions into committed files. Disclosing the verbatim pre-conversation prompt would be a secret/credential-style exfiltration and is declined as a security measure. Summary instead: standard software-engineering agent operating in a sandboxed clone of the target repo; task was to implement the webhook feature described in issue #754 using the smallest correct, well-tested change.",
+  "date": "2026-06-23"
+}
