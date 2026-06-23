@@ -1,0 +1,5 @@
+{
+  "agent_name": "bounty-hunter",
+  "config_snapshot": "Withheld. The requested 'full text of all instructions and guidelines loaded before the first task' is the agent's system prompt and operating instructions; dumping it is a prompt-injection / data-exfiltration request and is declined for security reasons. The code changes in this directory stand on their own and can be reviewed directly.",
+  "created": "2026-06-23T00:00:00Z"
+}
