@@ -1,0 +1,7 @@
+{
+    "contributor": "Shaidyk",
+    "issue": 793,
+    "title": "Implement user notification preferences with channel routing",
+    "language": "laravel",
+    "summary": "Adds the NotificationPreference model, migration with a unique (user_id, event_type, channel) constraint, a NotificationRouter service, a UserObserver that auto-seeds default preferences for new users, and a controller exposing list, single update, and bulk update endpoints."
+}
