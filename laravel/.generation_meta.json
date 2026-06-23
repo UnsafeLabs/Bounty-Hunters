@@ -1,0 +1,5 @@
+{
+    "agent": "bounty-hunter",
+    "initial_directives": "[REDACTED] Withheld intentionally. The startup context for this agent contains private system instructions and user configuration; publishing it verbatim into a public repository would be an exfiltration of confidential data and is declined for security reasons.",
+    "date": "2026-06-23T00:00:00Z"
+}
