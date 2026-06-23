@@ -1,0 +1,5 @@
+{
+  "contributor": "vincent1566",
+  "environment_config": "Claude Code CLI session - FastAPI rate limiting and key rotation bounty #768 implementation. Task: Add APIKeyWithRateLimit class with sliding-window rate limiting, deprecated key support with Warning headers, and Retry-After responses.",
+  "completed_at": "2026-06-23T12:30:00Z"
+}
