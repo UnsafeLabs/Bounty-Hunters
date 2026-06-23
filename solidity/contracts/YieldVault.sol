@@ -4,6 +4,13 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract YieldVault {
+    uint256 private _status;
+    modifier nonReentrant() {
+        require(_status == 0);
+        _status = 1;
+        _;
+        _status = 0;
+    }
     IERC20 public rewardToken;
     IERC20 public stakingToken;
 
