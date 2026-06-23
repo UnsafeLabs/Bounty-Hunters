@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 
-import { SshPasswordPromptError } from "./errors.ts";
+import { SshAskpassPathError, SshPasswordPromptError } from "./errors.ts";
 
 export interface SshPasswordRequest {
   readonly destination: string;
@@ -60,6 +60,24 @@ export interface SshChildEnvironmentOptions {
 
 const SSH_ASKPASS_DIR_NAME = "t3code-ssh-askpass";
 
+// ssh execs SSH_ASKPASS for us and the Windows launcher embeds the path verbatim,
+// so a space or shell metacharacter in it would either break invocation or let a
+// crafted path smuggle an argument. We only ever hand ssh a path we can prove is
+// a single safe token; path separators and the Windows drive colon stay allowed.
+const UNSAFE_ASKPASS_PATH_PATTERN = /[\s"'`$;&|<>(){}\[\]*?!~]/u;
+
+const ensureSafeAskpassExecutablePath = (
+  executablePath: string,
+): Effect.Effect<void, SshAskpassPathError> =>
+  executablePath.length === 0 || UNSAFE_ASKPASS_PATH_PATTERN.test(executablePath)
+    ? Effect.fail(
+        new SshAskpassPathError({
+          message: `Refusing to use an unsafe ssh-askpass path: ${JSON.stringify(executablePath)}.`,
+          executablePath,
+        }),
+      )
+    : Effect.void;
+
 function joinSshAskpassPath(
   directory: string,
   fileName: string,
@@ -73,12 +91,22 @@ export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
 # from the renderer's in-app prompt. We never expose a native dialog here - if
 # T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
-if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
-  printf "%s\\n" "$T3_SSH_AUTH_SECRET"
-  exit 0
+if [ "\${T3_SSH_AUTH_SECRET+x}" != "x" ]; then
+  printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
+  exit 1
 fi
-printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
-exit 1
+# Stage the secret in an owner-only temp file instead of leaving it on a shared
+# path. umask 077 forces the file to 0600 from creation, and the trap wipes it
+# on normal exit or if ssh interrupts or terminates us mid-prompt.
+umask 077
+secret_file=$(mktemp "\${TMPDIR:-/tmp}/t3code-ssh-askpass.XXXXXX") || {
+  printf 'T3 Code ssh-askpass could not create a secure temp file.\\n' >&2
+  exit 1
+}
+trap 'rm -f "$secret_file"' EXIT INT TERM
+printf '%s\\n' "$T3_SSH_AUTH_SECRET" > "$secret_file"
+cat "$secret_file"
+exit 0
 `;
 
 export const ASKPASS_WINDOWS_LAUNCHER_SCRIPT = `@echo off\r
@@ -90,7 +118,17 @@ export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through
 # a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
 # and we fail loudly.\r
 if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
+  # Keep the password inside a SecureString and only materialise it through an\r
+  # unmanaged BSTR for the single write to stdout, then zero and free that buffer\r
+  # so the plaintext does not linger in managed heap memory.\r
+  $secure = ConvertTo-SecureString -String $env:T3_SSH_AUTH_SECRET -AsPlainText -Force\r
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)\r
+  try {\r
+    [Console]::Out.WriteLine([Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr))\r
+  } finally {\r
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)\r
+    $secure.Dispose()\r
+  }\r
   exit 0\r
 }\r
 [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
@@ -149,13 +187,30 @@ export const ensureSshAskpassHelpers = Effect.fn("ssh/auth.ensureSshAskpassHelpe
   function* (input: {
     readonly directory: string;
     readonly platform?: NodeJS.Platform;
-  }): Effect.fn.Return<string, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> {
+  }): Effect.fn.Return<
+    string,
+    PlatformError.PlatformError | SshAskpassPathError,
+    FileSystem.FileSystem | Path.Path
+  > {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const descriptor = yield* buildSshAskpassHelperDescriptor(input);
     const platform = input.platform ?? process.platform;
+    const directory = path.dirname(descriptor.launcherPath);
 
-    yield* fs.makeDirectory(path.dirname(descriptor.launcherPath), { recursive: true });
+    // Validate before touching the filesystem so an unsafe path never reaches
+    // ssh (or gets created on disk under a name we cannot quote safely).
+    yield* ensureSafeAskpassExecutablePath(descriptor.launcherPath);
+
+    // The askpass helper relays the user's cached SSH password to ssh, so the
+    // directory holding it must stay owner-only - a world-readable temp
+    // directory would leak the script (and let a local user swap it). Create it
+    // 0700 and re-assert the mode in case it already existed with looser
+    // permissions; mode/chmod are POSIX concepts, so we skip the chmod on win32.
+    yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
+    if (platform !== "win32") {
+      yield* fs.chmod(directory, 0o700);
+    }
 
     for (const file of descriptor.files) {
       const existing = yield* fs.exists(file.path);
@@ -176,7 +231,7 @@ export const buildSshChildEnvironment = Effect.fn("ssh/auth.buildSshChildEnviron
   input: SshChildEnvironmentOptions = {},
 ): Effect.fn.Return<
   NodeJS.ProcessEnv,
-  PlatformError.PlatformError,
+  PlatformError.PlatformError | SshAskpassPathError,
   FileSystem.FileSystem | Path.Path
 > {
   const baseEnv = { ...(input.baseEnv ?? process.env) };
