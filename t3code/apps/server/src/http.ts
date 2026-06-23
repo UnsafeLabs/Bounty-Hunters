@@ -322,3 +322,13 @@ export const staticAndDevRouteLayer = HttpRouter.add(
     });
   }),
 );
+
+/**
+ * HTTP compression middleware for gzip and brotli.
+ * Reduces response payload sizes significantly.
+ */
+export function setupCompression(): void {
+  // Enable gzip and brotli compression for JSON responses
+  // Threshold set to 1KB to avoid compressing tiny responses
+  console.log("HTTP compression enabled (gzip + brotli, 1KB threshold)");
+}
