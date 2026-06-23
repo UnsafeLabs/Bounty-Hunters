@@ -37,9 +37,9 @@ contract PriceOracle {
             uint80 answeredInRound
         ) = primaryFeed.latestRoundData();
 
-        // Missing: require(price > 0)
-        // Missing: require(answeredInRound >= roundId)
-        // Missing: require(block.timestamp - updatedAt < MAX_STALENESS)
+        require(price > 0, "Oracle: Invalid price");
+        require(answeredInRound >= roundId, "Oracle: Stale round");
+        require(block.timestamp - updatedAt < 3600, "Oracle: Stale price");
 
         return price;
     }
