@@ -1,7 +1,18 @@
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract MultiSigWallet {
+    using SafeMath for uint256;
+    
+    uint256 private _entered;
+    modifier nonReentrant() {
+        require(_entered == 0, "ReentrancyGuard");
+        _entered = 1;
+        _;
+        _entered = 0;
+    }
     address[] public owners;
     uint256 public required;
     uint256 public transactionCount;
