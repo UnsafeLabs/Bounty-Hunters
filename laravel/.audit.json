@@ -1,0 +1,49 @@
+{
+    "issue": 756,
+    "title": "Add email verification flow and fix mail configuration for SMTP fallback",
+    "scope": "Email verification flow and failover mail configuration (laravel/).",
+    "secrets_included": false,
+    "notes": "This artifact intentionally contains no environment variables, credentials, connection strings, or initialization secrets.",
+    "changes": [
+        {
+            "path": "app/Notifications/CustomVerifyEmail.php",
+            "summary": "Branded email verification notification rendering resources/views/emails/verify-email.blade.php."
+        },
+        {
+            "path": "app/Http/Middleware/EnsureEmailIsVerified.php",
+            "summary": "Redirects unverified users to the verification.notice route (409 for JSON clients)."
+        },
+        {
+            "path": "app/Models/User.php",
+            "summary": "Wires sendEmailVerificationNotification() to the branded CustomVerifyEmail notification."
+        },
+        {
+            "path": "app/Http/Controllers/Auth/EmailVerificationController.php",
+            "summary": "notice/verify/send endpoints; notice renders the verification view for web clients."
+        },
+        {
+            "path": "resources/views/auth/verify-email.blade.php",
+            "summary": "Verification notice page with a resend form."
+        },
+        {
+            "path": "resources/views/emails/verify-email.blade.php",
+            "summary": "Branded verification email template."
+        },
+        {
+            "path": "config/mail.php",
+            "summary": "Default mailer set to failover with an SMTP->log fallback chain."
+        },
+        {
+            "path": "bootstrap/app.php",
+            "summary": "Registers the 'verified' middleware alias."
+        },
+        {
+            "path": "routes/web.php",
+            "summary": "Verification routes plus a protected /dashboard route guarded by auth+verified."
+        },
+        {
+            "path": "tests/Feature/Auth/EmailVerificationTest.php",
+            "summary": "Covers verification flow, protected-route redirect, and failover mailer fallback."
+        }
+    ]
+}
