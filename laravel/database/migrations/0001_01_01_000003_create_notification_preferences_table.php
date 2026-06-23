@@ -14,8 +14,11 @@ return new class extends Migration
         Schema::create('notification_preferences', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->string('event_type');
-            $table->string('channel');
+            // Bounded lengths keep the composite unique index below the 767-byte
+            // prefix limit older MySQL/InnoDB engines impose on utf8mb4. The
+            // values come from a short configured list, so this is ample.
+            $table->string('event_type', 64);
+            $table->string('channel', 32);
             $table->boolean('enabled')->default(true);
             $table->timestamps();
 

@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\BulkUpdateNotificationPreferencesRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 class NotificationPreferenceController extends Controller
 {
@@ -43,17 +43,9 @@ class NotificationPreferenceController extends Controller
      * Update many of the current user's preferences in a single request. Every
      * id must belong to the authenticated user or the whole request is rejected.
      */
-    public function bulkUpdate(Request $request): JsonResponse
+    public function bulkUpdate(BulkUpdateNotificationPreferencesRequest $request): JsonResponse
     {
-        $ownedIds = $request->user()->notificationPreferences()->pluck('id')->all();
-
-        $validated = $request->validate([
-            'preferences' => ['required', 'array', 'min:1'],
-            'preferences.*.id' => ['required', 'integer', Rule::in($ownedIds)],
-            'preferences.*.enabled' => ['required', 'boolean'],
-        ]);
-
-        foreach ($validated['preferences'] as $preference) {
+        foreach ($request->validated()['preferences'] as $preference) {
             $request->user()->notificationPreferences()
                 ->whereKey($preference['id'])
                 ->update(['enabled' => $preference['enabled']]);

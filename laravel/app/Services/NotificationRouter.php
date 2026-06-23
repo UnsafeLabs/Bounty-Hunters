@@ -44,10 +44,16 @@ class NotificationRouter
     /**
      * Determine whether a single channel is enabled for an event type.
      *
-     * @throws InvalidArgumentException When the event type is not configured.
+     * @throws InvalidArgumentException When the event type or channel is not configured.
      */
     public static function isEnabled(User $user, string $eventType, string $channel): bool
     {
+        $channels = (array) config('notifications.channels', []);
+
+        if (! in_array($channel, $channels, true)) {
+            throw new InvalidArgumentException("Unknown notification channel [{$channel}].");
+        }
+
         return in_array($channel, self::channelsFor($user, $eventType), true);
     }
 }

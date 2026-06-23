@@ -166,6 +166,33 @@ class NotificationPreferenceTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrorFor('preferences');
     }
 
+    public function test_bulk_update_rejects_a_null_payload_item(): void
+    {
+        $user = $this->user();
+
+        // A null entry must not slip past the per-item type checks.
+        $this->actingAs($user)->postJson('/notifications/preferences/bulk', [
+            'preferences' => [null],
+        ])->assertUnprocessable()->assertJsonValidationErrorFor('preferences.0');
+    }
+
+    public function test_bulk_update_rejects_a_null_enabled_flag(): void
+    {
+        $user = $this->user();
+        $preference = $user->notificationPreferences()->firstOrFail();
+
+        $this->actingAs($user)->postJson('/notifications/preferences/bulk', [
+            'preferences' => [
+                ['id' => $preference->id, 'enabled' => null],
+            ],
+        ])->assertUnprocessable()->assertJsonValidationErrorFor('preferences.0.enabled');
+
+        $this->assertDatabaseHas('notification_preferences', [
+            'id' => $preference->id,
+            'enabled' => $preference->enabled,
+        ]);
+    }
+
     public function test_endpoints_require_authentication(): void
     {
         $preference = $this->user()->notificationPreferences()->firstOrFail();

@@ -83,6 +83,16 @@ class NotificationRouterTest extends TestCase
         NotificationRouter::channelsFor($user, 'not_a_type');
     }
 
+    public function test_is_enabled_rejects_an_unknown_channel(): void
+    {
+        $user = $this->user();
+
+        $this->expectException(InvalidArgumentException::class);
+
+        // Only mail/slack/database are configured channels.
+        NotificationRouter::isEnabled($user, 'account', 'carrier_pigeon');
+    }
+
     public function test_is_enabled_reports_single_channel_state(): void
     {
         $user = $this->user();
