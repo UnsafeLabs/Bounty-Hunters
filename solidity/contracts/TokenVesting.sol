@@ -67,7 +67,7 @@ contract TokenVesting {
         uint256 vested = vestedAmount();
         // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
         // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        uint256 unvested = totalAllocation - claimed;
 
         if (vested > claimed) {
             token.transfer(beneficiary, vested - claimed);
