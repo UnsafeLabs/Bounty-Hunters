@@ -139,6 +139,9 @@ export interface WsRpcClient {
       typeof WS_METHODS.serverGetProcessResourceHistory
     >;
     readonly signalProcess: RpcUnaryMethod<typeof WS_METHODS.serverSignalProcess>;
+    readonly diagnoseTailscalePeer: RpcUnaryMethod<
+      typeof WS_METHODS.serverDiagnoseTailscalePeer
+    >;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
@@ -278,6 +281,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       signalProcess: (input) =>
         transport.request((client) =>
           client[WS_METHODS.serverSignalProcess](input).pipe(Effect.withTracerEnabled(false)),
+        ),
+      diagnoseTailscalePeer: (input) =>
+        transport.request((client) =>
+          client[WS_METHODS.serverDiagnoseTailscalePeer](input).pipe(
+            Effect.withTracerEnabled(false),
+          ),
         ),
       subscribeConfig: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerConfig]({}), listener, {

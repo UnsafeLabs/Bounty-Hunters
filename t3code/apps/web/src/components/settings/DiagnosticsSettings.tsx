@@ -31,6 +31,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { SettingsPageContainer, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
+import { TailscalePeerDiagnosticsSection } from "./TailscalePeerDiagnostics";
 
 const NUMBER_FORMAT = new Intl.NumberFormat();
 
@@ -913,6 +914,8 @@ export function DiagnosticsSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <TailscalePeerDiagnosticsSection />
+
       <SettingsSection
         title="Live Processes"
         headerAction={

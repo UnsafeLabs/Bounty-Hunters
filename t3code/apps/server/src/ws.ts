@@ -30,9 +30,18 @@ import {
   FilesystemBrowseError,
   ThreadId,
   type TerminalEvent,
+  TailscaleDiagnosticsError,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
+import {
+  diagnosePeer,
+  TAILSCALE_DIAGNOSE_TIMEOUT_MS,
+  type TailscaleCommandError,
+  type TailscalePeerUnknownError,
+  type TailscaleStatusParseError,
+  type TailscaleUnavailableError,
+} from "@t3tools/tailscale";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -156,6 +165,42 @@ function toAuthAccessStreamEvent(
       };
   }
 }
+
+const toTailscaleDiagnosticsError = (
+  error:
+    | TailscaleUnavailableError
+    | TailscalePeerUnknownError
+    | TailscaleStatusParseError
+    | TailscaleCommandError,
+): TailscaleDiagnosticsError => {
+  switch (error._tag) {
+    case "TailscalePeerUnknownError":
+      return new TailscaleDiagnosticsError({
+        kind: "peer-unknown",
+        detail: `Tailscale peer not found: ${error.peer}`,
+      });
+    case "TailscaleUnavailableError":
+      return new TailscaleDiagnosticsError({
+        kind: "unavailable",
+        detail:
+          error.reason.trim().length > 0
+            ? error.reason
+            : "Tailscale is unavailable. Is it installed and running?",
+      });
+    case "TailscaleStatusParseError":
+      return new TailscaleDiagnosticsError({
+        kind: "parse-error",
+        detail: "Failed to parse the tailscale status output.",
+      });
+    case "TailscaleCommandError": {
+      const stderr = error.stderr.trim();
+      return new TailscaleDiagnosticsError({
+        kind: error.message.toLowerCase().includes("timed out") ? "timeout" : "command-failed",
+        detail: stderr.length > 0 ? `${error.message} ${stderr}` : error.message,
+      });
+    }
+  }
+};
 
 const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
   WsRpcGroup.toLayer(
@@ -923,6 +968,19 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.serverSignalProcess, processDiagnostics.signal(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverDiagnoseTailscalePeer]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverDiagnoseTailscalePeer,
+            diagnosePeer({
+              peer: input.peer,
+              // Bound the whole status + ping run to the 15s diagnostics budget.
+              timeoutMs: TAILSCALE_DIAGNOSE_TIMEOUT_MS,
+              ...(input.pingCount === undefined ? {} : { pingCount: input.pingCount }),
+            }).pipe(Effect.mapError(toTailscaleDiagnosticsError)),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(
             WS_METHODS.sourceControlLookupRepository,

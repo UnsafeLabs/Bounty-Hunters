@@ -163,6 +163,10 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         rpcClient
           ? rpcClient.server.signalProcess(input)
           : Promise.reject(unavailableLocalBackendError()),
+      diagnoseTailscalePeer: (input) =>
+        rpcClient
+          ? rpcClient.server.diagnoseTailscalePeer(input)
+          : Promise.reject(unavailableLocalBackendError()),
     },
   };
 }
