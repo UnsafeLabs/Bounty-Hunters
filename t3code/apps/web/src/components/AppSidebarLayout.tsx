@@ -54,8 +54,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
-      <Sidebar
+    <Sidebar id="sidebar" tabIndex={-1}Provider className="h-dvh! min-h-0!" defaultOpen>
+      <Sidebar id="sidebar" tabIndex={-1}
         side="left"
         collapsible="offcanvas"
         className="border-r border-border bg-card text-foreground"
@@ -67,7 +67,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         }}
       >
         <ThreadSidebar />
-        <SidebarRail />
+        <Sidebar id="sidebar" tabIndex={-1}Rail />
       </Sidebar>
       {children}
     </SidebarProvider>

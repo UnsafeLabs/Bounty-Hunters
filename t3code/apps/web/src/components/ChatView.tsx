@@ -682,7 +682,7 @@ export default function ChatView(props: ChatViewProps) {
   const promptRef = useRef("");
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
-  const localComposerRef = useRef<ChatComposerHandle | null>(null);
+  const localComposerRef = useRef<div id="chat-composer" tabIndex={-1}><ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
@@ -3550,8 +3550,15 @@ export default function ChatView(props: ChatViewProps) {
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* Accessibility Skip Links */}
+        <div className="sr-only focus-within:not-sr-only focus-within:absolute focus-within:z-50 focus-within:bg-background focus-within:p-4">
+          <a href="#sidebar" className="mr-4 text-primary underline">Skip to Sidebar</a>
+          <a href="#chat-messages" className="mr-4 text-primary underline">Skip to Messages</a>
+          <a href="#chat-composer" className="text-primary underline">Skip to Composer</a>
+        </div>
+
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div id="chat-messages" className="relative flex min-h-0 flex-1 flex-col" role="log" aria-live="polite" tabIndex={-1}>
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}

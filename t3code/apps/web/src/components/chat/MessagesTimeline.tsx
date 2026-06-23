@@ -244,13 +244,39 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   // Stable renderItem — no closure deps. Row components read shared state
   // from TimelineRowCtx, which propagates through LegendList's memo.
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    const currentItem = target.closest('[role="listitem"]') as HTMLElement;
+    if (!currentItem) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = currentItem.nextElementSibling as HTMLElement;
+      if (next) next.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = currentItem.previousElementSibling as HTMLElement;
+      if (prev) prev.focus();
+    } else if (e.key === 'Enter') {
+      // Simulate expand if applicable
+      const expandBtn = currentItem.querySelector('button') as HTMLElement;
+      if (expandBtn) expandBtn.click();
+    }
+  }, []);
+
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div 
+        className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" 
+        data-timeline-root="true" 
+        role="listitem"
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+      >
         <TimelineRowContent row={item} />
       </div>
     ),
-    [],
+    [handleKeyDown],
   );
 
   if (rows.length === 0 && !isWorking) {
