@@ -270,3 +270,21 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(ElectronProtocol, make);
+
+/**
+ * Deep linking support via t3code:// custom protocol.
+ * Handles incoming URIs from external applications.
+ */
+export function setupDeepLinking(): void {
+  const protocol = "t3code";
+  
+  // Handle second-instance deep link events
+  const { app } = require("electron");
+  app.on("second-instance", (_event, argv) => {
+    const deepLink = argv.find(arg => arg.startsWith(protocol + "://"));
+    if (deepLink) {
+      const url = new URL(deepLink);
+      console.log("Deep link received:", url.pathname, url.searchParams);
+    }
+  });
+}
