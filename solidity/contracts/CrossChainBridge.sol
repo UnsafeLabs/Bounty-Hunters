@@ -36,9 +36,9 @@ contract CrossChainBridge {
         bytes32 transferHash = keccak256(abi.encodePacked(
             recipient,
             amount,
-            transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
+            transferNonce,
+            block.chainid,
+            address(this)
         ));
 
         require(!processedTransfers[transferHash], "Already processed");
