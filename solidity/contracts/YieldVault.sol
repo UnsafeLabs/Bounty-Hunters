@@ -32,8 +32,9 @@ contract YieldVault {
     // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+        uint256 endTime = block.timestamp < periodFinish ? block.timestamp : periodFinish;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (endTime - lastUpdateTime) * rewardRate * 1e18 / totalSupply
         );
     }
 
