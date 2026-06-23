@@ -37,9 +37,9 @@ contract PriceOracle {
             uint80 answeredInRound
         ) = primaryFeed.latestRoundData();
 
-        // Missing: require(price > 0)
-        // Missing: require(answeredInRound >= roundId)
-        // Missing: require(block.timestamp - updatedAt < MAX_STALENESS)
+        require(price > 0, "Invalid price: negative or zero");
+        require(answeredInRound >= roundId, "Round not complete");
+        require(block.timestamp - updatedAt <= MAX_STALENESS, "Price is stale");
 
         return price;
     }
@@ -49,6 +49,7 @@ contract PriceOracle {
     }
 
     function setMaxStaleness(uint256 _maxStaleness) external {
+        require(msg.sender == owner, "Not owner");
         require(msg.sender == owner, "Not owner");
         MAX_STALENESS = _maxStaleness;
     }
