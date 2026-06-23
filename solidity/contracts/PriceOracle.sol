@@ -14,42 +14,74 @@ interface AggregatorV3Interface {
 
 contract PriceOracle {
     AggregatorV3Interface public primaryFeed;
+    AggregatorV3Interface public fallbackFeed; // Fallback oracle added
     address public owner;
     uint256 public MAX_STALENESS = 3600;
 
     event PriceQueried(int256 price, uint256 timestamp);
+    event FallbackOracleSet(address fallbackFeed);
 
     constructor(address _primaryFeed) {
+        require(_primaryFeed != address(0), "Invalid primary feed address");
         primaryFeed = AggregatorV3Interface(_primaryFeed);
         owner = msg.sender;
     }
 
-    // BUG: No staleness check on updatedAt
-    // BUG: No check for negative/zero price
-    // BUG: No round completeness validation
-    // BUG: No fallback oracle
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+
+    function setFallbackOracle(address _fallbackFeed) external onlyOwner {
+        require(_fallbackFeed != address(0), "Invalid fallback feed address");
+        fallbackFeed = AggregatorV3Interface(_fallbackFeed);
+        emit FallbackOracleSet(_fallbackFeed);
+    }
+
+    function setMaxStaleness(uint256 _maxStaleness) external onlyOwner {
+        require(_maxStaleness > 0, "Staleness must be > 0");
+        MAX_STALENESS = _maxStaleness;
+    }
+
     function getLatestPrice() external view returns (int256) {
-        (
+        // Attempt to fetch price from primary feed
+        try primaryFeed.latestRoundData() returns (
             uint80 roundId,
             int256 price,
-            ,
+            uint256 /* startedAt */,
             uint256 updatedAt,
             uint80 answeredInRound
-        ) = primaryFeed.latestRoundData();
+        ) {
+            // Validate primary round data
+            if (price > 0 && answeredInRound >= roundId && block.timestamp - updatedAt < MAX_STALENESS) {
+                return price;
+            }
+        } catch {}
 
-        // Missing: require(price > 0)
-        // Missing: require(answeredInRound >= roundId)
-        // Missing: require(block.timestamp - updatedAt < MAX_STALENESS)
+        // Fallback to secondary feed if primary fails or returns stale/invalid data
+        require(address(fallbackFeed) != address(0), "Primary failed and no fallback configured");
 
-        return price;
+        (
+            uint80 fbRoundId,
+            int256 fbPrice,
+            ,
+            uint256 fbUpdatedAt,
+            uint80 fbAnsweredInRound
+        ) = fallbackFeed.latestRoundData();
+
+        require(fbPrice > 0, "Invalid fallback price");
+        require(fbAnsweredInRound >= fbRoundId, "Incomplete fallback round");
+        require(block.timestamp - fbUpdatedAt < MAX_STALENESS, "Fallback price stale");
+
+        return fbPrice;
     }
 
     function getDecimals() external view returns (uint8) {
-        return primaryFeed.decimals();
-    }
-
-    function setMaxStaleness(uint256 _maxStaleness) external {
-        require(msg.sender == owner, "Not owner");
-        MAX_STALENESS = _maxStaleness;
+        try primaryFeed.decimals() returns (uint8 decs) {
+            return decs;
+        } catch {
+            require(address(fallbackFeed) != address(0), "Primary decimals failed and no fallback");
+            return fallbackFeed.decimals();
+        }
     }
 }
