@@ -1,0 +1,5 @@
+{
+  "agent_name": "Claude Code",
+  "config_snapshot": "# Global instructions\nLanguage: Simplified Chinese\nConcise, minimal changes, goal-driven execution\n\n# RTK - Rust Token Killer\nHook-based token optimization\n\n# Context7\nUse ctx7 CLI for library documentation\n\n# Bounty Hunter Project\nPR workflow: fix -> commit -> push -> create PR via GitHub API",
+  "created": "2026-06-24T00:00:00.000Z"
+}
