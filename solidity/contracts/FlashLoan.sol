@@ -8,6 +8,8 @@ interface IFlashLoanReceiver {
 }
 
 contract FlashLoan {
+    uint256 private _lastReserve;
+    bool private _paused;
     IERC20 public loanToken;
     uint256 public feeBPS; // fee in basis points
     uint256 public totalFees;
@@ -63,3 +65,18 @@ contract FlashLoan {
         return loanToken.balanceOf(address(this));
     }
 }
+
+
+    // Emergency pause
+    function pause() external {
+        _paused = true;
+    }
+
+    function unpause() external {
+        _paused = false;
+    }
+
+    modifier whenNotPaused() {
+        require(!_paused, "Paused");
+        _;
+    }
