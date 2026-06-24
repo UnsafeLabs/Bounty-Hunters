@@ -1,0 +1,5 @@
+{
+  "contributor": "vincent1566",
+  "generation_context": "The dependency injection system in fastapi/fastapi/dependencies/utils.py does not support dependency caching within a single request scope, causing the same dependency to be resolved multiple times per request. Fix: Add use_cache parameter to Depends function, store resolved dependency results in request state when use_cache=True, return cached values for subsequent calls, cache key based on dependency function identity, when use_cache=False always resolve fresh.",
+  "completed_at": "2026-06-24T13:00:00Z"
+}
