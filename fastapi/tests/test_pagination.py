@@ -374,6 +374,64 @@ class TestEdgeCases:
         resp = client.get("/items", params={"page": 1, "page_size": 101})
         assert resp.status_code == 422
 
+    def test_total_exact_multiple_of_page_size(self):
+        """When total == page_size * page, has_next should be False."""
+        app = FastAPI()
+        paginator = Paginator()
+        # 20 items, page_size=10 → exactly 2 pages
+        items = [Item(id=i, name=f"item-{i}") for i in range(1, 21)]
+
+        @app.get("/items")
+        async def list_items(
+            pagination: PaginationParams = Depends(paginator.paginate_offset),
+        ):
+            page_items = items[pagination.skip : pagination.skip + pagination.limit]
+            return paginator.offset_response(page_items, total=20, params=pagination)
+
+        client = TestClient(app)
+
+        # Last page: page=2, page_size=10, total=20
+        resp = client.get("/items", params={"page": 2, "page_size": 10})
+        data = resp.json()
+        assert data["total"] == 20
+        assert data["total_pages"] == 2
+        assert data["has_next"] is False
+        assert data["has_previous"] is True
+        assert len(data["items"]) == 10
+
+        # First page should have has_next=True
+        resp1 = client.get("/items", params={"page": 1, "page_size": 10})
+        data1 = resp1.json()
+        assert data1["has_next"] is True
+        assert data1["has_previous"] is False
+
+
+class TestPaginatorValidation:
+    def test_default_page_size_zero_raises(self):
+        with pytest.raises(ValueError, match="default_page_size must be >= 1"):
+            Paginator(default_page_size=0)
+
+    def test_default_page_size_negative_raises(self):
+        with pytest.raises(ValueError, match="default_page_size must be >= 1"):
+            Paginator(default_page_size=-5)
+
+    def test_max_page_size_zero_raises(self):
+        with pytest.raises(ValueError, match="max_page_size must be >= 1"):
+            Paginator(max_page_size=0)
+
+    def test_max_page_size_negative_raises(self):
+        with pytest.raises(ValueError, match="max_page_size must be >= 1"):
+            Paginator(max_page_size=-1)
+
+    def test_default_exceeds_max_raises(self):
+        with pytest.raises(ValueError, match="must not exceed"):
+            Paginator(default_page_size=50, max_page_size=10)
+
+    def test_valid_custom_values(self):
+        p = Paginator(default_page_size=5, max_page_size=50)
+        assert p.default_page_size == 5
+        assert p.max_page_size == 50
+
 
 # ---------------------------------------------------------------------------
 # Module-level convenience functions

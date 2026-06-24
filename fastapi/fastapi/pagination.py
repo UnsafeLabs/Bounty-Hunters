@@ -139,6 +139,17 @@ class Paginator:
         default_page_size: int = 20,
         max_page_size: int = 100,
     ) -> None:
+        if default_page_size < 1:
+            raise ValueError(
+                f"default_page_size must be >= 1, got {default_page_size}"
+            )
+        if max_page_size < 1:
+            raise ValueError(f"max_page_size must be >= 1, got {max_page_size}")
+        if default_page_size > max_page_size:
+            raise ValueError(
+                f"default_page_size ({default_page_size}) must not exceed "
+                f"max_page_size ({max_page_size})"
+            )
         self.default_page_size = default_page_size
         self.max_page_size = max_page_size
 
@@ -156,7 +167,7 @@ class Paginator:
         effective_page_size = (
             page_size if page_size is not None else self.default_page_size
         )
-        clamped_page_size = min(effective_page_size, self.max_page_size)
+        clamped_page_size = max(1, min(effective_page_size, self.max_page_size))
         return PaginationParams(page=max(1, page), page_size=clamped_page_size)
 
     def paginate_cursor(
@@ -176,7 +187,7 @@ class Paginator:
         effective_page_size = (
             page_size if page_size is not None else self.default_page_size
         )
-        clamped_page_size = min(effective_page_size, self.max_page_size)
+        clamped_page_size = max(1, min(effective_page_size, self.max_page_size))
         return CursorPaginationParams(cursor=cursor, page_size=clamped_page_size)
 
     @staticmethod
