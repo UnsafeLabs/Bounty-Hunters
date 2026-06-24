@@ -1,10 +1,12 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 
 import * as AcpAgent from "../../src/agent.ts";
+import * as AcpError from "../../src/errors.ts";
 
 if (process.env.ACP_MOCK_MALFORMED_OUTPUT === "1") {
   process.stdout.write("{not-json}\n");
@@ -17,8 +19,13 @@ if (process.env.ACP_MOCK_EXIT_IMMEDIATELY_CODE !== undefined) {
 
 const sessionId = "mock-session-1";
 
+// When set, the agent treats the session as expired until it observes a
+// (re-)authenticate call, letting tests exercise the client's token refresh.
+const requireReauth = process.env.ACP_MOCK_AUTH_EXPIRE === "1";
+
 const program = Effect.gen(function* () {
   const agent = yield* AcpAgent.AcpAgent;
+  const authenticated = yield* Ref.make(false);
 
   yield* agent.handleInitialize(() =>
     Effect.succeed({
@@ -35,7 +42,7 @@ const program = Effect.gen(function* () {
     }),
   );
 
-  yield* agent.handleAuthenticate(() => Effect.succeed({}));
+  yield* agent.handleAuthenticate(() => Ref.set(authenticated, true).pipe(Effect.as({})));
   yield* agent.handleLogout(() => Effect.succeed({}));
   yield* agent.handleCreateSession(() =>
     Effect.succeed({
@@ -56,6 +63,15 @@ const program = Effect.gen(function* () {
 
   yield* agent.handlePrompt(() =>
     Effect.gen(function* () {
+      if (requireReauth) {
+        if (!(yield* Ref.get(authenticated))) {
+          return yield* Effect.fail(AcpError.AcpRequestError.authRequired("Session expired"));
+        }
+        return {
+          stopReason: "end_turn" as const,
+        };
+      }
+
       yield* agent.client.requestPermission({
         sessionId,
         options: [

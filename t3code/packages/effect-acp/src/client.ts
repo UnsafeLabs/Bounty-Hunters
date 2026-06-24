@@ -21,11 +21,21 @@ import {
   runHandler,
 } from "./_internal/shared.ts";
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
+import * as AuthRefresh from "./_internal/authRefresh.ts";
+
+export type { AcpAuthRefreshOptions } from "./_internal/authRefresh.ts";
 
 export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  /**
+   * Enables automatic token refresh: when an agent request fails because the
+   * session expired (`-32000`), the client re-authenticates once and retries the
+   * request, coalescing concurrent refreshes onto a single re-authentication.
+   * When omitted, requests are issued unchanged.
+   */
+  readonly authRefresh?: AuthRefresh.AcpAuthRefreshOptions;
 }
 
 type AcpClientRaw = {
@@ -456,6 +466,23 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     generateRequestId: () => nextRpcRequestId++ as never,
   }).pipe(Effect.provideService(RpcClient.Protocol, transport.clientProtocol));
 
+  const authRefresh = options.authRefresh
+    ? yield* AuthRefresh.make(options.authRefresh, (payload) =>
+        callRpc(rpc[AGENT_METHODS.authenticate](payload)),
+      )
+    : undefined;
+
+  const sessionIdOf = (payload: unknown): AcpSchema.SessionId | undefined =>
+    typeof payload === "object" && payload !== null && "sessionId" in payload
+      ? (payload as { readonly sessionId?: AcpSchema.SessionId }).sessionId
+      : undefined;
+
+  const withAuthRefresh = <A>(
+    payload: unknown,
+    request: Effect.Effect<A, AcpError.AcpError>,
+  ): Effect.Effect<A, AcpError.AcpError> =>
+    authRefresh ? authRefresh.wrap(sessionIdOf(payload), request) : request;
+
   return AcpClient.of({
     raw: {
       notifications: transport.incoming,
@@ -466,16 +493,24 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
       initialize: (payload) => callRpc(rpc[AGENT_METHODS.initialize](payload)),
       authenticate: (payload) => callRpc(rpc[AGENT_METHODS.authenticate](payload)),
       logout: (payload) => callRpc(rpc[AGENT_METHODS.logout](payload)),
-      createSession: (payload) => callRpc(rpc[AGENT_METHODS.session_new](payload)),
-      loadSession: (payload) => callRpc(rpc[AGENT_METHODS.session_load](payload)),
-      listSessions: (payload) => callRpc(rpc[AGENT_METHODS.session_list](payload)),
-      forkSession: (payload) => callRpc(rpc[AGENT_METHODS.session_fork](payload)),
-      resumeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_resume](payload)),
-      closeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_close](payload)),
-      setSessionModel: (payload) => callRpc(rpc[AGENT_METHODS.session_set_model](payload)),
+      createSession: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_new](payload))),
+      loadSession: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_load](payload))),
+      listSessions: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_list](payload))),
+      forkSession: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_fork](payload))),
+      resumeSession: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_resume](payload))),
+      closeSession: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_close](payload))),
+      setSessionModel: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_set_model](payload))),
       setSessionConfigOption: (payload) =>
-        callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)),
-      prompt: (payload) => callRpc(rpc[AGENT_METHODS.session_prompt](payload)),
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_set_config_option](payload))),
+      prompt: (payload) =>
+        withAuthRefresh(payload, callRpc(rpc[AGENT_METHODS.session_prompt](payload))),
       cancel: (payload) => transport.notify(AGENT_METHODS.session_cancel, payload),
     },
     handleRequestPermission: (handler) =>

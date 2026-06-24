@@ -375,6 +375,51 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
     }),
   );
 
+  it.effect("re-authenticates and retries a prompt after the session expires", () =>
+    Effect.gen(function* () {
+      const expiredSessions = yield* Ref.make<Array<string | undefined>>([]);
+      const handle = yield* makeHandle({ ACP_MOCK_AUTH_EXPIRE: "1" });
+      const scope = yield* Scope.make();
+      const acpLayer = AcpClient.layerChildProcess(handle, {
+        authRefresh: {
+          authenticate: { methodId: "cursor_login" },
+          onSessionExpired: (sessionId) =>
+            Ref.update(expiredSessions, (current) => [...current, sessionId]),
+        },
+      });
+      const context = yield* Layer.buildWithScope(acpLayer, scope);
+
+      const prompt = yield* Effect.gen(function* () {
+        const acp = yield* AcpClient.AcpClient;
+
+        yield* acp.agent.initialize({
+          protocolVersion: 1,
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+          },
+          clientInfo: {
+            name: "effect-acp-test",
+            version: "0.0.0",
+          },
+        });
+
+        const session = yield* acp.agent.createSession({
+          cwd: process.cwd(),
+          mcpServers: [],
+        });
+
+        return yield* acp.agent.prompt({
+          sessionId: session.sessionId,
+          prompt: [{ type: "text", text: "hello" }],
+        });
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+
+      assert.equal(prompt.stopReason, "end_turn");
+      assert.deepEqual(yield* Ref.get(expiredSessions), ["mock-session-1"]);
+    }),
+  );
+
   it.effect("uses distinct ids for RPC calls and extension requests", () =>
     Effect.gen(function* () {
       const { stdio, input, output } = yield* makeInMemoryStdio();
