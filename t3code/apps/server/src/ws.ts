@@ -50,6 +50,7 @@ import {
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
+import { ProviderCache } from "./services/ProviderCache.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
@@ -170,6 +171,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
       const providerRegistry = yield* ProviderRegistry;
+      const providerCache = yield* ProviderCache;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -572,7 +574,18 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
 
       const loadServerConfig = Effect.gen(function* () {
         const keybindingsConfig = yield* keybindings.loadConfigState;
-        const providers = yield* providerRegistry.getProviders;
+        // Serve each provider's model list from the TTL cache. The registry
+        // snapshot supplies the non-model config; the model list — the part the
+        // cache exists to memoize — comes from ProviderCache.getModels, falling
+        // back to the snapshot's own models if the cache lookup fails.
+        const providers = yield* Effect.forEach(
+          yield* providerRegistry.getProviders,
+          (provider) =>
+            providerCache.getModels(provider.instanceId).pipe(
+              Effect.map((models) => ({ ...provider, models })),
+              Effect.catchAll(() => Effect.succeed(provider)),
+            ),
+        );
         const settings = redactServerSettingsForClient(yield* serverSettings.getSettings);
         const environment = yield* serverEnvironment.getDescriptor;
         const auth = yield* serverAuth.getDescriptor();

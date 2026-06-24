@@ -30,6 +30,7 @@ import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { ProviderCache } from "../../services/ProviderCache.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -181,6 +182,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
+  const providerCache = yield* ProviderCache;
   const gitWorkflow = yield* GitWorkflowService;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
@@ -445,7 +447,7 @@ const make = Effect.gen(function* () {
     if (existingSessionThreadId) {
       const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
       const cwdChanged = effectiveCwd !== activeSession?.cwd;
-      const sessionModelSwitch = (yield* providerService.getCapabilities(desiredInstanceId))
+      const sessionModelSwitch = (yield* providerCache.getCapabilities(desiredInstanceId))
         .sessionModelSwitch;
       const modelChanged =
         requestedModelSelection !== undefined &&
@@ -550,7 +552,7 @@ const make = Effect.gen(function* () {
               method: "thread.turn.start",
               detail: `Active provider session '${activeSession.threadId}' is missing a provider instance id.`,
             })
-          : (yield* providerService.getCapabilities(activeSession.providerInstanceId))
+          : (yield* providerCache.getCapabilities(activeSession.providerInstanceId))
               .sessionModelSwitch;
     const requestedModelSelection =
       input.modelSelection ?? threadModelSelections.get(input.threadId) ?? thread.modelSelection;

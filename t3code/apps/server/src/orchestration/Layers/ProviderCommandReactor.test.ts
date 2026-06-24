@@ -40,6 +40,7 @@ import {
   ProviderService,
   type ProviderServiceShape,
 } from "../../provider/Services/ProviderService.ts";
+import { ProviderCache, type ProviderCacheShape } from "../../services/ProviderCache.ts";
 import { TextGeneration, type TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
@@ -319,6 +320,19 @@ describe("ProviderCommandReactor", () => {
       },
     };
 
+    // The reactor reads provider capabilities through ProviderCache; mirror the
+    // service stub's capability so existing model-switch assertions still hold.
+    const providerCache: ProviderCacheShape = {
+      getModels: () => unsupported(),
+      getCapabilities: (_instanceId) =>
+        Effect.succeed({
+          sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
+        }),
+      invalidateProvider: () => Effect.void,
+      invalidateAll: Effect.void,
+      stats: Effect.succeed({ hits: 0, misses: 0 }),
+    };
+
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
@@ -335,6 +349,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
+      Layer.provideMerge(Layer.succeed(ProviderCache, providerCache)),
       Layer.provideMerge(
         Layer.mock(GitWorkflowService)({
           renameBranch,
