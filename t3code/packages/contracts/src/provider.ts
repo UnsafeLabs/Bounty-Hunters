@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import * as Either from "effect/Either";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ApprovalRequestId,
@@ -22,12 +23,84 @@ import {
   RuntimeMode,
 } from "./orchestration.ts";
 import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
+  "closed",
+]);
 
-const ProviderSessionStatus = Schema.Literals([
-  "connecting",
-  "ready",
-  "running",
-  "error",
+// ProviderConfigError tagged error type
+export class ProviderConfigError {
+  readonly _tag = "ProviderConfigError";
+  constructor(
+    public readonly field: string,
+    public readonly invalidValue: unknown,
+    public readonly expectedFormat: string,
+    public readonly message: string
+  ) {}
+}
+
+// API key validation: non-empty, at least 10 characters
+const ApiKeySchema = Schema.String.pipe(
+  Schema.minLength(10, {
+    message: () => "API key must be at least 10 characters long",
+  }),
+  Schema.pattern(/^\S+$/, {
+    message: () => "API key cannot contain whitespace",
+  })
+);
+
+// HTTPS URL validation
+const HttpsUrlSchema = Schema.String.pipe(
+  Schema.pattern(/^https:\/\/.+/, {
+    message: () => "URL must use HTTPS protocol",
+  }),
+  Schema.pattern(/^https:\/\/[a-zA-Z0-9][-a-zA-Z0-9]*[a-zA-Z0-9]?(\.[a-zA-Z0-9][-a-zA-Z0-9]*[a-zA-Z0-9]?)*\.[a-zA-Z]{2,}(\/.*)?$/, {
+    message: () => "URL must have a valid hostname",
+  })
+);
+
+// Provider configuration schema with runtime validation
+export const ProviderConfig = Schema.Struct({
+  apiKey: ApiKeySchema,
+  endpoint: HttpsUrlSchema,
+});
+export type ProviderConfig = typeof ProviderConfig.Type;
+
+// Validate a single field and return errors
+function validateField<T>(
+  name: string,
+  value: unknown,
+  schema: Schema.Schema<T, any>
+): Either.Either<readonly ProviderConfigError[], T> {
+  const result = Schema.decodeUnknownEither(schema)(value);
+  if (Either.isLeft(result)) {
+    Immutab
+    return Either.left([
+      new ProviderConfigError(
+        name,
+        value,
+        "valid format",
+        String(result.left)
+      ),
+    ]);
+  }
+  return Either.right(result.right);
+}
+
+// Validate provider config and return all errors at once
+export function validateProviderConfig(
+  config: unknown
+): Either.Either<readonly ProviderConfigError[], ProviderConfig> {
+  const decoded = Schema.decodeUnknownEither(ProviderConfig)(config);
+  if (Either.isLeft(decoded)) {
+    // Return the decode error as a single error for now
+    // Effect Schema's decode already accumulates errors
+    return Either.left([new ProviderConfigError("config", config, "valid provider config", String(decoded.left))]);
+  }
+  return Either.right(decoded.right);
+}
+
+export const ProviderSession = Schema.Struct({
+  provider: ProviderDriverKind,
+  // Optional during the driver/instance migration. Once every producer
   "closed",
 ]);
 
