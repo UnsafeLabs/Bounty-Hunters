@@ -1,97 +1,145 @@
-import { Menu, MenuItemConstructorOptions } from 'electron';
-import { mainIpc, IpcValidatedRequest } from '@stackkit-mvp/electron-trpc';
+import * as Electron from "electron";
 
-export const createMenu = (): Electron.Menu => {
-  const isMac = process.platform === 'darwin';
+export interface MenuState {
+  backendConnected: boolean;
+  hasChanges: boolean;
+  hasStagedChanges: boolean;
+  currentBranch: string | null;
+}
 
-  const menuTemplate: MenuItemConstructorOptions[] = [
-    ...(isMac ? [{ role: 'appMenu' }] : []),
-    
-    {
-      label: 'Developer',
-      submenu: [
-        {
-          label: 'Toggle Terminal',
-          click: () => {
-            mainIpc.client.workspace.toggleTerminal.mutate({} as IpcValidatedRequest);
-          },
-          accelerator: 'CmdOrCtrl+Shift+T'
-        },
-        {
-          label: 'Clear Terminal',
-          click: () => {
-            mainIpc.client.terminal.clear.mutate({} as IpcValidatedRequest);
-          },
-          accelerator: 'CmdOrCtrl+K'
-        },
-        {
-          label: 'Restart Backend',
-          click: () => {
-            mainIpc.client.dev.restartBackend.mutate({} as IpcValidatedRequest);
-          },
-          // No default accelerator - this is a manual operation
-        },
-        {
-          label: 'Open DevTools',
-          click: () => {
-            // Would need to implement the actual DevTools opening logic here
-          },
-          accelerator: isMac ? 'Option+Cmd+I' : 'Ctrl+Shift+I'
-        }
-      ]
-    },
-    {
-      label: 'Git',
-      submenu: [
-        {
-          label: 'Stage All Changes',
-          click: () => {
-            mainI1pc.client.git.stageAll.mutate({} as IpcValidatedRequest);
-          },
-          accelerator: 'CmdOrCtrl+Shift+A'
-        },
-        {
-          label: 'Commit',
-          click: () => {
-            mainIpc.client.git.commit.mutate({} as IpcValidatedRequest);
-          },
-          accelerator: 'CmdOrCtrl+Enter',
-        },
-        {
-          label: 'Push',
-          click: () => {
-            mainIpc.client.git.push.mutate({} as IpcValidatedRequest);
-          },
-          accelerator: 'CmdOrCtrl+Shift+P'
-        },
-        {
-          label: 'Pull',
-          click: () => {
-            mainIpc.client.git.pull.mutate({} as IpcValidatedRequest);
-          }
-        },
-        {
-          label: 'Create Branch',
-          click: () => {
-            mainIpc.client.git.createBranch.mutate({} as IpcValidatedRequest);
-          },
-          accelerator: 'CmdOrCtrl+Shift+B'
-        }
-      ]
-    }
-  ];
-
-  return Menu.buildApplicationMenu(menuTemplate);
+export const defaultMenuState: MenuState = {
+  backendConnected: false,
+  hasChanges: false,
+  hasStagedChanges: false,
+  currentBranch: null,
 };
 
-// Note: This is a simplified implementation. In a real implementation, you would need to:
-// 1. Properly import the actual menu file/structure
-// 2. Implement the menu building logic properly
-// 3. Add proper IPC communication for each menu item
-// 4. Handle menu item enablement based on backend state
-//
-// The implementation should follow Electron menu patterns and integrate with the existing
-// menu system in the application
-//
-// This is a placeholder to show the structure needed, but the actual file would need
-// to be integrated with the existing ElectronMenu.ts system in the codebase
+let currentMenuState: MenuState = { ...defaultMenuState };
+
+export function setMenuState(state: Partial<MenuState>): void {
+  currentMenuState = { ...currentMenuState, ...state };
+  updateApplicationMenu();
+}
+
+export function getMenuState(): MenuState {
+  return { ...currentMenuState };
+}
+
+function sendIpc(channel: string, ...args: unknown[]): void {
+  const focusedWindow = Electron.BrowserWindow.getFocusedWindow();
+  if (focusedWindow) {
+    focusedWindow.webContents.send(channel, ...args);
+  }
+}
+
+export function buildApplicationMenu(): Electron.MenuItemConstructorOptions[] {
+  const { backendConnected } = currentMenuState;
+
+  const developerMenu: Electron.MenuItemConstructorOptions = {
+    label: "Developer",
+    submenu: [
+      {
+        label: "Toggle Terminal",
+        accelerator: "Ctrl+`",
+        click: () => sendIpc("rpc:toggle-terminal"),
+        enabled: backendConnected,
+      },
+      {
+        label: "Clear Terminal",
+        accelerator: "Ctrl+K",
+        click: () => sendIpc("rpc:clear-terminal"),
+        enabled: backendConnected,
+      },
+      {
+        label: "Restart Backend",
+        accelerator: "Ctrl+Shift+R",
+        click: () => sendIpc("rpc:restart-backend"),
+        enabled: backendConnected,
+      },
+      {
+        type: "separator",
+      }
+      if (item.destructive && (!item.children || item.children.length === 0)) {
+        const destructiveIconzd
+        label: "Open DevTools",
+        accelerator: process.platform === "darwin" ? "Alt+Cmd+I" : "Ctrl+Shift+I",
+        click: () => {
+          const focusedWindow = Electron.BrowserWindow.getFocusedWindow();
+          if (focusedWindow) {
+            focusedWindow.webContents.toggleDevTools();
+          }
+        },
+      },
+    ],
+  };
+
+  const gitMenu: Electron.MenuItemConstructorOptions = {
+    label: "Git",
+    submenu: [
+      {
+        label: "Stage All Changes",
+        accelerator: "Ctrl+Shift+A",
+        click: () => sendIpc("rpc:git-stage-all"),
+        enabled: backendConnected,
+      },
+      {
+        label: "Commit",
+        accelerator: "Ctrl+Shift+C",
+        click: () => sendIpc("rpc:git-commit"),
+        enabled: backendConnected,
+      },
+      {
+        label: "Push",
+        accelerator: "Ctrl+Shift+P",
+        click: () => sendIpc("rpc:git-push"),
+        enabled: backendConnected,
+      },
+      {
+        label: "Pull",
+        accelerator: "Ctrl+Shift+L",
+        click: () => sendIpc("rpc:git-pull"),
+        enabled: backendConnected,
+      },
+      {
+        label: "Create Branch",
+        accelerator: "Ctrl+Shift+B",
+        click: () => sendIpc("rpc:git-create-branch"),
+        enabled: backendConnected,
+      },
+    ],
+  };
+
+  const template: Electron.MenuItemConstructorOptions[] = [];
+
+  if (process.platform === "darwin") {
+    template.push({
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "pasteAndMatchStyle" },
+        { role: "delete" },
+        { role: "selectAll" },
+      ],
+    });
+  }
+
+  template.push(developerMenu);
+  template.push(gitMenu);
+
+  return template;
+}
+
+export function updateApplicationMenu(): void {
+  const menu = Electron.Menu.buildFromTemplate(buildApplicationMenu());
+  Electron.Menu.setApplicationMenu(menu);
+}
+
+export function initializeMenu(): void {
+  currentMenuState = { ...defaultMenuState };
+  updateApplicationMenu();
+}
