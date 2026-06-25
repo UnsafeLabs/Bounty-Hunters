@@ -1079,4 +1079,17 @@ describe("OrchestrationEngine", () => {
 
     await system.dispose();
   });
+
+  it("exposes an empty interrupted-command resume query and a no-op resume when nothing is pending", async () => {
+    const system = await createOrchestrationSystem();
+    const { engine } = system;
+
+    expect(await system.run(engine.interruptedCommandCheckpoints)).toEqual([]);
+    expect(await system.run(engine.resumeInterruptedCommands)).toEqual({
+      resumed: [],
+      remaining: [],
+    });
+
+    await system.dispose();
+  });
 });

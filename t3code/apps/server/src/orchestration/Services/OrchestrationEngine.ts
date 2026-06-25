@@ -10,11 +10,12 @@
  *
  * @module OrchestrationEngineService
  */
-import type { OrchestrationCommand, OrchestrationEvent } from "@t3tools/contracts";
+import type { CommandId, OrchestrationCommand, OrchestrationEvent } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 
+import type { InterruptedCommandCheckpoint } from "../commandCheckpoint.ts";
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
 
@@ -51,6 +52,28 @@ export interface OrchestrationEngineShape {
    * This is a hot runtime stream (new events only), not a historical replay.
    */
   readonly streamDomainEvents: Stream.Stream<OrchestrationEvent>;
+
+  /**
+   * Resume query: list commands whose processing fiber was interrupted before
+   * completion, with the partial state captured at interruption time.
+   *
+   * A command appears here after its in-flight processing was interrupted (e.g.
+   * shutdown or supervised cancellation) and disappears once it is successfully
+   * resumed or otherwise re-dispatched.
+   */
+  readonly interruptedCommandCheckpoints: Effect.Effect<
+    ReadonlyArray<InterruptedCommandCheckpoint>
+  >;
+
+  /**
+   * Re-dispatch every checkpointed interrupted command, oldest-first. Replay is
+   * idempotent via command receipts. Returns the command ids that completed and
+   * those still pending (re-dispatch failed and the checkpoint was retained).
+   */
+  readonly resumeInterruptedCommands: Effect.Effect<{
+    readonly resumed: ReadonlyArray<CommandId>;
+    readonly remaining: ReadonlyArray<CommandId>;
+  }>;
 }
 
 /**

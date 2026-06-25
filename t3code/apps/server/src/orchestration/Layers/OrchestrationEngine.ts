@@ -1,4 +1,5 @@
 import type {
+  CommandId,
   OrchestrationEvent,
   OrchestrationReadModel,
   ProjectId,
@@ -36,6 +37,10 @@ import {
   type OrchestrationDispatchError,
   type OrchestrationProjectorDecodeError,
 } from "../Errors.ts";
+import {
+  makeInMemoryOrchestrationCommandCheckpointStore,
+  recordCommandInterruptCheckpoint,
+} from "../commandCheckpoint.ts";
 import { decideOrchestrationCommand } from "../decider.ts";
 import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
@@ -87,6 +92,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+  const commandCheckpointStore = yield* makeInMemoryOrchestrationCommandCheckpointStore;
 
   const projectEventsOntoReadModel = (
     baseReadModel: OrchestrationReadModel,
@@ -107,6 +113,13 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     const baseMetricAttributes = {
       commandType: envelope.command.type,
       aggregateKind: aggregateRef.aggregateKind,
+    } as const;
+    const checkpointDescriptor = {
+      commandId: envelope.command.commandId,
+      command: envelope.command,
+      aggregateKind: aggregateRef.aggregateKind,
+      aggregateId: aggregateRef.aggregateId,
+      snapshotSequence: dispatchStartSequence,
     } as const;
     const reconcileReadModelAfterDispatchFailure = Effect.gen(function* () {
       const persistedEvents = yield* Stream.runCollect(
@@ -216,7 +229,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           }
         }
         return { sequence: committedCommand.lastSequence };
-      }).pipe(Effect.withSpan(`orchestration.command.${envelope.command.type}`)),
+      }).pipe(
+        Effect.withSpan(`orchestration.command.${envelope.command.type}`),
+        Effect.onInterrupt(() =>
+          recordCommandInterruptCheckpoint(commandCheckpointStore, checkpointDescriptor),
+        ),
+      ),
     ).pipe(
       Effect.flatMap((exit) =>
         Effect.gen(function* () {
@@ -244,6 +262,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
           if (Exit.isSuccess(exit)) {
+            yield* commandCheckpointStore.remove(envelope.command.commandId);
             yield* Deferred.succeed(envelope.result, exit.value);
             return;
           }
@@ -307,9 +326,38 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       return yield* Deferred.await(result);
     });
 
+  const interruptedCommandCheckpoints: OrchestrationEngineShape["interruptedCommandCheckpoints"] =
+    commandCheckpointStore.list;
+
+  const resumeInterruptedCommands: OrchestrationEngineShape["resumeInterruptedCommands"] =
+    Effect.gen(function* () {
+      const pending = yield* commandCheckpointStore.list;
+      const resumed: CommandId[] = [];
+      const remaining: CommandId[] = [];
+      for (const checkpoint of pending) {
+        // Re-dispatch is idempotent via command receipts; a successful replay
+        // clears its checkpoint in the success branch of `processEnvelope`.
+        const exit = yield* Effect.exit(dispatch(checkpoint.command));
+        if (Exit.isSuccess(exit)) {
+          resumed.push(checkpoint.commandId);
+        } else {
+          remaining.push(checkpoint.commandId);
+        }
+      }
+      yield* Effect.logInfo("resumed interrupted orchestration commands").pipe(
+        Effect.annotateLogs({
+          resumedCount: resumed.length,
+          remainingCount: remaining.length,
+        }),
+      );
+      return { resumed, remaining };
+    });
+
   return {
     readEvents,
     dispatch,
+    interruptedCommandCheckpoints,
+    resumeInterruptedCommands,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
     // each independently receive all domain events.
