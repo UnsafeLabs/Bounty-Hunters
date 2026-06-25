@@ -1,7 +1,8 @@
-/**
- * Provider-instance contracts.
- *
- * Splits the historical "provider kind" concept into two:
+import * as Schema from "effect/Schema";
+import * as Either from "effect/Either";
+import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+
+export const ProviderInstanceId = Schema.String.pipe(Schema.brand("ProviderInstanceId"));
  *
  *   - `ProviderDriverKind` is the implementation kind selector (e.g. codex,
  *     claudeAgent, a fork's `ollama`, …). It picks which driver package
@@ -11,9 +12,65 @@
  *     Threads, sessions, runtime events, and persisted bindings reference
  *     instance ids — never driver kinds — so a user can configure multiple
  *     instances of the same driver (e.g. `codex_personal` + `codex_work`),
- *     each with independent driver-specific configuration.
- *
- * Forward/backward compatibility invariant
+  "custom",
+]);
+export type ProviderDriverKind = typeof ProviderDriverKind.Type;
+
+// ProviderConfigError tagged error type
+export class ProviderConfigError {
+  readonly _tag = "ProviderConfigError";
+  constructor(
+    public readonly field: string,
+    public readonly invalidValue: unknown,
+    public readonly expectedFormat: string,
+    public readonly message: string
+  ) {}
+}
+
+// API key validation: non-empty, at least 10 characters, no whitespace
+const ApiKeySchema = Schema.String.pipe(
+  Schema.minLength(10, {
+    message: () => "API key must be at least 10 characters long",
+  }),
+  Schema.pattern(/^\S+$/, {
+    message: () => "API key cannot contain whitespace",
+  })
+);
+
+// HTTPS URL validation with proper hostname
+const HttpsUrlSchema = Schema.String.pipe(
+  Schema.pattern(/^https:\/\/.+/, {
+    message: () => "URL must use HTTPS protocol. HTTP URLs are not allowed for security reasons.",
+  }),
+  Schema.pattern(/^https:\/\/[a-zA-Z0-9][-a-zA-Z0-9]*[a-zA-Z0-9]?(\.[a-zA-Z0-9][-a-zA-Z0-9]*[a-zA-Z0-9]?)*\.[a-zA-Z]{2,}(\/.*)?$/, {
+    message: () => "URL must have a valid hostname",
+  })
+);
+
+// Provider instance configuration with runtime validation
+export const ProviderInstanceConfig = Schema.Struct({
+  apiKey: ApiKeySchema,
+  endpoint: HttpsUrlSchema,
+});
+export type ProviderInstanceConfig = typeof ProviderInstanceConfig.Type;
+
+// Validate provider instance config and return all errors at once
+export function validateProviderConfig(
+  config: unknown
+): Either.Either<readonly ProviderConfigError[], ProviderInstanceConfig> {
+  const decoded = Schema.decodeUnknownEither(ProviderInstanceConfig)(config);
+  if (Either.isLeft(decoded)) {
+    return Either.left([
+      new ProviderConfigError(
+        "config",
+        config,
+        "valid provider instance config",
+        String(decoded.left)
+      ),
+    ]);
+  }
+  return Either.right(decoded.right);
+}
  * ----------------------------------------
  * `ProviderDriverKind` is intentionally an **open** branded slug, not a closed
  * literal union. The server hosts forks, ships in PRs that add drivers, and
