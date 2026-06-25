@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract YieldVault {
+/**
+ * @title YieldVault
+ * @dev A simple yield vault that distributes rewards over a fixed period.
     IERC20 public rewardToken;
-    IERC20 public stakingToken;
-
-    uint256 public rewardRate;
-    uint256 public periodFinish;
-    uint256 public lastUpdateTime;
-    uint256 public rewardPerTokenStored;
-    uint256 public totalSupply;
+ * Users deposit tokens, earn rewards proportional to their share and time,
+ * and can withdraw their deposits plus claimed rewards.
+ */
+contract YieldVault is Ownable {
+    // ERC20-like state for the underlying staked token
+    string public name = "YieldVault Token";
+    string public symbol = "YVLT";
 
     mapping(address => uint256) public balanceOf;
     mapping(address => uint256) public userRewardPerTokenPaid;
@@ -32,63 +34,101 @@ contract YieldVault {
     // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
-        return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
-        );
-    }
+    uint256 public rewardRate;
+    uint256 public lastUpdateTime;
+    uint256 public rewardPerTokenStored;
+    
+    // Precision multiplier for reward rate calculations
+    uint256 public constant PRECISION = 1e18;
 
-    // BUG: Uses uncapped rewardPerToken
+    // User reward tracking
+    mapping(address => uint256) public userRewardPerTokenPaid;
     function earned(address account) public view returns (uint256) {
-        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
-    }
+
+    // Events
+    event RewardAdded(uint256 reward);
+    event RewardNotified(uint256 reward, uint256 duration, uint256 rewardRate);
+    
+    address public distributor;
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
         if (account != address(0)) {
             rewards[account] = earned(account);
-            userRewardPerTokenPaid[account] = rewardPerTokenStored;
-        }
+        userRewardPerTokenPaid[account] = rewardPerTokenStored;
+        _;
+    }
+    
+    modifier onlyDistributor() {
+        require(msg.sender == distributor, "YieldVault: caller is not the distributor");
         _;
     }
 
-    function deposit(uint256 amount) external updateReward(msg.sender) {
+    constructor(address _stakingToken) {
+        stakingToken = _stakingToken;
         require(amount > 0, "Cannot deposit 0");
-        totalSupply += amount;
-        balanceOf[msg.sender] += amount;
-        stakingToken.transferFrom(msg.sender, address(this), amount);
-        emit Deposited(msg.sender, amount);
+        periodFinish = 0;
+        rewardRate = 0;
+        lastUpdateTime = 0;
+        distributor = msg.sender;
+    }
+    
+    function setDistributor(address _distributor) external onlyOwner {
+        distributor = _distributor;
     }
 
+    /**
     function withdraw(uint256 amount) external updateReward(msg.sender) {
-        require(amount > 0, "Cannot withdraw 0");
-        totalSupply -= amount;
-        balanceOf[msg.sender] -= amount;
-        stakingToken.transfer(msg.sender, amount);
-        emit Withdrawn(msg.sender, amount);
-    }
-
-    function claimReward() external updateReward(msg.sender) {
-        uint256 reward = rewards[msg.sender];
-        if (reward > 0) {
-            rewards[msg.sender] = 0;
-            rewardToken.transfer(msg.sender, reward);
-            emit RewardPaid(msg.sender, reward);
+     * It updates rewardPerTokenStored based on elapsed time and total supply.
+     */
+    function rewardPerToken() public view returns (uint256) {
+        if (totalSupply == 0 || lastUpdateTime >= periodFinish) {
+            return rewardPerTokenStored;
         }
+        
+        uint256 timeElapsed = block.timestamp > periodFinish ? periodFinish - lastUpdateTime : block.timestamp - lastUpdateTime;
+        
+        if (timeElapsed == 0) {
+            return rewardPerTokenStored;
+        }
+        
+        return rewardPerTokenStored + ((timeElapsed * rewardRate * PRECISION) / totalSupply);
+    }
+    
+    /**
+     * @dev Calculates the earned rewards for an account.
+     */
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
-    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+        return
+            ((balanceOf[account] *
+                (rewardPerToken() - userRewardPerTokenPaid[account])) /
+                PRECISION) + rewards[account];
+    }
+
+    // Staking functions
+}
+     * @param _duration Duration of the new reward period in seconds.
+     * Requirements: only callable by authorized distributor.
+     */
+    function notifyRewardAmount(uint256 _reward, uint256 _duration) external onlyDistributor {
+        require(_duration > 0, "Duration must be > 0");
+        require(_reward > 0, "Reward must be > 0");
+
+        if (block.timestamp >= periodFinish) {
+            rewardRate = (_reward * PRECISION) / _duration;
+        } else {
+            uint256 remaining = periodFinish - block.timestamp;
+            uint256 leftover = (remaining * rewardRate) / PRECISION;
+            uint256 newRewardRate = ((_reward * PRECISION) + leftover) / _duration;
+            rewardRate = newRewardRate;
+            require(
+                _reward > leftover,
+                "New reward must cover remaining period"
+        }
+
         lastUpdateTime = block.timestamp;
-        periodFinish = block.timestamp + duration;
+ rewardingPeriod = _duration;
+        emit RewardAdded(_reward);
     }
 }
-    
-    function getReward() public nonReentrant updateReward(msg.sender) {
-        uint256 reward = rewards[msg.sender];
-        if (reward > 0) {
-            rewards[msg.sender] = 0;
-            rewardToken.transfer(msg.sender, reward);
-            emit RewardPaid(msg.sender, reward);
