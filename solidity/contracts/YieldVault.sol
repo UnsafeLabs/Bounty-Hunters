@@ -19,6 +19,11 @@ contract YieldVault {
 
     address public rewardDistributor;
 
+    // rewardRate is stored scaled by PRECISION so that the truncation in
+    // `reward / duration` no longer silently discards reward dust. The extra
+    // factor is divided out again in `earned` (i.e. at withdrawal time).
+    uint256 private constant PRECISION = 1e18;
+
     event Deposited(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
@@ -29,22 +34,33 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    modifier onlyRewardDistributor() {
+        require(msg.sender == rewardDistributor, "Not authorized");
+        _;
+    }
+
+    // Caps accrual at periodFinish so no rewards accrue once the period has ended.
+    function lastTimeRewardApplicable() public view returns (uint256) {
+        return block.timestamp < periodFinish ? block.timestamp : periodFinish;
+    }
+
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * PRECISION / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
     function earned(address account) public view returns (uint256) {
-        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
+        // rewardPerToken carries PRECISION (accumulator) and rewardRate carries a
+        // second PRECISION; both are divided out here so the truncated reward dust
+        // is only realised at withdrawal, keeping the error well under 0.01%.
+        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / PRECISION / PRECISION + rewards[account];
     }
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        lastUpdateTime = lastTimeRewardApplicable();
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -77,10 +93,13 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
-    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+    function notifyRewardAmount(uint256 reward, uint256 duration)
+        external
+        onlyRewardDistributor
+        updateReward(address(0))
+    {
+        require(duration > 0, "Duration is zero");
+        rewardRate = reward * PRECISION / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
     }
