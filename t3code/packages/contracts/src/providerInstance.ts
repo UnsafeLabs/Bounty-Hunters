@@ -34,6 +34,7 @@
  * @module providerInstance
  */
 import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -49,6 +50,9 @@ const PROVIDER_SLUG_MAX_CHARS = 64;
 const PROVIDER_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 const ENVIRONMENT_VARIABLE_NAME_MAX_CHARS = 128;
 const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+const API_KEY_FIELD_PATTERN = /(^|_)(api[_-]?key|token|secret)$|apiKey$/i;
+const URL_FIELD_PATTERN = /(^|_)(url|endpoint)$|Url$|Endpoint$/i;
+const API_KEY_VALUE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{7,}$/;
 
 const slugSchema = TrimmedNonEmptyString.check(
   Schema.isMaxLength(PROVIDER_SLUG_MAX_CHARS),
@@ -137,6 +141,94 @@ export type ProviderInstanceConfig = typeof ProviderInstanceConfig.Type;
  */
 export const ProviderInstanceConfigMap = Schema.Record(ProviderInstanceId, ProviderInstanceConfig);
 export type ProviderInstanceConfigMap = typeof ProviderInstanceConfigMap.Type;
+
+export type ProviderConfigValidationIssue = {
+  path: string;
+  message: string;
+};
+
+export class ProviderConfigError extends Schema.TaggedErrorClass<ProviderConfigError>()(
+  "ProviderConfigError",
+  {
+    errors: Schema.Array(
+      Schema.Struct({
+        path: Schema.String,
+        message: Schema.String,
+      }),
+    ),
+  },
+) {}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const formatPath = (path: ReadonlyArray<string>): string => path.join(".");
+
+const collectProviderConfigIssues = (
+  value: unknown,
+  path: ReadonlyArray<string>,
+  errors: Array<ProviderConfigValidationIssue>,
+): void => {
+  if (!isRecord(value)) {
+    return;
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    const entryPath = [...path, key];
+    if (isRecord(entry)) {
+      collectProviderConfigIssues(entry, entryPath, errors);
+      continue;
+    }
+
+    if (API_KEY_FIELD_PATTERN.test(key)) {
+      if (typeof entry !== "string" || !API_KEY_VALUE_PATTERN.test(entry.trim())) {
+        errors.push({
+          path: formatPath(entryPath),
+          message: "API key must be a non-empty token-like string.",
+        });
+      }
+      continue;
+    }
+
+    if (URL_FIELD_PATTERN.test(key)) {
+      if (typeof entry !== "string") {
+        errors.push({
+          path: formatPath(entryPath),
+          message: "URL must be a string.",
+        });
+        continue;
+      }
+
+      try {
+        const parsed = new URL(entry);
+        if (parsed.protocol !== "https:") {
+          errors.push({
+            path: formatPath(entryPath),
+            message: "URL must use https.",
+          });
+        }
+      } catch {
+        errors.push({
+          path: formatPath(entryPath),
+          message: "URL must be a valid absolute URL.",
+        });
+      }
+    }
+  }
+};
+
+export const validateProviderConfig = <Config extends unknown>(
+  config: Config,
+): Result.Result<Config, ProviderConfigError> => {
+  const errors: Array<ProviderConfigValidationIssue> = [];
+  collectProviderConfigIssues(config, [], errors);
+
+  if (errors.length > 0) {
+    return Result.fail(new ProviderConfigError({ errors }));
+  }
+
+  return Result.succeed(config);
+};
 
 /**
  * Construct the canonical `ProviderInstanceId` used as a back-compat default

@@ -7,6 +7,7 @@ import {
   ProviderInstanceConfigMap,
   ProviderInstanceId,
   ProviderInstanceRef,
+  validateProviderConfig,
 } from "./providerInstance.ts";
 
 const decodeProviderDriverKind = Schema.decodeUnknownSync(ProviderDriverKind);
@@ -204,5 +205,92 @@ describe("ProviderInstanceConfigMap", () => {
         "1codex": { driver: "codex" },
       }),
     ).toThrow();
+  });
+});
+
+describe("validateProviderConfig", () => {
+  it("accepts valid API keys and HTTPS URLs", () => {
+    const config = {
+      apiKey: "sk-valid_key_123",
+      baseUrl: "https://api.example.com/v1",
+    };
+
+    const result = validateProviderConfig(config);
+
+    expect(result._tag).toBe("Success");
+    if (result._tag === "Success") {
+      expect(result.success).toBe(config);
+    }
+  });
+
+  it("rejects an empty API key", () => {
+    const result = validateProviderConfig({ apiKey: "" });
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("ProviderConfigError");
+      expect(result.failure.errors).toEqual([
+        {
+          path: "apiKey",
+          message: "API key must be a non-empty token-like string.",
+        },
+      ]);
+    }
+  });
+
+  it("rejects HTTP URLs", () => {
+    const result = validateProviderConfig({ baseUrl: "http://api.example.com" });
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.errors).toEqual([
+        {
+          path: "baseUrl",
+          message: "URL must use https.",
+        },
+      ]);
+    }
+  });
+
+  it("rejects malformed URLs", () => {
+    const result = validateProviderConfig({ endpoint: "not a url" });
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.errors).toEqual([
+        {
+          path: "endpoint",
+          message: "URL must be a valid absolute URL.",
+        },
+      ]);
+    }
+  });
+
+  it("returns all validation errors", () => {
+    const result = validateProviderConfig({
+      apiKey: "",
+      nested: {
+        endpoint: "http://api.example.com",
+        callbackUrl: "not a url",
+      },
+    });
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.errors).toEqual([
+        {
+          path: "apiKey",
+          message: "API key must be a non-empty token-like string.",
+        },
+        {
+          path: "nested.endpoint",
+          message: "URL must use https.",
+        },
+        {
+          path: "nested.callbackUrl",
+          message: "URL must be a valid absolute URL.",
+        },
+      ]);
+    }
   });
 });
