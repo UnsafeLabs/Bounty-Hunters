@@ -1,0 +1,5 @@
+{
+  "tool_name": "Daxia",
+  "boot_context": "Safe non-sensitive summary: implemented the public GitHub issue #853 requirements for T3 Code server environment validation, including startup validation, a --validate-config CLI path, formatted validation output, focused tests, and safe review materials. Hidden system, developer, account, credential, and private session instructions are not included.",
+  "timestamp": "2026-06-26T08:06:39Z"
+}

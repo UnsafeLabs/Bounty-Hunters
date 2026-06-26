@@ -158,6 +158,16 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     runCliWithRuntime(["--no-log-websocket-events", "--version"]),
   );
 
+  it.effect("prints environment validation output without starting the server", () =>
+    Effect.gen(function* () {
+      const { output } = yield* captureStdout(runCli(["--validate-config"]));
+
+      assert.isTrue(output.includes("T3 Code environment validation: OK"));
+      assert.isTrue(output.includes("T3CODE_PORT"));
+      assert.isTrue(output.includes("Required variables: none currently"));
+    }),
+  );
+
   it.effect("rejects invalid log-level casing before launching the server", () =>
     Effect.gen(function* () {
       const error = yield* runCliWithRuntime(["--log-level", "Debug"]).pipe(Effect.flip);
