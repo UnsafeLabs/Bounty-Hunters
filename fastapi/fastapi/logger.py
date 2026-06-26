@@ -1,3 +1,17 @@
 import logging
+import contextvars
+from fastapi.middleware.request_id import request_id_var
+
+
+class RequestIDFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = request_id_var.get("")
+        return True
+
 
 logger = logging.getLogger("fastapi")
+logger.addFilter(RequestIDFilter())
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(request_id)s] %(name)s: %(message)s"))
+logger.addHandler(_handler)
