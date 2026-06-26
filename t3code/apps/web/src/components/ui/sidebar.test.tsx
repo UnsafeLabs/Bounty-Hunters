@@ -2,10 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  Sidebar,
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuSubButton,
   SidebarProvider,
+  SidebarRail,
 } from "./sidebar";
 
 function renderSidebarButton(className?: string) {
@@ -49,5 +51,22 @@ describe("sidebar interactive cursors", () => {
 
     expect(html).toContain('data-slot="sidebar-menu-sub-button"');
     expect(html).toContain("cursor-pointer");
+  });
+});
+
+describe("sidebar resize affordance", () => {
+  it("shows resize copy when a default reset width is configured", () => {
+    const html = renderToStaticMarkup(
+      <SidebarProvider>
+        <Sidebar resizable={{ defaultWidth: 280 }}>
+          <SidebarRail />
+        </Sidebar>
+      </SidebarProvider>,
+    );
+
+    expect(html).toContain('data-slot="sidebar-rail"');
+    expect(html).toContain('aria-label="Resize Sidebar"');
+    expect(html).toContain("Double-click to reset");
+    expect(html).toContain("hover:after:bg-sidebar-border");
   });
 });
