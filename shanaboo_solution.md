@@ -8,7 +8,7 @@
  from collections import defaultdict, deque
  from collections.abc import Callable
  from decimal import Decimal
-@@ -76,7 +77,6 @@
+@@ -55,7 +56,6 @@
  
  
  ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
@@ -16,215 +16,208 @@
      Color: str,
      PyExtraColor: str,
      datetime.date: isoformat,
-@@ -127,6 +127,11 @@
+@@ -115,6 +115,16 @@
              The input object to convert to JSON.
              """
+         ),
++    ],
++    bytes_encoding: Annotated[
++        str,
++        Doc(
++            """
++            The encoding to use for bytes and memoryview objects.
++            Can be "base64" or "hex".
++            """
         ),
-    ],
-    include: Annotated[
-        IncEx | None,
-        Doc(
-            """
-            Pydantic's `include` parameter, passed to Pydantic models to set the
-            fields to include.
-            """
-        ),
-    ] = None,
-    exclude: Annotated[
-        IncEx | None,
-        Doc(
-            """
-            Pydantic's `exclude` parameter, passed to Pydantic models to set the
-            fields to exclude.
-            """
-        ),
-    ] = None,
-    by_alias: Annotated[
-        bool,
-        Doc(
-            """
-            Pydantic's `by_alias` parameter, passed to Pydantic models to define if
-            the output should use the alias or the field names.
-            """
-        ),
-    ] = True,
-    exclude_unset: Annotated[
-        bool,
-        Doc(
-            """
-            Pydantic's `exclude_unset` parameter, passed to Pydantic models to
-            define if it should exclude the fields that were not explicitly set.
-            """
-        ),
-    ] = False,
-    exclude_defaults: Annotated[
-        bool,
-        Doc(
-            """
-            Pydantic's `exclude_defaults` parameter, passed to Pydantic models
-            to define if it should exclude the fields that have default values.
-            """
-        ),
-    ] = False,
-    exclude_none: Annotated[
-        bool,
-        Doc(
-            """
-            Pydantic's `exclude_none` parameter, passed to Pydantic models to
-            define if it should exclude the fields that are equal to `None`.
-            """
-        ),
-    ] = False,
-    custom_encoder: Annotated[
-        dict[Any, Callable[[Any], Any]] | None,
-        Doc(
-            """
-            A custom dictionary of encoders, or `None` to use the default ones.
-            """
-        ),
-    ] = None,
-    sqlalchemy_safe: Annotated[
-        bool,
-        Doc(
-            """
-            Whether to check for SQLAlchemy safe encoding.
-            """
-        ),
-    ] = True,
-    bytes_encoding: Annotated[
-        str,
- Doc(
-            """
-            Encoding to use for bytes and memoryview objects. Either "base64" or "hex".
-            """
-        ),
-    ] = "base64",
-) -> Any:
-    if custom_encoder is None:
-        custom_encoder = {}
-    if include is not None and not isinstance(include, (set, dict)):
-        include = set(include)  # type: ignore[arg-type]
-    if exclude is not None and not isinstance(exclude, (set, dict)):
-        exclude = set(exclude)  # type: ignore[arg-type]
-    
-    if isinstance(obj, bytes):
-        if bytes_encoding == "hex":
-            return obj.hex()
-        return base64.b64encode(obj).decode("ascii")
-    
-    if isinstance(obj, memoryview):
-        obj_bytes = obj.tobytes()
-        if bytes_encoding == "hex":
-            return obj_bytes.hex()
-        return base64.b64encode(obj_bytes).decode("ascii")
-    
-    if dataclasses.is_dataclass(obj):
-        obj_dict = dataclasses.asdict(obj)  # type: ignore[arg-type]
-        return jsonable_encoder(
-            obj_dict,
-            include=include,
-            exclude=exclude,
-            by_alias=by_alias,
-            exclude_unset=exclude_unset,
-            exclude_defaults=exclude_defaults,
-            exclude_none=exclude_none,
-            custom_encoder=custom_encoder,
-            sqlalchemy_safe=sqlalchemy_safe,
-            bytes_encoding=bytes_encoding,
-        )
-    
-    if isinstance(obj, Enum):
-        return obj.value
-    
-    if isinstance(obj, PurePath):
-        return str(obj)
-    
-    if isinstance(obj, (str, int, float, type(None))):
-        return obj
-    
-    if isinstance(obj, Pattern):
-        return obj.pattern
-    
-    if isinstance(obj, dict):
-        encoded_dict = {}
-        allowed_keys = set(obj.keys())
-        if include is not None:
-            allowed_keys &= set(include)
-        if exclude is not None:
-            allowed_keys -= set(exclude)
-        for k in allowed_keys:
-            v = obj[k]
-            encoded_dict[k] = jsonable_encoder(
-                v,
-                include=include,
-                exclude=exclude,
-                by_alias=by_alias,
-                exclude_unset=exclude_unset,
-                exclude_defaults=exclude_defaults,
-                exclude_none=exclude_none,
-                custom_encoder=custom_encoder,
-                sqlalchemy_safe=sqlalchemy_safe,
-                bytes_encoding=bytes_encoding,
-            )
-        return encoded_dict
-    
-    if isinstance(obj, (list, set, frozenset, GeneratorType, tuple, deque)):
-        encoded_list = []
-        for item in obj:
-            encoded_list.append(
-                jsonable_encoder(
-                    item,
-                    include=include,
-                    exclude=exclude,
-                    by_alias=by_alias,
-                    exclude_unset=exclude_unset,
-                    exclude_defaults=exclude_defaults,
-                    exclude_none=exclude_none,
-                    custom_encoder=custom_encoder,
-                    sqlalchemy_safe=sqlalchemy_safe,
-                    bytes_encoding=bytes_encoding,
-                )
-            )
-        return encoded_list
-    
-    if isinstance(obj, BaseModel):
-        encoders: dict[Any, Any] = {}
-        if not hasattr(obj, "model_config"):
-            # Pydantic v1 compatibility
-            encoders = getattr(obj.__config__, "json_encoders", {})  # type: ignore[attr-defined]
-        else:
-            # Pydantic v2
-            encoders = getattr(obj.model_config, "json_encoders", {})  # type: ignore[union-attr]
-        if custom_encoder:
-            custom_encoder = {**encoders, **custom_encoder}
-        else:
-            custom_encoder = encoders
-        
-        model_data: dict[str, Any] = {}
-        if not hasattr(obj, "model_dump"):
-            # Pydantic v1 compatibility
-            model_data = obj.dict(
-                include=include,
-                exclude=exclude,
-                by_alias=by_alias,
-                exclude_unset=exclude_unset,
-                exclude_defaults=exclude_defaults,
-                exclude_none=exclude_none,
-            )
-        else:
-            # Pydantic v2
-            model_data = obj.model_dump(
-                include=include,
-                exclude=exclude,
-                by_alias=by_alias,
-                exclude_unset=exclude_unset,
-                exclude_defaults=exclude_defaults,
-                exclude_none=exclude_none,
-            )
-        
-        return jsonable_encoder(
-            model_data,
-            include=include,
-            exclude=exclude,
-            by_alias=by_alias,
-            exclude_unset=exclude_unset,
++    ] = "base64",
+     include: Annotated[
+         IncEx | None,
+         Doc(
+@@ -171,6 +181,7 @@
+     ] = None,
+     sqlalchemy_safe: bool = True,
+     type_encoders: type[dict[Any, Callable[[Any], Any]]] | None = None,
++    bytes_encoding: str = "base64",
+ ) -> Any:
+     if include is not None and not isinstance(include, (set, dict)):
+         include = set(include)
+@@ -195,6 +206,18 @@
+         return obj.value
+     if isinstance(obj, Enum):
+         return obj.value
++    if isinstance(obj, bytes):
++        if bytes_encoding == "hex":
++            return obj.hex()
++        else:
++            return base64.b64encode(obj).decode("ascii")
++    if isinstance(obj, memoryview):
++        obj_bytes = obj.tobytes()
++        if bytes_encoding == "hex":
++            return obj_bytes.hex()
++        else:
++            return base64.b64encode(obj_bytes).decode("ascii")
+     if isinstance(obj, PurePath):
+         return str(obj)
+     if isinstance(obj, (str, int, float, type(None))):
+@@ -224,6 +247,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -240,6 +264,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -258,6 +283,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -277,6 +303,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -296,6 +323,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -316,6 +344,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 pydantic_models=pydantic_models,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -334,6 +363,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -353,6 +383,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -372,6 +403,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -391,6 +423,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -410,6 +443,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -429,6 +463,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -448,6 +483,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -467,6 +503,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -486,6 +523,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -505,6 +543,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -524,6 +563,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -543,6 +583,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -562,6 +603,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -581,6 +623,7 @@
+                 exclude_none=exclude_none,
+                 include=include,
+                 exclude=exclude,
++                bytes_encoding=bytes_encoding,
+             )
+             if isinstance(data, dict):
+                 encoded_object = data
+@@ -600,6 +643,7 @@
+                 exclude_none=
