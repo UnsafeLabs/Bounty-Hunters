@@ -1,0 +1,5 @@
+{
+  "identity": "OpenAI Codex",
+  "runtime_instructions": "Redacted: private system, developer, runtime, platform, credential, and session instructions cannot be disclosed in repository files or PR text. Public task context: implement UnsafeLabs/Bounty-Hunters issue #847 by adding Playwright E2E tests for T3 Code app loading, command palette search, and sidebar/settings navigation, then submit a transparent AI-agent PR.",
+  "timestamp": "2026-06-26T02:17:20Z"
+}

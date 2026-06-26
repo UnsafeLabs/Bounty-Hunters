@@ -10,6 +10,7 @@
         "@types/node": "catalog:",
         "oxfmt": "^0.40.0",
         "oxlint": "^1.63.0",
+        "playwright": "^1.58.2",
         "turbo": "^2.3.3",
         "typescript": "catalog:",
         "vitest": "catalog:",
