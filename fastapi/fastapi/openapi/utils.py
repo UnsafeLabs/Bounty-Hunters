@@ -33,6 +33,7 @@ from fastapi.types import ModelNameMap
 from fastapi.utils import (
     deep_dict_update,
     generate_operation_id_for_path,
+    generate_unique_id_for_method,
     is_body_allowed_for_status_code,
 )
 from pydantic import BaseModel
@@ -233,6 +234,23 @@ def generate_operation_summary(*, route: routing.APIRoute, method: str) -> str:
     return route.name.replace("_", " ").title()
 
 
+def _get_operation_id_for_route(*, route: routing.APIRoute, method: str) -> str:
+    if route.operation_id:
+        return route.operation_id
+    if isinstance(route.generate_unique_id_function, DefaultPlaceholder):
+        return generate_unique_id_for_method(route, method)
+    return route.unique_id
+
+
+def _append_operation_id_suffix(*, operation_id: str, operation_ids: set[str]) -> str:
+    suffix = 2
+    suffixed_operation_id = f"{operation_id}_{suffix}"
+    while suffixed_operation_id in operation_ids:
+        suffix += 1
+        suffixed_operation_id = f"{operation_id}_{suffix}"
+    return suffixed_operation_id
+
+
 def get_openapi_operation_metadata(
     *, route: routing.APIRoute, method: str, operation_ids: set[str]
 ) -> dict[str, Any]:
@@ -242,7 +260,7 @@ def get_openapi_operation_metadata(
     operation["summary"] = generate_operation_summary(route=route, method=method)
     if route.description:
         operation["description"] = route.description
-    operation_id = route.operation_id or route.unique_id
+    operation_id = _get_operation_id_for_route(route=route, method=method)
     if operation_id in operation_ids:
         endpoint_name = getattr(route.endpoint, "__name__", "<unnamed_endpoint>")
         message = f"Duplicate Operation ID {operation_id} for function {endpoint_name}"
@@ -250,6 +268,10 @@ def get_openapi_operation_metadata(
         if file_name:
             message += f" at {file_name}"
         warnings.warn(message, stacklevel=1)
+        if not route.operation_id:
+            operation_id = _append_operation_id_suffix(
+                operation_id=operation_id, operation_ids=operation_ids
+            )
     operation_ids.add(operation_id)
     operation["operationId"] = operation_id
     if route.deprecated:
