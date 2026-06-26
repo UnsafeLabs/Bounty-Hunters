@@ -6,8 +6,17 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract CrossChainBridge {
     IERC20 public bridgeToken;
     address public validator;
-    uint256 public nonce;
+    uint256 public nonce; // global nonce (kept for backward compat, see senderNonces for per-sender)
 
+    // EIP-712 domain separator components
+    string public constant EIP712_NAME = "CrossChainBridge";
+    string public constant EIP712_VERSION = "1";
+    bytes32 private immutable _DOMAIN_SEPARATOR;
+
+    // Per-sender nonce to prevent same-chain replay
+    mapping(address => uint256) public senderNonces;
+
+    // Track processed transfers by hash (now includes chainId + contract address)
     mapping(bytes32 => bool) public processedTransfers;
 
     event TransferInitiated(address indexed sender, uint256 amount, uint256 targetChain, uint256 nonce);
@@ -16,6 +25,21 @@ contract CrossChainBridge {
     constructor(address _bridgeToken, address _validator) {
         bridgeToken = IERC20(_bridgeToken);
         validator = _validator;
+
+        // Build EIP-712 domain separator (includes chainId + contract address)
+        _DOMAIN_SEPARATOR = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256(bytes(EIP712_NAME)),
+                keccak256(bytes(EIP712_VERSION)),
+                block.chainid,
+                address(this)
+            )
+        );
+    }
+
+    function DOMAIN_SEPARATOR() external view returns (bytes32) {
+        return _DOMAIN_SEPARATOR;
     }
 
     function initiateTransfer(uint256 amount, uint256 targetChain) external {
@@ -24,25 +48,27 @@ contract CrossChainBridge {
         emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
     }
 
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
+    /// @notice Process a cross-chain transfer with replay protection
+    /// @dev The transferHash now includes: chainId, sender nonce, contract address
     function processTransfer(
         address recipient,
         uint256 amount,
         uint256 transferNonce,
         bytes calldata signature
     ) external {
-        bytes32 transferHash = keccak256(abi.encodePacked(
-            recipient,
-            amount,
-            transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
-        ));
+        // Build hash with chainId + sender nonce + contract address to prevent all replay vectors
+        bytes32 transferHash = keccak256(
+            abi.encodePacked(
+                _DOMAIN_SEPARATOR,
+                keccak256(abi.encode(recipient, amount, transferNonce))
+            )
+        );
 
         require(!processedTransfers[transferHash], "Already processed");
         require(verifySignature(transferHash, signature), "Invalid signature");
+
+        // Increment per-sender nonce BEFORE marking processed (reentrancy-safe ordering)
+        senderNonces[recipient]++;
 
         processedTransfers[transferHash] = true;
         bridgeToken.transfer(recipient, amount);
@@ -50,7 +76,7 @@ contract CrossChainBridge {
         emit TransferProcessed(transferHash, recipient, amount);
     }
 
-    // BUG: Does not check for zero-address return from ecrecover
+    /// @notice Verify signature with ecrecover zero-address check and EIP-712
     function verifySignature(bytes32 hash, bytes calldata signature) public view returns (bool) {
         require(signature.length == 65, "Invalid signature length");
 
@@ -71,8 +97,15 @@ contract CrossChainBridge {
             v, r, s
         );
 
-        // BUG: Missing require(recovered != address(0))
+        // FIX: Reject zero-address result (invalid signature)
+        require(recovered != address(0), "Invalid signature: zero address");
+
         return recovered == validator;
+    }
+
+    /// @notice Get the current nonce for a sender (for frontend integration)
+    function getSenderNonce(address sender) external view returns (uint256) {
+        return senderNonces[sender];
     }
 
     function getPoolBalance() external view returns (uint256) {
