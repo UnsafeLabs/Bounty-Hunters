@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+pragma solidity ^0.8.20;
 
 contract MultiSigWallet {
     address[] public owners;
+    uint256 public required;
     uint256 public transactionCount;
-    uint public required;
 
-    mapping(uint => Transaction) public transactions;
-    // confirmations[txId][owner] => block number when confirmed (0 if not confirmed)
-    mapping(uint => mapping(address => uint)) public confirmations;
-    mapping(uint => bool) public executed;
-
-    uint public transactionCount;
+    struct Transaction {
+        address to;
+        uint256 value;
+        bytes data;
+        bool executed;
+    }
 
     mapping(uint256 => Transaction) public transactions;
     mapping(uint256 => mapping(address => bool)) public confirmations;
@@ -39,105 +37,55 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    }
-
-    function submitTransaction(address to, uint value, bytes memory data) public onlyOwner returns (uint txId) {
-        require(to != address(0), "MultiSigWallet: zero address");
-        if (to.code.length > 0) {
-            // target is a contract, additional validation could be added here
-        }
-        txId = transactionCount;
+    // BUG: No zero-address validation on `to`
+    function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
+            value: value,
             data: data,
             executed: false
         });
         emit Submitted(txId);
         return txId;
     }
+
+    function confirmTransaction(uint256 txId) external onlyOwner {
+        require(!transactions[txId].executed, "Already executed");
+        require(!confirmations[txId][msg.sender], "Already confirmed");
+        confirmations[txId][msg.sender] = true;
+        emit Confirmed(txId, msg.sender);
     }
 
-    function confirmTransaction(uint txId) public onlyOwner txExists(txId) notExecuted(txId) notConfirmed(txId) {
-        confirmations[txId][msg.sender] = block.number;
-        emit Confirmation(msg.sender, txId);
+    function revokeConfirmation(uint256 txId) external onlyOwner {
+        require(!transactions[txId].executed, "Already executed");
+        require(confirmations[txId][msg.sender], "Not confirmed");
+        confirmations[txId][msg.sender] = false;
+        emit Revoked(txId, msg.sender);
     }
 
-
-        require(confirmations[txId][msg.sender], "MultiSigWallet: not confirmed");
-        uint count = 0;
-        for (uint i = 0; i < owners.length; i++) {
-            if (confirmations[txId][owners[i]] > 0) {
-                count++;
-            }
-        }
     function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
         for (uint256 i = 0; i < owners.length; i++) {
-            revert("MultiSigWallet: cannot revoke, would drop below required");
+            if (confirmations[txId][owners[i]]) count++;
         }
-
-        confirmations[txId][msg.sender] = 0;
-        emit Revocation(msg.sender, txId);
     }
 
+    // BUG: No reentrancy protection — confirmation can be revoked during callback
+    // BUG: No block-level confirmation snapshot
+    function executeTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        uint count = 0;
-        for (uint i = 0; i < owners.length; i++) {
-            if (confirmations[txId][owners[i]] > 0) {
-                count++;
-            }
-        }
+        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+
+        Transaction storage txn = transactions[txId];
+        txn.executed = true;
+
+        (bool success, ) = txn.to.call{value: txn.value}(txn.data);
         require(success, "Execution failed");
 
+        emit Executed(txId);
     }
 
-    function isConfirmedAtBlock(uint txId, uint blockNum) public view txExists(tx) returns (bool) {
-        uint count = 0;
-        for (uint i = 0; i < owners.length; i++) {
-            uint confBlock = confirmations[txId][owners[i]];
-            if (confBlock > 0 && confBlock <= blockNum) {
-                count++;
-            }
-        }
-        return count >= required;
-    }
-
-    function getOwners() public view returns (address[] memory) {
-        return owners;
-    }
-        return transactions[txId];
-    }
-
-    function executeTransaction(uint txId) public onlyOwner txExists(txId) notExecuted(txId) nonReentrant {
-        require(getConfirmationCount(txId) >= required, "MultiSigWallet: not enough confirmations");
-
-        // Re-check confirmations after external call to prevent revocation during callback
-        (bool success, ) = transactions[txId].to.call{value: transactions[txId].value}(transactions[txId].data);
-        require(success, "MultiSigWallet: execution failed");
-
-        // Post-execution check: ensure confirmations weren't revoked during the call
-        require(getConfirmationCount(txId) >= required, "MultiSigWallet: confirmations revoked during execution");
-
-        executed[txId] = true;
-        emit Execution(txId);
-    }
-
-    function addOwner(address owner) public onlyOwner {
-    function removeOwner(address owner) public onlyOwner {
-        isOwner[owner] = false;
-    }
-
-    uint256 private constant _NOT_ENTERED = 1;
-    uint256 private constant _ENTERED = 2;
-    uint256 private _status;
-
-    modifier nonReentrant() {
-        require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
-        _status = _ENTERED;
-        _;
-        _status = _NOT_ENTERED;
-    }
-
-    constructor() {
-        _status = _NOT_ENTERED;
-    }
+    receive() external payable {}
+// This is a replacement showing the full corrected file structure
+// The actual diff above contains the changes
 }
