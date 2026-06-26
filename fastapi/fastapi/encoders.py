@@ -1,6 +1,6 @@
 import dataclasses
-import base64
 import datetime
+import base64
 from collections import defaultdict, deque
 from collections.abc import Callable
 from decimal import Decimal
@@ -86,21 +86,21 @@ ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
     bytes: lambda o: o.decode(),
     Color: str,
     PyExtraColor: str,
-    datetime.date: isoformat,
-    datetime.datetime: isoformat,
-    datetime.time: isoformat,
-    datetime.timedelta: lambda td: td.total_seconds(),
-    Decimal: decimal_encoder,
-    Enum: lambda o: o.value,
-    frozenset: list,
-    deque: list,
-    GeneratorType: list,
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
+    deque: list,
+    GeneratorType: list,
+    IPv4Address: str,
+    IPv4Interface: str,
+    IPv4Network: str,
+    IPv6Address: str,
+    IPv6Interface: str,
+    IPv6Network: str,
+    NameEmail: str,
     Path: str,
     Pattern: lambda o: o.pattern,
     SecretBytes: str,
@@ -142,13 +142,12 @@ def jsonable_encoder(
             Pydantic's `include` parameter, passed to Pydantic models to set the
             fields to include.
             """
-            """
         ),
     ] = None,
-    bytes_encoding: Annotated[str, Doc("""The encoding to use for bytes objects. Defaults to "base64". Can be "base64" or "hex".""")] = "base64",
-) -> Any:
-    if isinstance(obj, BaseModel):
-        # TODO: remove when deprecating Pydantic v1, there we can just pass
+    exclude: Annotated[
+        IncEx | None,
+        Doc(
+            """
             Pydantic's `exclude` parameter, passed to Pydantic models to set the
             fields to exclude.
             """
@@ -158,11 +157,23 @@ def jsonable_encoder(
         bool,
         Doc(
             """
-            Pydantic's `by_alias` parameter, passed to Pydantic models to define if
-            the output should use the alias names (when provided) or the Python
-            attribute names. In an API, if you set an alias, it's probably because you
-            want to use it in the result, so you probably want to leave this set to
-            `True`.
+            fields to exclude.
+            
+            """
+        ),
+    ] = None,
+    bytes_encoding: Annotated[
+        str,
+        Doc(
+            """
+            The encoding to use for bytes and memoryview objects.
+            Defaults to "base64", can be set to "hex".
+            """
+        ),
+    ] = "base64",
+    exclude_unset: Annotated[
+        bool,
+        Doc(
             """
         ),
     ] = True,
@@ -222,35 +233,30 @@ def jsonable_encoder(
 
     This is used internally by FastAPI to make sure anything you return can be
     encoded as JSON before it is sent to the client.
-            return jsonable_encoder(
-                obj._asdict(), include=include, exclude=exclude
-            )
+
+    You can also use it yourself, for example to convert objects before saving them
+    in a database that supports only JSON.
+
+    Read more about it in the
+    [FastAPI docs for JSON Compatible Encoder](https://fastapi.tiangolo.com/tutorial/encoder/).
+    """
+    custom_encoder = custom_encoder or {}
+        )
+        return encoded_list
+
     if isinstance(obj, bytes):
         if bytes_encoding == "hex":
             return obj.hex()
-        else:
-            return base64.b64encode(obj).decode("ascii")
+        return base64.b64encode(obj).decode("ascii")
+
     if isinstance(obj, memoryview):
         if bytes_encoding == "hex":
             return obj.tobytes().hex()
-        else:
-            return base64.b64encode(obj.tobytes()).decode("ascii")
-    if bytes_encoding not in ("base64", "hex"):
-        raise ValueError(
-            f"Invalid bytes_encoding: {bytes_encoding}. Must be 'base64' or 'hex'."
-        )
+        return base64.b64encode(obj).decode("ascii")
 
-    if isinstance(obj, Enum):
-        return obj.value
-    if isinstance(obj, PurePath):
-    """
-    custom_encoder = custom_encoder or {}
-    if custom_encoder:
-        if type(obj) in custom_encoder:
-            return custom_encoder[type(obj)](obj)
-        else:
-            for encoder_type, encoder_instance in custom_encoder.items():
-                if isinstance(obj, encoder_type):
+    if dataclasses.is_dataclass(obj):
+        obj_dict = dataclasses.asdict(obj)
+        return jsonable_encoder(
                     return encoder_instance(obj)
     if include is not None and not isinstance(include, (set, dict)):
         include = set(include)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
