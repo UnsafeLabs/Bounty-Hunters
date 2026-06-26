@@ -2,18 +2,17 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-/**
- * @title YieldVault
- * @dev A simple yield vault that distributes rewards over a fixed period.
     IERC20 public rewardToken;
- * Users deposit tokens, earn rewards proportional to their share and time,
- * and can withdraw their deposits plus claimed rewards.
+ * @title YieldVault
+ * @notice A simple yield vault that distributes rewards over a fixed period
  */
-contract YieldVault is Ownable {
-    // ERC20-like state for the underlying staked token
-    string public name = "YieldVault Token";
-    string public symbol = "YVLT";
+contract YieldVault is ReentrancyGuard, Ownable {
+    IERC20 public stakingToken;
+    IERC20 public rewardToken;
+
 
     mapping(address => uint256) public balanceOf;
     mapping(address => uint256) public userRewardPerTokenPaid;
@@ -21,114 +20,104 @@ contract YieldVault is Ownable {
 
     address public rewardDistributor;
 
-    event Deposited(address indexed user, uint256 amount);
-    event Withdrawn(address indexed user, uint256 amount);
-    event RewardPaid(address indexed user, uint256 reward);
-
-    constructor(address _stakingToken, address _rewardToken) {
-        stakingToken = IERC20(_stakingToken);
-        rewardToken = IERC20(_rewardToken);
-        rewardDistributor = msg.sender;
-    }
-
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
-    function rewardPerToken() public view returns (uint256) {
-        if (totalSupply == 0) return rewardPerTokenStored;
     uint256 public rewardRate;
     uint256 public lastUpdateTime;
     uint256 public rewardPerTokenStored;
-    
-    // Precision multiplier for reward rate calculations
     uint256 public constant PRECISION = 1e18;
-
-    // User reward tracking
-    mapping(address => uint256) public userRewardPerTokenPaid;
-    function earned(address account) public view returns (uint256) {
-
-    // Events
-    event RewardAdded(uint256 reward);
-    event RewardNotified(uint256 reward, uint256 duration, uint256 rewardRate);
-    
+    uint256 public scaledRewardRate;
     address public distributor;
 
-    modifier updateReward(address account) {
-        rewardPerTokenStored = rewardPerToken();
-        if (account != address(0)) {
-            rewards[account] = earned(account);
-        userRewardPerTokenPaid[account] = rewardPerTokenStored;
-        _;
-    }
-    
+    mapping(address => uint256) public userRewardPerTokenPaid;
+    mapping(address => uint256) public rewards;
+        rewardToken = IERC20(_rewardToken);
+        rewardDistributor = msg.sender;
+    event Withdrawn(address indexed user, uint256 amount);
+    event RewardPaid(address indexed user, uint256 reward);
+    event RewardAdded(uint256 reward);
+    event DistributorUpdated(address indexed newDistributor);
+
     modifier onlyDistributor() {
-        require(msg.sender == distributor, "YieldVault: caller is not the distributor");
+        require(msg.sender == distributor, "Not authorized distributor");
         _;
     }
 
-    constructor(address _stakingToken) {
-        stakingToken = _stakingToken;
-        require(amount > 0, "Cannot deposit 0");
-        periodFinish = 0;
-        rewardRate = 0;
-        lastUpdateTime = 0;
-        distributor = msg.sender;
-    }
-    
-    function setDistributor(address _distributor) external onlyOwner {
-        distributor = _distributor;
+    constructor(address _stakingToken, address _rewardToken) {
+        stakingToken = IERC20(_stakingToken);
+            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
     }
 
-    /**
-    function withdraw(uint256 amount) external updateReward(msg.sender) {
-     * It updates rewardPerTokenStored based on elapsed time and total supply.
-     */
     function rewardPerToken() public view returns (uint256) {
-        if (totalSupply == 0 || lastUpdateTime >= periodFinish) {
+        if (totalSupply == 0) {
             return rewardPerTokenStored;
         }
-        
-        uint256 timeElapsed = block.timestamp > periodFinish ? periodFinish - lastUpdateTime : block.timestamp - lastUpdateTime;
-        
-        if (timeElapsed == 0) {
+        uint256 timeToUse = block.timestamp;
+        if (timeToUse > periodFinish) {
+            timeToUse = periodFinish;
+        }
+        if (lastUpdateTime >= timeToUse) {
             return rewardPerTokenStored;
         }
-        
-        return rewardPerTokenStored + ((timeElapsed * rewardRate * PRECISION) / totalSupply);
-    }
-    
-    /**
-     * @dev Calculates the earned rewards for an account.
-     */
+        return rewardPerTokenStored + (((timeToUse - lastUpdateTime) * scaledRewardRate) / totalSupply);
     }
 
-        return
-            ((balanceOf[account] *
-                (rewardPerToken() - userRewardPerTokenPaid[account])) /
-                PRECISION) + rewards[account];
+    function earned(address account) public view returns (uint256) {
+    modifier updateReward(address account) {
     }
 
-    // Staking functions
-}
-     * @param _duration Duration of the new reward period in seconds.
-     * Requirements: only callable by authorized distributor.
-     */
-    function notifyRewardAmount(uint256 _reward, uint256 _duration) external onlyDistributor {
-        require(_duration > 0, "Duration must be > 0");
-        require(_reward > 0, "Reward must be > 0");
+    function stake(uint256 amount) external nonReentrant updateReward(msg.sender) {
+        require(amount > 0, "Cannot stake zero");
+        totalSupply += amount;
+        balances[msg.sender] += amount;
+        stakingToken.transferFrom(msg.sender, address(this), amount);
+    }
+    }
 
+    function withdraw(uint256 amount) external nonReentrant updateReward(msg.sender) {
+        require(amount > 0, "Cannot withdraw zero");
+        totalSupply -= amount;
+        balances[msg.sender] -= amount;
+        stakingToken.transfer(msg.sender, amount);
+    }
+
+    function withdraw(uint256 amount) external updateReward(msg.sender) {
+        require(amount > 0, "Cannot withdraw 0");
+        totalSupply -= amount;
+        balanceOf[msg.sender] -= amount;
+        stakingToken.transfer(msg.sender, amount);
+        emit Withdrawn(msg.sender, amount);
+        emit RewardPaid(msg.sender, reward);
+    }
+
+    function setDistributor(address _distributor) external onlyOwner {
+        require(_distributor != address(0), "Invalid distributor");
+        distributor = _distributor;
+        emit DistributorUpdated(_distributor);
+    }
+
+    function notifyRewardAmount(uint256 reward) external onlyDistributor updateReward(address(0)) {
+        require(reward > 0, "Reward must be positive");
+        require(distributor != address(0), "Distributor not set");
+        rewardToken.transferFrom(msg.sender, address(this), reward);
         if (block.timestamp >= periodFinish) {
-            rewardRate = (_reward * PRECISION) / _duration;
+            scaledRewardRate = (reward * PRECISION) / duration;
         } else {
             uint256 remaining = periodFinish - block.timestamp;
-            uint256 leftover = (remaining * rewardRate) / PRECISION;
-            uint256 newRewardRate = ((_reward * PRECISION) + leftover) / _duration;
-            rewardRate = newRewardRate;
-            require(
-                _reward > leftover,
-                "New reward must cover remaining period"
+            uint256 leftover = remaining * scaledRewardRate;
+            scaledRewardRate = ((reward * PRECISION) + leftover) / duration;
         }
-
         lastUpdateTime = block.timestamp;
- rewardingPeriod = _duration;
-        emit RewardAdded(_reward);
+        periodFinish = block.timestamp + duration;
+        emit RewardAdded(reward);
+    }
+
+    function getRewardRate() external view returns (uint256) {
+        return scaledRewardRate;
+    }
+}
+    // BUG: Precision loss in rewardRate calculation
+    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
+        rewardRate = reward / duration;
+        lastUpdateTime = block.timestamp;
+        periodFinish = block.timestamp + duration;
     }
 }
