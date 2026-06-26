@@ -1,7 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as HashMap from "effect/HashMap";
+import * as Hash from "effect/Hash";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
@@ -53,100 +53,121 @@ export class SshPasswordPrompt extends Context.Service<SshPasswordPrompt, SshPas
 
 export interface SshChildEnvironmentOptions {
   readonly interactiveAuth?: boolean;
-  readonly baseEnv?: NodeJS.ProcessEnv;
-  readonly askpassDirectory?: string;
-  readonly authSecret?: string | null;
-  readonly platform?: NodeJS.Platform;
+  return platform === "win32" ? `${trimmed}\\${fileName}` : `${trimmed}/${fileName}`;
 }
+NE
+const SHELL_METACHARACTERS = /[;&|`$(){}[\]<>!#*?\\]/u;
+
+function validateScriptPath(path: string): void {
+  if (path.includes(" ") || path.includes("\t")) {
+    throw new Error("Script path cannot contain spaces");
+  }
+  if (SHELL_METACHARACTERS.test(path)) {
+    throw new Error("Script path contains invalid shell metacharacters");
+  }
+}
+
+export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
+# Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
+# from the renderer's in-app prompt. We never expose a native dialog here - if
+const SSH_ASKPASS_DIR_NAME = "t3code-ssh-askpass";
+
+function joinSshAskpassPath(
+  directory: string,
+printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
+exit 1
+`;
+`;
+
+export const ASKPASS_POSIX_SCRIPT_WITH_TEMP = (tempFile: string) => {
+  validateScriptPath(tempFile);
+  return `#!/bin/sh
+# Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
+# from the renderer's in-app prompt. We never expose a native dialog here - if
+# T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
+T3_TEMP_FILE="${tempFile}"
+trap 'rm -f "$T3_TEMP_FILE"' EXIT INT TERM
+if [ -f "$T3_TEMP_FILE" ]; then
+  cat "$T3_TEMP_FILE"
+  rm -f "$T3_TEMP_FILE"
+  exit 0
+fi
+printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
+exit 1
+`;
+};
+
+export const ASKPASS_WINDOWS_LAUNCHER_SCRIPT = `@echo off\r
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ssh-askpass.ps1" %*\r
+
 export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
 # from the renderer's in-app prompt. We never expose a native dialog here - if
 # T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
-T3_ASKPASS_TEMP_FILE=""
-trap 'rm -f "$T3_ASKPASS_TEMP_FILE"' EXIT INT TERM
-if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
-  printf "%s\\n" "$T3_SSH_AUTH_SECRET"
-  exit 0
-): string {
-exit 1
-`;
-
-// Windows launcher script - unchanged
-export const ASKPASS_WINDOWS_LAUNCHER_SCRIPT = `@echo off\r
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ssh-askpass.ps1" %*\r
-`;
-# from the renderer's in-app prompt. We never expose a native dialog here - if
-export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through ssh-askpass.cmd) when T3 Code re-runs\r
-# ssh with a cached password from the renderer's in-app prompt. We never expose\r
-# a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
+# a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug
 # and we fail loudly.\r
-$secureString = $null\r
 if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  $secureString = ConvertTo-SecureString -String $env:T3_SSH_AUTH_SECRET -AsPlainText -Force\r
-  [Console]::Out.WriteLine([System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString)))\r
-  $secureString = $null\r
+  $secureString = ConvertTo-SecureString $env:T3_SSH_AUTH_SECRET -AsPlainText -Force\r
+  $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString)\r
+  $plainText = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)\r
+  [Console]::Out.WriteLine($plainText)\r
+  [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)\r
   exit 0\r
 }\r
 [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
 exit 1\r
 `;
-
-
-export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through ssh-askpass.cmd) when T3 Code re-runs\r
-# ssh with a cached password from the renderer's in-app prompt. We never expose\r
-# a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
-# and we fail loudly.\r
-if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
-  exit 0\r
-}\r
-[Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
-exit 1\r
-`;
-
-  return platform === "win32" ? `${trimmed}\\${fileName}` : `${trimmed}/${fileName}`;
-}
-
-function validateAskpassPath(path: string): void {
-  // Reject paths with shell metacharacters that could lead to injection
-  const forbiddenPattern = /[;&|`$(){}[\]<>|*?#~!]/u;
-  if (forbiddenPattern.test(path)) {
-    throw new Error(`Invalid askpass path: contains shell metacharacters`);
-  }
-  // Also reject paths with spaces to avoid word splitting issues
-  if (path.includes(" ")) {
-    throw new Error(`Invalid askpass path: contains spaces`);
-  }
-}
-
-const SSH_ASKPASS_DIR_NAME = "t3code-ssh-askpass";
 
 export const getDefaultSshAskpassDirectory = Effect.fn("ssh/auth.getDefaultSshAskpassDirectory")(
-  function* () {
-    const fs = yield* FileSystem.FileSystem;
+
+export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through ssh-askpass.cmd) when T3 Code re-runs\r
+# ssh with a cached password from the renderer's in-app prompt. We never expose\r
+# a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
+# and we fail loudly.\r
+if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
+export const buildSshAskpassHelperDescriptor = Effect.fn(
+  "ssh/auth.buildSshAskpassHelperDescriptor",
+)(function* (input: {
+  readonly tempFile?: string;
+  readonly directory: string;
+  readonly platform?: NodeJS.Platform;
+}): Effect.fn.Return<SshAskpassHelperDescriptor, never, Path.Path> {
+
+  const path = yield* Path.Path;
+  const directory = input.directory;
+
+  validateScriptPath(directory);
+
+  if (platform === "win32") {
+    const powershellPath = joinSshAskpassPath(directory, "ssh-askpass.ps1", platform);
+    return {
   },
 );
 
 export const buildSshAskpassHelperDescriptor = Effect.fn(
   "ssh/auth.buildSshAskpassHelperDescriptor",
 )(function* (input: {
-  readonly directory: string;
-  readonly platform?: NodeJS.Platform;
-}): Effect.fn.Return<SshAskpassHelperDescriptor, never, Path.Path> {
-  const platform = input.platform ?? process.platform;
-  const path = yield* Path.Path;
-  const directory = input.directory;
+    };
+  }
 
-  if (platform === "win32") {
-    const powershellPath = joinSshAskpassPath(directory, "ssh-askpass.ps1", platform);
-  const path = yield* Path.Path;
-  const directory = input.directory;
+  const tempFile = input.tempFile ?? joinSshAskpassPath(directory, "ssh-askpass-secret", platform);
+  validateScriptPath(tempFile);
 
-  validateAskpassPath(directory);
-
-  if (platform === "win32") {
-    const powershellPath = joinSshAskpassPath(directory, "ssh-askpass.ps1", platform);
+  const scriptPath = joinSshAskpassPath(directory, "ssh-askpass", platform);
+  return {
+    launcherPath: scriptPath,
+    files: [
+      { path: scriptPath, contents: ASKPASS_POSIX_SCRIPT_WITH_TEMP(tempFile), mode: 0o700 },
+      ...(input.tempFile ? [{ path: tempFile, contents: "", mode: 0o600 }] : []),
+    ],
+  };
+});
     return {
+      launcherPath: joinSshAskpassPath(directory, "ssh-askpass.cmd", platform),
+      files: [
+        {
+          path: joinSshAskpassPath(directory, "ssh-askpass.cmd", platform),
+          contents: ASKPASS_WINDOWS_LAUNCHER_SCRIPT,
         },
         {
           path: powershellPath,
@@ -157,28 +178,15 @@ export const buildSshAskpassHelperDescriptor = Effect.fn(
   }
 
   return {
-    } as const;
-  }
-
-  // POSIX path
-  const scriptPath = joinSshAskpassPath(directory, "ssh-askpass.sh", platform);
-  validateAskpassPath(scriptPath);
-
-  // Use mktemp with mode 0600 for secure temporary file creation
-  const tempFileCreation = `T3_ASKPASS_TEMP_FILE=$(mktemp -t t3code-ssh-askpass-XXXXXX)
-chmod 0600 "$T3_ASKPASS_TEMP_FILE"
-trap 'rm -f "$T3_ASKPASS_TEMP_FILE"' EXIT INT TERM
-`;
-
-  const posixScript = ASKPASS_POSIX_SCRIPT.replace(
-    'T3_ASKPASS_TEMP_FILE=""',
-    tempFileCreation.trim()
-  );
-
-  return {
-    launcherPath: scriptPath,
-    files: [{ path: scriptPath, contents: posixScript, mode: 0o700 }],
-  } as const;
+    launcherPath: path.join(directory, "ssh-askpass.sh"),
+    files: [
+      {
+        path: path.join(directory, "ssh-askpass.sh"),
+        contents: ASKPASS_POSIX_SCRIPT,
+        mode: 0o700,
+      },
+    ],
+  };
 });
 
 export const ensureSshAskpassHelpers = Effect.fn("ssh/auth.ensureSshAskpassHelpers")(
