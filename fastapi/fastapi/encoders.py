@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import datetime
 from collections import defaultdict, deque
@@ -15,7 +16,7 @@ from ipaddress import (
 from pathlib import Path, PurePath
 from re import Pattern
 from types import GeneratorType
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from annotated_doc import Doc
@@ -82,7 +83,6 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
@@ -124,6 +124,18 @@ def generate_encoders_by_class_tuples(
 
 
 encoders_by_class_tuples = generate_encoders_by_class_tuples(ENCODERS_BY_TYPE)
+
+
+def _encode_bytes(
+    value: bytes | memoryview,
+    bytes_encoding: Literal["base64", "hex"],
+) -> str:
+    raw_value = value.tobytes() if isinstance(value, memoryview) else value
+    if bytes_encoding == "base64":
+        return base64.b64encode(raw_value).decode("ascii")
+    if bytes_encoding == "hex":
+        return raw_value.hex()
+    raise ValueError("bytes_encoding must be 'base64' or 'hex'")
 
 
 def jsonable_encoder(
@@ -215,6 +227,14 @@ def jsonable_encoder(
             """
         ),
     ] = True,
+    bytes_encoding: Annotated[
+        Literal["base64", "hex"],
+        Doc(
+            """
+            The encoding to use for bytes and memoryview values.
+            """
+        ),
+    ] = "base64",
 ) -> Any:
     """
     Convert any object to something that can be encoded in JSON.
@@ -242,7 +262,7 @@ def jsonable_encoder(
         exclude = set(exclude)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
     if isinstance(obj, BaseModel):
         obj_dict = obj.model_dump(
-            mode="json",
+            mode="python",
             include=include,
             exclude=exclude,
             by_alias=by_alias,
@@ -255,6 +275,7 @@ def jsonable_encoder(
             exclude_none=exclude_none,
             exclude_defaults=exclude_defaults,
             sqlalchemy_safe=sqlalchemy_safe,
+            bytes_encoding=bytes_encoding,
         )
     if dataclasses.is_dataclass(obj):
         assert not isinstance(obj, type)
@@ -269,6 +290,7 @@ def jsonable_encoder(
             exclude_none=exclude_none,
             custom_encoder=custom_encoder,
             sqlalchemy_safe=sqlalchemy_safe,
+            bytes_encoding=bytes_encoding,
         )
     if isinstance(obj, Enum):
         return obj.value
@@ -276,6 +298,8 @@ def jsonable_encoder(
         return str(obj)
     if isinstance(obj, (str, int, float, type(None))):
         return obj
+    if isinstance(obj, (bytes, memoryview)):
+        return _encode_bytes(obj, bytes_encoding)
     if isinstance(obj, PydanticUndefinedType):
         return None
     if isinstance(obj, dict):
@@ -302,6 +326,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
                 encoded_value = jsonable_encoder(
                     value,
@@ -310,6 +335,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
                 encoded_dict[encoded_key] = encoded_value
         return encoded_dict
@@ -327,6 +353,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
             )
         return encoded_list
@@ -361,4 +388,5 @@ def jsonable_encoder(
         exclude_none=exclude_none,
         custom_encoder=custom_encoder,
         sqlalchemy_safe=sqlalchemy_safe,
+        bytes_encoding=bytes_encoding,
     )

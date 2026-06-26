@@ -1,0 +1,5 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Redacted: private system, developer, runtime, platform, credential, and session instructions cannot be disclosed in repository files or PR text. Public task context: implement UnsafeLabs/Bounty-Hunters issue #759 by adding jsonable_encoder bytes and memoryview support with base64 and hex encoding options, focused tests, validation, and a transparent AI-agent PR.",
+  "timestamp": "2026-06-26T02:31:20Z"
+}

@@ -1,3 +1,4 @@
+import base64
 import warnings
 from collections import deque
 from dataclasses import dataclass
@@ -9,10 +10,12 @@ from pathlib import PurePath, PurePosixPath, PureWindowsPath
 from typing import TypedDict
 
 import pytest
+from fastapi import FastAPI
 from fastapi._compat import Undefined
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import PydanticV1NotSupportedError
 from pydantic import BaseModel, Field, ValidationError
+from starlette.testclient import TestClient
 
 
 class Person:
@@ -311,6 +314,69 @@ def test_encode_deque_encodes_child_models():
 def test_encode_pydantic_undefined():
     data = {"value": Undefined}
     assert jsonable_encoder(data) == {"value": None}
+
+
+def test_encode_bytes_defaults_to_base64():
+    raw = b"\x00\xfffastapi"
+
+    assert jsonable_encoder(raw) == base64.b64encode(raw).decode("ascii")
+
+
+def test_encode_memoryview_defaults_to_base64():
+    raw = b"memoryview"
+
+    assert jsonable_encoder(memoryview(raw)) == base64.b64encode(raw).decode("ascii")
+
+
+def test_encode_bytes_hex():
+    assert (
+        jsonable_encoder(b"\x00\xfffastapi", bytes_encoding="hex")
+        == "00ff66617374617069"
+    )
+
+
+def test_encode_bytes_nested_structures():
+    data = {
+        "payloads": [b"\x00\xff", memoryview(b"ok")],
+        b"key": {"inner": b"nested"},
+    }
+
+    assert jsonable_encoder(data) == {
+        "payloads": ["AP8=", "b2s="],
+        "a2V5": {"inner": "bmVzdGVk"},
+    }
+    assert jsonable_encoder(data, bytes_encoding="hex") == {
+        "payloads": ["00ff", "6f6b"],
+        "6b6579": {"inner": "6e6573746564"},
+    }
+
+
+def test_encode_model_with_bytes():
+    class ModelWithBytes(BaseModel):
+        data: bytes
+
+    obj = ModelWithBytes(data=b"\x00\xfffastapi")
+
+    assert jsonable_encoder(obj) == {"data": "AP9mYXN0YXBp"}
+    assert jsonable_encoder(obj, bytes_encoding="hex") == {"data": "00ff66617374617069"}
+
+
+def test_encode_bytes_in_json_response():
+    app = FastAPI()
+
+    @app.get("/payload")
+    def read_payload():
+        return {"data": b"\x00\xfffastapi"}
+
+    response = TestClient(app).get("/payload")
+
+    response.raise_for_status()
+    assert response.json() == {"data": "AP9mYXN0YXBp"}
+
+
+def test_encode_invalid_bytes_encoding():
+    with pytest.raises(ValueError, match="bytes_encoding"):
+        jsonable_encoder(b"fastapi", bytes_encoding="utf-8")  # type: ignore[arg-type]
 
 
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
