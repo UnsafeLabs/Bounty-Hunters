@@ -1,6 +1,6 @@
 import dataclasses
-import datetime
 import base64
+import datetime
 from collections import defaultdict, deque
 from collections.abc import Callable
 from decimal import Decimal
@@ -91,16 +91,16 @@ ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
     datetime.time: isoformat,
     datetime.timedelta: lambda td: td.total_seconds(),
     Decimal: decimal_encoder,
+    Enum: lambda o: o.value,
+    frozenset: list,
+    deque: list,
+    GeneratorType: list,
 
 
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
     Color: str,
     PyExtraColor: str,
     datetime.date: isoformat,
-    IPv6Address: str,
-    IPv6Interface: str,
-    IPv6Network: str,
-    NameEmail: str,
     Path: str,
     Pattern: lambda o: o.pattern,
     SecretBytes: str,
@@ -145,10 +145,10 @@ def jsonable_encoder(
             """
         ),
     ] = None,
-    *,
-    exclude: Annotated[
-        IncEx | None,
-        Doc(
+    bytes_encoding: Annotated[str, Doc("""The encoding to use for bytes objects. Defaults to "base64". Can be "base64" or "hex".""")] = "base64",
+) -> Any:
+    if isinstance(obj, BaseModel):
+        # TODO: remove when deprecating Pydantic v1, there we can just pass
             Pydantic's `exclude` parameter, passed to Pydantic models to set the
             fields to exclude.
             """
@@ -176,13 +176,12 @@ def jsonable_encoder(
             """
         ),
     ] = False,
+    exclude_defaults: Annotated[
+        bool,
+        Doc(
             """
-        ),
-    ] = None,
-    bytes_encoding: Annotated[str, Doc("""The encoding to use for bytes objects. Defaults to "base64". Can be "base64" or "hex".""")] = "base64",
-) -> Any:
-    """
-    Convert any object to something that can be encoded in JSON.
+            Pydantic's `exclude_defaults` parameter, passed to Pydantic models to define
+            if it should exclude from the output the fields that had the same default
             value, even when they were explicitly set.
             """
         ),
@@ -194,25 +193,13 @@ def jsonable_encoder(
             Pydantic's `exclude_none` parameter, passed to Pydantic models to define
             if it should exclude from the output any fields that have a `None` value.
             """
-    if isinstance(obj, Enum):
-        return obj.value
-    if isinstance(obj, bytes):
-        if bytes_encoding == "base64":
-            return base64.b64encode(obj).decode("ascii")
-        elif bytes_encoding == "hex":
-            return obj.hex()
-        else:
-            raise ValueError(f"Invalid bytes_encoding: {bytes_encoding}")
-    if isinstance(obj, memoryview):
-        if bytes_encoding == "base64":
-            return base64.b64encode(obj.tobytes()).decode("ascii")
-        elif bytes_encoding == "hex":
-            return obj.tobytes().hex()
-        else:
-            raise ValueError(f"Invalid bytes_encoding: {bytes_encoding}")
-    if isinstance(obj, dict):
-        encoded_dict = {}
-        allowed_keys = set(obj.keys())
+        ),
+    ] = False,
+    custom_encoder: Annotated[
+        dict[Any, Callable[[Any], Any]] | None,
+        Doc(
+            """
+            Pydantic's `custom_encoder` parameter, passed to Pydantic models to define
             a custom encoder.
             """
         ),
@@ -235,12 +222,27 @@ def jsonable_encoder(
 
     This is used internally by FastAPI to make sure anything you return can be
     encoded as JSON before it is sent to the client.
+            return jsonable_encoder(
+                obj._asdict(), include=include, exclude=exclude
+            )
+    if isinstance(obj, bytes):
+        if bytes_encoding == "hex":
+            return obj.hex()
+        else:
+            return base64.b64encode(obj).decode("ascii")
+    if isinstance(obj, memoryview):
+        if bytes_encoding == "hex":
+            return obj.tobytes().hex()
+        else:
+            return base64.b64encode(obj.tobytes()).decode("ascii")
+    if bytes_encoding not in ("base64", "hex"):
+        raise ValueError(
+            f"Invalid bytes_encoding: {bytes_encoding}. Must be 'base64' or 'hex'."
+        )
 
-    You can also use it yourself, for example to convert objects before saving them
-    in a database that supports only JSON.
-
-    Read more about it in the
-    [FastAPI docs for JSON Compatible Encoder](https://fastapi.tiangolo.com/tutorial/encoder/).
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, PurePath):
     """
     custom_encoder = custom_encoder or {}
     if custom_encoder:
