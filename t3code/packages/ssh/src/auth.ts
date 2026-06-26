@@ -59,6 +59,16 @@ export interface SshChildEnvironmentOptions {
 }
 
 const SSH_ASKPASS_DIR_NAME = "t3code-ssh-askpass";
+const POSIX_ASKPASS_PATH_PATTERN = /^[A-Za-z0-9._/=-]+$/u;
+const WINDOWS_ASKPASS_PATH_PATTERN = /^[A-Za-z0-9._:\\/=-]+$/u;
+
+export function validateSshAskpassPath(pathValue: string, platform: NodeJS.Platform): string {
+  const pattern = platform === "win32" ? WINDOWS_ASKPASS_PATH_PATTERN : POSIX_ASKPASS_PATH_PATTERN;
+  if (!pattern.test(pathValue)) {
+    throw new Error(`Unsafe SSH askpass helper path: ${pathValue}`);
+  }
+  return pathValue;
+}
 
 function joinSshAskpassPath(
   directory: string,
@@ -66,7 +76,10 @@ function joinSshAskpassPath(
   platform: NodeJS.Platform,
 ): string {
   const trimmed = directory.replace(/[\\/]+$/u, "");
-  return platform === "win32" ? `${trimmed}\\${fileName}` : `${trimmed}/${fileName}`;
+  return validateSshAskpassPath(
+    platform === "win32" ? `${trimmed}\\${fileName}` : `${trimmed}/${fileName}`,
+    platform,
+  );
 }
 
 export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
@@ -74,7 +87,15 @@ export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # from the renderer's in-app prompt. We never expose a native dialog here - if
 # T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
 if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
-  printf "%s\\n" "$T3_SSH_AUTH_SECRET"
+  umask 077
+  secret_file="$(mktemp "\${TMPDIR:-/tmp}/t3-ssh-askpass.XXXXXX")" || exit 1
+  cleanup() {
+    rm -f "$secret_file"
+  }
+  trap cleanup EXIT INT TERM
+  chmod 600 "$secret_file"
+  printf "%s\\n" "$T3_SSH_AUTH_SECRET" > "$secret_file"
+  cat "$secret_file"
   exit 0
 fi
 printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
@@ -90,7 +111,16 @@ export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through
 # a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
 # and we fail loudly.\r
 if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
+  $secureSecret = ConvertTo-SecureString -String $env:T3_SSH_AUTH_SECRET -AsPlainText -Force\r
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureSecret)\r
+  try {\r
+    [Console]::Out.WriteLine([Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr))\r
+  } finally {\r
+    if ($bstr -ne [IntPtr]::Zero) {\r
+      [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)\r
+    }\r
+    $secureSecret.Dispose()\r
+  }\r
   exit 0\r
 }\r
 [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
@@ -134,10 +164,10 @@ export const buildSshAskpassHelperDescriptor = Effect.fn(
   }
 
   return {
-    launcherPath: path.join(directory, "ssh-askpass.sh"),
+    launcherPath: validateSshAskpassPath(path.join(directory, "ssh-askpass.sh"), platform),
     files: [
       {
-        path: path.join(directory, "ssh-askpass.sh"),
+        path: validateSshAskpassPath(path.join(directory, "ssh-askpass.sh"), platform),
         contents: ASKPASS_POSIX_SCRIPT,
         mode: 0o700,
       },
