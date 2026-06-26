@@ -14,6 +14,8 @@ import {
   modelPickerJumpCommandForIndex,
   modelPickerJumpIndexFromCommand,
   isOpenFavoriteEditorShortcut,
+  isTerminalClipboardCopyShortcut,
+  isTerminalClipboardPasteShortcut,
   isTerminalClearShortcut,
   isTerminalCloseShortcut,
   isTerminalNewShortcut,
@@ -626,6 +628,47 @@ describe("isTerminalClearShortcut", () => {
   it("ignores non-keydown events", () => {
     assert.isFalse(
       isTerminalClearShortcut(event({ type: "keyup", key: "l", ctrlKey: true }), "Linux"),
+    );
+  });
+});
+
+describe("terminal clipboard shortcuts", () => {
+  it("matches platform-specific copy shortcuts", () => {
+    assert.isTrue(isTerminalClipboardCopyShortcut(event({ key: "c", metaKey: true }), "MacIntel"));
+    assert.isTrue(
+      isTerminalClipboardCopyShortcut(event({ key: "c", ctrlKey: true, shiftKey: true }), "Linux"),
+    );
+    assert.isTrue(
+      isTerminalClipboardCopyShortcut(event({ key: "C", ctrlKey: true, shiftKey: true }), "Win32"),
+    );
+  });
+
+  it("does not treat plain Ctrl+C as a clipboard copy shortcut on non-macOS", () => {
+    assert.isFalse(isTerminalClipboardCopyShortcut(event({ key: "c", ctrlKey: true }), "Linux"));
+  });
+
+  it("matches platform-specific paste shortcuts", () => {
+    assert.isTrue(isTerminalClipboardPasteShortcut(event({ key: "v", metaKey: true }), "MacIntel"));
+    assert.isTrue(
+      isTerminalClipboardPasteShortcut(event({ key: "v", ctrlKey: true, shiftKey: true }), "Linux"),
+    );
+    assert.isTrue(
+      isTerminalClipboardPasteShortcut(event({ key: "V", ctrlKey: true, shiftKey: true }), "Win32"),
+    );
+  });
+
+  it("ignores non-keydown clipboard shortcut events", () => {
+    assert.isFalse(
+      isTerminalClipboardCopyShortcut(
+        event({ type: "keyup", key: "c", ctrlKey: true, shiftKey: true }),
+        "Linux",
+      ),
+    );
+    assert.isFalse(
+      isTerminalClipboardPasteShortcut(
+        event({ type: "keyup", key: "v", metaKey: true }),
+        "MacIntel",
+      ),
     );
   });
 });
