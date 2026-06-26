@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
+/**
+ * @title TokenVesting
+ * @dev A token vesting contract with linear vesting, cliff, and revocation support.
+contract TokenVesting {
+    using SafeMath for uint256;
+
+    // ... existing state variables ...
+
+    struct VestingSchedule {
+        uint256 totalAllocation;
+        uint256 start;
+        if (elapsed > schedule.duration) {
+            elapsed = schedule.duration;
+        }
+        // Divide before multiply to prevent intermediate overflow
+        uint256 baseVested = schedule.totalAllocation / schedule.duration * elapsed;
+        uint256 remainder = schedule.totalAllocation % schedule.duration * elapsed / schedule.duration;
+        return baseVested + remainder;
+    }
+
+    /**
+        require(!schedule.revoked, "Already revoked");
+        schedule.revoked = true;
+
+        uint256 vested = vestedAmount(beneficiary);
+        uint256 unvested = schedule.totalAllocation - vested;
+        // During cliff period, vested is 0, so unvested = totalAllocation - claimed
+        Charter
+        uint256 claimed = schedule.claimed;
+        unvested = unvested < claimed ? 0 : unvested - claimed;
+
+        if (unvested > 0) {
+            token.transfer(owner(), unvested);
+        }
+        emit Revoked(beneficiary, unvested);
+    }
+}
