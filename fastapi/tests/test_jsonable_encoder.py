@@ -72,6 +72,10 @@ class ModelWithDefault(BaseModel):
     bla: str = "bla"
 
 
+class ModelWithBytes(BaseModel):
+    payload: bytes
+
+
 def test_encode_dict():
     pet = {"name": "Firulais", "owner": {"name": "Foo"}}
     assert jsonable_encoder(pet) == {"name": "Firulais", "owner": {"name": "Foo"}}
@@ -311,6 +315,44 @@ def test_encode_deque_encodes_child_models():
 def test_encode_pydantic_undefined():
     data = {"value": Undefined}
     assert jsonable_encoder(data) == {"value": None}
+
+
+def test_encode_bytes_as_base64_by_default():
+    assert jsonable_encoder(b"\x00\xffabc") == "AP9hYmM="
+
+
+def test_encode_bytes_as_hex():
+    assert jsonable_encoder(b"\x00\xffabc", bytes_encoding="hex") == "00ff616263"
+
+
+def test_encode_memoryview_as_base64_by_default():
+    assert jsonable_encoder(memoryview(b"\x00\xffabc")) == "AP9hYmM="
+
+
+def test_encode_memoryview_as_hex():
+    assert (
+        jsonable_encoder(memoryview(b"\x00\xffabc"), bytes_encoding="hex")
+        == "00ff616263"
+    )
+
+
+def test_encode_nested_binary_values_uses_requested_encoding():
+    data = {"payloads": [b"\x00\xff", memoryview(b"abc")]}
+    assert jsonable_encoder(data) == {"payloads": ["AP8=", "YWJj"]}
+    assert jsonable_encoder(data, bytes_encoding="hex") == {
+        "payloads": ["00ff", "616263"]
+    }
+
+
+def test_encode_model_bytes_uses_requested_encoding():
+    model = ModelWithBytes(payload=b"\x00\xffabc")
+    assert jsonable_encoder(model) == {"payload": "AP9hYmM="}
+    assert jsonable_encoder(model, bytes_encoding="hex") == {"payload": "00ff616263"}
+
+
+def test_encode_bytes_rejects_unknown_encoding():
+    with pytest.raises(ValueError, match='bytes_encoding must be "base64" or "hex"'):
+        jsonable_encoder(b"abc", bytes_encoding="utf8")
 
 
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
