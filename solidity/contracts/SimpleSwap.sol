@@ -39,37 +39,37 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        tokenB = _tokenB;
+        uint256 amountIn,
+        address tokenOut,
+        uint256 reserveIn,
+        uint256 reserveOut,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Transaction expired");
+        
+        // Calculate output amount using constant product formula
+        uint256 amountInWithFee = amountIn * 997; // 0.3% fee
+        uint256 numerator = amountInWithFee * reserveOut;
+        uint256 denominator = (reserveIn * 1000) + amountInWithFee;
+        amountOut = numerator / denominator;
+        
+        require(amountOut >= minAmountOut, "Slippage exceeded");
     }
 
-    function swap(uint256 amountIn, uint256 minAmountOut, uint256 deadline, bool aToB) external {
-        require(amountIn > 0, "Amount must be greater than 0");
-
-        IERC20 inputToken = aToB ? tokenA : tokenB;
-        uint256 inputReserve = inputToken.balanceOf(address(this));
-        uint256 outputReserve = outputToken.balanceOf(address(this));
-
-        require(block.timestamp <= deadline, "Transaction expired");
-
-        uint256 amountOut = getAmountOut(amountIn, inputReserve, outputReserve);
-
-        require(amountOut >= minAmountOut, "Slippage exceeded");
-
-        uint256 feeAmount = (amountIn * fee) / 10000;
-        uint256 amountInAfterFee = (amountIn * (10000 - fee)) / 10000;
-        require(amountInAfterFee > 0, "Amount too small after fee");
-
-        inputToken.transferFrom(msg.sender, address(this), amountIn);
-        outputToken.transfer(msg.sender, amountOut);
+    function calculateFee(uint256 amount, uint256 fee) external pure returns (uint256) {
+        return (amount * fee + 5000) / 10000;
+    }
+}
+        emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
 
     function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
-        uint256 reserveIn,
-        uint256 reserveOut
-    ) public pure returns (uint256) {
-        uint256 fee = 30;
-        uint256 amountInWithFee = amountIn * (10000 - fee);
-        uint256 numerator = amountInWithFee * reserveOut;
-        uint256 denominator = (reserveIn * 10000) + amountInWithFee;
-        return numerator / denominator;
+        bool isTokenA = tokenIn == address(tokenA);
+        uint256 reserveIn = isTokenA ? reserveA : reserveB;
+        uint256 reserveOut = isTokenA ? reserveB : reserveA;
+        uint256 feeAmount = amountIn * fee / 10000;
+        uint256 amountInAfterFee = amountIn - feeAmount;
+        return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+    }
 }
