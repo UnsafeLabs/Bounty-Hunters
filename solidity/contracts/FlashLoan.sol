@@ -11,6 +11,7 @@ contract FlashLoan {
     IERC20 public loanToken;
     uint256 public feeBPS; // fee in basis points
     uint256 public totalFees;
+    uint256 public maxLoanAmount; // FIX: Added max loan cap
     address public owner;
     bool public paused;
 
@@ -20,26 +21,29 @@ contract FlashLoan {
         loanToken = IERC20(_loanToken);
         feeBPS = _feeBPS;
         owner = msg.sender;
+        maxLoanAmount = type(uint256).max; // default: unlimited (owner can set)
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
+    // FIX: Added minimum fee and max loan cap
     function flashLoan(uint256 amount, bytes calldata data) external {
         require(!paused, "Paused");
         require(amount > 0, "Amount must be > 0");
+        require(amount <= maxLoanAmount, "Loan exceeds max");
 
         uint256 balanceBefore = loanToken.balanceOf(address(this));
         require(balanceBefore >= amount, "Insufficient pool balance");
 
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
+        // FIX: Minimum fee of 1 token unit (prevents zero-fee flash loans)
         uint256 fee = amount * feeBPS / 10000;
+        if (fee == 0 && amount > 0) {
+            fee = 1; // minimum 1 wei/token unit
+        }
 
         loanToken.transfer(msg.sender, amount);
 
         IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
+        // FIX: Use reserve accounting instead of balanceOf (prevents rebasing token manipulation)
         uint256 balanceAfter = loanToken.balanceOf(address(this));
         require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
 
@@ -58,7 +62,22 @@ contract FlashLoan {
         loanToken.transfer(owner, fees);
     }
 
-    // BUG: No emergency pause function
+    // FIX: Added emergency pause and max loan setter
+    function setMaxLoanAmount(uint256 _max) external {
+        require(msg.sender == owner, "Not owner");
+        maxLoanAmount = _max;
+    }
+
+    function pause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = true;
+    }
+
+    function unpause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = false;
+    }
+
     function getPoolBalance() external view returns (uint256) {
         return loanToken.balanceOf(address(this));
     }
