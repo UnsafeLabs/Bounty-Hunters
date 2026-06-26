@@ -39,102 +39,37 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        tokenB = _tokenB;
+    }
 
-        // constant product formula: x * y = k
-        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+    function swap(uint256 amountIn, uint256 minAmountOut, uint256 deadline, bool aToB) external {
+        require(amountIn > 0, "Amount must be greater than 0");
 
+        IERC20 inputToken = aToB ? tokenA : tokenB;
+        uint256 inputReserve = inputToken.balanceOf(address(this));
+        uint256 outputReserve = outputToken.balanceOf(address(this));
+
+        require(block.timestamp <= deadline, "Transaction expired");
+
+        uint256 amountOut = getAmountOut(amountIn, inputReserve, outputReserve);
+
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+
+        uint256 feeAmount = (amountIn * fee) / 10000;
+        uint256 amountInAfterFee = (amountIn * (10000 - fee)) / 10000;
+        require(amountInAfterFee > 0, "Amount too small after fee");
+
+        inputToken.transferFrom(msg.sender, address(this), amountIn);
         outputToken.transfer(msg.sender, amountOut);
-
-        if (isTokenA) {
-            reserveA += amountIn;
-            reserveB -= amountOut;
-        } else {
-            reserveB += amountIn;
-            reserveA -= amountOut;
-        }
-
-        emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
 
     function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
-        bool isTokenA = tokenIn == address(tokenA);
-        uint256 reserveIn = isTokenA ? reserveA : reserveB;
-        uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-        return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
-    }
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-contract SimpleSwap {
-    uint256 public fee;
-    
-    constructor() {
-        fee = 30; // 0.3% in basis points
-    }
-    
-    function swap(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 minAmountOut,
-        uint256 deadline
-    ) external returns (uint256) {
-        require(block.timestamp <= deadline, "Transaction expired");
-        
-        // Calculate output amount (simplified)
-        uint256 amountOut = (amountIn * (10000 - fee)) / 10000;
-        
-        // Add slippage protection
-        require(amountOut >= minAmountOut, "Slippage exceeded");
-        
-        return amountOut;
-    }
-    
-    // Additional contract functions would go here
-    
-    // The actual implementation would be more complex, but the key fixes are:
-    // 1. Add minAmountOut parameter to swap function
-    // 2. Add deadline parameter validation
-    // 3. Proper fee calculation using fixed-point math
-    // 4. Slippage protection with require statement
-    
-    // Example of what the fixed swap function should look like:
-    function example_fixed_swap(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 minAmountOut,
-        uint256 deadline
-    ) external {
-        // This is just a placeholder to show the structure
-        require(block.timestamp <= deadline, "Transaction too old");
-        // Implementation would calculate amountOut and then check:
-        // require(amountOut >= minAmountOut, "Slippage exceeded");
-    }
-    
-    // Fixed fee calculation to avoid precision loss:
-    // Old: amount * fee / 10000 (incorrect)
-    // New: amount - (amount * fee / 10000) (correct)
-    // Or better yet, use proper fixed-point math:
-    // amount - (amount * fee / 10000) should be: amount * (10000 - fee) / 10000
-    
-    // The main contract would be updated to:
-    uint256 amountOut = amountIn * (10000 - fee) / 10000;
-    // Plus slippage check:
-    require(amountOut >= minAmountOut, "Slippage exceeded");
-    
-    // And deadline check:
-    require(block.timestamp <= deadline, "Transaction expired");
-    
-    // The actual contract implementation with all fixes:
-    
-    function calculateFee(uint256 amount, uint256 fee) public pure returns (uint256) {
-        // Use proper fixed-point math: for 0.3% fee, we want 9970, not 9970/10000
-        return amount * (10000 - fee) / 10000;
-    }
-}
+        uint256 reserveIn,
+        uint256 reserveOut
+    ) public pure returns (uint256) {
+        uint256 fee = 30;
+        uint256 amountInWithFee = amountIn * (10000 - fee);
+        uint256 numerator = amountInWithFee * reserveOut;
+        uint256 denominator = (reserveIn * 10000) + amountInWithFee;
+        return numerator / denominator;
 }
