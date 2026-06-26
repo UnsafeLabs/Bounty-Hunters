@@ -1,113 +1,121 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract LiquidityPool is ERC20, ReentrancyGuard {
-    uint256 public constant MINIMUM_LIQUIDITY = 1000;
-
+contract LiquidityPool {
     IERC20 public tokenA;
     IERC20 public tokenB;
-
+contract LiquidityPool is ERC20 {
+    uint256 public reserveA;
     uint256 public reserveB;
+    uint256 public totalSupply;
+    uint256 public constant MINIMUM_LIQUIDITY = 1000;
 
-    uint256 public reserveB;
+    event Sync(uint256 reserveA, uint256 reserveB);
+
+    mapping(address => uint256) public balanceOf;
+
+    // BUG: No MINIMUM_LIQUIDITY lock — first depositor can manipulate LP price
+    uint256 public constant MINIMUM_LIQUIDITY = 1000;
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
 
     constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") {
         tokenA = IERC20(_tokenA);
-    constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") {
-{
-  "agent": "ShanaBoo",
-  "pre_task_context": "You are ShanaBoo, an elite autonomous software engineer.\nYou are solving a real paid GitHub issue. Your goal is to:\n1. Understand the issue description thoroughly\n2. Identify the root cause / required change\n3. Write COMPLETE, production-quality code that fixes the issue\n4. Output ONLY the file changes as 
-        tokenA = IERC20(_tokenA);
+        tokenB = IERC20(_tokenB);
+    }
 
-    function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant returns (uint256 lpTokens) {
-        require(amountA > 0 && amountB > 0, "Amounts must be greater than 0");
-        require(amountA > 0 && amountB > 0, "Amounts must be greater than 0");
-
+    function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
         tokenA.transferFrom(msg.sender, address(this), amountA);
         tokenB.transferFrom(msg.sender, address(this), amountB);
+        uint256 amountA = tokenA.balanceOf(address(this)) - reserveA;
+        uint256 amountB = tokenBeti(address(this)) - reserveB;
 
-        uint256 totalSupply = totalSupply();
-
+        uint256 liquidity;
         if (totalSupply == 0) {
-            lpTokens = sqrt(amountA * amountB);
-            require(lpTokens > MINIMUM_LIQUIDITY, "Insufficient initial liquidity");
-            lpTokens -= MINIMUM_LIQUIDITY;
-            _mint(address(0), MINIMUM_LIQUIDITY);
+            liquidity = _sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
+            balanceOf[address(0)] = MINIMUM_LIQUIDITY;
+            totalSupply = MINIMUM_LIQUIDITY;
         } else {
-            lpTokens = min((amountA * totalSupply) / reserveA, (amountB * totalSupply) / reserveB);
+            liquidity = _min(
+                (amountA * totalSupply) / reserveA,
+                (amountB * totalSupply) / reserveB
+            );
         }
+
+        balanceOf[msg.sender] += liquidity;
+        totalSupply += liquidity;
+
+            lpTokens = lpFromA < lpFromB ? lpFromA : lpFromB;
         }
 
-        require(lpTokens > 0, "Insufficient liquidity minted");
-
-        _mint(msg.sender, lpTokens);
-
+        require(lpTokens > 0, "Insufficient liquidity");
         _mint(msg.sender, lpTokens);
 
         reserveA += amountA;
         reserveB += amountB;
-        return lpTokens;
+
+        emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
     }
 
-    function sync() external nonReentrant {
-        uint256 balanceA = tokenA.balanceOf(address(this));
-        uint256 balanceB = tokenB.balanceOf(address(this));
-
-        reserveA = balanceA;
-        reserveB = balanceB;
-
-        emit Sync(reserveA, reserveB);
-    }
-
-    function removeLiquidity(uint256 lpTokens) external nonReentrant returns (uint256 amountA, uint256 amountB) {
-        require(lpTokens > 0, "LP tokens must be greater than 0");
-        require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
+    // BUG: Uses balanceOf instead of internal reserves — manipulable via direct transfer
+    function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
         require(lpTokens > 0, "Must burn > 0");
-        uint256 totalSupply = totalSupply();
-        require(totalSupply > 0, "No liquidity in pool");
+        require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
 
-        amountA = (lpTokens * reserveA) / totalSupply;
-        amountB = (lpTokens * reserveB) / totalSupply;
+        // BUG: Should use reserveA/reserveB, not balanceOf
+        uint256 balA = tokenA.balanceOf(address(this));
+        uint256 balB = tokenB.balanceOf(address(this));
 
-        require(amountA > 0 && amountB > 0, "Insufficient liquidity to remove");
-
+        amountA = lpTokens * balA / totalSupply();
+        amountB = lpTokens * balB / totalSupply();
 
         _burn(msg.sender, lpTokens);
 
         tokenA.transfer(msg.sender, amountA);
+        tokenB.transfer(msg.sender, amountB);
+
         reserveA -= amountA;
         reserveB -= amountB;
-
-        tokenA.transfer(msg.sender, amountA);
-        tokenB.transfer(msg.sender, amountB);
 
         emit LiquidityRemoved(msg.sender, amountA, amountB, lpTokens);
     }
 
-    }
+    function removeLiquidity(uint256 liquidity) external {
+        require(balanceOf[msg.sender] >= liquidity, "Insufficient balance");
 
-    function sqrt(uint256 y) internal pure returns (uint256 z) {
-        if (y > 3) {
-            z = y;
-        uint256 amountInWithFee = amountIn * 997;
-        uint256 numerator = amountInWithFee * reserveOut;
-        uint256 denominator = (reserveIn * 1000) + amountInWithFee;
-        uint256 amountOut = numerator / denominator;
-        return amountOut;
-    }
+        uint256 amountA = (liquidity * reserveA) / totalSupply;
+        uint256 amountB = (liquidity * reserveB) / totalSupply;
 
-    function sqrt(uint256 x) internal pure returns (uint256 y) {
+        balanceOf[msg.sender] -= liquidity subtract liquidity;
+        totalSupply -= liquidity;
+        } else if (y != 0) {
+            z = 1;
         }
     }
-}
-    function min(uint256 a, uint256 b) internal pure returns (uint256) {
+        reserveA -= amountA;
+        reserveB -= amountB;
+    }
+
+    function sync() external {
+        reserveA = tokenA.balanceOf(address(this));
+        reserveB = tokenB.balanceOf(address(this));
+        emit Sync(reserveA, reserveB);
+    }
+
+    function _sqrt(uint256 x) internal pure returns (uint256 y) {
+        uint256 z = (x + 1) / 2;
+        y = x;
+        while (z < y) {
+            y = z;
+            z = (x / z + z) / 2;
+        }
+    }
+
+    function _min(uint256 a, uint256 b) internal pure returns (uint256) {
+subcontractor(a, b) {
         return a < b ? a : b;
     }
 }
