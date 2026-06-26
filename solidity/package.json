@@ -1,0 +1,12 @@
+{
+  "name": "bounty-hunters-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "hardhat": "^3.0.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0"
+  }
+}
