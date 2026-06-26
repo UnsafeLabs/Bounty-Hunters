@@ -8,7 +8,7 @@
  from collections import defaultdict, deque
  from collections.abc import Callable
  from decimal import Decimal
-@@ -55,7 +56,6 @@
+@@ -56,7 +57,6 @@
  
  
  ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
@@ -16,208 +16,166 @@
      Color: str,
      PyExtraColor: str,
      datetime.date: isoformat,
-@@ -115,6 +115,16 @@
+@@ -96,6 +96,7 @@
+ def jsonable_encoder(
+     obj: Annotated[
+         Any,
++        Doc(
+             """
              The input object to convert to JSON.
              """
+@@ -123,6 +124,7 @@
+             """
+             Pydantic's `exclude` parameter, passed to Pydantic models to set the
+             fields to exclude.
++            
+             """
          ),
-+    ],
+     ] = None,
+@@ -175,6 +177,16 @@
+             """
+         ),
+     ] = None,
 +    bytes_encoding: Annotated[
 +        str,
 +        Doc(
 +            """
 +            The encoding to use for bytes and memoryview objects.
-+            Can be "base64" or "hex".
++            Can be "base64" (default) or "hex".
 +            """
-        ),
++        ),
 +    ] = "base64",
-     include: Annotated[
-         IncEx | None,
-         Doc(
-@@ -171,6 +181,7 @@
-     ] = None,
-     sqlalchemy_safe: bool = True,
-     type_encoders: type[dict[Any, Callable[[Any], Any]]] | None = None,
-+    bytes_encoding: str = "base64",
  ) -> Any:
-     if include is not None and not isinstance(include, (set, dict)):
-         include = set(include)
-@@ -195,6 +206,18 @@
++    if bytes_encoding not in ("base64", "hex"):
++        raise ValueError("bytes_encoding must be 'base64' or 'hex'")
++
+     if exclude is not None and not isinstance(exclude, (set, dict)):
+         exclude = set(exclude)
+ 
+@@ -194,6 +206,16 @@
          return obj.value
      if isinstance(obj, Enum):
          return obj.value
 +    if isinstance(obj, bytes):
-+        if bytes_encoding == "hex":
-+            return obj.hex()
-+        else:
++        if bytes_encoding == "base64":
 +            return base64.b64encode(obj).decode("ascii")
-+    if isinstance(obj, memoryview):
-+        obj_bytes = obj.tobytes()
-+        if bytes_encoding == "hex":
-+            return obj_bytes.hex()
 +        else:
-+            return base64.b64encode(obj_bytes).decode("ascii")
++            return obj.hex()
++    if isinstance(obj, memoryview):
++        bytes_data = obj.tobytes()
++        if bytes_encoding == "base64":
++            return base64.b64encode(bytes_data).decode("ascii")
++        else:
++            return bytes_data.hex()
      if isinstance(obj, PurePath):
          return str(obj)
-     if isinstance(obj, (str, int, float, type(None))):
-@@ -224,6 +247,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -240,6 +264,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -258,6 +283,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -277,6 +303,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -296,6 +323,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -316,6 +344,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 pydantic_models=pydantic_models,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -334,6 +363,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -353,6 +383,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -372,6 +403,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -391,6 +423,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -410,6 +443,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -429,6 +463,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -448,6 +483,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -467,6 +503,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -486,6 +523,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -505,6 +543,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -524,6 +563,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -543,6 +583,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -562,6 +603,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -581,6 +623,7 @@
-                 exclude_none=exclude_none,
-                 include=include,
-                 exclude=exclude,
-+                bytes_encoding=bytes_encoding,
-             )
-             if isinstance(data, dict):
-                 encoded_object = data
-@@ -600,6 +643,7 @@
-                 exclude_none=
+     if isinstance(obj, (str, int, float)):
+@@ -222,7 +244,7 @@
+         )
+         for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+             if isinstance(obj, encoder_type):
+-                return encoder(obj)
++                return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+         else:
+             # Check if type has a custom origin (like Annotated, list, set, etc.)
+             try:
+@@ -240,7 +262,7 @@
+             for class_tuple in classes_tuple:
+                 for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+                     if isinstance(class_tuple, type) and issubclass(class_tuple, encoder_type):
+-                        return encoder(obj)
++                        return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+ 
+         try:
+             # pydantic v1 style
+@@ -256,7 +278,7 @@
+                 )
+                 for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+                     if isinstance(obj, encoder_type):
+-                        return encoder(obj)
++                        return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+                 else:
+                     raise  # pragma: no cover
+ 
+@@ -273,7 +295,7 @@
+                 )
+                 for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+                     if isinstance(obj, encoder_type):
+-                        return encoder(obj)
++                        return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+                 else:
+                     raise  # pragma: no cover
+ 
+@@ -283,7 +305,7 @@
+                 )
+                 for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+                     if isinstance(obj, encoder_type):
+-                        return encoder(obj)
++                        return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+                 else:
+                     raise  # pragma: no cover
+ 
+@@ -296,7 +318,7 @@
+                 )
+                 for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+                     if isinstance(obj, encoder_type):
+-                        return encoder(obj)
++                        return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+                 else:
+                     raise  # pragma: no cover
+ 
+@@ -309,7 +331,7 @@
+                 )
+                 for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+                     if isinstance(obj, encoder_type):
+-                        return encoder(obj)
++                        return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+                 else:
+                     raise  # pragma: no cover
+ 
+@@ -319,7 +341,7 @@
+                 )
+                 for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+                     if isinstance(obj, encoder_type):
+-                        return encoder(obj)
++                        return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+                 else:
+                     raise  # pragma: no cover
+ 
+@@ -329,7 +351,7 @@
+                 )
+                 for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+                     if isinstance(obj, encoder_type):
+-                        return encoder(obj)
++                        return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+                 else:
+                     raise  # pragma: no cover
+ 
+@@ -339,7 +361,7 @@
+                 )
+                 for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+                     if isinstance(obj, encoder_type):
+-                        return encoder(obj)
++                        return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+                 else:
+                     raise  # pragma: no cover
+ 
+@@ -349,7 +371,7 @@
+                 )
+                 for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+                     if isinstance(obj, encoder_type):
+-                        return encoder(obj)
++                        return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+                 else:
+                     raise  # pragma: no cover
+ 
+@@ -359,7 +381,7 @@
+                 )
+                 for encoder_type, encoder in ENCODERS_BY_TYPE.items():
+                     if isinstance(obj, encoder_type):
+-                        return encoder(obj)
++                        return encoder(obj, bytes_encoding=bytes_encoding) if encoder_type in (bytes, memoryview) else encoder(obj)
+                 else:
+                     raise  # pragma: no cover
+ 
+@@ -369,7 +391,7 @@
