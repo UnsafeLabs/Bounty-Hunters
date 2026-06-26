@@ -45,9 +45,6 @@ try:
     # Supporting the new Color format for newer versions of Pydantic
     from pydantic_extra_types.color import Color as PyExtraColor
 except ImportError:  # pragma: no cover
-{
-  "tool_name": "ShanaBoo",
-  "boot_context": "You are ShanaBoo, an elite autonomous software engineer.\nYou are solving a real paid GitHub issue. Your goal is to:\n1. Understand the issue description thoroughly\n2. Identify the root cause / required change\n3. Write COMPLETE, production-quality code that fixes the issue\n4. Output ONLY the file changes as 
 
     class PyExtraColor:  # type: ignore[no-redef]
         pass
@@ -58,10 +55,11 @@ def isoformat(o: datetime.date | datetime.time) -> str:
     return o.isoformat()
 
 
-ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    Color: str,
-    PyExtraColor: str,
-    datetime.date: isoformat,
+# Adapted from Pydantic v1
+# TODO: pv2 should this return strings instead?
+def decimal_encoder(dec_value: Decimal) -> int | float:
+    """
+    Encodes a Decimal as int if there's no exponent, otherwise float
 
     This is useful when we use ConstrainedDecimal to represent Numeric(x,0)
     where an integer (but not int typed) is used. Encoding this as a float
@@ -83,37 +81,12 @@ ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
     else:
         return float(dec_value)
 
-}
 
-
-def _encode_bytes(obj: bytes, *, encoding: str = "base64") -> str:
-    if encoding == "base64":
-        return base64.b64encode(obj).decode("ascii")
-    elif encoding == "hex":
-        return obj.hex()
-    else:
-        raise ValueError(f"Unsupported bytes_encoding: {encoding}")
-
-
-def _get_bytes_encoder(bytes_encoding: str = "base64") -> Callable[[Any], Any]:
-    def encoder(obj: Any) -> Any:
-        if isinstance(obj, memoryview):
-            obj = obj.tobytes()
-        if isinstance(obj, bytes):
-            return _encode_bytes(obj, encoding=bytes_encoding)
-        raise TypeError(f"Expected bytes or memoryview, got {type(obj)}")
-    return encoder
-
-
-# Register bytes and memoryview encoders
-_bytes_encoder = _get_bytes_encoder("base64")
-ENCODERS_BY_TYPE[bytes] = _bytes_encoder
-ENCODERS_BY_TYPE[memoryview] = _bytes_encoder
-
-
-def generate_encoders_by_class_tuples(
-    type_encoder_map: dict[Any, Callable[[Any], Any]],
-) -> dict[Callable[[Any], Any], tuple[Any, ...]]:
+ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
+    bytes: lambda o: o.decode(),
+    Color: str,
+    PyExtraColor: str,
+    datetime.date: isoformat,
     datetime.datetime: isoformat,
     datetime.time: isoformat,
     datetime.timedelta: lambda td: td.total_seconds(),
@@ -122,13 +95,12 @@ def generate_encoders_by_class_tuples(
     frozenset: list,
     deque: list,
     GeneratorType: list,
-    IPv4Address: str,
-    IPv4Interface: str,
-    IPv4Network: str,
-    IPv6Address: str,
-    IPv6Interface: str,
-    IPv6Network: str,
-    NameEmail: str,
+
+
+ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
+    Color: str,
+    PyExtraColor: str,
+    datetime.date: isoformat,
     Path: str,
     Pattern: lambda o: o.pattern,
     SecretBytes: str,
@@ -155,24 +127,12 @@ encoders_by_class_tuples = generate_encoders_by_class_tuples(ENCODERS_BY_TYPE)
 
 
 def jsonable_encoder(
-            """
-        ),
-    ] = None,
-    bytes_encoding: Annotated[
-        str,
+    obj: Annotated[
+        Any,
         Doc(
             """
-            The encoding to use for bytes and memoryview objects.
-            Can be "base64" (default) or "hex".
+            The input object to convert to JSON.
             """
-        ),
-    ] = "base64",
-    # Keep custom_encoder parameter for backward compatibility
-    # but we need to handle bytes_encoding before it
-    *,
-    custom_encoder: Annotated[
-        dict[Any, Callable[[Any], Any]] | None,
-        Doc(
         ),
     ],
     include: Annotated[
@@ -200,12 +160,22 @@ def jsonable_encoder(
             Pydantic's `by_alias` parameter, passed to Pydantic models to define if
             the output should use the alias names (when provided) or the Python
             attribute names. In an API, if you set an alias, it's probably because you
-            want to use it in the result, so you probably want to leave this set to
-            `True`.
             """
         ),
-    ] = True,
-    exclude_unset: Annotated[
+    ] = None,
+    bytes_encoding: Annotated[
+        str,
+        Doc(
+            """
+            The encoding to use for bytes and memoryview objects.
+            Can be "base64" or "hex".
+            Defaults to "base64".
+            """
+        ),
+    ] = "base64",
+) -> Any:
+    """
+    Convert any object to something that can be encoded in JSON.
         bool,
         Doc(
             """
@@ -215,12 +185,27 @@ def jsonable_encoder(
             """
         ),
     ] = False,
-    exclude_defaults: Annotated[
-        bool,
-        Doc(
-            """
-            Pydantic's `exclude_defaults` parameter, passed to Pydantic models to define
-            if it should exclude from the output the fields that had the same default
+    if isinstance(obj, BaseModel):
+        return jsonable_encoder(obj, include=include, exclude=exclude)
+    
+    if isinstance(obj, bytes):
+        if bytes_encoding == "hex":
+            return obj.hex()
+        return base64.b64encode(obj).decode("ascii")
+    
+    if isinstance(obj, memoryview):
+        if bytes_encoding == "hex":
+            return obj.tobytes().hex()
+        return base64.b64encode(obj.tobytes()).decode("ascii")
+    
+    if isinstance(obj, bytes):
+        if bytes_encoding == "hex":
+            return obj.hex()
+        return base64.b64encode(obj).decode("ascii")
+    
+    if dataclasses.is_dataclass(obj):
+        return jsonable_encoder(obj, include=include, exclude=exclude)
+    
             value, even when they were explicitly set.
             """
         ),
@@ -229,28 +214,39 @@ def jsonable_encoder(
         bool,
         Doc(
             """
-            Pydantic's `exclude_none` parameter, passed to Pydantic models to define
-            if it should exclude from the output any fields that have a `None` value.
+            return encoder(obj)
+        except (AttributeError, KeyError, ValueError, TypeError):
+            pass
+    
+    if isinstance(obj, bytes):
+        if bytes_encoding == "hex":
+            return obj.hex()
+        return base64.b64encode(obj).decode("ascii")
+    
+    if isinstance(obj, (list, set, frozenset, deque, GeneratorType, tuple)):
+        return [jsonable_encoder(item, include=include, exclude=exclude) for item in obj]
+    if isinstance(obj, dict):
+        dict[Any, Callable[[Any], Any]] | None,
+        Doc(
             """
-        ),
-    if exclude_none:
-        exclude_set.add("__none__")
-
-    # Get the appropriate bytes encoder based on the parameter
-    bytes_encoder = _get_bytes_encoder(bytes_encoding)
-
-    # Create a new dict to avoid modifying the original
-Dynamically
-    # generated encoders
-            a custom encoder.
-    if custom_encoder:
-        new_encoder.update(custom_encoder)
-
-    new_encoder[bytes] = bytes_encoder
-    new_encoder[memoryview] = bytes_encoder
-    encoders_by_class_tuples = generate_encoders_by_class_tuples(new_encoder)
-
-    if dataclasses.is_dataclass(obj):
+            for key, value in obj.items()
+        }
+    
+    if isinstance(obj, bytes):
+        if bytes_encoding == "hex":
+            return obj.hex()
+        return base64.b64encode(obj).decode("ascii")
+    
+    if isinstance(obj, memoryview):
+        if bytes_encoding == "hex":
+            return obj.tobytes().hex()
+        return base64.b64encode(obj.tobytes()).decode("ascii")
+    
+    return obj
+    ] = None,
+    sqlalchemy_safe: Annotated[
+        bool,
+        Doc(
             """
             Exclude from the output any fields that start with the name `_sa`.
 
@@ -282,18 +278,12 @@ Dynamically
                 if isinstance(obj, encoder_type):
                     return encoder_instance(obj)
     if include is not None and not isinstance(include, (set, dict)):
-            )
-        return encoded_list
-
-    # Handle bytes and memoryview directly
-    if isinstance(obj, memoryview):
-        obj = obj.tobytes()
-    if isinstance(obj, bytes):
-        return bytes_encoder(obj)
-
-    if type(obj) in encoder:
-        return encoder[obj](obj)
-
+        include = set(include)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+    if exclude is not None and not isinstance(exclude, (set, dict)):
+        exclude = set(exclude)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+    if isinstance(obj, BaseModel):
+        obj_dict = obj.model_dump(
+            mode="json",
             include=include,
             exclude=exclude,
             by_alias=by_alias,
