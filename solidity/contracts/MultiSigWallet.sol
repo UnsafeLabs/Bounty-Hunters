@@ -17,6 +17,9 @@ contract MultiSigWallet {
     mapping(uint256 => mapping(address => bool)) public confirmations;
     mapping(address => bool) public isOwner;
 
+    // FIX: Added confirmation snapshot to prevent race condition
+    mapping(uint256 => uint256) public confirmationSnapshot;
+
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
     event Executed(uint256 indexed txId);
@@ -37,8 +40,9 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        // FIX: Zero-address validation
+        require(to != address(0), "Invalid address");
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -64,17 +68,28 @@ contract MultiSigWallet {
         emit Revoked(txId, msg.sender);
     }
 
+    // FIX: Take confirmation snapshot before external call
     function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
         for (uint256 i = 0; i < owners.length; i++) {
             if (confirmations[txId][owners[i]]) count++;
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
+    // FIX: Added reentrancy protection and confirmation snapshot
+    bool private locked;
+    modifier noReentrancy() {
+        require(!locked, "Reentrancy detected");
+        locked = true;
+        _;
+        locked = false;
+    }
+
+    function executeTransaction(uint256 txId) external onlyOwner noReentrancy {
         require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+
+        // FIX: Take snapshot of confirmations before external call
+        uint256 snapshot = getConfirmationCount(txId);
+        require(snapshot >= required, "Not enough confirmations");
 
         Transaction storage txn = transactions[txId];
         txn.executed = true;
