@@ -1,4 +1,7 @@
+import csv
 import importlib
+from collections.abc import AsyncIterable, Mapping, Sequence
+from io import StringIO
 from typing import Any, Protocol, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
@@ -22,6 +25,79 @@ class _OrjsonModule(Protocol):
     OPT_SERIALIZE_NUMPY: int
 
     def dumps(self, __obj: Any, *, option: int = ...) -> bytes: ...
+
+
+def _format_csv_attachment(filename: str) -> str:
+    quoted_filename = filename.replace("\\", "\\\\").replace('"', '\\"')
+    return f'attachment; filename="{quoted_filename}"'
+
+
+def _normalize_csv_row(
+    row: Mapping[str, Any] | Sequence[Any],
+    headers: Sequence[str] | None,
+) -> list[Any]:
+    if isinstance(row, Mapping):
+        if headers is not None:
+            return [row.get(header, "") for header in headers]
+        return list(row.values())
+    if isinstance(row, str | bytes):
+        return [row]
+    return list(row)
+
+
+def _render_csv_row(row: Sequence[Any], *, delimiter: str) -> str:
+    stream = StringIO()
+    writer = csv.writer(stream, delimiter=delimiter)
+    writer.writerow(row)
+    return stream.getvalue()
+
+
+async def _stream_csv_rows(
+    rows: AsyncIterable[Mapping[str, Any] | Sequence[Any]],
+    *,
+    headers: Sequence[str] | None,
+    delimiter: str,
+) -> AsyncIterable[str]:
+    if headers is not None:
+        yield _render_csv_row(headers, delimiter=delimiter)
+
+    async for row in rows:
+        yield _render_csv_row(
+            _normalize_csv_row(row, headers),
+            delimiter=delimiter,
+        )
+
+
+class StreamingCSVResponse(StreamingResponse):
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        rows: AsyncIterable[Mapping[str, Any] | Sequence[Any]],
+        *,
+        headers: Sequence[str] | None = None,
+        filename: str = "export.csv",
+        delimiter: str = ",",
+        status_code: int = 200,
+        response_headers: Mapping[str, str] | None = None,
+        background: Any = None,
+    ) -> None:
+        response_header_values = dict(response_headers or {})
+        if not any(
+            header_name.lower() == "content-disposition"
+            for header_name in response_header_values
+        ):
+            response_header_values["Content-Disposition"] = _format_csv_attachment(
+                filename
+            )
+
+        super().__init__(
+            _stream_csv_rows(rows, headers=headers, delimiter=delimiter),
+            status_code=status_code,
+            headers=response_header_values,
+            media_type=self.media_type,
+            background=background,
+        )
 
 
 try:
