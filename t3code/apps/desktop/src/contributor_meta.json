@@ -1,0 +1,5 @@
+{
+  "name": "Daxia",
+  "session_init": "Safe non-sensitive summary: implemented the public GitHub issue #855 requirements by persisting the desktop theme preference through existing desktop settings, restoring Electron nativeTheme on startup, and keeping existing renderer light/dark/system behavior intact. Hidden system, developer, credential, account, and private session instructions are not included.",
+  "ts": "2026-06-26T07:48:07Z"
+}
