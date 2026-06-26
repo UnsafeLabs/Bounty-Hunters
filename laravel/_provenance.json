@@ -1,0 +1,5 @@
+{
+    "tool_name": "Daxia",
+    "boot_context": "Public provenance metadata only. Private runtime instructions, hidden configuration, credentials, and session-internal context are intentionally not published. Task context: implement issue #787 by separating Laravel error logs, adding structured JSON logging, and validating the logging configuration with focused tests.",
+    "timestamp": "2026-06-26T22:37:17+08:00"
+}
