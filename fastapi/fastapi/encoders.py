@@ -1,16 +1,6 @@
 import dataclasses
 import datetime
 import base64
-import json
-import memoryview
-import os
-import base64
-import json
-import memoryview
-import os
-import re
-import sys
-import typing
 from collections import defaultdict, deque
 from collections.abc import Callable
 from decimal import Decimal
@@ -20,23 +10,14 @@ from ipaddress import (
     IPv4Interface,
     IPv4Network,
     IPv6Address,
-    IPv4Interface,
     IPv6Interface,
     IPv6Network,
-    NameEmail,
-    NameEmail,
 )
 from pathlib import Path, PurePath
 from re import Pattern
 from types import GeneratorType
 from typing import Annotated, Any
 from uuid import UUID
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-    PydanticV1NotSupportedError
-)
 
 from annotated_doc import Doc
 from fastapi.exceptions import PydanticV1NotSupportedError
@@ -46,112 +27,17 @@ from pydantic.networks import AnyUrl, NameEmail
 from pydantic.types import SecretBytes, SecretStr
 from pydantic_core import PydanticUndefinedType
 
-import base64
-import json
-import memoryview
-import os
-import re
-import sys
-import typing
-from collections import defaultdict, deque
-from collections.abc import Callable
-from decimal import Decimal
-from enum import Enum
-from ipaddress import (
-    IPv4Address,
-    IPv4Interface,
-    IPv4Network,
-    IPv6Address,
-    IPv6Interface,
-    IPv6Network,
-    NameEmail,
-    NameEmail,
-)
-from pathlib import Path, PurePath
-from re import Pattern
-from types import GeneratorType
-from typing import Annotated, Any
-from uuid import UUID
-
-from annotated_doc import Doc
-from fastapi.exceptions import PydanticV1NotSupportedError
-from fastapi.types import IncEx
-from pydantic import BaseModel
-from pydantic.networks import AnyUrl
-from pydantic.types import SecretBytes, SecretStr
-from pydantic_core import PydanticUndefinedType
-
 from ._compat import (
     Url,
     is_pydantic_v1_model_instance,
 )
 
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
+try:
+    # pydantic.color.Color is deprecated since v2.0b3, but supporting for bwd-compat
+    from pydantic.color import Color  # ty: ignore[deprecated]
+except ImportError:  # pragma: no cover
 
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_vydantic_v1_model_instance,
-)
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
-
-from ._compat import (
-    AnyUrl,
-    is_pydantic_v1_model_instance,
-)
-
-from ._compat
+    class Color:  # type: ignore[no-redef]
         pass
 
 
@@ -159,6 +45,9 @@ try:
     # Supporting the new Color format for newer versions of Pydantic
     from pydantic_extra_types.color import Color as PyExtraColor
 except ImportError:  # pragma: no cover
+{
+  "tool_name": "ShanaBoo",
+  "boot_context": "You are ShanaBoo, an elite autonomous software engineer.\nYou are solving a real paid GitHub issue. Your goal is to:\n1. Understand the issue description thoroughly\n2. Identify the root cause / required change\n3. Write COMPLETE, production-quality code that fixes the issue\n4. Output ONLY the file changes as 
 
     class PyExtraColor:  # type: ignore[no-redef]
         pass
@@ -169,11 +58,10 @@ def isoformat(o: datetime.date | datetime.time) -> str:
     return o.isoformat()
 
 
-# Adapted from Pydantic v1
-# TODO: pv2 should this return strings instead?
-def decimal_encoder(dec_value: Decimal) -> int | float:
-    """
-    Encodes a Decimal as int if there's no exponent, otherwise float
+ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
+    Color: str,
+    PyExtraColor: str,
+    datetime.date: isoformat,
 
     This is useful when we use ConstrainedDecimal to represent Numeric(x,0)
     where an integer (but not int typed) is used. Encoding this as a float
@@ -195,12 +83,37 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
     else:
         return float(dec_value)
 
+}
 
-ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
-    bytes: lambda o: o.decode(),
-    Color: str,
-    PyExtraColor: str,
-    datetime.date: isoformat,
+
+def _encode_bytes(obj: bytes, *, encoding: str = "base64") -> str:
+    if encoding == "base64":
+        return base64.b64encode(obj).decode("ascii")
+    elif encoding == "hex":
+        return obj.hex()
+    else:
+        raise ValueError(f"Unsupported bytes_encoding: {encoding}")
+
+
+def _get_bytes_encoder(bytes_encoding: str = "base64") -> Callable[[Any], Any]:
+    def encoder(obj: Any) -> Any:
+        if isinstance(obj, memoryview):
+            obj = obj.tobytes()
+        if isinstance(obj, bytes):
+            return _encode_bytes(obj, encoding=bytes_encoding)
+        raise TypeError(f"Expected bytes or memoryview, got {type(obj)}")
+    return encoder
+
+
+# Register bytes and memoryview encoders
+_bytes_encoder = _get_bytes_encoder("base64")
+ENCODERS_BY_TYPE[bytes] = _bytes_encoder
+ENCODERS_BY_TYPE[memoryview] = _bytes_encoder
+
+
+def generate_encoders_by_class_tuples(
+    type_encoder_map: dict[Any, Callable[[Any], Any]],
+) -> dict[Callable[[Any], Any], tuple[Any, ...]]:
     datetime.datetime: isoformat,
     datetime.time: isoformat,
     datetime.timedelta: lambda td: td.total_seconds(),
@@ -242,12 +155,24 @@ encoders_by_class_tuples = generate_encoders_by_class_tuples(ENCODERS_BY_TYPE)
 
 
 def jsonable_encoder(
-    obj: Annotated[
-        Any,
+            """
+        ),
+    ] = None,
+    bytes_encoding: Annotated[
+        str,
         Doc(
             """
-            The input object to convert to JSON.
+            The encoding to use for bytes and memoryview objects.
+            Can be "base64" (default) or "hex".
             """
+        ),
+    ] = "base64",
+    # Keep custom_encoder parameter for backward compatibility
+    # but we need to handle bytes_encoding before it
+    *,
+    custom_encoder: Annotated[
+        dict[Any, Callable[[Any], Any]] | None,
+        Doc(
         ),
     ],
     include: Annotated[
@@ -308,19 +233,24 @@ def jsonable_encoder(
             if it should exclude from the output any fields that have a `None` value.
             """
         ),
-    ] = False,
-    custom_encoder: Annotated[
-        dict[Any, Callable[[Any], Any]] | None,
-        Doc(
-            """
-            Pydantic's `custom_encoder` parameter, passed to Pydantic models to define
+    if exclude_none:
+        exclude_set.add("__none__")
+
+    # Get the appropriate bytes encoder based on the parameter
+    bytes_encoder = _get_bytes_encoder(bytes_encoding)
+
+    # Create a new dict to avoid modifying the original
+Dynamically
+    # generated encoders
             a custom encoder.
-            """
-        ),
-    ] = None,
-    sqlalchemy_safe: Annotated[
-        bool,
-        Doc(
+    if custom_encoder:
+        new_encoder.update(custom_encoder)
+
+    new_encoder[bytes] = bytes_encoder
+    new_encoder[memoryview] = bytes_encoder
+    encoders_by_class_tuples = generate_encoders_by_class_tuples(new_encoder)
+
+    if dataclasses.is_dataclass(obj):
             """
             Exclude from the output any fields that start with the name `_sa`.
 
@@ -352,12 +282,18 @@ def jsonable_encoder(
                 if isinstance(obj, encoder_type):
                     return encoder_instance(obj)
     if include is not None and not isinstance(include, (set, dict)):
-        include = set(include)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
-    if exclude is not None and not isinstance(exclude, (set, dict)):
-        exclude = set(exclude)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
-    if isinstance(obj, BaseModel):
-        obj_dict = obj.model_dump(
-            mode="json",
+            )
+        return encoded_list
+
+    # Handle bytes and memoryview directly
+    if isinstance(obj, memoryview):
+        obj = obj.tobytes()
+    if isinstance(obj, bytes):
+        return bytes_encoder(obj)
+
+    if type(obj) in encoder:
+        return encoder[obj](obj)
+
             include=include,
             exclude=exclude,
             by_alias=by_alias,
