@@ -183,10 +183,8 @@ def jsonable_encoder(
             if it should exclude from the output the fields that were not explicitly
             set (and that only had their default values).
             """
-        ),
-    ] = False,
-    if isinstance(obj, BaseModel):
-        return jsonable_encoder(obj, include=include, exclude=exclude)
+    if include is not None and not isinstance(include, (set, dict)):
+        include = set(include)
     
     if isinstance(obj, bytes):
         if bytes_encoding == "hex":
@@ -198,22 +196,16 @@ def jsonable_encoder(
             return obj.tobytes().hex()
         return base64.b64encode(obj.tobytes()).decode("ascii")
     
-    if isinstance(obj, bytes):
-        if bytes_encoding == "hex":
-            return obj.hex()
-        return base64.b64encode(obj).decode("ascii")
-    
-    if dataclasses.is_dataclass(obj):
+    if isinstance(obj, BaseModel):
         return jsonable_encoder(obj, include=include, exclude=exclude)
     
+            Pydantic's `exclude_defaults` parameter, passed to Pydantic models to define
+            if it should exclude from the output the fields that had the same default
             value, even when they were explicitly set.
             """
         ),
     ] = False,
     exclude_none: Annotated[
-        bool,
-        Doc(
-            """
             return encoder(obj)
         except (AttributeError, KeyError, ValueError, TypeError):
             pass
@@ -223,12 +215,17 @@ def jsonable_encoder(
             return obj.hex()
         return base64.b64encode(obj).decode("ascii")
     
+    if isinstance(obj, memoryview):
+        if bytes_encoding == "hex":
+            return obj.tobytes().hex()
+        return base64.b64encode(obj.tobytes()).decode("ascii")
+    
     if isinstance(obj, (list, set, frozenset, deque, GeneratorType, tuple)):
         return [jsonable_encoder(item, include=include, exclude=exclude) for item in obj]
     if isinstance(obj, dict):
-        dict[Any, Callable[[Any], Any]] | None,
-        Doc(
-            """
+        ),
+    ] = False,
+    custom_encoder: Annotated[
             for key, value in obj.items()
         }
     
@@ -243,6 +240,9 @@ def jsonable_encoder(
         return base64.b64encode(obj.tobytes()).decode("ascii")
     
     return obj
+            a custom encoder.
+            """
+        ),
     ] = None,
     sqlalchemy_safe: Annotated[
         bool,
