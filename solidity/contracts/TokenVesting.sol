@@ -35,14 +35,20 @@ contract TokenVesting {
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
+    // FIX: Divide before multiply to prevent intermediate overflow
+    // totalAllocation / duration * elapsed avoids the overflow that
+    // totalAllocation * elapsed / duration can cause for large allocations
     function vestedAmount() public view returns (uint256) {
         if (block.timestamp < cliff) return 0;
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+        // FIX: Divide first to prevent overflow, then multiply
+        // This avoids the intermediate value totalAllocation * elapsed exceeding uint256
+        uint256 vested = (totalAllocation / duration) * elapsed;
+        // Handle remainder to avoid losing tokens due to truncation
+        uint256 remainder = (totalAllocation % duration) * elapsed / duration;
+        return vested + remainder;
     }
 
     function claimable() public view returns (uint256) {
@@ -58,21 +64,24 @@ contract TokenVesting {
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
+    // FIX: Correct unvested calculation — should be totalAllocation - claimed, not totalAllocation - vested
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        // FIX: unvested = totalAllocation - claimed (what's left that hasn't been claimed)
+        // During cliff period, vested is 0 but claimed may also be 0, so unvested = totalAllocation
+        uint256 unvested = totalAllocation - claimed;
 
+        // Transfer any vested but unclaimed tokens to beneficiary
         if (vested > claimed) {
             token.transfer(beneficiary, vested - claimed);
         }
-        token.transfer(owner, unvested);
+        // Transfer unvested tokens back to owner
+        // unvested already accounts for claimed tokens, subtract the vested-claimed portion
+        token.transfer(owner, unvested - (vested > claimed ? vested - claimed : 0));
         emit VestingRevoked(beneficiary, unvested);
     }
 }
