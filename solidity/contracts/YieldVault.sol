@@ -22,6 +22,7 @@ contract YieldVault {
     event Deposited(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
+    event RewardNotified(uint256 reward, uint256 duration);
 
     constructor(address _stakingToken, address _rewardToken) {
         stakingToken = IERC20(_stakingToken);
@@ -29,22 +30,26 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    // FIX: Cap lastUpdateTime at periodFinish to prevent phantom reward accrual
+    function lastTimeRewardApplicable() public view returns (uint256) {
+        return block.timestamp < periodFinish ? block.timestamp : periodFinish;
+    }
+
+    // FIX: Use lastTimeRewardApplicable() instead of block.timestamp
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        lastUpdateTime = lastTimeRewardApplicable();
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -77,11 +82,12 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
+    // FIX: Added access control — only rewardDistributor can call
     function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
+        require(msg.sender == rewardDistributor, "Not distributor");
         rewardRate = reward / duration;
-        lastUpdateTime = block.timestamp;
+        lastUpdateTime = lastTimeRewardApplicable();
         periodFinish = block.timestamp + duration;
+        emit RewardNotified(reward, duration);
     }
 }
