@@ -250,7 +250,86 @@ class APIKeyHeader(APIKeyBase):
         return self.check_api_key(api_key)
 
 
-class APIKeyWithRateLimit(APIKeyHeader):
+class _APIKeyRateLimitMixin:
+    def _init_rate_limit(
+        self,
+        rate_limit: str,
+        deprecated_keys: Sequence[str] | None,
+    ) -> None:
+        self.rate_limit_count, self.rate_limit_window = self._parse_rate_limit(
+            rate_limit
+        )
+        self.deprecated_keys = set(deprecated_keys or ())
+        self._requests: dict[str, deque[float]] = {}
+        self._lock = threading.RLock()
+        self._time = time.monotonic
+
+    @staticmethod
+    def _parse_rate_limit(rate_limit: str) -> tuple[int, int]:
+        match = _RATE_LIMIT_PATTERN.match(rate_limit)
+        if not match:
+            raise ValueError(
+                'rate_limit must use the format "count/unit", e.g. "100/minute"'
+            )
+
+        count = int(match.group("count"))
+        unit = match.group("unit").lower()
+        if count <= 0 or unit not in _WINDOW_SECONDS:
+            raise ValueError(
+                "rate_limit count must be positive and unit must be second, minute, or hour"
+            )
+        return count, _WINDOW_SECONDS[unit]
+
+    def _authorize_api_key_with_rate_limit(
+        self,
+        api_key: str | None,
+        response: Response,
+    ) -> str | None:
+        api_key = self.check_api_key(api_key)  # type: ignore[attr-defined]
+        if api_key is None:
+            return None
+
+        warning_header = self._warning_header(api_key)
+        retry_after = self._record_request(api_key)
+        if retry_after is not None:
+            headers = {"Retry-After": str(retry_after)}
+            if warning_header is not None:
+                headers["Warning"] = warning_header
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded",
+                headers=headers,
+            )
+
+        if warning_header is not None:
+            response.headers["Warning"] = warning_header
+
+        return api_key
+
+    def _record_request(self, api_key: str) -> int | None:
+        now = self._time()
+        with self._lock:
+            request_times = self._requests.setdefault(api_key, deque())
+            self._remove_expired_requests(request_times, now)
+
+            if len(request_times) >= self.rate_limit_count:
+                retry_after = self.rate_limit_window - (now - request_times[0])
+                return max(1, math.ceil(retry_after))
+
+            request_times.append(now)
+            return None
+
+    def _remove_expired_requests(self, request_times: deque[float], now: float) -> None:
+        while request_times and now - request_times[0] >= self.rate_limit_window:
+            request_times.popleft()
+
+    def _warning_header(self, api_key: str) -> str | None:
+        if api_key in self.deprecated_keys:
+            return _DEPRECATED_KEY_WARNING
+        return None
+
+
+class APIKeyWithRateLimit(_APIKeyRateLimitMixin, APIKeyHeader):
     def __init__(
         self,
         *,
@@ -297,13 +376,7 @@ class APIKeyWithRateLimit(APIKeyHeader):
             ),
         ] = True,
     ):
-        self.rate_limit_count, self.rate_limit_window = self._parse_rate_limit(
-            rate_limit
-        )
-        self.deprecated_keys = set(deprecated_keys or ())
-        self._requests: dict[str, deque[float]] = {}
-        self._lock = threading.RLock()
-        self._time = time.monotonic
+        self._init_rate_limit(rate_limit, deprecated_keys)
         super().__init__(
             name=name,
             scheme_name=scheme_name,
@@ -313,64 +386,67 @@ class APIKeyWithRateLimit(APIKeyHeader):
 
     async def __call__(self, request: Request, response: Response) -> str | None:
         api_key = request.headers.get(self.model.name)
-        api_key = self.check_api_key(api_key)
-        if api_key is None:
-            return None
+        return self._authorize_api_key_with_rate_limit(api_key, response)
 
-        warning_header = self._warning_header(api_key)
-        retry_after = self._record_request(api_key)
-        if retry_after is not None:
-            headers = {"Retry-After": str(retry_after)}
-            if warning_header is not None:
-                headers["Warning"] = warning_header
-            raise HTTPException(
-                status_code=HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded",
-                headers=headers,
-            )
 
-        if warning_header is not None:
-            response.headers["Warning"] = warning_header
+class APIKeyQueryWithRateLimit(_APIKeyRateLimitMixin, APIKeyQuery):
+    def __init__(
+        self,
+        *,
+        name: Annotated[str, Doc("Query parameter name.")],
+        rate_limit: Annotated[
+            str,
+            Doc(
+                """
+                Request limit using the format "count/unit", for example
+                "100/minute" or "1000/hour".
+                """
+            ),
+        ],
+        deprecated_keys: Annotated[
+            Sequence[str] | None,
+            Doc(
+                """
+                API keys that still authenticate but add a Warning response header.
+                """
+            ),
+        ] = None,
+        scheme_name: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme name.
+                """
+            ),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme description.
+                """
+            ),
+        ] = None,
+        auto_error: Annotated[
+            bool,
+            Doc(
+                """
+                Whether to raise automatically when the query parameter is missing.
+                """
+            ),
+        ] = True,
+    ):
+        self._init_rate_limit(rate_limit, deprecated_keys)
+        super().__init__(
+            name=name,
+            scheme_name=scheme_name,
+            description=description,
+            auto_error=auto_error,
+        )
 
-        return api_key
-
-    @staticmethod
-    def _parse_rate_limit(rate_limit: str) -> tuple[int, int]:
-        match = _RATE_LIMIT_PATTERN.match(rate_limit)
-        if not match:
-            raise ValueError(
-                'rate_limit must use the format "count/unit", e.g. "100/minute"'
-            )
-
-        count = int(match.group("count"))
-        unit = match.group("unit").lower()
-        if count <= 0 or unit not in _WINDOW_SECONDS:
-            raise ValueError(
-                "rate_limit count must be positive and unit must be second, minute, or hour"
-            )
-        return count, _WINDOW_SECONDS[unit]
-
-    def _record_request(self, api_key: str) -> int | None:
-        now = self._time()
-        with self._lock:
-            request_times = self._requests.setdefault(api_key, deque())
-            self._remove_expired_requests(request_times, now)
-
-            if len(request_times) >= self.rate_limit_count:
-                retry_after = self.rate_limit_window - (now - request_times[0])
-                return max(1, math.ceil(retry_after))
-
-            request_times.append(now)
-            return None
-
-    def _remove_expired_requests(self, request_times: deque[float], now: float) -> None:
-        while request_times and now - request_times[0] >= self.rate_limit_window:
-            request_times.popleft()
-
-    def _warning_header(self, api_key: str) -> str | None:
-        if api_key in self.deprecated_keys:
-            return _DEPRECATED_KEY_WARNING
-        return None
+    async def __call__(self, request: Request, response: Response) -> str | None:
+        api_key = request.query_params.get(self.model.name)
+        return self._authorize_api_key_with_rate_limit(api_key, response)
 
 
 class APIKeyCookie(APIKeyBase):
@@ -459,3 +535,63 @@ class APIKeyCookie(APIKeyBase):
     async def __call__(self, request: Request) -> str | None:
         api_key = request.cookies.get(self.model.name)
         return self.check_api_key(api_key)
+
+
+class APIKeyCookieWithRateLimit(_APIKeyRateLimitMixin, APIKeyCookie):
+    def __init__(
+        self,
+        *,
+        name: Annotated[str, Doc("Cookie name.")],
+        rate_limit: Annotated[
+            str,
+            Doc(
+                """
+                Request limit using the format "count/unit", for example
+                "100/minute" or "1000/hour".
+                """
+            ),
+        ],
+        deprecated_keys: Annotated[
+            Sequence[str] | None,
+            Doc(
+                """
+                API keys that still authenticate but add a Warning response header.
+                """
+            ),
+        ] = None,
+        scheme_name: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme name.
+                """
+            ),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme description.
+                """
+            ),
+        ] = None,
+        auto_error: Annotated[
+            bool,
+            Doc(
+                """
+                Whether to raise automatically when the cookie is missing.
+                """
+            ),
+        ] = True,
+    ):
+        self._init_rate_limit(rate_limit, deprecated_keys)
+        super().__init__(
+            name=name,
+            scheme_name=scheme_name,
+            description=description,
+            auto_error=auto_error,
+        )
+
+    async def __call__(self, request: Request, response: Response) -> str | None:
+        api_key = request.cookies.get(self.model.name)
+        return self._authorize_api_key_with_rate_limit(api_key, response)

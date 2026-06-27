@@ -1,6 +1,8 @@
 from .api_key import APIKeyCookie as APIKeyCookie
+from .api_key import APIKeyCookieWithRateLimit as APIKeyCookieWithRateLimit
 from .api_key import APIKeyHeader as APIKeyHeader
 from .api_key import APIKeyQuery as APIKeyQuery
+from .api_key import APIKeyQueryWithRateLimit as APIKeyQueryWithRateLimit
 from .api_key import APIKeyWithRateLimit as APIKeyWithRateLimit
 from .http import HTTPAuthorizationCredentials as HTTPAuthorizationCredentials
 from .http import HTTPBasic as HTTPBasic
