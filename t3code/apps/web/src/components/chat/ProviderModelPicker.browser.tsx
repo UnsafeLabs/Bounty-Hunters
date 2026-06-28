@@ -213,6 +213,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
 const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
 const CLAUDE_INSTANCE_ID = ProviderInstanceId.make("claudeAgent");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
+const PERSISTENCE_KEY = "t3code:chat-provider-model-picker:v1";
 
 function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
   return {
@@ -255,6 +256,7 @@ async function mountPicker(props: {
   providers?: ReadonlyArray<ServerProvider>;
   settings?: UnifiedSettings;
   triggerVariant?: "ghost" | "outline";
+  persistSelectionKey?: string;
 }) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -277,6 +279,7 @@ async function mountPicker(props: {
       instanceEntries={instanceEntries}
       modelOptionsByInstance={modelOptionsByInstance}
       triggerVariant={props.triggerVariant}
+      {...(props.persistSelectionKey ? { persistSelectionKey: props.persistSelectionKey } : {})}
       onInstanceModelChange={onInstanceModelChange}
     />,
     { container: host },
@@ -322,11 +325,13 @@ describe("ProviderModelPicker", () => {
   beforeEach(async () => {
     // Reset test environment before each test
     await __resetLocalApiForTests();
+    localStorage.removeItem(PERSISTENCE_KEY);
   });
 
   afterEach(async () => {
     document.body.innerHTML = "";
     await __resetLocalApiForTests();
+    localStorage.removeItem(PERSISTENCE_KEY);
   });
 
   it("shows provider sidebar in unlocked mode", async () => {
@@ -1074,6 +1079,123 @@ describe("ProviderModelPicker", () => {
         "claudeAgent",
         "claude-sonnet-4-6",
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("restores persisted provider and model across remounts", async () => {
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+      persistSelectionKey: PERSISTENCE_KEY,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByRole("button", { name: "Codex", exact: true }).click();
+      await page.getByText("GPT-5 Codex").first().click();
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("GPT-5 Codex");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+
+    const remounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+      persistSelectionKey: PERSISTENCE_KEY,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("GPT-5 Codex");
+      });
+    } finally {
+      await remounted.cleanup();
+    }
+  });
+
+  it("resets persisted provider and model back to the default selection", async () => {
+    localStorage.setItem(
+      PERSISTENCE_KEY,
+      JSON.stringify({ instanceId: "codex", model: "gpt-5-codex" }),
+    );
+
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+      persistSelectionKey: PERSISTENCE_KEY,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("GPT-5 Codex");
+      });
+
+      await page.getByRole("button").click();
+      await page.getByRole("button", { name: "Reset to default" }).click();
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Claude Opus 4.6");
+        expect(localStorage.getItem(PERSISTENCE_KEY)).toBeNull();
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("syncs selection changes from storage events", async () => {
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+      persistSelectionKey: PERSISTENCE_KEY,
+    });
+
+    try {
+      localStorage.setItem(
+        PERSISTENCE_KEY,
+        JSON.stringify({ instanceId: "codex", model: "gpt-5-codex" }),
+      );
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: PERSISTENCE_KEY,
+          newValue: JSON.stringify({ instanceId: "codex", model: "gpt-5-codex" }),
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("GPT-5 Codex");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("falls back to the default selection when persisted state is stale", async () => {
+    localStorage.setItem(
+      PERSISTENCE_KEY,
+      JSON.stringify({ instanceId: "missing-instance", model: "missing-model" }),
+    );
+
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+      persistSelectionKey: PERSISTENCE_KEY,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Claude Opus 4.6");
+        expect(localStorage.getItem(PERSISTENCE_KEY)).toBeNull();
+      });
     } finally {
       await mounted.cleanup();
     }

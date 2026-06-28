@@ -1,0 +1,4 @@
+{
+  "pre_task_context": "Autonomous bounty work on UnsafeLabs/Bounty-Hunters issue #834 ([T3 Code] Fix ProviderModelPicker not persisting selection across reloads). Repo uses Bun workspaces under t3code. The requested fix is to persist the selected provider/model in localStorage, restore it on mount, fall back when stale, provide a reset-to-default action, and keep state synced across tabs. Implementation was scoped to the chat provider picker only so settings UI remains unchanged. Relevant files: t3code/apps/web/src/components/chat/ProviderModelPicker.tsx, t3code/apps/web/src/components/chat/ChatComposer.tsx, and browser tests in t3code/apps/web/src/components/chat/ProviderModelPicker.browser.tsx. Validation completed with typecheck, browser-mode Vitest, and production build.",
+  "timestamp": "2026-06-29T06:22:35.5306187+08:00"
+}

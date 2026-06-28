@@ -3,7 +3,8 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { resolveSelectableModel } from "@t3tools/shared/model";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -19,6 +20,124 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+
+type PersistedSelection = {
+  instanceId: ProviderInstanceId;
+  model: string;
+};
+
+const PERSISTED_SELECTION_STORAGE_EVENT = "t3code:provider-model-picker-selection-change";
+
+function isPersistedSelection(value: unknown): value is PersistedSelection {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { instanceId?: unknown; model?: unknown };
+  return typeof candidate.instanceId === "string" && typeof candidate.model === "string";
+}
+
+function readPersistedSelection(storageKey: string | null): PersistedSelection | null {
+  if (!storageKey || typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return isPersistedSelection(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedSelection(storageKey: string | null, next: PersistedSelection | null) {
+  if (!storageKey || typeof window === "undefined") return;
+  if (next === null) {
+    window.localStorage.removeItem(storageKey);
+  } else {
+    window.localStorage.setItem(storageKey, JSON.stringify(next));
+  }
+  window.dispatchEvent(
+    new CustomEvent<{ key: string }>(PERSISTED_SELECTION_STORAGE_EVENT, {
+      detail: { key: storageKey },
+    }),
+  );
+}
+
+function sameSelection(a: PersistedSelection, b: PersistedSelection) {
+  return a.instanceId === b.instanceId && a.model === b.model;
+}
+
+function normalizePersistedSelection(
+  selection: PersistedSelection | null,
+  instanceEntries: ReadonlyArray<ProviderInstanceEntry>,
+  modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>,
+): PersistedSelection | null {
+  if (!selection) return null;
+  const entry = instanceEntries.find(
+    (candidate) =>
+      candidate.instanceId === selection.instanceId &&
+      candidate.enabled &&
+      candidate.status === "ready",
+  );
+  if (!entry) return null;
+
+  const options = modelOptionsByInstance.get(entry.instanceId) ?? [];
+  if (options.some((option) => option.slug === selection.model)) {
+    return selection;
+  }
+
+  const resolved = resolveSelectableModel(entry.driverKind, selection.model, options);
+  return resolved ? { instanceId: selection.instanceId, model: resolved } : null;
+}
+
+function usePersistedSelection(storageKey: string | null) {
+  const [selection, setSelection] = useState<PersistedSelection | null>(() =>
+    readPersistedSelection(storageKey),
+  );
+
+  useEffect(() => {
+    if (!storageKey || typeof window === "undefined") {
+      setSelection(null);
+      return;
+    }
+
+    const syncFromStorage = () => {
+      setSelection(readPersistedSelection(storageKey));
+    };
+
+    syncFromStorage();
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === storageKey) {
+        syncFromStorage();
+      }
+    };
+
+    const handleLocalChange = (event: CustomEvent<{ key: string }>) => {
+      if (event.detail.key === storageKey) {
+        syncFromStorage();
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener(PERSISTED_SELECTION_STORAGE_EVENT, handleLocalChange as EventListener);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener(
+        PERSISTED_SELECTION_STORAGE_EVENT,
+        handleLocalChange as EventListener,
+      );
+    };
+  }, [storageKey]);
+
+  const persistSelection = useCallback(
+    (next: PersistedSelection | null) => {
+      writePersistedSelection(storageKey, next);
+      setSelection(next);
+    },
+    [storageKey],
+  );
+
+  return [selection, persistSelection] as const;
+}
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -40,29 +159,63 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   open?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  persistSelectionKey?: string;
   onOpenChange?: (open: boolean) => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+  const defaultSelectionRef = useRef<PersistedSelection>({
+    instanceId: props.activeInstanceId,
+    model: props.model,
+  });
+  const hadPersistedSelectionRef = useRef(false);
+  const [persistedSelection, setPersistedSelection] = usePersistedSelection(
+    props.persistSelectionKey ?? null,
+  );
+
+  const currentSelection = useMemo(
+    () => ({
+      instanceId: props.activeInstanceId,
+      model: props.model,
+    }),
+    [props.activeInstanceId, props.model],
+  );
+  const resolvedPersistedSelection = useMemo(
+    () =>
+      props.persistSelectionKey
+        ? normalizePersistedSelection(
+            persistedSelection,
+            props.instanceEntries,
+            props.modelOptionsByInstance,
+          )
+        : null,
+    [
+      persistedSelection,
+      props.instanceEntries,
+      props.modelOptionsByInstance,
+      props.persistSelectionKey,
+    ],
+  );
+  const effectiveSelection = resolvedPersistedSelection ?? currentSelection;
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
   // instance disappears, do not infer a replacement from its driver kind.
   const activeEntry = useMemo(() => {
     return (
-      props.instanceEntries.find((entry) => entry.instanceId === props.activeInstanceId) ?? null
+      props.instanceEntries.find((entry) => entry.instanceId === effectiveSelection.instanceId) ??
+      null
     );
-  }, [props.activeInstanceId, props.instanceEntries]);
+  }, [effectiveSelection.instanceId, props.instanceEntries]);
 
-  const activeInstanceId = props.activeInstanceId;
-  const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
+  const selectedInstanceOptions = props.modelOptionsByInstance.get(effectiveSelection.instanceId) ?? [];
   // If the current slug belongs to a different instance (for example after
   // a provider switch or disable), prefer the active instance's first
   // option so the trigger icon and label stay in sync instead of showing
   // a stale foreign slug.
   const selectedModel =
-    selectedInstanceOptions.find((option) => option.slug === props.model) ??
+    selectedInstanceOptions.find((option) => option.slug === effectiveSelection.model) ??
     selectedInstanceOptions[0];
   const triggerTitle = selectedModel ? getTriggerDisplayModelName(selectedModel) : props.model;
   const triggerSubtitle = selectedModel?.subProvider;
@@ -86,9 +239,65 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
+  useEffect(() => {
+    if (!props.persistSelectionKey) {
+      return;
+    }
+
+    if (persistedSelection !== null) {
+      hadPersistedSelectionRef.current = true;
+    }
+
+    const normalizedSelection = resolvedPersistedSelection;
+    if (normalizedSelection) {
+      hadPersistedSelectionRef.current = true;
+      if (!sameSelection(currentSelection, normalizedSelection)) {
+        props.onInstanceModelChange(
+          normalizedSelection.instanceId,
+          normalizedSelection.model,
+        );
+      }
+      return;
+    }
+
+    if (persistedSelection !== null) {
+      setPersistedSelection(null);
+    }
+
+    if (
+      hadPersistedSelectionRef.current &&
+      !sameSelection(currentSelection, defaultSelectionRef.current)
+    ) {
+      props.onInstanceModelChange(
+        defaultSelectionRef.current.instanceId,
+        defaultSelectionRef.current.model,
+      );
+    }
+  }, [
+    currentSelection,
+    persistedSelection,
+    props.onInstanceModelChange,
+    props.persistSelectionKey,
+    resolvedPersistedSelection,
+    setPersistedSelection,
+  ]);
+
+  const handleResetToDefault = useCallback(() => {
+    if (props.disabled) return;
+    setPersistedSelection(null);
+    props.onInstanceModelChange(
+      defaultSelectionRef.current.instanceId,
+      defaultSelectionRef.current.model,
+    );
+    setIsMenuOpen(false);
+  }, [props.disabled, props.onInstanceModelChange, setPersistedSelection]);
+
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
+    if (props.persistSelectionKey) {
+      setPersistedSelection({ instanceId, model });
+    }
     setIsMenuOpen(false);
   };
 
@@ -152,7 +361,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 <>
                   <span className="min-w-0 truncate">{triggerSubtitle}</span>
                   <span aria-hidden="true" className="shrink-0 opacity-60">
-                    ·
+                    路
                   </span>
                   <span className="min-w-0 truncate">{triggerTitle}</span>
                 </>
@@ -169,18 +378,33 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         align="start"
         className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] *:data-[slot=popover-viewport]:p-0"
       >
-        <ModelPickerContent
-          activeInstanceId={activeInstanceId}
-          model={props.model}
-          lockedProvider={props.lockedProvider}
-          lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
-          instanceEntries={props.instanceEntries}
-          {...(props.keybindings ? { keybindings: props.keybindings } : {})}
-          modelOptionsByInstance={props.modelOptionsByInstance}
-          terminalOpen={props.terminalOpen ?? false}
-          onRequestClose={() => setIsMenuOpen(false)}
-          onInstanceModelChange={handleInstanceModelChange}
-        />
+        <div className="flex flex-col">
+          {props.persistSelectionKey ? (
+            <div className="flex items-center justify-end border-b bg-popover px-3 py-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                onClick={handleResetToDefault}
+              >
+                Reset to default
+              </Button>
+            </div>
+          ) : null}
+          <ModelPickerContent
+            activeInstanceId={effectiveSelection.instanceId}
+            model={effectiveSelection.model}
+            lockedProvider={props.lockedProvider}
+            lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
+            instanceEntries={props.instanceEntries}
+            {...(props.keybindings ? { keybindings: props.keybindings } : {})}
+            modelOptionsByInstance={props.modelOptionsByInstance}
+            terminalOpen={props.terminalOpen ?? false}
+            onRequestClose={() => setIsMenuOpen(false)}
+            onInstanceModelChange={handleInstanceModelChange}
+          />
+        </div>
       </PopoverPopup>
     </Popover>
   );
