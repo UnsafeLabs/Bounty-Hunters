@@ -1,0 +1,16 @@
+{
+  "name": "bounty-hunters-solidity",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "mocha \"test/**/*.test.js\""
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "^5.4.0",
+    "chai": "^4.5.0",
+    "ethers": "^6.15.0",
+    "ganache": "^7.9.2",
+    "mocha": "^11.7.1",
+    "solc": "^0.8.30"
+  }
+}
