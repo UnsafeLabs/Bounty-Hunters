@@ -1,5 +1,5 @@
+import { HttpServerMiddleware } from "effect/unstable/http";
 import Mime from "@effect/platform-node/Mime";
-import { Readable } from "node:stream";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -12,16 +12,16 @@ import {
   HttpClient,
   HttpClientResponse,
   HttpRouter,
-  HttpRouter,
   HttpServerResponse,
   HttpServerRequest,
-  HttpServerError,
 } from "effect/unstable/http";
+  HttpServerResponse,
+  HttpServerRequest,
+} from "effect/unstable/http";
+import * as HttpServerError from "effect/unstable/http/HttpServerError";
 import { OtlpTracer } from "effect/unstable/observability";
 
-  ATTACHMENTS_ROUTE_PREFIX,
-  normalizeAttachmentRelativePath,
-  resolveAttachmentRelativePath,
+import {
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
@@ -32,19 +32,91 @@ import { respondToAuthError } from "./auth/http.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import {
   browserApiCorsAllowedHeaders,
+  browserApiCorsAllowedMethods,
+  browserApiCorsHeaders,
+} from "./httpCors.ts";
+
+  browserApiCorsHeaders,
+} from "./httpCors.ts";
+
+// ---------------------------------------------------------------------------
+// Request body size limiting
+// ---------------------------------------------------------------------------
+
+/** Default maximum request body size in bytes (10 MB). */
+export const DEFAULT_MAX_BODY_SIZE = 10 * 1024 * 1024;
+
+/** Maximum request body size for file-upload endpoints (50 MB). */
+export const FILE_UPLOAD_MAX_BODY_SIZE = 50 * 1024 * 1024;
+
+/**
+ * Per-route body-size overrides.
+ *
+ * Keys are route patterns (matched with `startsWith` against the request
+ * pathname).  Values are the maximum body size in bytes for that route.
+ */
+export const ROUTE_BODY_SIZE_OVERRIDES: Record<string, number> = {
+  [ATTACHMENTS_ROUTE_PREFIX]: FILE_UPLOAD_MAX_BODY_SIZE,
+};
+
+/**
+ * Resolve the maximum body size for a given request path.
+ *
+ * Checks `ROUTE_BODY_SIZE_OVERRIDES` first; falls back to
+ * `DEFAULT_MAX_BODY_SIZE`.
+ */
+export function resolveMaxBodySize(pathname: string): number {
+  for (const [prefix, limit] of Object.entries(ROUTE_BODY_SIZE_OVERRIDES)) {
+    if (pathname.startsWith(prefix)) {
+      return limit;
+    }
+  }
+  return DEFAULT_MAX_BODY_SIZE;
+}
+
+/**
+ * Middleware that enforces a configurable request body size limit.
+ *
+ * - Reads the `Content-Length` header (if present) and rejects requests that
+ *   exceed the limit **before** the body is buffered.
+ * - Returns `413 Payload Too Large` with a JSON body containing the limit and
+ *   the received `Content-Length`.
+ * - Sets the `X-Max-Body-Size` response header on 413 responses.
+ */
+export const bodySizeLimitMiddleware = HttpServerMiddleware.make((app) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const maxSize = resolveMaxBodySize(new URL(request.url).pathname);
+
+    const contentLengthHeader = request.headers["content-length"];
+    if (contentLengthHeader) {
+      const contentLength = parseInt(contentLengthHeader, 10);
+      if (!Number.isNaN(contentLength) && contentLength > maxSize) {
+        return HttpServerResponse.jsonUnsafe(
+          {
+            error: "Payload Too Large",
+            message: "Request body exceeds the maximum allowed size.",
+            limit: maxSize,
+            received: contentLength,
+          },
+          {
+            status: 413,
+            headers: {
+              ...browserApiCorsHeaders,
+              "x-max-body-size": String(maxSize),
+            },
+          },
+        );
+      }
+    }
+
+    return yield* app;
+  }),
+);
+
+const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
+const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
-
-const DEFAULT_BODY_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
-const FILE_UPLOAD_BODY_SIZE_LIMIT = 50 * 1024 * 1024; // 50MB
-
-export const browserApiCorsLayer = HttpRouter.cors({
-  allowedMethods: [...browserApiCorsAllowedMethods],
-  allowedHeaders: [...browserApiCorsAllowedHeaders],
-const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
-
-export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: [...browserApiCorsAllowedMethods],
   allowedHeaders: [...browserApiCorsAllowedHeaders],
   maxAge: 600,
@@ -58,82 +130,11 @@ export function isLoopbackHostname(hostname: string): boolean {
   return LOOPBACK_HOSTNAMES.has(normalizedHostname);
 }
 
-  return redirectUrl.toString();
-}
-
-export interface BodySizeLimitConfig {
-  readonly limit: number;
-}
-
-export const defaultBodySizeLimit: BodySizeLimitConfig = {
-  limit: DEFAULT_BODY_SIZE_LIMIT,
-};
-
-export const fileUploadBodySizeLimit: BodySizeLimitConfig = {
-  limit: FILE_UPLOAD_BODY_SIZE_LIMIT,
-};
-
-class PayloadTooLargeError extends Data.TaggedError("PayloadTooLargeError")<{
-  readonly limit: number;
-  readonly received: number;
-}> {}
-
-export function checkBodySize(
-  limitConfig: BodySizeLimitConfig
-): Effect.Effect<void, PayloadTooLargeError, HttpServerRequest.HttpServerRequest> {
-  return Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const contentLength = request.headers["content-length"];
-    if (contentLength) {
-      const size = parseInt(contentLength, 10);
-      if (!isNaN(size) && size > limitConfig.limit) {
-        return yield* new PayloadTooLargeError({
-          limit: limitConfig.limit,
-          received: size,
-        });
-      }
-    }
-  });
-}
-
-export function withBodySizeLimit(
-  route: HttpRouter.Route<any, any, any, any, any, any>,
-  limitConfig: BodySizeLimitConfig = defaultBodySizeLimit
-): HttpRouter.Route<any, any, any, any, any, any> {
-  const originalHandler = route.handler;
-  const newHandler = Effect.gen(function* () {
-    yield* checkBodySize(limitConfig);
-    return yield* originalHandler;
-  }).pipe(
-    Effect.catchAll((error) => {
-      if (error instanceof PayloadTooLargeError) {
-        return Effect.succeed(
-          HttpServerResponse.jsonUnsafe(
-            {
-              error: "Payload Too Large",
-              limit: error.limit,
-              received: error.received,
-            },
-            {
-              status: 413,
-              headers: {
-                "X-Max-Body-Size": String(error.limit),
-              },
-            }
-          )
-        );
-      }
-      return Effect.fail(error);
-    })
-  );
-  return {
-    ...route,
-    handler: newHandler,
-  };
-}
-
-const requireAuthenticatedRequest = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
+export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
+  const redirectUrl = new URL(devUrl.toString());
+  redirectUrl.pathname = requestUrl.pathname;
+  redirectUrl.search = requestUrl.search;
+  redirectUrl.hash = requestUrl.hash;
   return redirectUrl.toString();
 }
 
