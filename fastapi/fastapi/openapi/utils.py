@@ -33,6 +33,8 @@ from fastapi.types import ModelNameMap
 from fastapi.utils import (
     deep_dict_update,
     generate_operation_id_for_path,
+    generate_unique_id,
+    generate_unique_id_for_method,
     is_body_allowed_for_status_code,
 )
 from pydantic import BaseModel
@@ -233,6 +235,23 @@ def generate_operation_summary(*, route: routing.APIRoute, method: str) -> str:
     return route.name.replace("_", " ").title()
 
 
+def _uses_default_generate_unique_id(route: routing.APIRoute) -> bool:
+    generate_unique_id_function = route.generate_unique_id_function
+    return (
+        isinstance(generate_unique_id_function, DefaultPlaceholder)
+        and generate_unique_id_function.value is generate_unique_id
+    )
+
+
+def _append_collision_suffix(operation_id: str, operation_ids: set[str]) -> str:
+    if operation_id not in operation_ids:
+        return operation_id
+    suffix = 2
+    while f"{operation_id}_{suffix}" in operation_ids:
+        suffix += 1
+    return f"{operation_id}_{suffix}"
+
+
 def get_openapi_operation_metadata(
     *, route: routing.APIRoute, method: str, operation_ids: set[str]
 ) -> dict[str, Any]:
@@ -243,6 +262,9 @@ def get_openapi_operation_metadata(
     if route.description:
         operation["description"] = route.description
     operation_id = route.operation_id or route.unique_id
+    if route.operation_id is None and _uses_default_generate_unique_id(route):
+        operation_id = generate_unique_id_for_method(route, method)
+        operation_id = _append_collision_suffix(operation_id, operation_ids)
     if operation_id in operation_ids:
         endpoint_name = getattr(route.endpoint, "__name__", "<unnamed_endpoint>")
         message = f"Duplicate Operation ID {operation_id} for function {endpoint_name}"

@@ -1697,3 +1697,80 @@ def test_warn_duplicate_operation_id():
         ]
         assert len(duplicate_warnings) > 0
         assert "Duplicate Operation ID" in str(duplicate_warnings[0].message)
+
+
+def test_default_operation_ids_include_method_path_and_name():
+    app = FastAPI()
+
+    @app.get("/users")
+    def list_users():
+        return []  # pragma: nocover
+
+    @app.post("/api/v1/items")
+    def create_item():
+        return {}  # pragma: nocover
+
+    @app.get("/users/{user_id}")
+    def read_user(user_id: str):
+        return {"user_id": user_id}  # pragma: nocover
+
+    schema = TestClient(app).get("/openapi.json").json()
+
+    assert schema["paths"]["/users"]["get"]["operationId"] == "get_users_list_users"
+    assert (
+        schema["paths"]["/api/v1/items"]["post"]["operationId"]
+        == "post_api_v1_items_create_item"
+    )
+    assert (
+        schema["paths"]["/users/{user_id}"]["get"]["operationId"]
+        == "get_users_user_id_read_user"
+    )
+
+
+def test_default_operation_ids_use_router_prefix_and_method_per_operation():
+    app = FastAPI()
+    api_router = APIRouter(prefix="/api/v1")
+
+    @api_router.get("/users")
+    def list_users():
+        return []  # pragma: nocover
+
+    def health():
+        return {"ok": True}  # pragma: nocover
+
+    api_router.add_api_route("/health", health, methods=["GET", "POST"])
+    app.include_router(api_router)
+
+    schema = TestClient(app).get("/openapi.json").json()
+
+    assert (
+        schema["paths"]["/api/v1/users"]["get"]["operationId"]
+        == "get_api_v1_users_list_users"
+    )
+    assert (
+        schema["paths"]["/api/v1/health"]["get"]["operationId"]
+        == "get_api_v1_health_health"
+    )
+    assert (
+        schema["paths"]["/api/v1/health"]["post"]["operationId"]
+        == "post_api_v1_health_health"
+    )
+
+
+def test_default_operation_ids_are_sanitized_and_collision_suffixed():
+    app = FastAPI()
+
+    def report():
+        return {}  # pragma: nocover
+
+    app.add_api_route("/reports/a-b", report, methods=["GET"], name="read_report")
+    app.add_api_route("/reports/a_b", report, methods=["GET"], name="read_report")
+
+    schema = TestClient(app).get("/openapi.json").json()
+
+    first_id = schema["paths"]["/reports/a-b"]["get"]["operationId"]
+    second_id = schema["paths"]["/reports/a_b"]["get"]["operationId"]
+    assert first_id == "get_reports_a_b_read_report"
+    assert second_id == "get_reports_a_b_read_report_2"
+    assert first_id.replace("_", "").isalnum()
+    assert second_id.replace("_", "").isalnum()
