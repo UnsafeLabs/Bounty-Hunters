@@ -1030,6 +1030,93 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  // A multi-megabyte chat-history snapshot is the payload the compression feature
+  // exists for: build one well past the 1 KiB threshold and highly compressible.
+  const makeLargeOrchestrationReadModel = () => {
+    const base = makeDefaultOrchestrationReadModel();
+    return {
+      ...base,
+      threads: base.threads.map((thread) => ({
+        ...thread,
+        title: "chat history ".repeat(512),
+      })),
+    };
+  };
+
+  it.effect("compresses the orchestration snapshot JSON with brotli when accepted", () =>
+    Effect.gen(function* () {
+      const snapshot = makeLargeOrchestrationReadModel();
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getSnapshot: () => Effect.succeed(snapshot),
+          },
+        },
+      });
+
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const url = yield* getHttpServerUrl("/api/orchestration/snapshot");
+      const response = yield* Effect.promise(() =>
+        fetch(url, { headers: { cookie, "accept-encoding": "br" } }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-encoding"), "br");
+      assert.equal(response.headers.get("vary"), "Accept-Encoding");
+      const body = yield* Effect.promise(() => response.json());
+      assert.deepEqual(body, snapshot);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("falls back to gzip for the orchestration snapshot when brotli is not accepted", () =>
+    Effect.gen(function* () {
+      const snapshot = makeLargeOrchestrationReadModel();
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getSnapshot: () => Effect.succeed(snapshot),
+          },
+        },
+      });
+
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const url = yield* getHttpServerUrl("/api/orchestration/snapshot");
+      const response = yield* Effect.promise(() =>
+        fetch(url, { headers: { cookie, "accept-encoding": "gzip" } }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-encoding"), "gzip");
+      const body = yield* Effect.promise(() => response.json());
+      assert.deepEqual(body, snapshot);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("leaves the orchestration snapshot uncompressed when no coding is accepted", () =>
+    Effect.gen(function* () {
+      const snapshot = makeLargeOrchestrationReadModel();
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getSnapshot: () => Effect.succeed(snapshot),
+          },
+        },
+      });
+
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const url = yield* getHttpServerUrl("/api/orchestration/snapshot");
+      const response = yield* Effect.promise(() =>
+        fetch(url, { headers: { cookie, "accept-encoding": "identity" } }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-encoding"), null);
+      assert.equal(response.headers.get("vary"), "Accept-Encoding");
+      const body = yield* Effect.promise(() => response.json());
+      assert.deepEqual(body, snapshot);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("serves the public environment descriptor without requiring auth", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();

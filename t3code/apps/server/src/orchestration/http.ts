@@ -8,9 +8,35 @@ import * as Effect from "effect/Effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { ServerAuth } from "../auth/Services/ServerAuth.ts";
+import {
+  compressResponseBody,
+  contentEncodingResponseHeaders,
+  resolveCompressionOptionsFromEnv,
+} from "../httpCompression.ts";
 import { normalizeDispatchCommand } from "./Normalizer.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
+
+const JSON_CONTENT_TYPE = "application/json";
+
+// Serialize a value as JSON and apply gzip/brotli compression negotiated from the
+// request's Accept-Encoding. The orchestration snapshot is the largest JSON the
+// server emits (project/session read model, i.e. chat history), so compressing it
+// is where the bandwidth win lives.
+const compressedJsonResponse = (acceptEncoding: string | undefined, value: unknown) => {
+  const data = new TextEncoder().encode(JSON.stringify(value));
+  const { encoding, body } = compressResponseBody({
+    data,
+    acceptEncoding,
+    contentType: JSON_CONTENT_TYPE,
+    options: resolveCompressionOptionsFromEnv(),
+  });
+  return HttpServerResponse.uint8Array(body, {
+    status: 200,
+    contentType: JSON_CONTENT_TYPE,
+    headers: contentEncodingResponseHeaders(encoding),
+  });
+};
 
 const respondToOrchestrationHttpError = (
   error: OrchestrationDispatchCommandError | OrchestrationGetSnapshotError,
@@ -44,6 +70,7 @@ export const orchestrationSnapshotRouteLayer = HttpRouter.add(
   "/api/orchestration/snapshot",
   Effect.gen(function* () {
     yield* authenticateOwnerSession;
+    const request = yield* HttpServerRequest.HttpServerRequest;
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const snapshot = yield* projectionSnapshotQuery.getSnapshot().pipe(
       Effect.mapError(
@@ -54,9 +81,10 @@ export const orchestrationSnapshotRouteLayer = HttpRouter.add(
           }),
       ),
     );
-    return HttpServerResponse.jsonUnsafe(snapshot satisfies OrchestrationReadModel, {
-      status: 200,
-    });
+    return compressedJsonResponse(
+      request.headers["accept-encoding"],
+      snapshot satisfies OrchestrationReadModel,
+    );
   }).pipe(
     Effect.catchTag("OrchestrationDispatchCommandError", respondToOrchestrationHttpError),
     Effect.catchTag("OrchestrationGetSnapshotError", respondToOrchestrationHttpError),

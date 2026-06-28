@@ -23,6 +23,13 @@ import {
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
+import {
+  compressResponseBody,
+  contentEncodingResponseHeaders,
+  decodeRequestBody,
+  resolveCompressionOptionsFromEnv,
+  UnsupportedContentEncodingError,
+} from "./httpCompression.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
@@ -86,6 +93,19 @@ class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecor
   readonly bodyJson: OtlpTracer.TraceData;
 }> {}
 
+class DecodeRequestBodyError extends Data.TaggedError("DecodeRequestBodyError")<{
+  readonly cause: unknown;
+  readonly unsupportedEncoding: boolean;
+}> {}
+
+const respondToDecodeRequestBodyError = (error: DecodeRequestBodyError) =>
+  Effect.gen(function* () {
+    yield* Effect.logWarning("Failed to decode request body", { cause: error.cause });
+    return error.unsupportedEncoding
+      ? HttpServerResponse.text("Unsupported Content-Encoding", { status: 415 })
+      : HttpServerResponse.text("Bad Request", { status: 400 });
+  });
+
 export const otlpTracesProxyRouteLayer = HttpRouter.add(
   "POST",
   OTLP_TRACES_PROXY_PATH,
@@ -96,7 +116,25 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
     const otlpTracesUrl = config.otlpTracesUrl;
     const browserTraceCollector = yield* BrowserTraceCollector;
     const httpClient = yield* HttpClient.HttpClient;
-    const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
+    // Decode any gzip/brotli-encoded request body before JSON parsing so clients
+    // can compress large OTLP trace uploads (negotiated via Content-Encoding).
+    const rawRequestBody = yield* request.arrayBuffer;
+    const contentEncoding = request.headers["content-encoding"];
+    const bodyJson = yield* Effect.try({
+      try: () =>
+        cast<unknown, OtlpTracer.TraceData>(
+          JSON.parse(
+            new TextDecoder().decode(
+              decodeRequestBody({ data: new Uint8Array(rawRequestBody), contentEncoding }),
+            ),
+          ),
+        ),
+      catch: (cause) =>
+        new DecodeRequestBodyError({
+          cause,
+          unsupportedEncoding: cause instanceof UnsupportedContentEncodingError,
+        }),
+    });
 
     yield* Effect.try({
       try: () => decodeOtlpTraceRecords(bodyJson),
@@ -132,7 +170,10 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
           Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
         ),
       );
-  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+  }).pipe(
+    Effect.catchTag("AuthError", respondToAuthError),
+    Effect.catchTag("DecodeRequestBodyError", respondToDecodeRequestBodyError),
+  ),
 );
 
 export const attachmentsRouteLayer = HttpRouter.add(
@@ -232,6 +273,29 @@ export const projectFaviconRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+// Serve in-memory static assets with gzip/brotli compression negotiated from the
+// request's `Accept-Encoding`. Static files (the web bundle's HTML/JS/CSS) are one
+// source of large, compressible payloads; the other — the multi-megabyte chat-history
+// JSON — is compressed at its own route (`orchestration/http.ts`). Both go through the
+// shared `compressResponseBody`, which leaves small or already-compressed bodies alone.
+function staticAssetResponse(
+  acceptEncoding: string | undefined,
+  data: Uint8Array,
+  contentType: string,
+) {
+  const { encoding, body } = compressResponseBody({
+    data,
+    acceptEncoding,
+    contentType,
+    options: resolveCompressionOptionsFromEnv(),
+  });
+  return HttpServerResponse.uint8Array(body, {
+    status: 200,
+    contentType,
+    headers: contentEncodingResponseHeaders(encoding),
+  });
+}
+
 export const staticAndDevRouteLayer = HttpRouter.add(
   "GET",
   "*",
@@ -302,10 +366,11 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       if (!indexData) {
         return HttpServerResponse.text("Not Found", { status: 404 });
       }
-      return HttpServerResponse.uint8Array(indexData, {
-        status: 200,
-        contentType: "text/html; charset=utf-8",
-      });
+      return staticAssetResponse(
+        request.headers["accept-encoding"],
+        indexData,
+        "text/html; charset=utf-8",
+      );
     }
 
     const contentType = Mime.getType(filePath) ?? "application/octet-stream";
@@ -316,9 +381,6 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Internal Server Error", { status: 500 });
     }
 
-    return HttpServerResponse.uint8Array(data, {
-      status: 200,
-      contentType,
-    });
+    return staticAssetResponse(request.headers["accept-encoding"], data, contentType);
   }),
 );
