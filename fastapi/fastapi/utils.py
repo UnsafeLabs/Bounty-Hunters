@@ -86,18 +86,27 @@ def generate_operation_id_for_path(
         category=FastAPIDeprecationWarning,
         stacklevel=2,
     )
-    operation_id = f"{name}{path}"
-    operation_id = re.sub(r"\W", "_", operation_id)
-    operation_id = f"{operation_id}_{method.lower()}"
-    return operation_id
+    return _sanitize_operation_id("_".join([method.lower(), path.strip("/"), name]))
+
+
+def _sanitize_operation_id(operation_id: str) -> str:
+    operation_id = re.sub(r"[^0-9a-zA-Z_]+", "_", operation_id)
+    operation_id = re.sub(r"_+", "_", operation_id)
+    return operation_id.strip("_").lower()
+
+
+def generate_unique_id_for_method(route: "APIRoute", method: str) -> str:
+    path_fragment = route.path_format.strip("/")
+    operation_id_parts = [method.lower()]
+    if path_fragment:
+        operation_id_parts.append(path_fragment)
+    operation_id_parts.append(route.name)
+    return _sanitize_operation_id("_".join(operation_id_parts))
 
 
 def generate_unique_id(route: "APIRoute") -> str:
-    operation_id = f"{route.name}{route.path_format}"
-    operation_id = re.sub(r"\W", "_", operation_id)
     assert route.methods
-    operation_id = f"{operation_id}_{list(route.methods)[0].lower()}"
-    return operation_id
+    return generate_unique_id_for_method(route=route, method=sorted(route.methods)[0])
 
 
 def deep_dict_update(main_dict: dict[Any, Any], update_dict: dict[Any, Any]) -> None:
