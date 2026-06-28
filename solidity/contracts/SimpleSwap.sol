@@ -2,8 +2,14 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract SimpleSwap {
+    using SafeERC20 for IERC20;
+
+    uint256 private constant BPS_DENOMINATOR = 10000;
+
     IERC20 public tokenA;
     IERC20 public tokenB;
     uint256 public reserveA;
@@ -13,22 +19,31 @@ contract SimpleSwap {
     event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
 
     constructor(address _tokenA, address _tokenB, uint256 _fee) {
+        require(_tokenA != address(0) && _tokenB != address(0), "Invalid token");
+        require(_tokenA != _tokenB, "Duplicate token");
+        require(_fee <= BPS_DENOMINATOR, "Invalid fee");
+
         tokenA = IERC20(_tokenA);
         tokenB = IERC20(_tokenB);
         fee = _fee;
     }
 
     function addLiquidity(uint256 amountA, uint256 amountB) external {
-        tokenA.transferFrom(msg.sender, address(this), amountA);
-        tokenB.transferFrom(msg.sender, address(this), amountB);
+        require(amountA > 0 && amountB > 0, "Invalid liquidity");
+
+        tokenA.safeTransferFrom(msg.sender, address(this), amountA);
+        tokenB.safeTransferFrom(msg.sender, address(this), amountB);
         reserveA += amountA;
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Deadline expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
@@ -37,15 +52,11 @@ contract SimpleSwap {
             ? (tokenA, tokenB, reserveA, reserveB)
             : (tokenB, tokenA, reserveB, reserveA);
 
-        inputToken.transferFrom(msg.sender, address(this), amountIn);
+        amountOut = _getAmountOut(reserveIn, reserveOut, amountIn);
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-
-        // constant product formula: x * y = k
-        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
-
-        outputToken.transfer(msg.sender, amountOut);
+        inputToken.safeTransferFrom(msg.sender, address(this), amountIn);
+        outputToken.safeTransfer(msg.sender, amountOut);
 
         if (isTokenA) {
             reserveA += amountIn;
@@ -59,10 +70,30 @@ contract SimpleSwap {
     }
 
     function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
+        require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
+        require(amountIn > 0, "Amount must be > 0");
+
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
+        return _getAmountOut(reserveIn, reserveOut, amountIn);
+    }
+
+    function calculateFee(uint256 amountIn) public view returns (uint256) {
+        if (fee == 0) return 0;
+        return Math.ceilDiv(amountIn * fee, BPS_DENOMINATOR);
+    }
+
+    function _getAmountOut(
+        uint256 reserveIn,
+        uint256 reserveOut,
+        uint256 amountIn
+    ) private view returns (uint256) {
+        require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
+
+        uint256 feeAmount = calculateFee(amountIn);
+        require(amountIn > feeAmount, "Amount too small");
+
         uint256 amountInAfterFee = amountIn - feeAmount;
         return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
     }
