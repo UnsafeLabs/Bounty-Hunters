@@ -1,3 +1,7 @@
+import time
+from collections.abc import Callable, Sequence
+from math import ceil
+from threading import RLock
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -5,7 +9,8 @@ from fastapi.openapi.models import APIKey, APIKeyIn
 from fastapi.security.base import SecurityBase
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.responses import Response
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class APIKeyBase(SecurityBase):
@@ -230,6 +235,93 @@ class APIKeyHeader(APIKeyBase):
     async def __call__(self, request: Request) -> str | None:
         api_key = request.headers.get(self.model.name)
         return self.check_api_key(api_key)
+
+
+class APIKeyWithRateLimit(APIKeyHeader):
+    _WINDOWS = {
+        "second": 1,
+        "minute": 60,
+        "hour": 60 * 60,
+        "day": 24 * 60 * 60,
+    }
+
+    def __init__(
+        self,
+        *,
+        name: Annotated[str, Doc("Header name.")],
+        rate_limit: str,
+        deprecated_keys: Sequence[str] | None = None,
+        scheme_name: str | None = None,
+        description: str | None = None,
+        auto_error: bool = True,
+        time_func: Callable[[], float] | None = None,
+    ):
+        super().__init__(
+            name=name,
+            scheme_name=scheme_name,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.rate_limit = rate_limit
+        self.max_requests, self.window_seconds = self._parse_rate_limit(rate_limit)
+        self.deprecated_keys = set(deprecated_keys or ())
+        self._time = time_func or time.monotonic
+        self._requests: dict[str, list[float]] = {}
+        self._lock = RLock()
+
+    @classmethod
+    def _parse_rate_limit(cls, rate_limit: str) -> tuple[int, int]:
+        try:
+            count_text, unit_text = rate_limit.split("/", 1)
+            max_requests = int(count_text)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("rate_limit must use a format like '100/minute'") from exc
+        unit = unit_text.strip().lower().removesuffix("s")
+        if max_requests < 1 or unit not in cls._WINDOWS:
+            raise ValueError("rate_limit must use a format like '100/minute'")
+        return max_requests, cls._WINDOWS[unit]
+
+    @staticmethod
+    def _deprecated_warning() -> str:
+        return '299 - "API key is deprecated and will be deactivated"'
+
+    def _warning_headers(self, api_key: str) -> dict[str, str]:
+        if api_key in self.deprecated_keys:
+            return {"Warning": self._deprecated_warning()}
+        return {}
+
+    def _check_rate_limit(self, api_key: str, headers: dict[str, str]) -> None:
+        now = self._time()
+        with self._lock:
+            window_start = now - self.window_seconds
+            timestamps = [
+                timestamp
+                for timestamp in self._requests.get(api_key, [])
+                if timestamp > window_start
+            ]
+            if len(timestamps) >= self.max_requests:
+                retry_after = max(1, ceil(self.window_seconds - (now - timestamps[0])))
+                raise HTTPException(
+                    status_code=HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Rate limit exceeded",
+                    headers={**headers, "Retry-After": str(retry_after)},
+                )
+            timestamps.append(now)
+            self._requests[api_key] = timestamps
+
+    async def __call__(
+        self,
+        request: Request,
+        response: Response,
+    ) -> str | None:
+        api_key = self.check_api_key(request.headers.get(self.model.name))
+        if api_key is None:
+            return None
+        headers = self._warning_headers(api_key)
+        self._check_rate_limit(api_key, headers)
+        if "Warning" in headers:
+            response.headers["Warning"] = headers["Warning"]
+        return api_key
 
 
 class APIKeyCookie(APIKeyBase):
