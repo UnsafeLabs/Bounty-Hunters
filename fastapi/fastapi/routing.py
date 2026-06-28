@@ -78,6 +78,8 @@ from starlette._utils import is_async_callable
 from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import (
@@ -249,6 +251,47 @@ class _DefaultLifespan:
 
 # Cache for endpoint context to avoid re-extracting on every request
 _endpoint_context_cache: dict[int, EndpointContext] = {}
+
+
+def _is_dispatch_middleware(middleware: Callable[..., Any]) -> bool:
+    if inspect.isclass(middleware):
+        return False
+    try:
+        parameters = inspect.signature(middleware).parameters
+    except (TypeError, ValueError):
+        return False
+    positional = [
+        parameter
+        for parameter in parameters.values()
+        if parameter.kind
+        in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    return len(positional) == 2
+
+
+def _build_middleware_stack(
+    app: ASGIApp,
+    middleware: Sequence[Middleware],
+) -> ASGIApp:
+    for middleware_item in reversed(middleware):
+        cls, args, kwargs = middleware_item
+        if _is_dispatch_middleware(cls):
+            app = BaseHTTPMiddleware(app, dispatch=cls)
+        else:
+            app = cls(app, *args, **kwargs)
+    return app
+
+
+def _wrap_route_with_middleware(
+    route: BaseRoute,
+    middleware: Sequence[Middleware],
+) -> None:
+    if not hasattr(route, "app"):
+        return
+    original_app = getattr(route, "_fastapi_original_app", route.app)
+    route._fastapi_original_app = original_app
+    route._fastapi_router_middleware = list(middleware)
+    route.app = _build_middleware_stack(original_app, route._fastapi_router_middleware)
 
 
 def _extract_endpoint_context(func: Any) -> EndpointContext:
@@ -1122,6 +1165,14 @@ class APIRouter(routing.Router):
                 """
             ),
         ] = None,
+        middleware: Annotated[
+            Sequence[Middleware] | None,
+            Doc(
+                """
+                Middleware to apply only to routes registered on this router.
+                """
+            ),
+        ] = None,
         redirect_slashes: Annotated[
             bool,
             Doc(
@@ -1313,6 +1364,57 @@ class APIRouter(routing.Router):
         self.default_response_class = default_response_class
         self.generate_unique_id_function = generate_unique_id_function
         self.strict_content_type = strict_content_type
+        self.router_middleware = list(middleware or [])
+        for route in self.routes:
+            _wrap_route_with_middleware(route, self.router_middleware)
+
+    def add_middleware(
+        self,
+        middleware_class: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        self.router_middleware.append(Middleware(middleware_class, *args, **kwargs))
+        for route in self.routes:
+            route_middleware = getattr(route, "_fastapi_router_middleware", [])
+            _wrap_route_with_middleware(
+                route,
+                [*route_middleware, self.router_middleware[-1]],
+            )
+
+    def add_route(
+        self,
+        path: str,
+        endpoint: Callable[[Request], Awaitable[Response] | Response],
+        methods: Collection[str] | None = None,
+        name: str | None = None,
+        include_in_schema: bool = True,
+        route_middleware: Sequence[Middleware] | None = None,
+    ) -> None:
+        super().add_route(
+            path,
+            endpoint=endpoint,
+            methods=methods,
+            name=name,
+            include_in_schema=include_in_schema,
+        )
+        _wrap_route_with_middleware(
+            self.routes[-1],
+            [*self.router_middleware, *(route_middleware or [])],
+        )
+
+    def add_websocket_route(
+        self,
+        path: str,
+        endpoint: Callable[[WebSocket], Awaitable[None]],
+        name: str | None = None,
+        route_middleware: Sequence[Middleware] | None = None,
+    ) -> None:
+        super().add_websocket_route(path, endpoint=endpoint, name=name)
+        _wrap_route_with_middleware(
+            self.routes[-1],
+            [*self.router_middleware, *(route_middleware or [])],
+        )
 
     def route(
         self,
@@ -1364,6 +1466,7 @@ class APIRouter(routing.Router):
         generate_unique_id_function: Callable[[APIRoute], str]
         | DefaultPlaceholder = Default(generate_unique_id),
         strict_content_type: bool | DefaultPlaceholder = Default(True),
+        route_middleware: Sequence[Middleware] | None = None,
     ) -> None:
         route_class = route_class_override or self.route_class
         responses = responses or {}
@@ -1413,6 +1516,10 @@ class APIRouter(routing.Router):
             strict_content_type=get_value_or_default(
                 strict_content_type, self.strict_content_type
             ),
+        )
+        _wrap_route_with_middleware(
+            route,
+            [*self.router_middleware, *(route_middleware or [])],
         )
         self.routes.append(route)
 
@@ -1485,6 +1592,7 @@ class APIRouter(routing.Router):
         name: str | None = None,
         *,
         dependencies: Sequence[params.Depends] | None = None,
+        route_middleware: Sequence[Middleware] | None = None,
     ) -> None:
         current_dependencies = self.dependencies.copy()
         if dependencies:
@@ -1496,6 +1604,10 @@ class APIRouter(routing.Router):
             name=name,
             dependencies=current_dependencies,
             dependency_overrides_provider=self.dependency_overrides_provider,
+        )
+        _wrap_route_with_middleware(
+            route,
+            [*self.router_middleware, *(route_middleware or [])],
         )
         self.routes.append(route)
 
@@ -1793,6 +1905,7 @@ class APIRouter(routing.Router):
                         router.strict_content_type,
                         self.strict_content_type,
                     ),
+                    route_middleware=getattr(route, "_fastapi_router_middleware", []),
                 )
             elif isinstance(route, routing.Route):
                 methods = list(route.methods or [])
@@ -1802,6 +1915,7 @@ class APIRouter(routing.Router):
                     methods=methods,
                     include_in_schema=route.include_in_schema,
                     name=route.name,
+                    route_middleware=getattr(route, "_fastapi_router_middleware", []),
                 )
             elif isinstance(route, APIWebSocketRoute):
                 current_dependencies = []
@@ -1814,10 +1928,14 @@ class APIRouter(routing.Router):
                     route.endpoint,
                     dependencies=current_dependencies,
                     name=route.name,
+                    route_middleware=getattr(route, "_fastapi_router_middleware", []),
                 )
             elif isinstance(route, routing.WebSocketRoute):
                 self.add_websocket_route(
-                    prefix + route.path, route.endpoint, name=route.name
+                    prefix + route.path,
+                    route.endpoint,
+                    name=route.name,
+                    route_middleware=getattr(route, "_fastapi_router_middleware", []),
                 )
         for handler in router.on_startup:
             self.add_event_handler("startup", handler)
