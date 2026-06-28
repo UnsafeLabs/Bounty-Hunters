@@ -1,13 +1,14 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import (
     Annotated,
     Any,
     BinaryIO,
     TypeVar,
-    cast,
 )
 
 from annotated_doc import Doc
+from fastapi.exceptions import HTTPException
 from pydantic import GetJsonSchemaHandler
 from starlette.datastructures import URL as URL  # noqa: F401
 from starlette.datastructures import Address as Address  # noqa: F401
@@ -16,6 +17,13 @@ from starlette.datastructures import Headers as Headers  # noqa: F401
 from starlette.datastructures import QueryParams as QueryParams  # noqa: F401
 from starlette.datastructures import State as State  # noqa: F401
 from starlette.datastructures import UploadFile as StarletteUploadFile
+
+
+@dataclass(frozen=True)
+class ValidationResult:
+    is_valid: bool
+    file_size: int | None
+    content_type: str | None
 
 
 class UploadFile(StarletteUploadFile):
@@ -62,6 +70,88 @@ class UploadFile(StarletteUploadFile):
     content_type: Annotated[
         str | None, Doc("The content type of the request, from the headers.")
     ]
+    max_size: Annotated[
+        int | None,
+        Doc("The maximum allowed file size in bytes before validation fails."),
+    ]
+    allowed_content_types: Annotated[
+        tuple[str, ...] | None,
+        Doc("Allowed MIME content types before validation fails."),
+    ]
+
+    def __init__(
+        self,
+        file: BinaryIO,
+        *,
+        size: int | None = None,
+        filename: str | None = None,
+        headers: Headers | None = None,
+        max_size: int | None = None,
+        allowed_content_types: Sequence[str] | None = None,
+    ) -> None:
+        super().__init__(file=file, size=size, filename=filename, headers=headers)
+        self.max_size = max_size
+        self.allowed_content_types = (
+            tuple(allowed_content_types) if allowed_content_types is not None else None
+        )
+
+    def _get_file_size(self) -> int | None:
+        if self.size is not None:
+            return self.size
+
+        try:
+            current_position = self.file.tell()
+        except (AttributeError, OSError):
+            return None
+
+        try:
+            self.file.seek(0, 2)
+            file_size = self.file.tell()
+        except (AttributeError, OSError):
+            return None
+        try:
+            self.file.seek(current_position)
+        except (AttributeError, OSError):
+            return None
+        return file_size
+
+    def _raise_for_invalid_content_type(self) -> None:
+        if self.allowed_content_types is None:
+            return
+
+        normalized_allowed = {
+            content_type.lower() for content_type in self.allowed_content_types
+        }
+        content_type = self.content_type
+        if content_type is None or content_type.lower() not in normalized_allowed:
+            raise HTTPException(
+                status_code=415,
+                detail="Unsupported upload content type",
+            )
+
+    def _raise_for_invalid_size(self, file_size: int | None) -> None:
+        if (
+            self.max_size is not None
+            and file_size is not None
+            and file_size > self.max_size
+        ):
+            raise HTTPException(
+                status_code=413,
+                detail="Uploaded file exceeds the configured size limit",
+            )
+
+    async def validate(self) -> ValidationResult:
+        """
+        Validate this upload against the configured size and content type limits.
+        """
+        file_size = self._get_file_size()
+        self._raise_for_invalid_size(file_size)
+        self._raise_for_invalid_content_type()
+        return ValidationResult(
+            is_valid=True,
+            file_size=file_size,
+            content_type=self.content_type,
+        )
 
     async def write(
         self,
@@ -81,6 +171,10 @@ class UploadFile(StarletteUploadFile):
 
         To be awaitable, compatible with async, this is run in threadpool.
         """
+        if self.max_size is not None or self.allowed_content_types is not None:
+            validation_result = await self.validate()
+            if self.max_size is not None and validation_result.file_size is not None:
+                self._raise_for_invalid_size(validation_result.file_size + len(data))
         return await super().write(data)
 
     async def read(
@@ -99,6 +193,8 @@ class UploadFile(StarletteUploadFile):
 
         To be awaitable, compatible with async, this is run in threadpool.
         """
+        if self.max_size is not None or self.allowed_content_types is not None:
+            await self.validate()
         return await super().read(size)
 
     async def seek(
@@ -133,7 +229,14 @@ class UploadFile(StarletteUploadFile):
     def _validate(cls, __input_value: Any, _: Any) -> "UploadFile":
         if not isinstance(__input_value, StarletteUploadFile):
             raise ValueError(f"Expected UploadFile, received: {type(__input_value)}")
-        return cast(UploadFile, __input_value)
+        if isinstance(__input_value, cls):
+            return __input_value
+        return cls(
+            file=__input_value.file,
+            size=__input_value.size,
+            filename=__input_value.filename,
+            headers=__input_value.headers,
+        )
 
     @classmethod
     def __get_pydantic_json_schema__(
