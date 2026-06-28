@@ -1,7 +1,7 @@
-import { HttpServerMiddleware } from "effect/unstable/http";
 import Mime from "@effect/platform-node/Mime";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -12,16 +12,16 @@ import {
   HttpClient,
   HttpClientResponse,
   HttpRouter,
+  HttpServerError,
   HttpServerResponse,
   HttpServerRequest,
 } from "effect/unstable/http";
-  HttpServerResponse,
-  HttpServerRequest,
-} from "effect/unstable/http";
-import * as HttpServerError from "effect/unstable/http/HttpServerError";
 import { OtlpTracer } from "effect/unstable/observability";
 
 import {
+  ATTACHMENTS_ROUTE_PREFIX,
+  normalizeAttachmentRelativePath,
+  resolveAttachmentRelativePath,
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
@@ -36,94 +36,82 @@ import {
   browserApiCorsHeaders,
 } from "./httpCors.ts";
 
-  browserApiCorsHeaders,
-} from "./httpCors.ts";
+const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
+const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+const DEFAULT_BODY_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
+const FILE_UPLOAD_BODY_SIZE_LIMIT = 50 * 1024 * 1024; // 50MB
 
-// ---------------------------------------------------------------------------
-// Request body size limiting
-// ---------------------------------------------------------------------------
-
-/** Default maximum request body size in bytes (10 MB). */
-export const DEFAULT_MAX_BODY_SIZE = 10 * 1024 * 1024;
-
-/** Maximum request body size for file-upload endpoints (50 MB). */
-export const FILE_UPLOAD_MAX_BODY_SIZE = 50 * 1024 * 1024;
-
-/**
- * Per-route body-size overrides.
- *
- * Keys are route patterns (matched with `startsWith` against the request
- * pathname).  Values are the maximum body size in bytes for that route.
- */
-export const ROUTE_BODY_SIZE_OVERRIDES: Record<string, number> = {
-  [ATTACHMENTS_ROUTE_PREFIX]: FILE_UPLOAD_MAX_BODY_SIZE,
+// Per-route body size limit overrides (in bytes)
+const ROUTE_BODY_SIZE_LIMITS: Record<string, number> = {
+  [ATTACHMENTS_ROUTE_PREFIX]: FILE_UPLOAD_BODY_SIZE_LIMIT,
 };
 
+class PayloadTooLargeError extends Data.TaggedError("PayloadTooLargeError")<{
+  readonly limit: number;
+  readonly received: number;
+}> {}
+
+export const browserApiCorsLayer = HttpRouter.cors({
+  allowedMethods: [...browserApiCorsAllowedMethods],
+  allowedMethods: [...browserApiCorsAllowedMethods],
+  maxAge: 600,
+});
+
 /**
- * Resolve the maximum body size for a given request path.
- *
- * Checks `ROUTE_BODY_SIZE_OVERRIDES` first; falls back to
- * `DEFAULT_MAX_BODY_SIZE`.
+ * Resolve the body size limit for a given request path.
+ * Checks per-route overrides first, falls back to the default limit.
  */
-export function resolveMaxBodySize(pathname: string): number {
-  for (const [prefix, limit] of Object.entries(ROUTE_BODY_SIZE_OVERRIDES)) {
-    if (pathname.startsWith(prefix)) {
+function resolveBodySizeLimit(path: string): number {
+  for (const [prefix, limit] of Object.entries(ROUTE_BODY_SIZE_LIMITS)) {
+    if (path.startsWith(prefix)) {
       return limit;
     }
   }
-  return DEFAULT_MAX_BODY_SIZE;
+  return DEFAULT_BODY_SIZE_LIMIT;
 }
 
 /**
- * Middleware that enforces a configurable request body size limit.
- *
- * - Reads the `Content-Length` header (if present) and rejects requests that
- *   exceed the limit **before** the body is buffered.
- * - Returns `413 Payload Too Large` with a JSON body containing the limit and
- *   the received `Content-Length`.
- * - Sets the `X-Max-Body-Size` response header on 413 responses.
+ * Middleware that enforces request body size limits.
+ * Returns a 413 Payload Too Large response if Content-Length exceeds the limit,
+ * before the full body is read into memory.
  */
-export const bodySizeLimitMiddleware = HttpServerMiddleware.make((app) =>
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const maxSize = resolveMaxBodySize(new URL(request.url).pathname);
+export const bodySizeLimitMiddleware = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const url = new URL(request.url);
+  const limit = resolveBodySizeLimit(url.pathname);
 
-    const contentLengthHeader = request.headers["content-length"];
-    if (contentLengthHeader) {
-      const contentLength = parseInt(contentLengthHeader, 10);
-      if (!Number.isNaN(contentLength) && contentLength > maxSize) {
-        return HttpServerResponse.jsonUnsafe(
-          {
-            error: "Payload Too Large",
-            message: "Request body exceeds the maximum allowed size.",
-            limit: maxSize,
-            received: contentLength,
+  const contentLengthHeader = request.headers["content-length"];
+  if (contentLengthHeader) {
+    const contentLength = parseInt(contentLengthHeader, 10);
+    if (!isNaN(contentLength) && contentLength > limit) {
+      return HttpServerResponse.jsonUnsafe(
+        {
+          error: "Payload Too Large",
+          message: `Request body size (${contentLength} bytes) exceeds the limit of ${limit} bytes`,
+          limit,
+          received: contentLength,
+        },
+        {
+          status: 413,
+          headers: {
+            ...browserApiCorsHeaders,
+            "x-max-body-size": String(limit),
           },
-          {
-            status: 413,
-            headers: {
-              ...browserApiCorsHeaders,
-              "x-max-body-size": String(maxSize),
-            },
-          },
-        );
-      }
+        },
+      );
     }
+  }
 
-    return yield* app;
-  }),
-);
-
-const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
-const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
-const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
-  allowedMethods: [...browserApiCorsAllowedMethods],
-  allowedHeaders: [...browserApiCorsAllowedHeaders],
-  maxAge: 600,
+  // If no Content-Length header or within limit, continue
+  // Note: For chunked transfer encoding without Content-Length, we rely on the
+  // underlying HTTP server to enforce limits. This middleware handles the common case.
+  return yield* Effect.succeed(undefined);
 });
 
 export function isLoopbackHostname(hostname: string): boolean {
   const normalizedHostname = hostname
+    .trim()
     .trim()
     .toLowerCase()
     .replace(/^\[(.*)\]$/, "$1");
@@ -148,6 +136,7 @@ export const serverEnvironmentRouteLayer = HttpRouter.add(
   "GET",
   "/.well-known/t3/environment",
   Effect.gen(function* () {
+    yield* bodySizeLimitMiddleware;
     const descriptor = yield* Effect.service(ServerEnvironment).pipe(
       Effect.flatMap((serverEnvironment) => serverEnvironment.getDescriptor),
     );
@@ -166,12 +155,13 @@ class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecor
 export const otlpTracesProxyRouteLayer = HttpRouter.add(
   "POST",
   OTLP_TRACES_PROXY_PATH,
+  "POST",
+  OTLP_TRACES_PROXY_PATH,
   Effect.gen(function* () {
+    yield* bodySizeLimitMiddleware;
     yield* requireAuthenticatedRequest;
     const request = yield* HttpServerRequest.HttpServerRequest;
     const config = yield* ServerConfig;
-    const otlpTracesUrl = config.otlpTracesUrl;
-    const browserTraceCollector = yield* BrowserTraceCollector;
     const httpClient = yield* HttpClient.HttpClient;
     const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
 
