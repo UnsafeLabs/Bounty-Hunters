@@ -233,6 +233,18 @@ def generate_operation_summary(*, route: routing.APIRoute, method: str) -> str:
     return route.name.replace("_", " ").title()
 
 
+def _get_unique_operation_id(operation_id: str, operation_ids: set[str]) -> str:
+    if operation_id not in operation_ids:
+        return operation_id
+
+    suffix = 2
+    candidate = f"{operation_id}_{suffix}"
+    while candidate in operation_ids:
+        suffix += 1
+        candidate = f"{operation_id}_{suffix}"
+    return candidate
+
+
 def get_openapi_operation_metadata(
     *, route: routing.APIRoute, method: str, operation_ids: set[str]
 ) -> dict[str, Any]:
@@ -250,6 +262,7 @@ def get_openapi_operation_metadata(
         if file_name:
             message += f" at {file_name}"
         warnings.warn(message, stacklevel=1)
+        operation_id = _get_unique_operation_id(operation_id, operation_ids)
     operation_ids.add(operation_id)
     operation["operationId"] = operation_id
     if route.deprecated:
