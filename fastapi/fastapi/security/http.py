@@ -1,5 +1,11 @@
 import binascii
+import hashlib
+import hmac
+import time
 from base64 import b64decode
+from collections.abc import Callable, Mapping
+from math import ceil
+from os import urandom
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -10,7 +16,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class HTTPBasicCredentials(BaseModel):
@@ -217,6 +223,145 @@ class HTTPBasic(HTTPBase):
         if not separator:
             raise self.make_not_authenticated_error()
         return HTTPBasicCredentials(username=username, password=password)
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    def __init__(
+        self,
+        *,
+        max_attempts: int = 5,
+        window_seconds: int = 60,
+        password_hashes: Mapping[str, str] | None = None,
+        verify_credentials: Callable[[HTTPBasicCredentials], bool] | None = None,
+        time_func: Callable[[], float] | None = None,
+        scheme_name: str | None = None,
+        realm: str | None = None,
+        description: str | None = None,
+        auto_error: bool = True,
+    ):
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be greater than 0")
+        if window_seconds < 1:
+            raise ValueError("window_seconds must be greater than 0")
+        super().__init__(
+            scheme_name=scheme_name,
+            realm=realm,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self._uses_password_hashes = password_hashes is not None
+        self.password_hashes = dict(password_hashes or {})
+        self.verify_credentials = verify_credentials
+        self._time = time_func or time.monotonic
+        self._failed_attempts: dict[str, list[float]] = {}
+
+    @staticmethod
+    def hash_password(
+        password: str,
+        *,
+        salt: bytes | str | None = None,
+        iterations: int = 260_000,
+    ) -> str:
+        salt_bytes = (
+            urandom(16)
+            if salt is None
+            else (salt.encode() if isinstance(salt, str) else salt)
+        )
+        digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode(),
+            salt_bytes,
+            iterations,
+        ).hex()
+        return f"pbkdf2_sha256${iterations}${salt_bytes.hex()}${digest}"
+
+    @staticmethod
+    def verify_password(password: str, password_hash: str) -> bool:
+        try:
+            algorithm, iterations, salt, expected_digest = password_hash.split("$", 3)
+            if algorithm != "pbkdf2_sha256":
+                return False
+            candidate_digest = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode(),
+                bytes.fromhex(salt),
+                int(iterations),
+            ).hex()
+        except (TypeError, ValueError):
+            return False
+        return hmac.compare_digest(candidate_digest, expected_digest)
+
+    def _client_ip(self, request: Request) -> str:
+        if request.client is None:
+            return "unknown"
+        return request.client.host
+
+    def _prune_attempts(self, client_ip: str, now: float) -> list[float]:
+        attempts = [
+            attempt
+            for attempt in self._failed_attempts.get(client_ip, [])
+            if now - attempt < self.window_seconds
+        ]
+        if attempts:
+            self._failed_attempts[client_ip] = attempts
+        else:
+            self._failed_attempts.pop(client_ip, None)
+        return attempts
+
+    def _record_failure(self, client_ip: str, now: float) -> None:
+        attempts = self._prune_attempts(client_ip, now)
+        attempts.append(now)
+        self._failed_attempts[client_ip] = attempts
+
+    def _reset_failures(self, client_ip: str) -> None:
+        self._failed_attempts.pop(client_ip, None)
+
+    def _retry_after(self, client_ip: str, now: float) -> int:
+        attempts = self._prune_attempts(client_ip, now)
+        if not attempts:
+            return self.window_seconds
+        return max(1, ceil(self.window_seconds - (now - attempts[0])))
+
+    def _raise_if_locked(self, client_ip: str, now: float) -> None:
+        if len(self._prune_attempts(client_ip, now)) >= self.max_attempts:
+            retry_after = self._retry_after(client_ip, now)
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many authentication attempts",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+    def _credentials_are_valid(self, credentials: HTTPBasicCredentials) -> bool:
+        if self.verify_credentials is not None:
+            return self.verify_credentials(credentials)
+        if self._uses_password_hashes:
+            password_hash = self.password_hashes.get(credentials.username)
+            if password_hash is None:
+                return False
+            return self.verify_password(credentials.password, password_hash)
+        return True
+
+    async def __call__(  # type: ignore
+        self, request: Request
+    ) -> HTTPBasicCredentials | None:
+        client_ip = self._client_ip(request)
+        now = self._time()
+        self._raise_if_locked(client_ip, now)
+        try:
+            credentials = await super().__call__(request)
+        except HTTPException as exc:
+            if request.headers.get("Authorization") and exc.status_code == 401:
+                self._record_failure(client_ip, self._time())
+            raise
+        if credentials is None:
+            return None
+        if not self._credentials_are_valid(credentials):
+            self._record_failure(client_ip, self._time())
+            raise self.make_not_authenticated_error()
+        self._reset_failures(client_ip)
+        return credentials
 
 
 class HTTPBearer(HTTPBase):
