@@ -2,8 +2,12 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract TokenVesting {
+    using SafeERC20 for IERC20;
+
     IERC20 public token;
     address public beneficiary;
     address public owner;
@@ -26,6 +30,12 @@ contract TokenVesting {
         uint256 _cliffDuration,
         uint256 _vestingDuration
     ) {
+        require(_token != address(0), "Invalid token");
+        require(_beneficiary != address(0), "Invalid beneficiary");
+        require(_totalAllocation > 0, "Invalid allocation");
+        require(_vestingDuration > 0, "Invalid duration");
+        require(_cliffDuration <= _vestingDuration, "Invalid cliff");
+
         token = IERC20(_token);
         beneficiary = _beneficiary;
         owner = msg.sender;
@@ -35,14 +45,19 @@ contract TokenVesting {
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
     function vestedAmount() public view returns (uint256) {
-        if (block.timestamp < cliff) return 0;
-        if (block.timestamp >= start + duration) return totalAllocation;
+        return vestedAmountAt(block.timestamp);
+    }
 
-        uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+    function vestedAmountAt(uint256 timestamp) public view returns (uint256) {
+        if (timestamp < cliff) return 0;
+
+        uint256 elapsed = timestamp - start;
+        if (elapsed >= duration) return totalAllocation;
+
+        uint256 wholeTokens = (totalAllocation / duration) * elapsed;
+        uint256 remainder = totalAllocation % duration;
+        return wholeTokens + Math.mulDiv(remainder, elapsed, duration);
     }
 
     function claimable() public view returns (uint256) {
@@ -51,28 +66,32 @@ contract TokenVesting {
 
     function claim() external {
         require(msg.sender == beneficiary, "Not beneficiary");
+        require(!revoked, "Revoked");
         uint256 amount = claimable();
         require(amount > 0, "Nothing to claim");
         claimed += amount;
-        token.transfer(beneficiary, amount);
+        token.safeTransfer(beneficiary, amount);
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        uint256 claimableVested = vested > claimed ? vested - claimed : 0;
+        uint256 unvested = totalAllocation - claimed - claimableVested;
 
-        if (vested > claimed) {
-            token.transfer(beneficiary, vested - claimed);
+        claimed += claimableVested;
+
+        if (claimableVested > 0) {
+            token.safeTransfer(beneficiary, claimableVested);
         }
-        token.transfer(owner, unvested);
+        if (unvested > 0) {
+            token.safeTransfer(owner, unvested);
+        }
+
         emit VestingRevoked(beneficiary, unvested);
     }
 }
