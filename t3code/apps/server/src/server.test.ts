@@ -57,6 +57,7 @@ import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
+import { DEFAULT_MAX_REQUEST_BODY_BYTES } from "./bodySizeLimit.ts";
 import {
   CheckpointDiffQuery,
   type CheckpointDiffQueryShape,
@@ -1591,6 +1592,42 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "Invalid bootstrap credential.",
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "rejects an over-budget request body on a wired route with a 413 and the limit headers",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+
+        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+        const dispatchUrl = yield* getHttpServerUrl("/api/orchestration/dispatch");
+        const oversizedContentLength = DEFAULT_MAX_REQUEST_BODY_BYTES + 1;
+        const oversizedBody = "x".repeat(oversizedContentLength);
+        const response = yield* Effect.promise(() =>
+          fetch(dispatchUrl, {
+            method: "POST",
+            headers: {
+              cookie: ownerCookie,
+              "content-type": "application/json",
+            },
+            body: oversizedBody,
+          }),
+        );
+        const bodyText = yield* Effect.promise(() => response.text());
+
+        assert.equal(response.status, 413);
+        assert.equal(
+          response.headers.get("x-max-body-size"),
+          String(DEFAULT_MAX_REQUEST_BODY_BYTES),
+        );
+        assert.equal(
+          response.headers.get("x-received-content-length"),
+          String(oversizedContentLength),
+        );
+        assert.include(bodyText, String(oversizedContentLength));
+        assert.include(bodyText, String(DEFAULT_MAX_REQUEST_BODY_BYTES));
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect(

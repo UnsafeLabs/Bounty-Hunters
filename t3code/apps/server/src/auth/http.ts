@@ -14,6 +14,10 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { AuthError, ServerAuth } from "./Services/ServerAuth.ts";
 import { SessionCredentialService } from "./Services/SessionCredentialService.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
+import {
+  DEFAULT_BODY_SIZE_LIMITS,
+  enforceRequestBodyLimitForRequest,
+} from "../bodySizeLimit.ts";
 import { browserApiCorsHeaders } from "../httpCors.ts";
 
 export const respondToAuthError = (error: AuthError) =>
@@ -68,6 +72,13 @@ export const authBootstrapRouteLayer = HttpRouter.add(
   "/api/auth/bootstrap",
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
+    const tooLarge = yield* enforceRequestBodyLimitForRequest(
+      DEFAULT_BODY_SIZE_LIMITS,
+      "/api/auth/bootstrap",
+    );
+    if (tooLarge !== undefined) {
+      return tooLarge;
+    }
     const serverAuth = yield* ServerAuth;
     const sessions = yield* SessionCredentialService;
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthBootstrapInput).pipe(
@@ -104,6 +115,13 @@ export const authBearerBootstrapRouteLayer = HttpRouter.add(
   "/api/auth/bootstrap/bearer",
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
+    const tooLarge = yield* enforceRequestBodyLimitForRequest(
+      DEFAULT_BODY_SIZE_LIMITS,
+      "/api/auth/bootstrap/bearer",
+    );
+    if (tooLarge !== undefined) {
+      return tooLarge;
+    }
     const serverAuth = yield* ServerAuth;
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthBootstrapInput).pipe(
       Effect.mapError(
@@ -153,6 +171,13 @@ export const authPairingCredentialRouteLayer = HttpRouter.add(
         message: "Only owner sessions can create pairing credentials.",
         status: 403,
       });
+    }
+    const tooLarge = yield* enforceRequestBodyLimitForRequest(
+      DEFAULT_BODY_SIZE_LIMITS,
+      "/api/auth/pairing-token",
+    );
+    if (tooLarge !== undefined) {
+      return tooLarge;
     }
     const headers = yield* HttpServerRequest.schemaHeaders(PairingCredentialRequestHeaders).pipe(
       Effect.mapError(
@@ -209,6 +234,13 @@ export const authPairingLinksRevokeRouteLayer = HttpRouter.add(
   "/api/auth/pairing-links/revoke",
   Effect.gen(function* () {
     const { serverAuth } = yield* authenticateOwnerSession;
+    const tooLarge = yield* enforceRequestBodyLimitForRequest(
+      DEFAULT_BODY_SIZE_LIMITS,
+      "/api/auth/pairing-links/revoke",
+    );
+    if (tooLarge !== undefined) {
+      return tooLarge;
+    }
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthRevokePairingLinkInput).pipe(
       Effect.mapError(
         (cause) =>
@@ -239,6 +271,13 @@ export const authClientsRevokeRouteLayer = HttpRouter.add(
   "/api/auth/clients/revoke",
   Effect.gen(function* () {
     const { serverAuth, session } = yield* authenticateOwnerSession;
+    const tooLarge = yield* enforceRequestBodyLimitForRequest(
+      DEFAULT_BODY_SIZE_LIMITS,
+      "/api/auth/clients/revoke",
+    );
+    if (tooLarge !== undefined) {
+      return tooLarge;
+    }
     const payload = yield* HttpServerRequest.schemaBodyJson(AuthRevokeClientSessionInput).pipe(
       Effect.mapError(
         (cause) =>

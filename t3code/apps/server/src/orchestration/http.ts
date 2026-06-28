@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { ServerAuth } from "../auth/Services/ServerAuth.ts";
+import { DEFAULT_BODY_SIZE_LIMITS, enforceRequestBodyLimit } from "../bodySizeLimit.ts";
 import { normalizeDispatchCommand } from "./Normalizer.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
@@ -68,6 +69,15 @@ export const orchestrationDispatchRouteLayer = HttpRouter.add(
   "/api/orchestration/dispatch",
   Effect.gen(function* () {
     yield* authenticateOwnerSession;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const tooLarge = enforceRequestBodyLimit(
+      DEFAULT_BODY_SIZE_LIMITS,
+      "/api/orchestration/dispatch",
+      request.headers["content-length"],
+    );
+    if (tooLarge !== undefined) {
+      return tooLarge;
+    }
     const orchestrationEngine = yield* OrchestrationEngineService;
     const command = yield* HttpServerRequest.schemaBodyJson(ClientOrchestrationCommand).pipe(
       Effect.mapError(
