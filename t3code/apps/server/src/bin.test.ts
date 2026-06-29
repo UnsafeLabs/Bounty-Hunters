@@ -16,7 +16,8 @@ import * as CliError from "effect/unstable/cli/CliError";
 import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/unstable/cli";
 
-import { cli } from "./bin.ts";
+import packageJson from "../package.json" with { type: "json" };
+import { cli, formatVersionInfo } from "./bin.ts";
 import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "./config.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
@@ -150,6 +151,30 @@ const withLiveProjectCliServer = <A, E, R>(baseDir: string, run: () => Effect.Ef
   });
 
 it.layer(NodeServices.layer)("bin cli parsing", (it) => {
+  it.effect("formats detailed version output", () =>
+    Effect.sync(() => {
+      assert.equal(
+        formatVersionInfo({
+          version: "1.2.3",
+          runtime: { name: "bun", version: "1.3.11" },
+          platform: "darwin",
+          arch: "arm64",
+        }),
+        "t3code v1.2.3 (bun 1.3.11, darwin arm64)",
+      );
+    }),
+  );
+
+  it.effect("prints detailed version information from the version subcommand", () =>
+    Effect.gen(function* () {
+      const { output } = yield* captureStdout(runCli(["version"]));
+
+      assert.equal(output.startsWith(`t3code v${packageJson.version} (`), true);
+      assert.equal(output.includes("node ") || output.includes("bun "), true);
+      assert.equal(output.endsWith(`, ${process.platform} ${process.arch})`), true);
+    }),
+  );
+
   it.effect("accepts the built-in lowercase log-level flag values", () =>
     runCliWithRuntime(["--log-level", "debug", "--version"]),
   );
