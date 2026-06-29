@@ -32,6 +32,7 @@ from typing import (
 import anyio
 from annotated_doc import Doc
 from anyio.abc import ObjectReceiveStream
+from pydantic_core import PydanticSerializationError
 from fastapi import params
 from fastapi._compat import (
     ModelField,
@@ -303,15 +304,34 @@ async def serialize_response(
                 endpoint_ctx=ctx,
             )
         serializer = field.serialize_json if dump_json else field.serialize
-        return serializer(
-            value,
-            include=include,
-            exclude=exclude,
-            by_alias=by_alias,
-            exclude_unset=exclude_unset,
-            exclude_defaults=exclude_defaults,
-            exclude_none=exclude_none,
-        )
+        try:
+            return serializer(
+                value,
+                include=include,
+                exclude=exclude,
+                by_alias=by_alias,
+                exclude_unset=exclude_unset,
+                exclude_defaults=exclude_defaults,
+                exclude_none=exclude_none,
+            )
+        except PydanticSerializationError:
+            fallback_content = jsonable_encoder(
+                field.serialize(
+                    value,
+                    mode="python",
+                    include=include,
+                    exclude=exclude,
+                    by_alias=by_alias,
+                    exclude_unset=exclude_unset,
+                    exclude_defaults=exclude_defaults,
+                    exclude_none=exclude_none,
+                )
+            )
+            if dump_json:
+                return json.dumps(fallback_content, separators=(",", ":")).encode(
+                    "utf-8"
+                )
+            return fallback_content
 
     else:
         return jsonable_encoder(response_content)

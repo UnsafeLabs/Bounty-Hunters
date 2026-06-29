@@ -84,6 +84,45 @@ def test_encode_dict():
     }
 
 
+def test_encode_bytes_defaults_to_base64():
+    assert jsonable_encoder(b"\x00\xffbinary") == "AP9iaW5hcnk="
+
+
+def test_encode_memoryview_defaults_to_base64():
+    assert jsonable_encoder(memoryview(b"\x00\xffbinary")) == "AP9iaW5hcnk="
+
+
+def test_encode_bytes_as_hex():
+    assert (
+        jsonable_encoder(b"\x00\xffbinary", bytes_encoding="hex")
+        == "00ff62696e617279"
+    )
+
+
+def test_encode_nested_bytes_uses_selected_encoding():
+    assert jsonable_encoder(
+        {"payload": [b"\x00\xff", memoryview(b"ok")]}, bytes_encoding="hex"
+    ) == {"payload": ["00ff", "6f6b"]}
+
+
+def test_encode_model_bytes_defaults_to_base64():
+    class ModelWithBytes(BaseModel):
+        payload: bytes
+
+    assert jsonable_encoder(ModelWithBytes(payload=b"\x00\xffbinary")) == {
+        "payload": "AP9iaW5hcnk="
+    }
+
+
+def test_encode_model_bytes_as_hex():
+    class ModelWithBytes(BaseModel):
+        payload: bytes
+
+    assert jsonable_encoder(
+        ModelWithBytes(payload=b"\x00\xffbinary"), bytes_encoding="hex"
+    ) == {"payload": "00ff62696e617279"}
+
+
 def test_encode_dict_include_exclude_list():
     pet = {"name": "Firulais", "owner": {"name": "Foo"}}
     assert jsonable_encoder(pet) == {"name": "Firulais", "owner": {"name": "Foo"}}

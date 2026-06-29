@@ -11,6 +11,10 @@ class Item(BaseModel):
     owner_ids: list[int] | None = None
 
 
+class BytesItem(BaseModel):
+    payload: bytes
+
+
 @app.get("/items/valid", response_model=Item)
 def get_valid():
     return {"name": "valid", "price": 1.0}
@@ -28,6 +32,11 @@ def get_validlist():
         {"name": "bar", "price": 1.0},
         {"name": "baz", "price": 2.0, "owner_ids": [1, 2, 3]},
     ]
+
+
+@app.get("/items/bytes", response_model=BytesItem)
+def get_bytes():
+    return {"payload": b"\x00\xffbinary"}
 
 
 client = TestClient(app)
@@ -53,3 +62,9 @@ def test_validlist():
         {"name": "bar", "price": 1.0, "owner_ids": None},
         {"name": "baz", "price": 2.0, "owner_ids": [1, 2, 3]},
     ]
+
+
+def test_response_model_bytes_defaults_to_base64():
+    response = client.get("/items/bytes")
+    response.raise_for_status()
+    assert response.json() == {"payload": "AP9iaW5hcnk="}
