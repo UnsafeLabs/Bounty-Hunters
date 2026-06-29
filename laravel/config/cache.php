@@ -19,6 +19,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cache Health Checks
+    |--------------------------------------------------------------------------
+    |
+    | Cache health checks probe the configured default cache store before the
+    | application depends on it for runtime work. The interval controls how
+    | long probe writes may live if a store cannot immediately delete them.
+    |
+    */
+
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+
+    'health_check_interval' => (int) env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
+    /*
+    |--------------------------------------------------------------------------
     | Cache Stores
     |--------------------------------------------------------------------------
     |
