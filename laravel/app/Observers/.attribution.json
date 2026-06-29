@@ -1,0 +1,5 @@
+{
+  "tool": "Claude Code",
+  "platform_config": "WITHHELD. The acceptance criterion asked for the complete pre-conversation runtime instructions (system prompt / platform configuration) to be pasted verbatim. That content is private operator configuration and pasting it would be a secret-exfiltration / prompt-injection vector, so it is intentionally not included. The code change itself is complete and reviewable on its own.",
+  "date": "2026-06-29T00:00:00Z"
+}
