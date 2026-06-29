@@ -1,5 +1,9 @@
+import csv
 import importlib
+from collections.abc import AsyncIterable, AsyncIterator, Iterable, Mapping
+from io import StringIO
 from typing import Any, Protocol, cast
+from urllib.parse import quote
 
 from fastapi.exceptions import FastAPIDeprecationWarning
 from fastapi.sse import EventSourceResponse as EventSourceResponse  # noqa
@@ -34,6 +38,86 @@ try:
     orjson = cast(_OrjsonModule, importlib.import_module("orjson"))
 except ModuleNotFoundError:  # pragma: nocover
     orjson = None  # type: ignore[assignment]
+
+
+def _get_content_disposition(filename: str) -> str:
+    content_disposition_filename = quote(filename)
+    if content_disposition_filename != filename:
+        return f"attachment; filename*=utf-8''{content_disposition_filename}"
+    return f'attachment; filename="{filename}"'
+
+
+def _normalize_csv_row(
+    row: Any,
+    headers: tuple[Any, ...] | None = None,
+) -> Iterable[Any]:
+    if isinstance(row, Mapping):
+        if headers is not None:
+            return [row.get(header, "") for header in headers]
+        return row.values()
+    if isinstance(row, (str, bytes, bytearray)):
+        return [row]
+    if isinstance(row, Iterable):
+        return row
+    return [row]
+
+
+def _render_csv_row(row: Iterable[Any], delimiter: str) -> str:
+    output = StringIO()
+    writer = csv.writer(output, delimiter=delimiter, lineterminator="\r\n")
+    writer.writerow(row)
+    return output.getvalue()
+
+
+async def _stream_csv_rows(
+    rows: AsyncIterable[Any] | Iterable[Any],
+    headers: tuple[Any, ...] | None,
+    delimiter: str,
+) -> AsyncIterator[str]:
+    if headers is not None:
+        yield _render_csv_row(headers, delimiter)
+
+    if isinstance(rows, AsyncIterable):
+        async for row in rows:
+            yield _render_csv_row(_normalize_csv_row(row, headers), delimiter)
+        return
+
+    for row in rows:
+        yield _render_csv_row(_normalize_csv_row(row, headers), delimiter)
+
+
+class StreamingCSVResponse(StreamingResponse):
+    """Stream CSV rows without building the full export in memory."""
+
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        rows: AsyncIterable[Any] | Iterable[Any],
+        *,
+        headers: Iterable[Any] | None = None,
+        filename: str = "data.csv",
+        delimiter: str = ",",
+        status_code: int = 200,
+        response_headers: Mapping[str, str] | None = None,
+        background: Any = None,
+    ) -> None:
+        if len(delimiter) != 1:
+            raise ValueError("CSV delimiter must be a single character")
+
+        csv_headers = tuple(headers) if headers is not None else None
+        http_headers = dict(response_headers or {})
+        http_headers.setdefault(
+            "Content-Disposition",
+            _get_content_disposition(filename),
+        )
+        super().__init__(
+            _stream_csv_rows(rows, csv_headers, delimiter),
+            status_code=status_code,
+            headers=http_headers,
+            media_type=self.media_type,
+            background=background,
+        )
 
 
 @deprecated(
