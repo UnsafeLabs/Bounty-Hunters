@@ -55,8 +55,6 @@ contract PriceOracle {
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-
 interface AggregatorV3Interface {
     function latestRoundData()
         external
@@ -70,66 +68,88 @@ interface AggregatorV3Interface {
         );
 }
 
-contract PriceOracle is Ownable {
-    AggregatorV3Interface public primaryOracle;
-    AggregatorV3Interface public fallbackOracle;
-    uint256 public MAX_STALENESS = 3600; // 1 hour default
+contract PriceOracle {
+    AggregatorV3Interface public priceFeed;
+    AggregatorV3Interface public fallbackPriceFeed;
+    address public owner;
+    uint256 public MAX_STALENESS = 3600; // 1 hour
 
-    event StalePrice(uint256 updatedAt);
+    event StalePrice(uint256 lastUpdateTimestamp);
 
-    constructor(address _primaryOracle, address _fallbackOracle) {
-        primaryOracle = AggregatorV3Interface(_primaryOracle);
-        fallbackOracle = AggregatorV3Interface(_fallbackOracle);
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+
+    constructor(address _.priceFeed, address _fallbackPriceFeed) {
+        priceFeed = AggregatorV3Interface(_priceFeed);
+        fallbackPriceFeed = AggregatorV3Interface(_fallbackPriceFeed);
+        owner = msg.sender;
     }
 
     function setMaxStaleness(uint256 _maxStaleness) external onlyOwner {
         MAX_STALENESS = _maxStaleness;
     }
 
-    function setPrimaryOracle(address _primaryOracle) external onlyOwner {
-        primaryOracle = AggregatorV3Interface(_primaryOracle);
+    function setPrimaryOracle(address _priceFeed) external onlyOwner {
+        priceFeed = AggregatorV3Interface(_priceFeed);
     }
 
-    function setFallbackOracle(address _fallbackOracle) external onlyOwner {
-        fallbackOracle = AggregatorV3Interface(_fallbackOracle);
+    function setFallbackOracle(address _fallbackPriceFeed) external onlyOwner {
+        fallbackPriceFeed = AggregatorV3Interface(_fallbackPriceFeed);
     }
 
-    function _getValidPrice(AggregatorV3Interface oracle) internal view returns (int256, uint256) {
-        (
-            uint80 roundId,
-            int256 price,
-            uint256 startedAt,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        ) = oracle.latestRoundData();
-
+    function _validatePrice(
+        uint80 roundId,
+        int256 price,
+        uint80 answeredInRound,
+        uint256 updatedAt
+    ) internal view {
         require(answeredInRound >= roundId, "Incomplete round");
         require(price > 0, "Invalid price");
         require(block.timestamp - updatedAt < MAX_STALENESS, "Stale price");
-
-        return (price, updatedAt);
     }
 
-    function getPrice() external view returns (int256) {
-        try this._tryPrimaryOracle() returns (int256 price) {
+    function getLatestPrice() public view returns (int256) {
+        (
+            uint80 roundId,
+            int256 price,
+            ,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        ) = priceFeed.latestRoundData();
+
+        try this._validatePriceExternal(roundId, price, answeredInRound, updatedAt) {
             return price;
         } catch {
-            (int256 fallbackPrice, ) = _getValidPrice(fallbackOracle);
+            // Primary oracle failed validation, try fallback
+            (
+                uint80 fallbackRoundId,
+                int256 fallbackPrice,
+                ,
+                uint256 fallbackUpdatedAt,
+                uint80 fallbackAnsweredInRound
+            ) = fallbackPriceFeed.latestRoundData();
+
+            // Validate fallback price
+            require(fallbackAnsweredInRound >= fallbackRoundId, "Incomplete round");
+            require(fallbackPrice > 0, "Invalid price");
+            require(block.timestamp - fallbackUpdatedAt < MAX_STALENESS, "Stale price");
+
+            emit StalePrice(updatedAt);
+
             return fallbackPrice;
         }
     }
 
-    function _tryPrimaryOracle() external view returns (int256) {
-        try this._getPrimaryPrice() returns (int256 price, uint256 updatedAt) {
-            return price;
-        } catch {
-            revert("Primary oracle failed");
-        }
-    }
-
-    function _getPrimaryPrice() external view returns (int256, uint256) {
-        (int256 price, uint256 updatedAt) = _getValidPrice(primaryOracle);
-        return (price, updatedAt);
+    function _validatePriceExternal(
+        uint80 roundId,
+        int256 price,
+        uint80 answeredInRound,
+        uint256 updatedAt
+    ) external view {
+        require(msg.sender == address(this), "Internal use only");
+        _validatePrice(roundId, price, answeredInRound, updatedAt);
     }
 }
 }
