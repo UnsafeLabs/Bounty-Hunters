@@ -361,7 +361,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 <>
                   <span className="min-w-0 truncate">{triggerSubtitle}</span>
                   <span aria-hidden="true" className="shrink-0 opacity-60">
-                    路
+                    ·
                   </span>
                   <span className="min-w-0 truncate">{triggerTitle}</span>
                 </>
