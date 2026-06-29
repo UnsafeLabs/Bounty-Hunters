@@ -18,6 +18,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Fallback Mailer
+    |--------------------------------------------------------------------------
+    |
+    | Verification mail can retry with this mailer when the primary transport
+    | throws a TransportException, keeping account verification available
+    | during short SMTP outages.
+    |
+    */
+
+    'fallback_mailer' => env('MAIL_FALLBACK_MAILER', 'log'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Mailer Configurations
     |--------------------------------------------------------------------------
     |
@@ -83,7 +96,7 @@ return [
             'transport' => 'failover',
             'mailers' => [
                 'smtp',
-                'log',
+                env('MAIL_FALLBACK_MAILER', 'log'),
             ],
             'retry_after' => 60,
         ],
