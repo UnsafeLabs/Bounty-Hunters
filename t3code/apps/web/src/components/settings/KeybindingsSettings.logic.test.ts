@@ -245,4 +245,63 @@ describe("KeybindingsSettings.logic", () => {
       }),
     ).toEqual(["Chat: New Local"]);
   });
+
+  it("sorts rows by shortcut, source, and when expression", () => {
+    const keybindings = [
+      {
+        command: "terminal.toggle",
+        shortcut: {
+          key: "j",
+          modKey: true,
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+      },
+      {
+        command: "diff.toggle",
+        shortcut: {
+          key: "a",
+          modKey: true,
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+        whenAst: {
+          type: "not",
+          node: { type: "identifier", name: "terminalFocus" },
+        },
+      },
+      {
+        command: "script.setup-db.run",
+        shortcut: {
+          key: "r",
+          modKey: true,
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+        whenAst: { type: "identifier", name: "terminalFocus" },
+      },
+    ] satisfies ResolvedKeybindingsConfig;
+
+    expect(
+      buildKeybindingRows(keybindings, "", { key: "shortcut", direction: "desc" }).map(
+        (row) => row.key,
+      ),
+    ).toEqual(["mod+r", "mod+j", "mod+a"]);
+    expect(
+      buildKeybindingRows(keybindings, "", { key: "source", direction: "asc" }).map(
+        (row) => row.source,
+      ),
+    ).toEqual(["Default", "Custom", "Project"]);
+    expect(
+      buildKeybindingRows(keybindings, "", { key: "when", direction: "desc" }).map(
+        (row) => row.when,
+      ),
+    ).toEqual(["terminalFocus", "!terminalFocus", ""]);
+  });
 });

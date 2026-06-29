@@ -37,6 +37,7 @@ import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/ser
 import { useUiStateStore } from "../../uiStateStore";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { DiagnosticsSettingsPanel } from "./DiagnosticsSettings";
+import { KeybindingsSettingsPanel } from "./KeybindingsSettings";
 import { GeneralSettingsPanel, ProviderSettingsPanel } from "./SettingsPanels";
 import { SourceControlSettingsPanel } from "./SourceControlSettings";
 
@@ -498,6 +499,73 @@ describe("GeneralSettingsPanel observability", () => {
     resetServerStateForTests();
     await __resetLocalApiForTests();
     authAccessHarness.reset();
+  });
+
+  it("shows source labels and lets sortable headers reorder keybindings", async () => {
+    setServerConfigSnapshot({
+      ...createBaseServerConfig(),
+      keybindings: [
+        {
+          command: "terminal.toggle",
+          shortcut: {
+            key: "j",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+        },
+        {
+          command: "diff.toggle",
+          shortcut: {
+            key: "a",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+          whenAst: {
+            type: "not",
+            node: { type: "identifier", name: "terminalFocus" },
+          },
+        },
+        {
+          command: "script.setup-db.run",
+          shortcut: {
+            key: "r",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+          whenAst: { type: "identifier", name: "terminalFocus" },
+        },
+      ],
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <KeybindingsSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByRole("button", { name: "Sort by Source" })).toBeInTheDocument();
+    await expect.element(page.getByText("User", { exact: true })).toBeInTheDocument();
+
+    const shortcutSort = page.getByRole("button", { name: "Sort by Shortcut" });
+    await shortcutSort.click();
+    await shortcutSort.click();
+
+    const rowTexts = Array.from(document.querySelectorAll('[data-testid="keybinding-row"]')).map(
+      (row) => row.textContent ?? "",
+    );
+
+    expect(rowTexts[0]).toContain("Run Script: Setup Db");
+    expect(rowTexts[1]).toContain("Terminal: Toggle");
+    expect(rowTexts[2]).toContain("Diff: Toggle");
   });
 
   it("hides owner pairing tools in browser-served loopback builds without remote exposure", async () => {
