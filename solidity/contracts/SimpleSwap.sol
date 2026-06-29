@@ -39,36 +39,34 @@ contract SimpleSwap {
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 amountIn,
-        address tokenIn,
-        address tokenOut,
-        uint256 minAmountOut,
-        uint256 deadline
-    ) external returns (uint256 amountOut) {
-        require(block.timestamp <= deadline, "Transaction expired");
-        
-        uint256 reserveIn = getReserve(tokenIn);
-        uint256 reserveOut = getReserve(tokenOut);
-
-        uint256 amountInWithFee = amountIn * (10000 - 30);
-        amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
-
-        require(amountOut >= minAmountOut, "Slippage exceeded");
-
-        // Transfer tokens and update reserves...
+        tokenB = _tokenB;
     }
 
-    function getReserve(address token) internal view returns (uint256) {
+    function swap(uint256 amountIn, uint256 minAmountOut, uint256 deadline, bool isAToB) external {
+        require(amountIn > 0, "Amount must be greater than 0");
+        require(block.timestamp <= deadline, "Transaction expired");
+
+        uint256 reserveIn;
+        uint256 balanceA = tokenA.balanceOf(address(this));
+        uint256 balanceB = tokenB.balanceOf(address(this));
+
+        uint256 feeAmount = (amountIn * fee) / 10000;
+        uint256 amountInWithFee = amountIn - feeAmount;
+
+        if (isAToB) {
+        }
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
 
     function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
-        bool isTokenA = tokenIn == address(tokenA);
-        uint256 reserveIn = isTokenA ? reserveA : reserveB;
-        uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-        return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        uint256 amountOut = reserveOut - (reserveIn * reserveOut) / (reserveIn + amountInWithFee);
+
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+
+        if (isAToB) {
+            tokenA.transferFrom(msg.sender, address(this), amountIn);
+            tokenB.transfer(msg.sender, amountOut);
     }
 }
