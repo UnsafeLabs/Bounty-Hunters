@@ -3,53 +3,50 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
     IERC20 public bridgeToken;
     address public validator;
     uint256 public nonce;
- * @notice Facilitates token transfers between chains using validator signatures
+ * @dev Facilitates token transfers between chains using validator signatures
  */
-contract CrossChainBridge is Ownable, ReentrancyGuard {
+contract CrossChainBridge is ReentrancyGuard, Ownable {
     using ECDSA for bytes32;
 
-    // EIP-712 TypeHash for the transfer struct
-    bytes32 private constant TRANSFER_TYPEHASH = keccak256(
-        "Transfer(address sender,address recipient,uint256 amount,uint256 nonce,uint256 chainId,address verifyingContract)"
+    // Transfer request struct for EIP-712
+    struct TransferRequest {
+        address token;
+        address recipient;
+    constructor(address _bridgeToken, address _validator) {
+        uint256 sourceChainId;
+    }
+
+    // EIP-712 type hashes
+    bytes32 private constant TRANSFER_REQUEST_TYPEHASH = keccak256(
+        "TransferRequest(address token,address recipient,uint256 amount,uint256 sourceChainId,uint256 nonce,uint256 targetChainId,address targetContract)"
     );
 
-    // EIP-712 Domain TypeHash
     bytes32 private constant EIP712_DOMAIN_TYPEHASH = keccak256(
         "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
     );
 
-    // Contract name and version for EIP-712
-    string public constant NAME = "CrossChainBridge";
-    string public constant VERSION = "1";
-
-    // EIP-712 domain separator (cached)
     bytes32 private immutable _domainSeparator;
-
-    // Nonce tracking per sender to prevent same-chain replay
-    mapping(address => uint256) private _nonces;
-
-    // Token being bridged
-    IERC20 public token;
+    address public validator;
+    bool public paused;
     
-    constructor(address _bridgeToken, address _validator) {
-        bridgeToken = IERC20(_bridgeToken);
-        validator = _validator;
-    }
-
-    function initiateTransfer(uint256 amount, uint256 targetChain) external {
-        require(amount > 0, "Amount must be > 0");
         bridgeToken.transferFrom(msg.sender, address(this), amount);
-        emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
-    }
-
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
+    mapping(bytes32 => bool) public processedTransfers;
+    mapping(address => bool) public supportedTokens;
+    
+    // Nonce tracking per sender for replay protection
+    mapping(address => uint256) public nonces;
+    
+    // Track used signatures to prevent replay
+    mapping(bytes32 => bool) public usedSignatures;
+    
+    event TransferInitiated(
+        bytes32 indexed transferId,
+        address indexed token,
     function processTransfer(
         address recipient,
         uint256 amount,
@@ -60,143 +57,148 @@ contract CrossChainBridge is Ownable, ReentrancyGuard {
             recipient,
             amount,
             transferNonce
-        address _token,
-        address _validator
-    ) {
-        // Compute and cache the EIP-712 domain separator
-        _domainSeparator = _computeDomainSeparator();
-
-        require(_token != address(0), "Invalid token address");
-        require(_validator != address(0), "Invalid validator address");
-        token = IERC20(_token);
-
+        uint256 amount,
+        uint256 sourceChainId,
+        uint256 targetChainId,
+        bytes signature,
+        uint256 nonce,
+        address sender
+    );
+    
+    event ValidatorUpdated(address indexed oldValidator, address indexed newValidator);
         processedTransfers[transferHash] = true;
         bridgeToken.transfer(recipient, amount);
-
-        emit TransferProcessed(transferHash, recipient, amount);
-    }
-
-    // BUG: Does not check for zero-address return from ecrecover
-    function verifySignature(bytes32 hash, bytes calldata signature) public view returns (bool) {
+    error InvalidSignature();
+    error TransferAlreadyProcessed();
+    error TokenNotSupported();
+    error InvalidValidatorSignature();
+    
+    modifier whenNotPaused() {
+        require(!paused, "Bridge is paused");
         require(signature.length == 65, "Invalid signature length");
 
         bytes32 r;
         bytes32 s;
         uint8 v;
-
-        assembly {
-            r := calldataload(signature.offset)
-            s := calldataload(add(signature.offset, 32))
-     * @param amount Amount of tokens to transfer
-     * @param signature Validator signature authorizing the transfer
+        _;
+    }
+    
+    constructor(address _validator, string memory name, string memory version) {
+        _domainSeparator = keccak256(abi.encode(
+            EIP712_DOMAIN_TYPEHASH,
+            keccak256(bytes(name)),
+            keccak256(bytes(version)),
+            block.chainid,
+            address(this)
+        ));
+        
+        validator = _validator;
+    }
+    
+        if (v < 27) v += 27;
+     * @notice Initiates a transfer from this chain to another
      */
-    function processTransfer( 
-        address sender,
-        address recipient,
-        uint256 amount,
-            v, r, s
-        );
-
-        // BUG: Missing require(recovered != address(0))
-        return recovered == validator;
-        require(recipient != address(0), "Invalid recipient");
+    function initiateTransfer(address token, address recipient, uint256 amount, uint256 targetChainId) external whenNotPaused {
+        // Increment nonce for sender
+        require(supportedTokens[token], "Token not supported");
         require(amount > 0, "Amount must be greater than 0");
         
-        // Get and increment nonce for sender to prevent same-chain replay
-        uint256 nonce = _nonces[sender]++;
-        
-        // Build EIP-712 typed data hash including chainId, nonce, and contract address
-        bytes32 messageHash = _hashTypedDataV4(sender, recipient, amount, nonce);
-        require(verifySignature(messageHash, signature), "Invalid signature");
-        
-        // Mark as processed to prevent replay
-        
-        emit TransferProcessed(sender, recipient, amount, block.chainid);
+        // BUG: Missing require(recovered != address(0))
+        return recovered == validator;
     }
-
-    // Placeholder for missing closing brace if needed; original file had it.
-    // The following functions are added/updated below.
-    
-    /**
-     * @notice Verifies that a signature was signed by the validator
-     * @param signature Signature to verify
-     * @return True if signature is valid
-     */
-    function verifySignature(bytes32 digest, bytes memory signature) public view returns (bool) {
-        // Use ECDSA library for safer signature verification
-        address recoveredSigner = ECDSA.recover(digest, signature);
+            recipient: recipient,
+            amount: amount,
+            sourceChainId: block.chainid,
+            targetChainId: targetChainId,
+            nonce: nonces[msg.sender]++,
+            sender: msg.sender
+        });
         
-        // ECDSA.recover already reverts on invalid signatures, but we keep explicit check for clarity
-        if (recoveredSigner == address(0)) {
-            return false;
-        }
+        IERC20(token).transferFrom(msg.sender, address(this), amount);
+        uint256 amount,
+        uint256 sourceChainId,
+        uint256 targetChainId,
+        bytes calldata signature,
+        uint256 nonce,
+        address sender
+    ) external nonReentrant whenNotPaused {
+        require(targetChainId == block.chainid, "Invalid target chain");
+        require(supportedTokens[token], "Token not supported");
+            recipient: recipient,
+            amount: amount,
+            sourceChainId: sourceChainId,
+            targetChainId: targetChainId,
+            nonce: nonce,
+            sender: sender
+        });
         
-        return recoveredSigner == validator;
-    }
-    
-    /**
-     * @notice Returns the next nonce for a given sender
-     * @param sender Address to query
-     * @return Next nonce value
-     */
-    function nonces(address sender) external view returns (uint256) {
-        return _nonces[sender];
-    }
-    
-    /**
-     * @notice Computes the EIP-712 domain separator
-     */
-    function _computeDomainSeparator() internal view returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                EIP712_DOMAIN_TYPEHASH,
-                ke1ccak256(bytes(NAME)),
-                keccak256(bytes(VERSION)),
-                block.chainid,
-                address(this)
-            )
+        require(!processedTransfers[transferId], "Transfer already processed");
+            amount,
+            sourceChainId,
+            targetChainId,
+            signature,
+            nonce,
+            sender
         );
     }
     
-    /**
-     * @notice Returns the cached domain separator
-     */
-    function domainSeparator() external view returns (bytes32) {
-        return _domainSeparator;
-    }
-    
-    /**
-     * @notice Hashes transfer data according to EIP-712
-     */
-    function _hashTypedDataV4(
-        address sender,
         address recipient,
         uint256 amount,
-        uint256 nonce
-    ) internal view returns (bytes32) {
-        bytes32 structHash = keccak256(
-            abi.encode(
-                TRANSFER_TYPEHASH,
-                sender,
-                recipient,
-                amount,
-                nonce,
-                block.chainid,
-                address(this)
-            )
-        );
-        
-        return keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                _domainSeparator,
-                structHash
-            )
-        );
+        uint256 sourceChainId,
+        uint256 targetChainId,
+        uint256 nonce,
+        address sender
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            token,
+            amount,
+            sourceChainId,
+            targetChainId,
+            block.chainid,
+            nonce,
+            sender,
+            address(this)
+        ));
     }
     
-    /**
+        address recipient,
+        uint256 amount,
+        uint256 sourceChainId,
+        uint256 targetChainId,
+        uint256 nonce,
+        address sender
+    ) internal view returns (bool) {
+        bytes32 messageHash = keccak256(abi.encode(
+            TRANSFER_REQUEST_TYPEHASH,
+            recipient,
+            amount,
+            sourceChainId,
+            targetChainId,
+            nonce,
+            block.chainid,
+            address(this)
+        ));
         
-        return (v, r, s);
+        bytes32 typedDataHash = keccak256(abi.encodePacked(
+        ));
+        
+        address recovered = ECDSA.recover(typedDataHash, signature);
+        
+        // Explicitly reject zero-address return from ecrecover
+        if (recovered == address(0)) {
+            revert InvalidValidatorSignature();
+        }
+        
+        return recovered == validator;
     }
-}
+    
+        return validator;
+    }
+    
+    function getNonce(address account) external view returns (uint256) {
+        return nonces[account];
+    }
+    
+    function updateValidator(address newValidator) external onlyOwner {
+        address oldValidator = validator;
+        validator = newValidator;
