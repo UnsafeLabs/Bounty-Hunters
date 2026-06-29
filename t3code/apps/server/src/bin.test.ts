@@ -49,6 +49,34 @@ const captureStdout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     return { result, output };
   }).pipe(Effect.provide(Layer.mergeAll(CliRuntimeLayer, TestConsole.layer)));
 
+const withIsolatedServerEnv = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const snapshot = new Map<string, string | undefined>();
+      for (const key of Object.keys(process.env)) {
+        if (key.startsWith("T3CODE_") || key === "VITE_DEV_SERVER_URL") {
+          snapshot.set(key, process.env[key]);
+          delete process.env[key];
+        }
+      }
+      return snapshot;
+    }),
+    () => effect,
+    (snapshot) =>
+      Effect.sync(() => {
+        for (const key of Object.keys(process.env)) {
+          if (key.startsWith("T3CODE_") || key === "VITE_DEV_SERVER_URL") {
+            delete process.env[key];
+          }
+        }
+        for (const [key, value] of snapshot) {
+          if (value !== undefined) {
+            process.env[key] = value;
+          }
+        }
+      }),
+  );
+
 const makeCliTestServerConfig = (baseDir: string) =>
   Effect.gen(function* () {
     const derivedPaths = yield* deriveServerPaths(baseDir, undefined);
@@ -156,6 +184,19 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
 
   it.effect("accepts canonical --no-<flag> boolean negation", () =>
     runCliWithRuntime(["--no-log-websocket-events", "--version"]),
+  );
+
+  it.effect("--validate-config reports configuration without starting the server", () =>
+    Effect.gen(function* () {
+      const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-validate-config-"));
+      const { output } = yield* withIsolatedServerEnv(
+        captureStdout(runCli(["--validate-config", "--base-dir", baseDir, "--port", "3773"])),
+      );
+
+      expect(output).toContain("Server environment validation passed.");
+      expect(output).toContain("T3CODE_PORT");
+      expect(output).toContain("T3CODE_TAILSCALE_SERVE_PORT");
+    }),
   );
 
   it.effect("rejects invalid log-level casing before launching the server", () =>
