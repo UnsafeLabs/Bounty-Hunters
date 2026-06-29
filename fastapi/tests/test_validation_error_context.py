@@ -13,6 +13,11 @@ class Item(BaseModel):
     name: str
 
 
+class Payload(BaseModel):
+    username: str
+    count: int
+
+
 class ExceptionCapture:
     def __init__(self):
         self.exception = None
@@ -166,3 +171,62 @@ def test_validation_error_with_no_context():
     assert "1 validation error:" in error_str
     assert "Endpoint" not in error_str
     assert 'File "' not in error_str
+
+
+def test_default_request_validation_error_response_includes_debug_context_body():
+    debug_app = FastAPI(debug=True)
+
+    @debug_app.post("/payload")
+    def create_payload(payload: Payload):
+        return payload  # pragma: no cover
+
+    response = TestClient(debug_app).post(
+        "/payload",
+        json={
+            "username": "alice",
+            "password": "secret-password",
+            "profile": {
+                "token": "secret-token",
+                "api_key": "secret-api-key",
+                "display_name": "Alice",
+            },
+            "items": [
+                {"secret": "nested-secret", "visible": "visible-value"},
+                {"Token": "case-insensitive-token"},
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    data = response.json()
+    assert data["path"] == "/payload"
+    assert data["method"] == "POST"
+    assert "body" in data
+    assert data["body"]["username"] == "alice"
+    assert data["body"]["password"] == "***REDACTED***"
+    assert data["body"]["profile"]["token"] == "***REDACTED***"
+    assert data["body"]["profile"]["api_key"] == "***REDACTED***"
+    assert data["body"]["profile"]["display_name"] == "Alice"
+    assert data["body"]["items"][0]["secret"] == "***REDACTED***"
+    assert data["body"]["items"][0]["visible"] == "visible-value"
+    assert data["body"]["items"][1]["Token"] == "***REDACTED***"
+
+
+def test_default_request_validation_error_response_omits_body_without_debug():
+    non_debug_app = FastAPI(debug=False)
+
+    @non_debug_app.post("/payload")
+    def create_payload(payload: Payload):
+        return payload  # pragma: no cover
+
+    response = TestClient(non_debug_app).post(
+        "/payload",
+        json={"username": "alice", "password": "secret-password"},
+    )
+
+    assert response.status_code == 422
+    data = response.json()
+    assert data["path"] == "/payload"
+    assert data["method"] == "POST"
+    assert "detail" in data
+    assert "body" not in data
