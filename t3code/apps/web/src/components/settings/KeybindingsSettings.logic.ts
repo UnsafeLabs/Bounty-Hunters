@@ -13,6 +13,13 @@ import {
 import { isMacPlatform } from "../../lib/utils";
 
 export type KeybindingSource = "Default" | "Custom" | "Project";
+export type KeybindingSortKey = "command" | "key" | "source" | "when" | "status";
+export type KeybindingSortDirection = "asc" | "desc";
+
+export interface KeybindingSort {
+  readonly key: KeybindingSortKey;
+  readonly direction: KeybindingSortDirection;
+}
 
 export interface KeybindingRow {
   readonly id: string;
@@ -30,6 +37,15 @@ export type WhenVariableOption = string;
 export type KeybindingCommandOption = KeybindingCommand;
 
 const CORE_WHEN_VARIABLES = ["terminalFocus", "terminalOpen", "true", "false"] as const;
+const DEFAULT_KEYBINDING_SORT = {
+  key: "command",
+  direction: "asc",
+} satisfies KeybindingSort;
+const SOURCE_SORT_ORDER: Record<KeybindingSource, number> = {
+  Default: 0,
+  Custom: 1,
+  Project: 2,
+};
 
 const DEFAULT_WHEN_VARIABLES = new Set<string>(CORE_WHEN_VARIABLES);
 for (const binding of DEFAULT_RESOLVED_KEYBINDINGS) {
@@ -154,6 +170,7 @@ export function keybindingConflictLabels(
 export function buildKeybindingRows(
   keybindings: ResolvedKeybindingsConfig,
   query: string,
+  sort: KeybindingSort = DEFAULT_KEYBINDING_SORT,
 ): ReadonlyArray<KeybindingRow> {
   const normalizedQuery = query.trim().toLowerCase();
   const rows = keybindings.map((binding, index) => {
@@ -184,11 +201,7 @@ export function buildKeybindingRows(
       : row;
   });
 
-  rowsWithConflicts.sort((left, right) => {
-    const commandCompare = left.command.localeCompare(right.command);
-    if (commandCompare !== 0) return commandCompare;
-    return left.key.localeCompare(right.key);
-  });
+  rowsWithConflicts.sort((left, right) => compareKeybindingRows(left, right, sort));
 
   if (normalizedQuery.length === 0) {
     return rowsWithConflicts;
@@ -202,6 +215,41 @@ export function buildKeybindingRows(
       row.source.toLowerCase().includes(normalizedQuery)
     );
   });
+}
+
+function compareKeybindingRows(
+  left: KeybindingRow,
+  right: KeybindingRow,
+  sort: KeybindingSort,
+): number {
+  const direction = sort.direction === "asc" ? 1 : -1;
+  const primary = compareKeybindingRowsByKey(left, right, sort.key);
+  if (primary !== 0) return primary * direction;
+
+  return (
+    commandLabel(left.command).localeCompare(commandLabel(right.command)) ||
+    left.key.localeCompare(right.key) ||
+    left.when.localeCompare(right.when)
+  );
+}
+
+function compareKeybindingRowsByKey(
+  left: KeybindingRow,
+  right: KeybindingRow,
+  key: KeybindingSortKey,
+): number {
+  switch (key) {
+    case "command":
+      return commandLabel(left.command).localeCompare(commandLabel(right.command));
+    case "key":
+      return left.key.localeCompare(right.key);
+    case "source":
+      return SOURCE_SORT_ORDER[left.source] - SOURCE_SORT_ORDER[right.source];
+    case "when":
+      return left.when.localeCompare(right.when);
+    case "status":
+      return left.conflicts.length - right.conflicts.length;
+  }
 }
 
 function collectWhenIdentifiersFromNode(

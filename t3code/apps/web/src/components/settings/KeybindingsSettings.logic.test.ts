@@ -245,4 +245,48 @@ describe("KeybindingsSettings.logic", () => {
       }),
     ).toEqual(["Chat: New Local"]);
   });
+
+  it("sorts keybinding rows by source", () => {
+    const rows = buildKeybindingRows(
+      [
+        {
+          command: "script.setup-db.run",
+          shortcut: {
+            key: "r",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+        },
+        {
+          command: "terminal.toggle",
+          shortcut: {
+            key: "j",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+        },
+        {
+          command: "diff.toggle",
+          shortcut: {
+            key: "d",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+        },
+      ] satisfies ResolvedKeybindingsConfig,
+      "",
+      { key: "source", direction: "asc" },
+    );
+
+    expect(rows.map((row) => row.source)).toEqual(["Default", "Custom", "Project"]);
+  });
 });
