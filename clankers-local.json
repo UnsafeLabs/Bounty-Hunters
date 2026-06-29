@@ -31,9 +31,9 @@
   },
   {
     "username": "genesisrevelationinc-debug",
-    "total_prs": 103,
+    "total_prs": 104,
     "first_pr": "2026-05-22T14:02:27.948Z",
-    "last_pr": "2026-06-28T22:04:33.707Z"
+    "last_pr": "2026-06-29T11:57:29.944Z"
   },
   {
     "username": "mkcash",
@@ -336,6 +336,12 @@
     "last_pr": "2026-06-04T18:54:39.540Z"
   },
   {
+    "username": "lin20070906",
+    "total_prs": 18,
+    "first_pr": "2026-06-28T09:59:25.045Z",
+    "last_pr": "2026-06-29T11:31:06.472Z"
+  },
+  {
     "username": "justusaugust",
     "total_prs": 17,
     "first_pr": "2026-05-25T06:26:55.284Z",
@@ -466,12 +472,6 @@
     "total_prs": 13,
     "first_pr": "2026-05-16T17:07:47.940Z",
     "last_pr": "2026-05-29T15:00:40.798Z"
-  },
-  {
-    "username": "lin20070906",
-    "total_prs": 13,
-    "first_pr": "2026-06-28T09:59:25.045Z",
-    "last_pr": "2026-06-28T11:44:15.968Z"
   },
   {
     "username": "zeppnyc",

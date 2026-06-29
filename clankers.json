@@ -228,6 +228,12 @@
     "last_pr": "2026-05-18T13:04:47.236Z"
   },
   {
+    "username": "clarboncy",
+    "total_prs": 33,
+    "first_pr": "2026-06-27T06:09:44.885Z",
+    "last_pr": "2026-06-29T06:07:04.149Z"
+  },
+  {
     "username": "zqleslie",
     "total_prs": 32,
     "first_pr": "2026-05-16T08:23:14.852Z",
@@ -276,22 +282,16 @@
     "last_pr": "2026-05-13T08:21:26Z"
   },
   {
+    "username": "Shaidyk",
+    "total_prs": 27,
+    "first_pr": "2026-06-18T16:31:08.499Z",
+    "last_pr": "2026-06-29T08:36:53.273Z"
+  },
+  {
     "username": "xlocalvn-svg",
     "total_prs": 26,
     "first_pr": "2026-05-13T07:25:35Z",
     "last_pr": "2026-05-13T15:45:54Z"
-  },
-  {
-    "username": "clarboncy",
-    "total_prs": 26,
-    "first_pr": "2026-06-27T06:09:44.885Z",
-    "last_pr": "2026-06-27T06:48:09.214Z"
-  },
-  {
-    "username": "Shaidyk",
-    "total_prs": 26,
-    "first_pr": "2026-06-18T16:31:08.499Z",
-    "last_pr": "2026-06-28T22:12:09.692Z"
   },
   {
     "username": "jjb9707",
@@ -1896,6 +1896,18 @@
     "last_pr": "2026-06-22T08:37:02.736Z"
   },
   {
+    "username": "wisdom518",
+    "total_prs": 2,
+    "first_pr": "2026-06-28T22:29:32.501Z",
+    "last_pr": "2026-06-29T06:32:06.955Z"
+  },
+  {
+    "username": "guo-gy",
+    "total_prs": 2,
+    "first_pr": "2026-06-29T09:20:47.924Z",
+    "last_pr": "2026-06-29T09:28:28.615Z"
+  },
+  {
     "username": "kingskuan",
     "total_prs": 2,
     "first_pr": "2026-05-15T14:10:31.174Z",
@@ -2550,16 +2562,16 @@
     "last_pr": "2026-06-28T06:56:48.448Z"
   },
   {
-    "username": "wisdom518",
-    "total_prs": 1,
-    "first_pr": "2026-06-28T22:29:32.501Z",
-    "last_pr": "2026-06-28T22:29:32.501Z"
-  },
-  {
     "username": "earthwalking",
     "total_prs": 1,
     "first_pr": "2026-06-29T01:22:03.204Z",
     "last_pr": "2026-06-29T01:22:03.204Z"
+  },
+  {
+    "username": "ReAlice10124",
+    "total_prs": 1,
+    "first_pr": "2026-06-29T09:30:46.016Z",
+    "last_pr": "2026-06-29T09:30:46.016Z"
   },
   {
     "username": "MichisGitIsKing",
