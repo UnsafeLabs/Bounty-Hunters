@@ -6,10 +6,12 @@ import {
   buildKeybindingCommandOptions,
   buildWhenVariableOptions,
   commandLabel,
+  DEFAULT_KEYBINDING_SORT,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
   shortcutToKeybindingInput,
+  toggleKeybindingSort,
   unknownWhenVariables,
   whenAstToExpression,
 } from "./KeybindingsSettings.logic";
@@ -244,5 +246,83 @@ describe("KeybindingsSettings.logic", () => {
         when: "",
       }),
     ).toEqual(["Chat: New Local"]);
+  });
+
+  it("sorts rows by every visible editor column", () => {
+    const config = [
+      {
+        command: "terminal.toggle",
+        shortcut: {
+          key: "j",
+          modKey: true,
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+        whenAst: { type: "identifier", name: "terminalFocus" },
+      },
+      {
+        command: "chat.new",
+        shortcut: {
+          key: "n",
+          modKey: true,
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+        whenAst: {
+          type: "not",
+          node: { type: "identifier", name: "terminalFocus" },
+        },
+      },
+      {
+        command: "script.setup-db.run",
+        shortcut: {
+          key: "r",
+          modKey: true,
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+      },
+    ] satisfies ResolvedKeybindingsConfig;
+
+    expect(
+      buildKeybindingRows(config, "", { column: "command", direction: "asc" }).map(
+        (row) => row.command,
+      ),
+    ).toEqual(["chat.new", "script.setup-db.run", "terminal.toggle"]);
+    expect(
+      buildKeybindingRows(config, "", { column: "key", direction: "desc" }).map((row) => row.key),
+    ).toEqual(["mod+r", "mod+n", "mod+j"]);
+    expect(
+      buildKeybindingRows(config, "", { column: "when", direction: "desc" }).map(
+        (row) => row.command,
+      ),
+    ).toEqual(["terminal.toggle", "script.setup-db.run", "chat.new"]);
+    expect(
+      buildKeybindingRows(config, "", { column: "source", direction: "asc" }).map(
+        (row) => row.source,
+      ),
+    ).toEqual(["Custom", "Default", "Project"]);
+    expect(
+      buildKeybindingRows(config, "", { column: "status", direction: "asc" }).map(
+        (row) => row.command,
+      ),
+    ).toEqual(["terminal.toggle", "chat.new", "script.setup-db.run"]);
+  });
+
+  it("toggles editor sort state for sortable headers", () => {
+    expect(toggleKeybindingSort(DEFAULT_KEYBINDING_SORT, "key")).toEqual({
+      column: "key",
+      direction: "asc",
+    });
+    expect(toggleKeybindingSort({ column: "key", direction: "asc" }, "key")).toEqual({
+      column: "key",
+      direction: "desc",
+    });
   });
 });
