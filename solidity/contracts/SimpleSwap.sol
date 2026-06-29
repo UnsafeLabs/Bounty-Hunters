@@ -40,27 +40,26 @@ contract SimpleSwap {
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
         uint256 amountIn,
+        address tokenIn,
         address tokenOut,
-        uint256 reserveIn,
-        uint256 reserveOut,
         uint256 minAmountOut,
         uint256 deadline
     ) external returns (uint256 amountOut) {
         require(block.timestamp <= deadline, "Transaction expired");
         
-        // Calculate output amount using constant product formula
-        uint256 amountInWithFee = amountIn * 997; // 0.3% fee
-        uint256 numerator = amountInWithFee * reserveOut;
-        uint256 denominator = (reserveIn * 1000) + amountInWithFee;
-        amountOut = numerator / denominator;
-        
+        uint256 reserveIn = getReserve(tokenIn);
+        uint256 reserveOut = getReserve(tokenOut);
+
+        uint256 amountInWithFee = amountIn * (10000 - 30);
+        amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
+
         require(amountOut >= minAmountOut, "Slippage exceeded");
+
+        // Transfer tokens and update reserves...
     }
 
-    function calculateFee(uint256 amount, uint256 fee) external pure returns (uint256) {
-        return (amount * fee + 5000) / 10000;
-    }
-}
+    function getReserve(address token) internal view returns (uint256) {
+
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
 
