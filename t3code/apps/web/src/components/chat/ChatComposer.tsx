@@ -2320,6 +2320,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   activeInstanceId={selectedInstanceId}
                   model={selectedModelForPickerWithCustomFallback}
                   lockedProvider={lockedProvider}
+                  persistenceKey={
+                    lockedProvider
+                      ? `chat-composer:${lockedProvider}:${lockedContinuationGroupKey ?? "global"}`
+                      : "chat-composer"
+                  }
                   lockedContinuationGroupKey={lockedContinuationGroupKey}
                   instanceEntries={providerInstanceEntries}
                   keybindings={keybindings}

@@ -1,6 +1,7 @@
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { EnvironmentId } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
+import * as React from "react";
 import { page, userEvent } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
@@ -252,6 +253,7 @@ async function mountPicker(props: {
   model: string;
   lockedProvider: ProviderDriverKind | null;
   lockedContinuationGroupKey?: string | null;
+  persistenceKey?: string;
   providers?: ReadonlyArray<ServerProvider>;
   settings?: UnifiedSettings;
   triggerVariant?: "ghost" | "outline";
@@ -277,6 +279,7 @@ async function mountPicker(props: {
       instanceEntries={instanceEntries}
       modelOptionsByInstance={modelOptionsByInstance}
       triggerVariant={props.triggerVariant}
+      {...(props.persistenceKey ? { persistenceKey: props.persistenceKey } : {})}
       onInstanceModelChange={onInstanceModelChange}
     />,
     { container: host },
@@ -289,6 +292,59 @@ async function mountPicker(props: {
     get onProviderModelChange() {
       return onInstanceModelChange;
     },
+    cleanup: async () => {
+      await screen.unmount();
+      host.remove();
+    },
+  };
+}
+
+async function mountControlledPicker(props: {
+  activeInstanceId: ProviderInstanceId;
+  model: string;
+  lockedProvider: ProviderDriverKind | null;
+  persistenceKey: string;
+  providers?: ReadonlyArray<ServerProvider>;
+}) {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const providers = props.providers ?? TEST_PROVIDERS;
+  const instanceEntries = sortProviderInstanceEntries(deriveProviderInstanceEntries(providers));
+  const onInstanceModelChange = vi.fn();
+  const initialSelection = {
+    activeInstanceId: props.activeInstanceId,
+    model: props.model,
+  };
+
+  function ControlledPicker() {
+    const [selection, setSelection] = React.useState(initialSelection);
+    const modelOptionsByInstance = getCustomModelOptionsByInstance(
+      DEFAULT_UNIFIED_SETTINGS,
+      providers,
+      selection.activeInstanceId,
+      selection.model,
+    );
+
+    return (
+      <ProviderModelPicker
+        activeInstanceId={selection.activeInstanceId}
+        model={selection.model}
+        lockedProvider={props.lockedProvider}
+        persistenceKey={props.persistenceKey}
+        instanceEntries={instanceEntries}
+        modelOptionsByInstance={modelOptionsByInstance}
+        onInstanceModelChange={(instanceId, model) => {
+          onInstanceModelChange(instanceId, model);
+          setSelection({ activeInstanceId: instanceId, model });
+        }}
+      />
+    );
+  }
+
+  const screen = await render(<ControlledPicker />, { container: host });
+
+  return {
+    onInstanceModelChange,
     cleanup: async () => {
       await screen.unmount();
       host.remove();
@@ -326,6 +382,7 @@ describe("ProviderModelPicker", () => {
 
   afterEach(async () => {
     document.body.innerHTML = "";
+    localStorage.clear();
     await __resetLocalApiForTests();
   });
 
@@ -1219,6 +1276,108 @@ describe("ProviderModelPicker", () => {
       }
       expect(button.className).toContain("border-input");
       expect(button.className).toContain("bg-popover");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("restores a persisted provider/model selection on mount", async () => {
+    localStorage.setItem(
+      "t3code:provider-model-picker:v1:chat-composer",
+      JSON.stringify({
+        instanceId: "claudeAgent",
+        model: "claude-sonnet-4-6",
+      }),
+    );
+
+    const mounted = await mountControlledPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      persistenceKey: "chat-composer",
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith(
+          "claudeAgent",
+          "claude-sonnet-4-6",
+        );
+        const trigger = document.querySelector<HTMLElement>(
+          '[data-chat-provider-model-picker="true"]',
+        );
+        expect(trigger?.textContent).toContain("Claude Sonnet 4.6");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("ignores invalid persisted selections and refreshes storage with the current selection", async () => {
+    localStorage.setItem(
+      "t3code:provider-model-picker:v1:chat-composer",
+      JSON.stringify({
+        instanceId: "claudeAgent",
+        model: "claude-not-real",
+      }),
+    );
+
+    const mounted = await mountControlledPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      persistenceKey: "chat-composer",
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).not.toHaveBeenCalled();
+        expect(
+          JSON.parse(
+            localStorage.getItem("t3code:provider-model-picker:v1:chat-composer") ?? "null",
+          ),
+        ).toEqual({
+          instanceId: "codex",
+          model: "gpt-5-codex",
+        });
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("syncs provider/model changes from storage events", async () => {
+    const mounted = await mountControlledPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      persistenceKey: "chat-composer",
+    });
+
+    try {
+      localStorage.setItem(
+        "t3code:provider-model-picker:v1:chat-composer",
+        JSON.stringify({
+          instanceId: "claudeAgent",
+          model: "claude-haiku-4-5",
+        }),
+      );
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "t3code:provider-model-picker:v1:chat-composer",
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith(
+          "claudeAgent",
+          "claude-haiku-4-5",
+        );
+        const trigger = document.querySelector<HTMLElement>(
+          '[data-chat-provider-model-picker="true"]',
+        );
+        expect(trigger?.textContent).toContain("Claude Haiku 4.5");
+      });
     } finally {
       await mounted.cleanup();
     }

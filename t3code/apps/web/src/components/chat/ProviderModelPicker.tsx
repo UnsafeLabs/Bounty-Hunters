@@ -1,8 +1,9 @@
 import {
-  type ProviderInstanceId,
+  ProviderInstanceId,
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { memo, useEffect, useMemo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
@@ -19,6 +20,24 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+import { useLocalStorage } from "../../hooks/useLocalStorage";
+
+const PERSISTED_PROVIDER_MODEL_SELECTION_STORAGE_PREFIX = "t3code:provider-model-picker:v1:";
+
+const PersistedProviderModelSelection = Schema.Struct({
+  instanceId: Schema.String,
+  model: Schema.String,
+});
+
+type PersistedProviderModelSelection = typeof PersistedProviderModelSelection.Type;
+type ResolvedProviderModelSelection = {
+  instanceId: ProviderInstanceId;
+  model: string;
+};
+
+function providerModelPickerStorageKey(persistenceKey: string): string {
+  return `${PERSISTED_PROVIDER_MODEL_SELECTION_STORAGE_PREFIX}${persistenceKey}`;
+}
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -36,6 +55,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
+  persistenceKey?: string;
   terminalOpen?: boolean;
   open?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
@@ -45,6 +65,13 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+  const persistenceStorageKey = providerModelPickerStorageKey(
+    props.persistenceKey ?? "__disabled__",
+  );
+  const [persistedSelection, setPersistedSelection] = useLocalStorage<
+    PersistedProviderModelSelection | null,
+    PersistedProviderModelSelection | null
+  >(persistenceStorageKey, null, Schema.NullOr(PersistedProviderModelSelection));
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -71,6 +98,36 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     (entry) => activeEntry !== null && entry.driverKind === activeEntry.driverKind,
   ).length;
   const showInstanceBadge = Boolean(activeEntry?.accentColor) || duplicateDriverCount > 1;
+  const resolvePersistedSelection = (
+    selection: PersistedProviderModelSelection | null | undefined,
+  ): ResolvedProviderModelSelection | null => {
+    if (!selection) {
+      return null;
+    }
+    const entry = props.instanceEntries.find(
+      (candidate) => candidate.instanceId === selection.instanceId,
+    );
+    if (!entry || entry.status !== "ready") {
+      return null;
+    }
+    if (props.lockedProvider !== null && entry.driverKind !== props.lockedProvider) {
+      return null;
+    }
+    if (
+      props.lockedContinuationGroupKey &&
+      entry.continuationGroupKey !== props.lockedContinuationGroupKey
+    ) {
+      return null;
+    }
+    const options = props.modelOptionsByInstance.get(entry.instanceId) ?? [];
+    return options.some((option) => option.slug === selection.model)
+      ? { instanceId: entry.instanceId, model: selection.model }
+      : null;
+  };
+  const activeSelectionKey = `${props.activeInstanceId}:${props.model}`;
+  const persistedSelectionKey = persistedSelection
+    ? `${persistedSelection.instanceId}:${persistedSelection.model}`
+    : null;
 
   const setIsMenuOpen = (open: boolean) => {
     props.onOpenChange?.(open);
@@ -86,8 +143,49 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
+  useEffect(() => {
+    if (!props.persistenceKey) {
+      return;
+    }
+    const restoredSelection = resolvePersistedSelection(persistedSelection);
+    if (restoredSelection) {
+      const restoredSelectionKey = `${restoredSelection.instanceId}:${restoredSelection.model}`;
+      if (restoredSelectionKey !== activeSelectionKey) {
+        props.onInstanceModelChange(restoredSelection.instanceId, restoredSelection.model);
+      }
+      return;
+    }
+    const nextSelection = resolvePersistedSelection({
+      instanceId: props.activeInstanceId,
+      model: props.model,
+    });
+    if (!nextSelection) {
+      return;
+    }
+    const nextSelectionKey = `${nextSelection.instanceId}:${nextSelection.model}`;
+    if (persistedSelectionKey !== nextSelectionKey) {
+      setPersistedSelection(nextSelection);
+    }
+  }, [
+    activeSelectionKey,
+    persistedSelection,
+    persistedSelectionKey,
+    props.activeInstanceId,
+    props.instanceEntries,
+    props.lockedContinuationGroupKey,
+    props.lockedProvider,
+    props.model,
+    props.modelOptionsByInstance,
+    props.onInstanceModelChange,
+    props.persistenceKey,
+    setPersistedSelection,
+  ]);
+
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
+    if (props.persistenceKey) {
+      setPersistedSelection({ instanceId, model });
+    }
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
   };
