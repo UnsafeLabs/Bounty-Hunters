@@ -19,6 +19,7 @@ const DesktopSettingsPatch = Schema.Struct({
   serverExposureMode: Schema.optionalKey(Schema.Literals(["local-only", "network-accessible"])),
   tailscaleServeEnabled: Schema.optionalKey(Schema.Boolean),
   tailscaleServePort: Schema.optionalKey(Schema.Number),
+  theme: Schema.optionalKey(Schema.Literals(["light", "dark", "system"])),
   updateChannel: Schema.optionalKey(Schema.Literals(["latest", "nightly"])),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
 });
@@ -93,6 +94,7 @@ describe("DesktopSettings", () => {
       serverExposureMode: "local-only",
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
+      theme: "system",
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
     } satisfies DesktopSettingsValue);
@@ -106,6 +108,7 @@ describe("DesktopSettings", () => {
           serverExposureMode: "network-accessible",
           tailscaleServeEnabled: true,
           tailscaleServePort: 8443,
+          theme: "dark",
           updateChannel: "latest",
           updateChannelConfiguredByUser: true,
         });
@@ -114,6 +117,7 @@ describe("DesktopSettings", () => {
           serverExposureMode: "network-accessible",
           tailscaleServeEnabled: true,
           tailscaleServePort: 8443,
+          theme: "dark",
           updateChannel: "latest",
           updateChannelConfiguredByUser: true,
         } satisfies DesktopSettingsValue);
@@ -128,6 +132,10 @@ describe("DesktopSettings", () => {
         });
         assert.isTrue(tailscale.changed);
         assert.equal(tailscale.settings.tailscaleServePort, 9443);
+
+        const theme = yield* settings.setTheme("light");
+        assert.isTrue(theme.changed);
+        assert.equal(theme.settings.theme, "light");
 
         const updateChannel = yield* settings.setUpdateChannel("nightly");
         assert.isTrue(updateChannel.changed);
@@ -150,6 +158,9 @@ describe("DesktopSettings", () => {
           port: Option.none(),
         });
         assert.isFalse(tailscale.changed);
+
+        const theme = yield* settings.setTheme("system");
+        assert.isFalse(theme.changed);
 
         const updateChannel = yield* settings.setUpdateChannel("latest");
         assert.isFalse(updateChannel.changed);
@@ -193,6 +204,7 @@ describe("DesktopSettings", () => {
           serverExposureMode: "network-accessible",
           tailscaleServeEnabled: true,
           tailscaleServePort: 8443,
+          theme: "system",
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
         } satisfies DesktopSettingsValue);
@@ -232,6 +244,7 @@ describe("DesktopSettings", () => {
           serverExposureMode: "local-only",
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
+          theme: "system",
           updateChannel: "nightly",
           updateChannelConfiguredByUser: false,
         } satisfies DesktopSettingsValue);
@@ -254,6 +267,7 @@ describe("DesktopSettings", () => {
           serverExposureMode: "local-only",
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
+          theme: "system",
           updateChannel: "latest",
           updateChannelConfiguredByUser: true,
         } satisfies DesktopSettingsValue);
@@ -275,9 +289,29 @@ describe("DesktopSettings", () => {
           serverExposureMode: "local-only",
           tailscaleServeEnabled: true,
           tailscaleServePort: 443,
+          theme: "system",
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
         } satisfies DesktopSettingsValue);
+      }),
+    ),
+  );
+
+  it.effect("persists explicit desktop theme choices sparsely", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+
+        yield* settings.setTheme("dark");
+
+        const persisted = yield* decodeDesktopSettingsPatch(
+          yield* fileSystem.readFileString(environment.desktopSettingsPath),
+        );
+        assert.deepEqual(persisted, {
+          theme: "dark",
+        } satisfies typeof DesktopSettingsPatch.Type);
       }),
     ),
   );

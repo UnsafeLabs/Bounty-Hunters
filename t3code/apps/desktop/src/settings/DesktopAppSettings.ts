@@ -1,5 +1,7 @@
 import {
   DesktopServerExposureModeSchema,
+  DesktopThemeSchema,
+  type DesktopTheme,
   DesktopUpdateChannelSchema,
   type DesktopServerExposureMode,
   type DesktopUpdateChannel,
@@ -24,6 +26,7 @@ export interface DesktopSettings {
   readonly serverExposureMode: DesktopServerExposureMode;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
+  readonly theme: DesktopTheme;
   readonly updateChannel: DesktopUpdateChannel;
   readonly updateChannelConfiguredByUser: boolean;
 }
@@ -39,6 +42,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   serverExposureMode: "local-only",
   tailscaleServeEnabled: false,
   tailscaleServePort: DEFAULT_TAILSCALE_SERVE_PORT,
+  theme: "system",
   updateChannel: "latest",
   updateChannelConfiguredByUser: false,
 };
@@ -47,6 +51,7 @@ const DesktopSettingsDocument = Schema.Struct({
   serverExposureMode: Schema.optionalKey(DesktopServerExposureModeSchema),
   tailscaleServeEnabled: Schema.optionalKey(Schema.Boolean),
   tailscaleServePort: Schema.optionalKey(Schema.Number),
+  theme: Schema.optionalKey(DesktopThemeSchema),
   updateChannel: Schema.optionalKey(DesktopUpdateChannelSchema),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
 });
@@ -81,6 +86,9 @@ export interface DesktopAppSettingsShape {
     readonly enabled: boolean;
     readonly port: Option.Option<number>;
   }) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+  readonly setTheme: (
+    theme: DesktopTheme,
+  ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
   readonly setUpdateChannel: (
     channel: DesktopUpdateChannel,
   ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
@@ -120,6 +128,7 @@ function normalizeDesktopSettingsDocument(
       parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
     tailscaleServeEnabled: parsed.tailscaleServeEnabled === true,
     tailscaleServePort: normalizeTailscaleServePort(parsed.tailscaleServePort),
+    theme: parsed.theme ?? defaultSettings.theme,
     updateChannel: updateChannelConfiguredByUser
       ? Option.getOrElse(parsedUpdateChannel, () => defaultSettings.updateChannel)
       : defaultSettings.updateChannel,
@@ -141,6 +150,9 @@ function toDesktopSettingsDocument(
   }
   if (settings.tailscaleServePort !== defaults.tailscaleServePort) {
     document.tailscaleServePort = settings.tailscaleServePort;
+  }
+  if (settings.theme !== defaults.theme) {
+    document.theme = settings.theme;
   }
   if (settings.updateChannel !== defaults.updateChannel) {
     document.updateChannel = settings.updateChannel;
@@ -191,6 +203,15 @@ function setUpdateChannel(
         ...settings,
         updateChannel: requestedChannel,
         updateChannelConfiguredByUser: true,
+      };
+}
+
+function setTheme(settings: DesktopSettings, requestedTheme: DesktopTheme): DesktopSettings {
+  return settings.theme === requestedTheme
+    ? settings
+    : {
+        ...settings,
+        theme: requestedTheme,
       };
 }
 
@@ -281,6 +302,10 @@ export const layer = Layer.effect(
         persist((settings) => setTailscaleServe(settings, input)).pipe(
           Effect.withSpan("desktop.settings.setTailscaleServe", { attributes: input }),
         ),
+      setTheme: (theme) =>
+        persist((settings) => setTheme(settings, theme)).pipe(
+          Effect.withSpan("desktop.settings.setTheme", { attributes: { theme } }),
+        ),
       setUpdateChannel: (channel) =>
         persist((settings) => setUpdateChannel(settings, channel)).pipe(
           Effect.withSpan("desktop.settings.setUpdateChannel", { attributes: { channel } }),
@@ -312,6 +337,7 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
         setServerExposureMode: (mode) =>
           update((settings) => setServerExposureMode(settings, mode)),
         setTailscaleServe: (input) => update((settings) => setTailscaleServe(settings, input)),
+        setTheme: (theme) => update((settings) => setTheme(settings, theme)),
         setUpdateChannel: (channel) => update((settings) => setUpdateChannel(settings, channel)),
       });
     }),
