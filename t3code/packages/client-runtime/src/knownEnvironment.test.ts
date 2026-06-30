@@ -1,7 +1,11 @@
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { createKnownEnvironment, getKnownEnvironmentHttpBaseUrl } from "./knownEnvironment.ts";
+import {
+  createKnownEnvironment,
+  detectRuntimeEnvironment,
+  getKnownEnvironmentHttpBaseUrl,
+} from "./knownEnvironment.ts";
 import {
   parseScopedProjectKey,
   parseScopedThreadKey,
@@ -57,6 +61,84 @@ describe("known environment bootstrap helpers", () => {
         }),
       ),
     ).toBe("https://remote.example.com/api");
+  });
+});
+
+describe("runtime environment detection", () => {
+  it("detects container, ci, and wsl signals from injected readers", () => {
+    expect(
+      detectRuntimeEnvironment({
+        runtime: "node",
+        platform: "linux",
+        arch: "x64",
+        env: {
+          CI: "true",
+          GITHUB_ACTIONS: "true",
+          WSL_DISTRO_NAME: "Ubuntu",
+        },
+        pathExists: (path) => path === "/.dockerenv",
+        readTextFile: (path) =>
+          path === "/proc/1/cgroup"
+            ? "0::/docker/123"
+            : path === "/proc/version"
+              ? "Linux microsoft"
+              : null,
+      }),
+    ).toEqual({
+      runtime: "node",
+      platform: "linux",
+      arch: "x64",
+      isContainer: true,
+      isCi: true,
+      ciProvider: "github-actions",
+      isWsl: true,
+    });
+  });
+
+  it("detects ci providers from provider-specific environment variables", () => {
+    expect(
+      detectRuntimeEnvironment({
+        env: {
+          CI: "true",
+          GITLAB_CI: "true",
+        },
+      }),
+    ).toMatchObject({
+      isCi: true,
+      ciProvider: "gitlab-ci",
+    });
+  });
+
+  it("falls back to a non-container desktop-friendly snapshot when no signals are present", () => {
+    expect(
+      detectRuntimeEnvironment({
+        runtime: "browser",
+        platform: "darwin",
+        arch: "arm64",
+        env: {},
+      }),
+    ).toEqual({
+      runtime: "browser",
+      platform: "darwin",
+      arch: "arm64",
+      isContainer: false,
+      isCi: false,
+      ciProvider: null,
+      isWsl: false,
+    });
+  });
+
+  it("treats ci-only environments as ci even when no named provider matches", () => {
+    expect(
+      detectRuntimeEnvironment({
+        env: {
+          CI: "true",
+        },
+      }),
+    ).toMatchObject({
+      isCi: true,
+      ciProvider: null,
+    });
   });
 });
 
