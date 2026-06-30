@@ -430,9 +430,94 @@ label:has(> select#reasoning-effort) select {
   margin: 0.65rem 0;
 }
 
+.chat-markdown .chat-markdown-codeblock-details {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  overflow: clip;
+  background: color-mix(in srgb, var(--background) 88%, var(--card));
+}
+
+.chat-markdown .chat-markdown-codeblock-summary {
+  position: relative;
+  display: block;
+  cursor: pointer;
+  list-style: none;
+  outline: none;
+}
+
+.chat-markdown .chat-markdown-codeblock-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-markdown .chat-markdown-codeblock-summary-icon {
+  position: absolute;
+  top: 0.55rem;
+  left: 0.55rem;
+  z-index: 1;
+  color: var(--muted-foreground);
+  transition: transform 160ms ease;
+  pointer-events: none;
+}
+
+.chat-markdown .chat-markdown-codeblock-details[open] .chat-markdown-codeblock-summary-icon {
+  transform: rotate(180deg);
+}
+
+.chat-markdown .chat-markdown-codeblock-preview {
+  padding: 0.05rem 0;
+}
+
+.chat-markdown .chat-markdown-codeblock-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 180ms ease,
+    opacity 180ms ease;
+}
+
+.chat-markdown .chat-markdown-codeblock-details[open] .chat-markdown-codeblock-panel {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.chat-markdown .chat-markdown-codeblock-panel-inner {
+  overflow: hidden;
+}
+
+.chat-markdown .chat-markdown-codeblock-details[open] .chat-markdown-codeblock-preview {
+  display: none;
+}
+
 .chat-markdown .chat-markdown-codeblock pre {
   margin: 0;
   padding-right: calc(0.9rem + var(--chat-markdown-codeblock-copy-button-space));
+}
+
+.chat-markdown .chat-markdown-shiki pre {
+  overflow: auto;
+}
+
+.chat-markdown .chat-markdown-shiki code {
+  display: block;
+  counter-reset: line;
+}
+
+.chat-markdown .chat-markdown-shiki .line {
+  position: relative;
+  display: block;
+  padding-left: 3.4rem;
+}
+
+.chat-markdown .chat-markdown-shiki .line::before {
+  counter-increment: line;
+  content: counter(line);
+  position: absolute;
+  left: 0;
+  width: 2.6rem;
+  text-align: right;
+  color: var(--muted-foreground);
+  user-select: none;
 }
 
 .chat-markdown .chat-markdown-copy-button {

@@ -1,5 +1,5 @@
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, CopyIcon } from "lucide-react";
 import type { ServerProviderSkill } from "@t3tools/contracts";
 import React, {
   Children,
@@ -66,7 +66,9 @@ interface ChatMarkdownProps {
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
-const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
+const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)(?:language|lang)-([^\s]+)/;
+const CODE_BLOCK_COLLAPSE_THRESHOLD = 20;
+const CODE_BLOCK_COLLAPSE_PREVIEW_LINES = 10;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
 const highlightedCodeCache = new LRUCache<string>(
@@ -75,11 +77,48 @@ const highlightedCodeCache = new LRUCache<string>(
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 
-function extractFenceLanguage(className: string | undefined): string {
+function extractFenceLanguage(className: string | undefined, code: string): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
-  const raw = match?.[1] ?? "text";
+  const raw = match?.[1] ?? guessFenceLanguage(code);
   // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
   return raw === "gitignore" ? "ini" : raw;
+}
+
+function guessFenceLanguage(code: string): string {
+  const trimmed = code.trim();
+  const trimmedStart = code.trimStart();
+
+  if (trimmed.length === 0) {
+    return "text";
+  }
+  if (trimmedStart.startsWith("#!")) {
+    return "bash";
+  }
+  if (/^\s*[{[]/.test(trimmed)) {
+    try {
+      JSON.parse(trimmed);
+      return "json";
+    } catch {
+      // fall through to the remaining heuristics
+    }
+  }
+  if (/^<([a-zA-Z][\w:-]*)(\s[^>]*)?>/.test(trimmedStart)) {
+    return "html";
+  }
+  if (/^---\s*$/m.test(trimmed) || /^\s*[A-Za-z0-9_.-]+:\s+/m.test(trimmed)) {
+    return "yaml";
+  }
+  if (
+    /\b(import|export|const|let|var|function|class|interface|type|async|await)\b/.test(trimmed) ||
+    /=>/.test(trimmed) ||
+    /\bconsole\.[a-z]+\(/.test(trimmed)
+  ) {
+    return "ts";
+  }
+  if (/\bSELECT\b|\bFROM\b|\bWHERE\b/i.test(trimmed) && /;?\s*$/.test(trimmed)) {
+    return "sql";
+  }
+  return "text";
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -121,6 +160,48 @@ function createHighlightCacheKey(code: string, language: string, themeName: Diff
   return `${fnv1a32(code).toString(36)}:${code.length}:${language}:${themeName}`;
 }
 
+const SHIKI_CODE_BLOCK_HTML_REGEX = /^<pre([^>]*)><code([^>]*)>([\s\S]*)<\/code><\/pre>$/;
+
+function splitHighlightedCodeHtml(highlightedHtml: string): {
+  preAttributes: string;
+  codeAttributes: string;
+  lineHtml: string[];
+} | null {
+  const match = highlightedHtml.match(SHIKI_CODE_BLOCK_HTML_REGEX);
+  if (!match) {
+    return null;
+  }
+
+  const preAttributes = match[1] ?? "";
+  const codeAttributes = match[2] ?? "";
+  const lineHtml = (match[3] ?? "").split("\n");
+  return { preAttributes, codeAttributes, lineHtml };
+}
+
+function buildHighlightedCodeHtml(
+  parsed: {
+    preAttributes: string;
+    codeAttributes: string;
+    lineHtml: string[];
+  },
+  startLine: number,
+  lineCount: number,
+): string {
+  const startIndex = Math.max(0, startLine - 1);
+  const endIndex = Math.max(startIndex, Math.min(parsed.lineHtml.length, startIndex + lineCount));
+  const selectedLines = parsed.lineHtml.slice(startIndex, endIndex).join("\n");
+  const counterReset = Math.max(0, startLine - 1);
+  const codeAttributes =
+    parsed.codeAttributes.trim().length > 0
+      ? `${parsed.codeAttributes} style="counter-reset: line ${counterReset};"`
+      : ` style="counter-reset: line ${counterReset};"`;
+  return `<pre${parsed.preAttributes}><code${codeAttributes}>${selectedLines}</code></pre>`;
+}
+
+function getCodeLineCount(code: string): number {
+  return code.length === 0 ? 0 : code.split(/\r?\n/).length;
+}
+
 function estimateHighlightedSize(html: string, code: string): number {
   return Math.max(html.length * 2, code.length * 3);
 }
@@ -146,9 +227,43 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   return promise;
 }
 
-function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
+function MarkdownCodeBlock({
+  code,
+  children,
+  highlightedHtml,
+}: {
+  code: string;
+  children: ReactNode;
+  highlightedHtml: string;
+}) {
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const parsedHighlightedHtml = useMemo(
+    () => splitHighlightedCodeHtml(highlightedHtml),
+    [highlightedHtml],
+  );
+  const lineCount = useMemo(() => getCodeLineCount(code), [code]);
+  const collapsible = parsedHighlightedHtml != null && lineCount > CODE_BLOCK_COLLAPSE_THRESHOLD;
+  const previewHtml = useMemo(() => {
+    if (!collapsible || parsedHighlightedHtml == null) {
+      return highlightedHtml;
+    }
+    return buildHighlightedCodeHtml(
+      parsedHighlightedHtml,
+      1,
+      Math.min(CODE_BLOCK_COLLAPSE_PREVIEW_LINES, lineCount),
+    );
+  }, [collapsible, highlightedHtml, lineCount, parsedHighlightedHtml]);
+  const collapsedBodyHtml = useMemo(() => {
+    if (!collapsible || parsedHighlightedHtml == null) {
+      return highlightedHtml;
+    }
+    return buildHighlightedCodeHtml(
+      parsedHighlightedHtml,
+      CODE_BLOCK_COLLAPSE_PREVIEW_LINES + 1,
+      lineCount - CODE_BLOCK_COLLAPSE_PREVIEW_LINES,
+    );
+  }, [collapsible, highlightedHtml, lineCount, parsedHighlightedHtml]);
   const handleCopy = useCallback(() => {
     if (typeof navigator === "undefined" || navigator.clipboard == null) {
       return;
@@ -177,6 +292,39 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
     },
     [],
   );
+
+  if (collapsible) {
+    return (
+      <details className="chat-markdown-codeblock chat-markdown-codeblock-details leading-snug">
+        <summary className="chat-markdown-codeblock-summary">
+          <div className="chat-markdown-codeblock-preview">
+            <div
+              className="chat-markdown-shiki"
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
+          </div>
+          <ChevronDownIcon className="chat-markdown-codeblock-summary-icon size-3.5" aria-hidden />
+        </summary>
+        <div className="chat-markdown-codeblock-panel">
+          <div className="chat-markdown-codeblock-panel-inner">
+            <div
+              className="chat-markdown-shiki"
+              dangerouslySetInnerHTML={{ __html: collapsedBodyHtml }}
+            />
+          </div>
+        </div>
+        <button
+          type="button"
+          className="chat-markdown-copy-button"
+          onClick={handleCopy}
+          title={copied ? "Copied" : "Copy code"}
+          aria-label={copied ? "Copied" : "Copy code"}
+        >
+          {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+        </button>
+      </details>
+    );
+  }
 
   return (
     <div className="chat-markdown-codeblock leading-snug">
@@ -207,16 +355,18 @@ function SuspenseShikiCodeBlock({
   themeName,
   isStreaming,
 }: SuspenseShikiCodeBlockProps) {
-  const language = extractFenceLanguage(className);
+  const language = extractFenceLanguage(className, code);
   const cacheKey = createHighlightCacheKey(code, language, themeName);
   const cachedHighlightedHtml = !isStreaming ? highlightedCodeCache.get(cacheKey) : null;
 
   if (cachedHighlightedHtml != null) {
     return (
-      <div
-        className="chat-markdown-shiki"
-        dangerouslySetInnerHTML={{ __html: cachedHighlightedHtml }}
-      />
+      <MarkdownCodeBlock code={code} highlightedHtml={cachedHighlightedHtml}>
+        <div
+          className="chat-markdown-shiki"
+          dangerouslySetInnerHTML={{ __html: cachedHighlightedHtml }}
+        />
+      </MarkdownCodeBlock>
     );
   }
 
@@ -272,7 +422,9 @@ function UncachedShikiCodeBlock({
   }, [cacheKey, code, highlightedHtml, isStreaming]);
 
   return (
-    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+    <MarkdownCodeBlock code={code} highlightedHtml={highlightedHtml}>
+      <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+    </MarkdownCodeBlock>
   );
 }
 
@@ -587,18 +739,16 @@ function ChatMarkdown({
         }
 
         return (
-          <MarkdownCodeBlock code={codeBlock.code}>
-            <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
-              <Suspense fallback={<pre {...props}>{children}</pre>}>
-                <SuspenseShikiCodeBlock
-                  className={codeBlock.className}
-                  code={codeBlock.code}
-                  themeName={diffThemeName}
-                  isStreaming={isStreaming}
-                />
-              </Suspense>
-            </CodeHighlightErrorBoundary>
-          </MarkdownCodeBlock>
+          <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
+            <Suspense fallback={<pre {...props}>{children}</pre>}>
+              <SuspenseShikiCodeBlock
+                className={codeBlock.className}
+                code={codeBlock.code}
+                themeName={diffThemeName}
+                isStreaming={isStreaming}
+              />
+            </Suspense>
+          </CodeHighlightErrorBoundary>
         );
       },
     }),

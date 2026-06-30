@@ -25,10 +25,26 @@ vi.mock("../localApi", () => ({
 
 import ChatMarkdown from "./ChatMarkdown";
 
+const clipboardWriteTextMock = vi.fn(async () => undefined);
+const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+
+function setClipboardMock() {
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: clipboardWriteTextMock },
+  });
+}
+
 describe("ChatMarkdown", () => {
   afterEach(() => {
     openInPreferredEditorMock.mockClear();
     readLocalApiMock.mockClear();
+    clipboardWriteTextMock.mockClear();
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
+    } else {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
     localStorage.clear();
     document.body.innerHTML = "";
   });
@@ -134,6 +150,78 @@ describe("ChatMarkdown", () => {
       await expect.element(link).toBeInTheDocument();
       await expect.element(link).toHaveAttribute("href", "https://openai.com/docs");
       await expect.element(link).toHaveAttribute("target", "_blank");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("syntax highlights fenced code blocks with language hints", async () => {
+    const screen = await render(
+      <ChatMarkdown text={"```ts\nconst answer: number = 42;\n```"} cwd="/repo/project" />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        const codeBlock = document.querySelector(".chat-markdown-shiki .shiki");
+        expect(codeBlock).not.toBeNull();
+        expect(codeBlock?.textContent).toContain("const answer: number = 42;");
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("attempts language detection when fences omit a hint", async () => {
+    const screen = await render(
+      <ChatMarkdown text={'```\n{"name":"Ada","role":"engineer"}\n```'} cwd="/repo/project" />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        const highlighted = document.querySelector(".chat-markdown-shiki .shiki");
+        expect(highlighted).not.toBeNull();
+        expect(highlighted?.querySelectorAll('span[style*="color"]').length).toBeGreaterThan(0);
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("collapses code blocks longer than twenty lines", async () => {
+    const longCode = Array.from({ length: 21 }, (_, index) => `item ${index + 1}`).join("\n");
+    const screen = await render(
+      <ChatMarkdown text={`\`\`\`ts\n${longCode}\n\`\`\``} cwd="/repo/project" />,
+    );
+
+    try {
+      const details = document.querySelector("details.chat-markdown-codeblock-details");
+      expect(details).not.toBeNull();
+      await expect.element(page.getByText("item 1", { exact: true })).toBeVisible();
+      await expect.element(page.getByText("item 11", { exact: true })).not.toBeVisible();
+
+      await page.getByText("item 1", { exact: true }).click();
+
+      await expect.element(page.getByText("item 11", { exact: true })).toBeVisible();
+      await expect.element(page.getByText("item 21", { exact: true })).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("copies only the code content from the copy button", async () => {
+    setClipboardMock();
+
+    const screen = await render(
+      <ChatMarkdown text={"```ts\nconst answer = 42;\n```"} cwd="/repo/project" />,
+    );
+
+    try {
+      await page.getByText("const answer = 42;", { exact: false }).hover();
+      await page.getByRole("button", { name: "Copy code" }).click();
+
+      await vi.waitFor(() => {
+        expect(clipboardWriteTextMock).toHaveBeenCalledWith("const answer = 42;\n");
+      });
     } finally {
       await screen.unmount();
     }
