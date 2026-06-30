@@ -1,9 +1,24 @@
+import * as Console from "effect/Console";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { Command, GlobalFlag } from "effect/unstable/cli";
 
 import { ServerConfig, type StartupPresentation } from "../config.ts";
 import { runServer } from "../server.ts";
-import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
+import {
+  type CliServerFlags,
+  formatServerEnvironmentValidation,
+  resolveServerConfig,
+  sharedServerCommandFlags,
+  validateServerEnvironment,
+} from "./config.ts";
+
+class ServerEnvironmentValidationError extends Data.TaggedError(
+  "ServerEnvironmentValidationError",
+)<{
+  readonly message: string;
+}> {}
 
 export const runServerCommand = (
   flags: CliServerFlags,
@@ -14,6 +29,21 @@ export const runServerCommand = (
 ) =>
   Effect.gen(function* () {
     const logLevel = yield* GlobalFlag.LogLevel;
+    const validation = validateServerEnvironment(process.env);
+    const shouldValidateOnly = Option.getOrElse(flags.validateConfig, () => false);
+
+    if (validation.hasErrors) {
+      yield* Console.log(formatServerEnvironmentValidation(validation));
+      return yield* new ServerEnvironmentValidationError({
+        message: "Server environment validation failed before startup.",
+      });
+    }
+
+    if (shouldValidateOnly) {
+      yield* Console.log(formatServerEnvironmentValidation(validation));
+      return;
+    }
+
     const config = yield* resolveServerConfig(flags, logLevel, options);
     return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
   });

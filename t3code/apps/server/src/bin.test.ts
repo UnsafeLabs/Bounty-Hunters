@@ -359,4 +359,24 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       assert.equal(optionError.option, "--dev-url");
     }),
   );
+
+  it.effect("prints startup environment validation without launching the server", () =>
+    Effect.gen(function* () {
+      const previous = process.env.T3CODE_PORT;
+      process.env.T3CODE_PORT = "abc";
+
+      const exit = yield* captureStdout(runCliWithRuntime(["--validate-config"]).pipe(Effect.exit));
+
+      if (previous === undefined) {
+        delete process.env.T3CODE_PORT;
+      } else {
+        process.env.T3CODE_PORT = previous;
+      }
+
+      assert.equal(exit.output.includes("T3 Code server environment validation"), true);
+      assert.equal(exit.output.includes("T3CODE_PORT"), true);
+      assert.equal(exit.output.includes("Status: failed"), true);
+      assert.equal(exit.result._tag, "Failure");
+    }),
+  );
 });

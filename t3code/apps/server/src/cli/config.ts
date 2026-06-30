@@ -80,6 +80,12 @@ export const tailscaleServePortFlag = Flag.integer("tailscale-serve-port").pipe(
   Flag.withDescription("HTTPS port for Tailscale Serve when --tailscale-serve is enabled."),
   Flag.optional,
 );
+export const validateConfigFlag = Flag.boolean("validate-config").pipe(
+  Flag.withDescription(
+    "Validate known startup environment variables and exit before starting the server.",
+  ),
+  Flag.optional,
+);
 
 const EnvServerConfig = Config.all({
   logLevel: Config.logLevel("T3CODE_LOG_LEVEL").pipe(Config.withDefault("Info")),
@@ -151,6 +157,7 @@ export interface CliServerFlags {
   readonly logWebSocketEvents: Option.Option<boolean>;
   readonly tailscaleServeEnabled: Option.Option<boolean>;
   readonly tailscaleServePort: Option.Option<number>;
+  readonly validateConfig: Option.Option<boolean>;
 }
 
 export interface CliAuthLocationFlags {
@@ -185,7 +192,367 @@ export const sharedServerCommandFlags = {
   logWebSocketEvents: logWebSocketEventsFlag,
   tailscaleServeEnabled: tailscaleServeFlag,
   tailscaleServePort: tailscaleServePortFlag,
+  validateConfig: validateConfigFlag,
 } as const;
+
+type EnvValidationStatus = "valid" | "default" | "optional" | "invalid";
+
+export interface ServerEnvironmentValidationRow {
+  readonly name: string;
+  readonly status: EnvValidationStatus;
+  readonly expected: string;
+  readonly description: string;
+  readonly value: string | undefined;
+  readonly note: string;
+}
+
+export interface ServerEnvironmentValidationResult {
+  readonly hasErrors: boolean;
+  readonly rows: ReadonlyArray<ServerEnvironmentValidationRow>;
+}
+
+interface ServerEnvironmentValidationSpec {
+  readonly name: string;
+  readonly expected: string;
+  readonly description: string;
+  readonly defaultNote?: string;
+  readonly sensitive?: boolean;
+  readonly validate: (value: string) => boolean;
+}
+
+const serverEnvironmentValidationSpecs: ReadonlyArray<ServerEnvironmentValidationSpec> = [
+  {
+    name: "T3CODE_LOG_LEVEL",
+    expected: "All | Fatal | Error | Warn | Info | Debug | Trace | None",
+    description: "Server log level.",
+    defaultNote: "defaults to Info",
+    validate: (value) =>
+      ["all", "fatal", "error", "warn", "warning", "info", "debug", "trace", "none"].includes(
+        value.trim().toLowerCase(),
+      ),
+  },
+  {
+    name: "T3CODE_TRACE_MIN_LEVEL",
+    expected: "All | Fatal | Error | Warn | Info | Debug | Trace | None",
+    description: "Minimum log level captured in trace output.",
+    defaultNote: "defaults to Info",
+    validate: (value) =>
+      ["all", "fatal", "error", "warn", "warning", "info", "debug", "trace", "none"].includes(
+        value.trim().toLowerCase(),
+      ),
+  },
+  {
+    name: "T3CODE_TRACE_TIMING_ENABLED",
+    expected: "boolean",
+    description: "Enable trace timing annotations.",
+    defaultNote: "defaults to true",
+    validate: (value) =>
+      ["true", "false", "1", "0", "yes", "no", "on", "off"].includes(value.trim().toLowerCase()),
+  },
+  {
+    name: "T3CODE_TRACE_FILE",
+    expected: "path",
+    description: "Override trace output file path.",
+    validate: (value) => value.trim().length > 0,
+  },
+  {
+    name: "T3CODE_TRACE_MAX_BYTES",
+    expected: "integer >= 0",
+    description: "Maximum bytes per trace log file.",
+    defaultNote: "defaults to 10485760",
+    validate: (value) => /^\d+$/.test(value.trim()),
+  },
+  {
+    name: "T3CODE_TRACE_MAX_FILES",
+    expected: "integer >= 0",
+    description: "Maximum number of trace log files to retain.",
+    defaultNote: "defaults to 10",
+    validate: (value) => /^\d+$/.test(value.trim()),
+  },
+  {
+    name: "T3CODE_TRACE_BATCH_WINDOW_MS",
+    expected: "integer >= 0",
+    description: "Trace batching window in milliseconds.",
+    defaultNote: "defaults to 200",
+    validate: (value) => /^\d+$/.test(value.trim()),
+  },
+  {
+    name: "T3CODE_OTLP_TRACES_URL",
+    expected: "URL",
+    description: "Optional OTLP traces endpoint.",
+    validate: (value) => {
+      try {
+        const parsed = new URL(value);
+        return parsed.protocol.length > 0;
+      } catch {
+        return false;
+      }
+    },
+  },
+  {
+    name: "T3CODE_POSTHOG_KEY",
+    expected: "non-empty string",
+    description: "Optional PostHog project key for telemetry.",
+    validate: (value) => value.trim().length > 0,
+    sensitive: true,
+  },
+  {
+    name: "T3CODE_POSTHOG_HOST",
+    expected: "URL",
+    description: "Optional PostHog ingestion host.",
+    defaultNote: "defaults to https://us.i.posthog.com",
+    validate: (value) => {
+      try {
+        const parsed = new URL(value);
+        return parsed.protocol.length > 0;
+      } catch {
+        return false;
+      }
+    },
+  },
+  {
+    name: "T3CODE_TELEMETRY_ENABLED",
+    expected: "boolean",
+    description: "Enable or disable anonymous telemetry buffering.",
+    defaultNote: "defaults to true",
+    validate: (value) =>
+      ["true", "false", "1", "0", "yes", "no", "on", "off"].includes(value.trim().toLowerCase()),
+  },
+  {
+    name: "T3CODE_TELEMETRY_FLUSH_BATCH_SIZE",
+    expected: "number >= 0",
+    description: "Maximum telemetry events per flush batch.",
+    defaultNote: "defaults to 20",
+    validate: (value) => !Number.isNaN(Number(value.trim())),
+  },
+  {
+    name: "T3CODE_TELEMETRY_MAX_BUFFERED_EVENTS",
+    expected: "number >= 0",
+    description: "Maximum buffered telemetry events in memory.",
+    defaultNote: "defaults to 1000",
+    validate: (value) => !Number.isNaN(Number(value.trim())),
+  },
+  {
+    name: "T3CODE_BITBUCKET_API_BASE_URL",
+    expected: "URL",
+    description: "Optional Bitbucket API base URL override.",
+    defaultNote: "defaults to https://api.bitbucket.org/2.0",
+    validate: (value) => {
+      try {
+        const parsed = new URL(value);
+        return parsed.protocol.length > 0;
+      } catch {
+        return false;
+      }
+    },
+  },
+  {
+    name: "T3CODE_OTLP_METRICS_URL",
+    expected: "URL",
+    description: "Optional OTLP metrics endpoint.",
+    validate: (value) => {
+      try {
+        const parsed = new URL(value);
+        return parsed.protocol.length > 0;
+      } catch {
+        return false;
+      }
+    },
+  },
+  {
+    name: "T3CODE_OTLP_EXPORT_INTERVAL_MS",
+    expected: "integer >= 0",
+    description: "OTLP export interval in milliseconds.",
+    defaultNote: "defaults to 10000",
+    validate: (value) => /^\d+$/.test(value.trim()),
+  },
+  {
+    name: "T3CODE_OTLP_SERVICE_NAME",
+    expected: "non-empty string",
+    description: "Service name attached to OTLP exports.",
+    defaultNote: "defaults to t3-server",
+    validate: (value) => value.trim().length > 0,
+  },
+  {
+    name: "T3CODE_MODE",
+    expected: "web | desktop",
+    description: "Runtime mode.",
+    validate: (value) => ["web", "desktop"].includes(value.trim()),
+  },
+  {
+    name: "T3CODE_PORT",
+    expected: "port 1-65535",
+    description: "HTTP/WebSocket listen port.",
+    validate: (value) => {
+      const parsed = Number.parseInt(value, 10);
+      return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535;
+    },
+  },
+  {
+    name: "T3CODE_HOST",
+    expected: "host or IP string",
+    description: "Optional bind host/interface.",
+    validate: (value) => value.trim().length > 0,
+  },
+  {
+    name: "T3CODE_HOME",
+    expected: "path",
+    description: "Optional base directory for state and worktrees.",
+    validate: (value) => value.trim().length > 0,
+  },
+  {
+    name: "VITE_DEV_SERVER_URL",
+    expected: "URL",
+    description: "Optional dev server URL for proxying the web app.",
+    validate: (value) => {
+      try {
+        const parsed = new URL(value);
+        return parsed.protocol.length > 0;
+      } catch {
+        return false;
+      }
+    },
+  },
+  {
+    name: "T3CODE_NO_BROWSER",
+    expected: "boolean",
+    description: "Disable automatic browser launch.",
+    validate: (value) =>
+      ["true", "false", "1", "0", "yes", "no", "on", "off"].includes(value.trim().toLowerCase()),
+  },
+  {
+    name: "T3CODE_BOOTSTRAP_FD",
+    expected: "integer >= 0",
+    description: "Optional bootstrap file descriptor.",
+    validate: (value) => /^\d+$/.test(value.trim()),
+  },
+  {
+    name: "T3CODE_BITBUCKET_ACCESS_TOKEN",
+    expected: "non-empty string",
+    description: "Optional Bitbucket bearer token.",
+    validate: (value) => value.trim().length > 0,
+    sensitive: true,
+  },
+  {
+    name: "T3CODE_BITBUCKET_EMAIL",
+    expected: "non-empty string",
+    description: "Optional Bitbucket account email for app-password auth.",
+    validate: (value) => value.trim().length > 0,
+    sensitive: true,
+  },
+  {
+    name: "T3CODE_BITBUCKET_API_TOKEN",
+    expected: "non-empty string",
+    description: "Optional Bitbucket API token for app-password auth.",
+    validate: (value) => value.trim().length > 0,
+    sensitive: true,
+  },
+  {
+    name: "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+    expected: "boolean",
+    description: "Bootstrap the current working directory as a project on startup.",
+    validate: (value) =>
+      ["true", "false", "1", "0", "yes", "no", "on", "off"].includes(value.trim().toLowerCase()),
+  },
+  {
+    name: "T3CODE_LOG_WS_EVENTS",
+    expected: "boolean",
+    description: "Log outbound websocket events.",
+    validate: (value) =>
+      ["true", "false", "1", "0", "yes", "no", "on", "off"].includes(value.trim().toLowerCase()),
+  },
+  {
+    name: "T3CODE_TAILSCALE_SERVE",
+    expected: "boolean",
+    description: "Enable Tailscale Serve HTTPS exposure.",
+    validate: (value) =>
+      ["true", "false", "1", "0", "yes", "no", "on", "off"].includes(value.trim().toLowerCase()),
+  },
+  {
+    name: "T3CODE_TAILSCALE_SERVE_PORT",
+    expected: "port 1-65535",
+    description: "HTTPS port for Tailscale Serve.",
+    defaultNote: "defaults to 443",
+    validate: (value) => {
+      const parsed = Number.parseInt(value, 10);
+      return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535;
+    },
+  },
+];
+
+export const validateServerEnvironment = (
+  env: Readonly<Record<string, string | undefined>>,
+): ServerEnvironmentValidationResult => {
+  const rows = serverEnvironmentValidationSpecs.map((spec) => {
+    const rawValue = env[spec.name];
+    const displayValue =
+      rawValue === undefined
+        ? undefined
+        : spec.sensitive
+          ? rawValue.length > 0
+            ? "[redacted]"
+            : ""
+          : rawValue;
+    if (rawValue === undefined) {
+      return {
+        name: spec.name,
+        status: spec.defaultNote ? "default" : "optional",
+        expected: spec.expected,
+        description: spec.description,
+        value: undefined,
+        note: spec.defaultNote ?? "optional and unset",
+      } satisfies ServerEnvironmentValidationRow;
+    }
+
+    if (spec.validate(rawValue)) {
+      return {
+        name: spec.name,
+        status: "valid",
+        expected: spec.expected,
+        description: spec.description,
+        value: displayValue,
+        note: "valid",
+      } satisfies ServerEnvironmentValidationRow;
+    }
+
+    return {
+      name: spec.name,
+      status: "invalid",
+      expected: spec.expected,
+      description: spec.description,
+      value: displayValue,
+      note: spec.sensitive ? "received [redacted]" : `received ${JSON.stringify(rawValue)}`,
+    } satisfies ServerEnvironmentValidationRow;
+  });
+
+  return {
+    hasErrors: rows.some((row) => row.status === "invalid"),
+    rows,
+  };
+};
+
+export const formatServerEnvironmentValidation = (
+  result: ServerEnvironmentValidationResult,
+): string => {
+  const lines = [
+    "T3 Code server environment validation",
+    result.hasErrors
+      ? "Status: failed - fix the invalid values before startup."
+      : "Status: passed - startup environment looks valid.",
+    "",
+    "STATUS   VARIABLE                              EXPECTED                               VALUE                  NOTE",
+  ];
+
+  for (const row of result.rows) {
+    const status = row.status.toUpperCase().padEnd(8, " ");
+    const name = row.name.padEnd(37, " ");
+    const expected = row.expected.padEnd(38, " ");
+    const value = (row.value ?? "-").slice(0, 20).padEnd(22, " ");
+    lines.push(`${status}${name}${expected}${value}${row.note}`);
+  }
+
+  return lines.join("\n");
+};
 
 export const authLocationFlags = sharedServerLocationFlags;
 
@@ -230,6 +597,7 @@ export const resolveServerConfig = (
       logWebSocketEvents: flags.logWebSocketEvents ?? Option.none(),
       tailscaleServeEnabled: flags.tailscaleServeEnabled ?? Option.none(),
       tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
+      validateConfig: flags.validateConfig ?? Option.none(),
     } satisfies CliServerFlags;
     const bootstrapFd = Option.getOrUndefined(normalizedFlags.bootstrapFd) ?? env.bootstrapFd;
     const bootstrapEnvelope =
@@ -397,6 +765,7 @@ export const resolveCliAuthConfig = (
       logWebSocketEvents: Option.none(),
       tailscaleServeEnabled: Option.none(),
       tailscaleServePort: Option.none(),
+      validateConfig: Option.none(),
     },
     cliLogLevel,
   );

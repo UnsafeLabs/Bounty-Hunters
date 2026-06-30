@@ -16,7 +16,7 @@ import {
 import * as NetService from "@t3tools/shared/Net";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { deriveServerPaths } from "../config.ts";
-import { resolveServerConfig } from "./config.ts";
+import { resolveServerConfig, validateServerEnvironment } from "./config.ts";
 
 const encodeDesktopBootstrap = Schema.encodeEffect(Schema.fromJsonString(DesktopBackendBootstrap));
 
@@ -75,6 +75,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           logWebSocketEvents: Option.none(),
           tailscaleServeEnabled: Option.none(),
           tailscaleServePort: Option.none(),
+          validateConfig: Option.none(),
         },
         Option.none(),
       ).pipe(
@@ -141,6 +142,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           logWebSocketEvents: Option.some(true),
           tailscaleServeEnabled: Option.some(true),
           tailscaleServePort: Option.some(8443),
+          validateConfig: Option.none(),
         },
         Option.some("Debug"),
       ).pipe(
@@ -215,6 +217,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           logWebSocketEvents: Option.some(false),
           tailscaleServeEnabled: Option.none(),
           tailscaleServePort: Option.none(),
+          validateConfig: Option.none(),
         },
         Option.none(),
       ).pipe(
@@ -290,6 +293,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           logWebSocketEvents: Option.none(),
           tailscaleServeEnabled: Option.none(),
           tailscaleServePort: Option.none(),
+          validateConfig: Option.none(),
         },
         Option.none(),
       ).pipe(
@@ -353,6 +357,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           logWebSocketEvents: Option.none(),
           tailscaleServeEnabled: Option.none(),
           tailscaleServePort: Option.none(),
+          validateConfig: Option.none(),
         },
         Option.none(),
       ).pipe(
@@ -412,6 +417,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           logWebSocketEvents: Option.none(),
           tailscaleServeEnabled: Option.none(),
           tailscaleServePort: Option.none(),
+          validateConfig: Option.none(),
         },
         Option.some("Debug"),
       ).pipe(
@@ -488,6 +494,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           logWebSocketEvents: Option.none(),
           tailscaleServeEnabled: Option.none(),
           tailscaleServePort: Option.none(),
+          validateConfig: Option.none(),
         },
         Option.none(),
       ).pipe(
@@ -545,6 +552,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           logWebSocketEvents: Option.none(),
           tailscaleServeEnabled: Option.none(),
           tailscaleServePort: Option.none(),
+          validateConfig: Option.none(),
         },
         Option.none(),
         {
@@ -587,4 +595,25 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       });
     }),
   );
+
+  it("reports invalid startup environment variables with expected formats", () => {
+    const validation = validateServerEnvironment({
+      T3CODE_PORT: "abc",
+      T3CODE_MODE: "worker",
+      T3CODE_NO_BROWSER: "sometimes",
+      T3CODE_OTLP_TRACES_URL: "not-a-url",
+      T3CODE_POSTHOG_KEY: "secret-token",
+    });
+
+    expect(validation.hasErrors).toBe(true);
+    expect(validation.rows.find((row) => row.name === "T3CODE_PORT")?.status).toBe("invalid");
+    expect(validation.rows.find((row) => row.name === "T3CODE_MODE")?.status).toBe("invalid");
+    expect(validation.rows.find((row) => row.name === "T3CODE_NO_BROWSER")?.status).toBe("invalid");
+    expect(validation.rows.find((row) => row.name === "T3CODE_OTLP_TRACES_URL")?.status).toBe(
+      "invalid",
+    );
+    expect(validation.rows.find((row) => row.name === "T3CODE_POSTHOG_KEY")?.value).toBe(
+      "[redacted]",
+    );
+  });
 });
