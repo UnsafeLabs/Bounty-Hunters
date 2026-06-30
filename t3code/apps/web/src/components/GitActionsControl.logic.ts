@@ -95,6 +95,7 @@ export function buildMenuItems(
   gitStatus: VcsStatusResult | null,
   isBusy: boolean,
   hasPrimaryRemote = true,
+  isProtectedBranch = false,
 ): GitActionMenuItem[] {
   if (!gitStatus) return [];
   const terminology = resolveChangeRequestTerminology(gitStatus);
@@ -111,7 +112,8 @@ export function buildMenuItems(
     hasBranch &&
     !isBehind &&
     gitStatus.aheadCount > 0 &&
-    (gitStatus.hasUpstream || canPushWithoutUpstream);
+    (gitStatus.hasUpstream || canPushWithoutUpstream) &&
+    !isProtectedBranch;
   const canCreatePr =
     !isBusy &&
     hasBranch &&
@@ -169,6 +171,7 @@ export function resolveQuickAction(
   isBusy: boolean,
   isDefaultRef = false,
   hasPrimaryRemote = true,
+  isProtectedBranch = false,
 ): GitQuickAction {
   if (isBusy) {
     return { label: "Commit", disabled: true, kind: "show_hint", hint: "Git action in progress." };
@@ -205,6 +208,9 @@ export function resolveQuickAction(
     if (!gitStatus.hasUpstream && !hasPrimaryRemote) {
       return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
     }
+    if (isProtectedBranch) {
+      return { label: "Commit (push disabled)", disabled: true, kind: "show_hint", hint: "Push to protected branch requires PR." };
+    }
     if (hasOpenPr || isDefaultRef) {
       return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
     }
@@ -236,6 +242,14 @@ export function resolveQuickAction(
         disabled: true,
         kind: "show_hint",
         hint: "No local commits to push.",
+      };
+    }
+    if (isProtectedBranch) {
+      return {
+        label: "Push",
+        disabled: true,
+        kind: "show_hint",
+        hint: "Push to protected branch is restricted.",
       };
     }
     if (hasOpenPr || isDefaultRef) {
@@ -272,6 +286,14 @@ export function resolveQuickAction(
   }
 
   if (isAhead) {
+    if (isProtectedBranch) {
+      return {
+        label: "Push",
+        disabled: true,
+        kind: "show_hint",
+        hint: "Push to protected branch is restricted.",
+      };
+    }
     if (hasOpenPr || isDefaultRef) {
       return {
         label: "Push",

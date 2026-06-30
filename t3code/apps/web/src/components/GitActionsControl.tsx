@@ -96,6 +96,19 @@ interface PendingDefaultBranchAction {
   onConfirmed?: () => void;
   filePaths?: string[];
 }
+interface BranchProtectionRule {
+  requiredReviews: number;
+  requiresStatusChecks: boolean;
+  requiresUpToDateBranch: boolean;
+  allowsForcePush: boolean;
+}
+
+interface BranchProtectionStatus {
+  isProtected: boolean;
+  rule: BranchProtectionRule | null;
+  provider: string;
+  checkedAt: number;
+}
 
 type PublishProviderKind = Extract<
   SourceControlProviderKind,
@@ -977,8 +990,68 @@ export default function GitActionsControl({
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
+  const [branchProtection, setBranchProtection] = useState<BranchProtectionStatus | null>(null);
+  const [isProtectedBranchDialogOpen, setIsProtectedBranchDialogOpen] = useState(false);
+  const [pendingProtectedBranchAction, setPendingProtectedBranchAction] =
+    useState<DefaultBranchConfirmableAction | null>(null);
   const activeGitActionProgressRef = useRef<ActiveGitActionProgress | null>(null);
   let runGitActionWithToast: (input: RunGitActionWithToastInput) => Promise<void>;
+  // Branch protection: query and cache with 5-minute refresh
+  useEffect(() => {
+    const CACHE_TTL_MS = 5 * 60 * 1000;
+
+    async function fetchBranchProtection() {
+      if (!gitCwd) return;
+      try {
+        const envApi = readEnvironmentApi();
+        if (!envApi) return;
+
+        // Read branch name from git status
+        const statusResult = await envApi.getGitStatus?.();
+        if (!statusResult?.refName) return;
+
+        const cached = branchProtection;
+        if (cached && Date.now() - cached.checkedAt < CACHE_TTL_MS) {
+          return; // Use cached value
+        }
+
+        // Query protection via provider API
+        const localApi = readLocalApi();
+        const protectionResult = await localApi?.getBranchProtection?.({
+          branch: statusResult.refName,
+          provider: statusResult.sourceControlProvider ?? "github",
+        });
+
+        if (protectionResult) {
+          setBranchProtection({
+            isProtected: protectionResult.protected ?? false,
+            rule: protectionResult.rule ?? null,
+            provider: statusResult.sourceControlProvider ?? "github",
+            checkedAt: Date.now(),
+          });
+        } else {
+          setBranchProtection({
+            isProtected: false,
+            rule: null,
+            provider: statusResult.sourceControlProvider ?? "github",
+            checkedAt: Date.now(),
+          });
+        }
+      } catch {
+        // Protection check failed — default to unprotected
+        setBranchProtection({
+          isProtected: false,
+          rule: null,
+          provider: "unknown",
+          checkedAt: Date.now(),
+        });
+      }
+    }
+
+    fetchBranchProtection();
+    const interval = setInterval(fetchBranchProtection, CACHE_TTL_MS);
+    return () => clearInterval(interval);
+  }, [gitCwd, branchProtection?.checkedAt]);
 
   const updateActiveProgressToast = useCallback(() => {
     const progress = activeGitActionProgressRef.current;
