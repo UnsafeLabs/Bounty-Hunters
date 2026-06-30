@@ -46,10 +46,22 @@
        01  WS-FILE-STATUS              PIC XX.
            88  WS-FILE-OK              VALUE '00'.
            88  WS-FILE-NOT-FOUND       VALUE '23'.
+           88  WS-FILE-LOGIC-ERROR     VALUE '92'.
+           88  WS-FILE-RESOURCE-BUSY   VALUE '93'.
+           88  WS-FILE-LOCKED          VALUE '95'.
        01  WS-CRL-FILE-STATUS          PIC XX.
            88  WS-CRL-OK               VALUE '00'.
            88  WS-CRL-EOF              VALUE '10'.
        01  WS-AUDIT-FILE-STATUS        PIC XX.
+       01  WS-CERTSTOR-RESOURCE         PIC X(8) VALUE 'CERTSTOR'.
+       01  WS-CERTSTOR-RETRY-COUNT      PIC 9 VALUE 0.
+       01  WS-CERTSTOR-MAX-RETRIES      PIC 9 VALUE 3.
+       01  WS-CERTSTOR-LOCK-FLAG        PIC X VALUE 'N'.
+           88  WS-CERTSTOR-LOCK-HELD    VALUE 'Y'.
+           88  WS-CERTSTOR-LOCK-FREE    VALUE 'N'.
+       01  WS-CERTSTOR-READ-STATE       PIC X VALUE 'P'.
+           88  WS-CERTSTOR-READ-PENDING VALUE 'P'.
+           88  WS-CERTSTOR-READ-DONE    VALUE 'D'.
        01  WS-CURRENT-CERT.
            05  WS-CERT-SERIAL-NUM      PIC X(40).
            05  WS-ISSUER-COMMON-NAME   PIC X(64).
@@ -142,6 +154,9 @@
            SET WS-HOSTNAME-NO-MATCH TO TRUE
            SET WS-CHAIN-IS-VALID TO TRUE
            MOVE FUNCTION CURRENT-DATE TO WS-CURRENT-DATE-TIME
+           EXEC CICS HANDLE CONDITION
+               DSIDERR(1090-CERTSTOR-DSIDERR)
+           END-EXEC
            OPEN INPUT CERT-STORE-FILE
            IF NOT WS-FILE-OK
                DISPLAY 'TLSVAL-E001: CERT STORE FAILED '
@@ -168,13 +183,10 @@
                UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH + 1
                MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
                    TO CS-CERT-SERIAL
-               READ CERT-STORE-FILE
-                   INVALID KEY
-                       DISPLAY 'TLSVAL-E011: UNKNOWN CERT '
-                           WS-CHN-SERIAL(WS-CHAIN-INDEX)
-                       SET WS-CHAIN-IS-INVALID TO TRUE
-                       GO TO 2000-EXIT
-               END-READ
+               PERFORM 2100-READ-CERT-STORE-SAFE
+               IF WS-CHAIN-IS-INVALID
+                   GO TO 2000-EXIT
+               END-IF
                IF WS-CHAIN-INDEX = WS-CHAIN-LENGTH
                    IF NOT CS-IS-TRUST-ANCHOR
                        SET WS-CHAIN-IS-INVALID TO TRUE
@@ -193,6 +205,86 @@
            .
        2000-EXIT.
            EXIT.
+
+       2100-READ-CERT-STORE-SAFE.
+           MOVE 0 TO WS-CERTSTOR-RETRY-COUNT
+           SET WS-CERTSTOR-READ-PENDING TO TRUE
+           PERFORM UNTIL WS-CERTSTOR-READ-DONE
+               PERFORM 2110-ENQ-CERT-STORE
+               READ CERT-STORE-FILE
+                   INVALID KEY
+                       IF WS-FILE-NOT-FOUND
+                           DISPLAY 'TLSVAL-E011: UNKNOWN CERT '
+                               WS-CHN-SERIAL(WS-CHAIN-INDEX)
+                       ELSE
+                           DISPLAY 'TLSVAL-E012: CERT STORE READ FAILED '
+                               WS-FILE-STATUS
+                       END-IF
+                       SET WS-CHAIN-IS-INVALID TO TRUE
+                       SET WS-CERTSTOR-READ-DONE TO TRUE
+               END-READ
+               IF WS-CERTSTOR-LOCK-HELD
+                   PERFORM 2120-DEQ-CERT-STORE
+               END-IF
+               IF WS-FILE-OK
+                   SET WS-CERTSTOR-READ-DONE TO TRUE
+               ELSE
+                   IF WS-FILE-STATUS = '92'
+                       OR WS-FILE-STATUS = '93'
+                       OR WS-FILE-STATUS = '95'
+                       IF WS-CERTSTOR-RETRY-COUNT
+                           < WS-CERTSTOR-MAX-RETRIES
+                           ADD 1 TO WS-CERTSTOR-RETRY-COUNT
+                           DISPLAY 'TLSVAL-W092: CERT STORE BUSY '
+                               WS-FILE-STATUS
+                               ' RETRY '
+                               WS-CERTSTOR-RETRY-COUNT
+                           EXEC CICS DELAY
+                               MILLISECONDS(100)
+                           END-EXEC
+                       ELSE
+                           DISPLAY 'TLSVAL-E092: CERT STORE UNTRUSTED '
+                               WS-FILE-STATUS
+                           SET WS-CHAIN-IS-INVALID TO TRUE
+                           SET WS-CERTSTOR-READ-DONE TO TRUE
+                       END-IF
+                   ELSE
+                       IF NOT WS-FILE-NOT-FOUND
+                           DISPLAY 'TLSVAL-E013: CERT STORE STATUS '
+                               WS-FILE-STATUS
+                           SET WS-CHAIN-IS-INVALID TO TRUE
+                           SET WS-CERTSTOR-READ-DONE TO TRUE
+                       END-IF
+                   END-IF
+               END-IF
+           END-PERFORM
+           .
+
+       2110-ENQ-CERT-STORE.
+           EXEC CICS ENQ
+               RESOURCE(WS-CERTSTOR-RESOURCE)
+               LENGTH(8)
+           END-EXEC
+           SET WS-CERTSTOR-LOCK-HELD TO TRUE
+           .
+
+       2120-DEQ-CERT-STORE.
+           EXEC CICS DEQ
+               RESOURCE(WS-CERTSTOR-RESOURCE)
+               LENGTH(8)
+           END-EXEC
+           SET WS-CERTSTOR-LOCK-FREE TO TRUE
+           .
+
+       1090-CERTSTOR-DSIDERR.
+           DISPLAY 'TLSVAL-E095: CERT STORE DATASET MISSING '
+               WS-FILE-STATUS
+           SET WS-CHAIN-IS-INVALID TO TRUE
+           MOVE 12 TO WS-RETURN-CODE
+           PERFORM 9000-CLEANUP
+           STOP RUN
+           .
+
        3000-CHECK-EXPIRY-DATE.
            MOVE WS-CERT-NOT-AFTER(1:2)  TO WS-EXP-YEAR-2D
            MOVE WS-CERT-NOT-AFTER(3:2)  TO WS-EXP-MONTH
@@ -343,11 +435,18 @@
                WS-VALIDATION-RESULT DELIMITED SIZE
                '|' DELIMITED SIZE
                WS-VALIDATION-MSG DELIMITED SPACES
+               '|FS=' DELIMITED SIZE
+               WS-FILE-STATUS DELIMITED SIZE
+               '|RTY=' DELIMITED SIZE
+               WS-CERTSTOR-RETRY-COUNT DELIMITED SIZE
                INTO AUDIT-LOG-RECORD
            END-STRING
            WRITE AUDIT-LOG-RECORD
            .
        9000-CLEANUP.
+           IF WS-CERTSTOR-LOCK-HELD
+               PERFORM 2120-DEQ-CERT-STORE
+           END-IF
            CLOSE CERT-STORE-FILE
            CLOSE CRL-FILE
            CLOSE AUDIT-LOG-FILE
