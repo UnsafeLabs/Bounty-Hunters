@@ -135,6 +135,15 @@
            88  WS-CERT-INVALID         VALUE 'I'.
        01  WS-VALIDATION-MSG           PIC X(128).
        01  WS-AUDIT-TIMESTAMP          PIC X(26).
+       01  WS-CERTSTOR-RESOURCE        PIC X(8) VALUE 'CERTSTOR'.
+       01  WS-CERTSTOR-RETRY-COUNT     PIC 9 VALUE 0.
+       01  WS-CERTSTOR-MAX-RETRIES     PIC 9 VALUE 3.
+       01  WS-CERTSTOR-LOCK-FLAG       PIC X VALUE 'N'.
+           88  WS-CERTSTOR-LOCK-HELD   VALUE 'Y'.
+           88  WS-CERTSTOR-LOCK-FREE   VALUE 'N'.
+       01  WS-CERTSTOR-READ-STATE      PIC X VALUE 'P'.
+           88  WS-CERTSTOR-READ-PENDING VALUE 'P'.
+           88  WS-CERTSTOR-READ-DONE   VALUE 'D'.
        01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
        PROCEDURE DIVISION.
        0000-MAIN-CONTROL.
@@ -285,6 +294,69 @@
            STOP RUN
            .
 
+       2100-READ-CERT-STORE-SAFE.
+           MOVE ZERO TO WS-CERTSTOR-RETRY-COUNT
+           SET WS-CERTSTOR-READ-PENDING TO TRUE
+           PERFORM UNTIL WS-CERTSTOR-READ-DONE
+               PERFORM 2110-ENQ-CERT-STORE
+               READ CERT-STORE-FILE
+                   INVALID KEY
+                       DISPLAY 'TLSVAL-E011: UNKNOWN CERT '
+                           WS-CHN-SERIAL(WS-CHAIN-INDEX)
+                       SET WS-CHAIN-IS-INVALID TO TRUE
+                       SET WS-CERTSTOR-READ-DONE TO TRUE
+                   NOT INVALID KEY
+                       SET WS-CERTSTOR-READ-DONE TO TRUE
+               END-READ
+               PERFORM 2120-DEQ-CERT-STORE
+               IF WS-FILE-LOGIC-ERROR OR WS-FILE-RESOURCE-BUSY
+                   OR WS-FILE-LOCKED
+                   ADD 1 TO WS-CERTSTOR-RETRY-COUNT
+                   IF WS-CERTSTOR-RETRY-COUNT
+                       < WS-CERTSTOR-MAX-RETRIES
+                       EXEC CICS DELAY
+                           MILLISECONDS(100)
+                       END-EXEC
+                       SET WS-CERTSTOR-READ-PENDING TO TRUE
+                   ELSE
+                       DISPLAY 'TLSVAL-E092: CERT STORE STATUS '
+                           WS-FILE-STATUS
+                       SET WS-CHAIN-IS-INVALID TO TRUE
+                       SET WS-CERTSTOR-READ-DONE TO TRUE
+                   END-IF
+               ELSE
+                   SET WS-CERTSTOR-READ-DONE TO TRUE
+               END-IF
+           END-PERFORM
+           .
+       2110-ENQ-CERT-STORE.
+           IF WS-CERTSTOR-LOCK-FREE
+               EXEC CICS ENQ
+                   RESOURCE(WS-CERTSTOR-RESOURCE)
+                   LENGTH(8)
+               END-EXEC
+               SET WS-CERTSTOR-LOCK-HELD TO TRUE
+           END-IF
+           .
+       2120-DEQ-CERT-STORE.
+           IF WS-CERTSTOR-LOCK-HELD
+               EXEC CICS DEQ
+                   RESOURCE(WS-CERTSTOR-RESOURCE)
+                   LENGTH(8)
+               END-EXEC
+               SET WS-CERTSTOR-LOCK-FREE TO TRUE
+           END-IF
+           .
+       1090-CERTSTOR-DSIDERR.
+           DISPLAY 'TLSVAL-E090: CERT STORE DSIDERR '
+               WS-FILE-STATUS
+           SET WS-CHAIN-IS-INVALID TO TRUE
+           SET WS-CERTSTOR-READ-DONE TO TRUE
+           IF WS-CERTSTOR-LOCK-HELD
+               PERFORM 2120-DEQ-CERT-STORE
+           END-IF
+           GO TO 2000-EXIT
+           .
        3000-CHECK-EXPIRY-DATE.
            MOVE WS-CERT-NOT-AFTER(1:2)  TO WS-EXP-YEAR-2D
            MOVE WS-CERT-NOT-AFTER(3:2)  TO WS-EXP-MONTH
