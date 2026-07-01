@@ -1,4 +1,5 @@
 import warnings
+import base64
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -306,6 +307,14 @@ def test_encode_deque_encodes_child_models():
     dq = deque([Model(test="test")])
 
     assert jsonable_encoder(dq)[0]["test"] == "test"
+
+
+def test_encode_bytes_and_memoryview_with_base64_and_hex():
+    payload = b"\x00\x01\xff"
+    assert jsonable_encoder(payload) == base64.b64encode(payload).decode()
+    assert jsonable_encoder(payload, bytes_encoding="hex") == payload.hex()
+    assert jsonable_encoder(memoryview(payload)) == base64.b64encode(payload).decode()
+    assert jsonable_encoder(memoryview(payload), bytes_encoding="hex") == payload.hex()
 
 
 def test_encode_pydantic_undefined():
