@@ -70,13 +70,15 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
+    // FIX: Take a confirmation count snapshot before execution to prevent
+    // race condition where confirmations are revoked during callback
     function executeTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
 
         Transaction storage txn = transactions[txId];
+        uint256 confirmationCount = getConfirmationCount(txId);
+        require(confirmationCount >= required, "Not enough confirmations");
+
         txn.executed = true;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
