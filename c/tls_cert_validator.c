@@ -139,16 +139,23 @@ static int validate_chain(chain_context_t *ctx)
     unsigned char   fp[FINGERPRINT_LEN];
     cert_entry_t   *trusted_issuer;
 
-    if (!ctx || !ctx->chain || ctx->chain_len <= 0) {
-        rc = CERT_STATUS_INVALID;
+  if (!ctx) {
+        log_error("cert_validator", "context is NULL");
+        rc = -2;
         goto cleanup;
     }
 
-    if (ctx->chain_len > MAX_CHAIN_DEPTH) {
-        rc = CERT_STATUS_INVALID;
+  if (!ctx || !ctx->trusted_store) {
+        log_error("cert_validator", "invalid context or store");
+        rc = -2;
         goto cleanup;
     }
 
+    if (!ctx->chain) {
+        log_error("cert_validator", "no chain provided");
+        rc = -2;
+        goto cleanup;
+   }
     for (i = 0; i < ctx->chain_len - 1; i++) {
         rc = check_expiry(ctx->chain[i]);
         if (rc != CERT_STATUS_OK) {
