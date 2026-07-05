@@ -1,3 +1,6 @@
+import math
+import time
+from threading import RLock
 from typing import Annotated
 
 from annotated_doc import Doc
@@ -5,7 +8,8 @@ from fastapi.openapi.models import APIKey, APIKeyIn
 from fastapi.security.base import SecurityBase
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.responses import Response
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_429_TOO_MANY_REQUESTS
 
 
 class APIKeyBase(SecurityBase):
@@ -230,6 +234,151 @@ class APIKeyHeader(APIKeyBase):
     async def __call__(self, request: Request) -> str | None:
         api_key = request.headers.get(self.model.name)
         return self.check_api_key(api_key)
+
+
+class APIKeyWithRateLimit(APIKeyHeader):
+    """
+    API key header authentication with a per-key in-memory rate limit and
+    deprecated key warnings.
+    """
+
+    _RATE_LIMIT_WINDOWS = {
+        "s": 1,
+        "sec": 1,
+        "second": 1,
+        "seconds": 1,
+        "m": 60,
+        "min": 60,
+        "minute": 60,
+        "minutes": 60,
+        "h": 3600,
+        "hr": 3600,
+        "hour": 3600,
+        "hours": 3600,
+        "d": 86400,
+        "day": 86400,
+        "days": 86400,
+    }
+
+    def __init__(
+        self,
+        *,
+        name: Annotated[str, Doc("Header name.")],
+        rate_limit: Annotated[
+            str,
+            Doc(
+                """
+                Rate limit in the form ``<count>/<window>``, for example
+                ``100/minute`` or ``1000/hour``.
+                """
+            ),
+        ],
+        deprecated_keys: Annotated[
+            list[str] | set[str] | tuple[str, ...] | None,
+            Doc(
+                """
+                API keys that remain accepted but emit an HTTP Warning header.
+                """
+            ),
+        ] = None,
+        scheme_name: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme name.
+                """
+            ),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Doc(
+                """
+                Security scheme description.
+                """
+            ),
+        ] = None,
+        auto_error: Annotated[
+            bool,
+            Doc(
+                """
+                By default, if the header is not provided, `APIKeyWithRateLimit`
+                will automatically cancel the request and send the client an error.
+                """
+            ),
+        ] = True,
+    ):
+        super().__init__(
+            name=name,
+            scheme_name=scheme_name,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.rate_limit = rate_limit
+        self.rate_limit_count, self.rate_limit_window_seconds = self._parse_rate_limit(
+            rate_limit
+        )
+        self.deprecated_keys = set(deprecated_keys or ())
+        self._requests_by_key: dict[str, list[float]] = {}
+        self._lock = RLock()
+
+    async def __call__(self, request: Request, response: Response) -> str | None:
+        api_key = await super().__call__(request)
+        if api_key is None:
+            return None
+
+        if api_key in self.deprecated_keys:
+            response.headers["Warning"] = (
+                '299 - "API key is deprecated and will be deactivated"'
+            )
+
+        self._check_rate_limit(api_key)
+        return api_key
+
+    @classmethod
+    def _parse_rate_limit(cls, rate_limit: str) -> tuple[int, int]:
+        count_text, separator, window_text = rate_limit.strip().partition("/")
+        if not separator:
+            raise ValueError(
+                "rate_limit must use the '<count>/<window>' format, "
+                "for example '100/minute'"
+            )
+        try:
+            count = int(count_text)
+        except ValueError as exc:
+            raise ValueError("rate_limit count must be an integer") from exc
+        if count < 1:
+            raise ValueError("rate_limit count must be greater than or equal to 1")
+
+        window_seconds = cls._RATE_LIMIT_WINDOWS.get(window_text.strip().lower())
+        if window_seconds is None:
+            raise ValueError(
+                "rate_limit window must be one of second, minute, hour, or day"
+            )
+        return count, window_seconds
+
+    def _check_rate_limit(self, api_key: str) -> None:
+        now = time.monotonic()
+        with self._lock:
+            cutoff = now - self.rate_limit_window_seconds
+            request_times = [
+                request_time
+                for request_time in self._requests_by_key.get(api_key, [])
+                if request_time > cutoff
+            ]
+            if len(request_times) >= self.rate_limit_count:
+                retry_after = max(
+                    1,
+                    math.ceil(request_times[0] + self.rate_limit_window_seconds - now),
+                )
+                self._requests_by_key[api_key] = request_times
+                raise HTTPException(
+                    status_code=HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Rate limit exceeded",
+                    headers={"Retry-After": str(retry_after)},
+                )
+
+            request_times.append(now)
+            self._requests_by_key[api_key] = request_times
 
 
 class APIKeyCookie(APIKeyBase):
