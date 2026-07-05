@@ -1697,3 +1697,73 @@ def test_warn_duplicate_operation_id():
         ]
         assert len(duplicate_warnings) > 0
         assert "Duplicate Operation ID" in str(duplicate_warnings[0].message)
+
+
+def test_default_operation_ids_include_method_path_and_name():
+    app = FastAPI()
+    users_router = APIRouter(prefix="/users")
+    admins_router = APIRouter(prefix="/admins")
+
+    @users_router.get("/")
+    def list_items():
+        return []  # pragma: nocover
+
+    def list_admin_items():
+        return []  # pragma: nocover
+
+    list_admin_items.__name__ = "list_items"
+    admins_router.add_api_route("/", list_admin_items, methods=["GET"])
+
+    app.include_router(users_router)
+    app.include_router(admins_router)
+
+    schema = TestClient(app).get("/openapi.json").json()
+    operation_ids = {
+        schema["paths"]["/users/"]["get"]["operationId"],
+        schema["paths"]["/admins/"]["get"]["operationId"],
+    }
+
+    assert operation_ids == {
+        "get_users_list_items",
+        "get_admins_list_items",
+    }
+
+
+def test_default_operation_ids_are_sanitized_lowercase():
+    app = FastAPI()
+
+    @app.post("/API v1/{Item-ID}")
+    def Create_Item():
+        return {}  # pragma: nocover
+
+    schema = TestClient(app).get("/openapi.json").json()
+
+    assert (
+        schema["paths"]["/API v1/{Item-ID}"]["post"]["operationId"]
+        == "post_api_v1_item_id_create_item"
+    )
+
+
+def test_generated_operation_id_collisions_get_numeric_suffix():
+    def colliding_operation_id(route: APIRoute):
+        return "get_items_read"
+
+    app = FastAPI(generate_unique_id_function=colliding_operation_id)
+
+    @app.get("/items")
+    def read_items():
+        return []  # pragma: nocover
+
+    @app.get("/items-alt")
+    def read_more_items():
+        return []  # pragma: nocover
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        schema = TestClient(app).get("/openapi.json").json()
+
+    assert schema["paths"]["/items"]["get"]["operationId"] == "get_items_read"
+    assert schema["paths"]["/items-alt"]["get"]["operationId"] == "get_items_read_2"
+    assert any(
+        "Duplicate Operation ID get_items_read" in str(item.message) for item in w
+    )

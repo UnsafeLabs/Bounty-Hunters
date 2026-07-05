@@ -233,6 +233,18 @@ def generate_operation_summary(*, route: routing.APIRoute, method: str) -> str:
     return route.name.replace("_", " ").title()
 
 
+def _deduplicate_operation_id(*, operation_id: str, operation_ids: set[str]) -> str:
+    if operation_id not in operation_ids:
+        return operation_id
+
+    suffix = 2
+    unique_operation_id = f"{operation_id}_{suffix}"
+    while unique_operation_id in operation_ids:
+        suffix += 1
+        unique_operation_id = f"{operation_id}_{suffix}"
+    return unique_operation_id
+
+
 def get_openapi_operation_metadata(
     *, route: routing.APIRoute, method: str, operation_ids: set[str]
 ) -> dict[str, Any]:
@@ -242,10 +254,16 @@ def get_openapi_operation_metadata(
     operation["summary"] = generate_operation_summary(route=route, method=method)
     if route.description:
         operation["description"] = route.description
-    operation_id = route.operation_id or route.unique_id
-    if operation_id in operation_ids:
+    base_operation_id = route.operation_id or route.unique_id
+    operation_id = _deduplicate_operation_id(
+        operation_id=base_operation_id, operation_ids=operation_ids
+    )
+    if operation_id != base_operation_id:
         endpoint_name = getattr(route.endpoint, "__name__", "<unnamed_endpoint>")
-        message = f"Duplicate Operation ID {operation_id} for function {endpoint_name}"
+        message = (
+            f"Duplicate Operation ID {base_operation_id} for function "
+            f"{endpoint_name}; using {operation_id}"
+        )
         file_name = getattr(route.endpoint, "__globals__", {}).get("__file__")
         if file_name:
             message += f" at {file_name}"
