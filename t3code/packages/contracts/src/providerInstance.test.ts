@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
 import {
@@ -7,6 +8,7 @@ import {
   ProviderInstanceConfigMap,
   ProviderInstanceId,
   ProviderInstanceRef,
+  validateProviderConfig,
 } from "./providerInstance.ts";
 
 const decodeProviderDriverKind = Schema.decodeUnknownSync(ProviderDriverKind);
@@ -14,6 +16,16 @@ const decodeProviderInstanceId = Schema.decodeUnknownSync(ProviderInstanceId);
 const decodeProviderInstanceRef = Schema.decodeUnknownSync(ProviderInstanceRef);
 const decodeProviderInstanceConfig = Schema.decodeUnknownSync(ProviderInstanceConfig);
 const decodeProviderInstanceConfigMap = Schema.decodeUnknownSync(ProviderInstanceConfigMap);
+
+const expectProviderConfigErrors = (input: unknown) => {
+  const decoded = decodeProviderInstanceConfig(input);
+  const result = validateProviderConfig(decoded);
+  expect(Result.isFailure(result)).toBe(true);
+  if (!Result.isFailure(result)) {
+    throw new Error("Expected provider config validation to fail");
+  }
+  return result.failure;
+};
 
 describe("provider slug validation (shared by driver + instance ids)", () => {
   const cases = [
@@ -170,6 +182,109 @@ describe("ProviderInstanceConfig", () => {
   it("rejects driver values that do not satisfy the slug pattern", () => {
     expect(() => decodeProviderInstanceConfig({ driver: "" })).toThrow();
     expect(() => decodeProviderInstanceConfig({ driver: "has spaces" })).toThrow();
+  });
+});
+
+describe("validateProviderConfig", () => {
+  it("passes valid provider config API keys and HTTPS endpoints unchanged", () => {
+    const decoded = decodeProviderInstanceConfig({
+      driver: "claudeAgent",
+      environment: [
+        { name: "ANTHROPIC_API_KEY", value: "sk-ant-valid-12345", sensitive: true },
+        { name: "ANTHROPIC_BASE_URL", value: "https://api.anthropic.com", sensitive: false },
+      ],
+      config: {
+        apiKey: "provider-key-12345",
+        endpointUrl: "https://provider.example.com/v1",
+        nested: {
+          baseUrl: "https://nested.example.com",
+        },
+      },
+    });
+
+    const result = validateProviderConfig(decoded);
+
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) {
+      expect(result.success).toBe(decoded);
+    }
+  });
+
+  it("rejects empty API key fields without breaking envelope decoding", () => {
+    const decoded = decodeProviderInstanceConfig({
+      driver: "claudeAgent",
+      environment: [{ name: "ANTHROPIC_API_KEY", value: "", sensitive: true }],
+    });
+
+    expect(decoded.environment?.[0]?.value).toBe("");
+
+    const result = validateProviderConfig(decoded);
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toHaveLength(1);
+      expect(result.failure[0]).toMatchObject({
+        _tag: "ProviderConfigError",
+        fieldName: "environment.ANTHROPIC_API_KEY",
+        invalidValue: "",
+        expectedFormat: expect.stringContaining("at least 10"),
+      });
+    }
+  });
+
+  it("rejects API keys shorter than 10 characters", () => {
+    const errors = expectProviderConfigErrors({
+      driver: "codex",
+      config: { apiKey: "short" },
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      fieldName: "config.apiKey",
+      invalidValue: "short",
+      expectedFormat: expect.stringContaining("at least 10"),
+    });
+  });
+
+  it("rejects HTTP provider endpoint URLs with an HTTPS suggestion", () => {
+    const errors = expectProviderConfigErrors({
+      driver: "codex",
+      environment: [{ name: "OPENAI_BASE_URL", value: "http://api.openai.com" }],
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      fieldName: "environment.OPENAI_BASE_URL",
+      invalidValue: "http://api.openai.com",
+      expectedFormat: expect.stringContaining("Use https://"),
+    });
+  });
+
+  it("rejects malformed endpoint URLs", () => {
+    const errors = expectProviderConfigErrors({
+      driver: "codex",
+      config: { endpointUrl: "not-a-url" },
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      fieldName: "config.endpointUrl",
+      invalidValue: "not-a-url",
+      expectedFormat: expect.stringContaining("valid HTTPS URL"),
+    });
+  });
+
+  it("returns all validation errors instead of only the first", () => {
+    const errors = expectProviderConfigErrors({
+      driver: "codex",
+      config: {
+        apiKey: "short",
+        endpointUrl: "http://bad",
+      },
+    });
+
+    expect(errors).toHaveLength(2);
+    expect(errors.map((error) => error.fieldName)).toEqual(["config.apiKey", "config.endpointUrl"]);
+    expect(errors.map((error) => error.invalidValue)).toEqual(["short", "http://bad"]);
   });
 });
 
