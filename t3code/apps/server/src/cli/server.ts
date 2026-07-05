@@ -4,6 +4,7 @@ import { Command, GlobalFlag } from "effect/unstable/cli";
 import { ServerConfig, type StartupPresentation } from "../config.ts";
 import { runServer } from "../server.ts";
 import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
+import { isValidateConfigEnabled, validateEnvironmentForStartup } from "./envValidation.ts";
 
 export const runServerCommand = (
   flags: CliServerFlags,
@@ -13,6 +14,10 @@ export const runServerCommand = (
   },
 ) =>
   Effect.gen(function* () {
+    const validateConfig = isValidateConfigEnabled(flags.validateConfig);
+    yield* validateEnvironmentForStartup({ printWhenValid: validateConfig });
+    if (validateConfig) return;
+
     const logLevel = yield* GlobalFlag.LogLevel;
     const config = yield* resolveServerConfig(flags, logLevel, options);
     return yield* runServer.pipe(Effect.provideService(ServerConfig, config));

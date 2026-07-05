@@ -9,6 +9,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServer from "effect/unstable/http/HttpServer";
@@ -33,6 +34,7 @@ import {
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import { ENVIRONMENT_VARIABLE_DEFINITIONS } from "./cli/envValidation.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
@@ -48,6 +50,50 @@ const captureStdout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       "";
     return { result, output };
   }).pipe(Effect.provide(Layer.mergeAll(CliRuntimeLayer, TestConsole.layer)));
+
+const captureStdoutExit = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(effect);
+    const output =
+      (yield* TestConsole.logLines).findLast((line): line is string => typeof line === "string") ??
+      "";
+    return { result, output };
+  }).pipe(Effect.provide(Layer.mergeAll(CliRuntimeLayer, TestConsole.layer)));
+
+const withServerEnvironment = <A, E, R>(
+  env: Readonly<Record<string, string | undefined>>,
+  effect: Effect.Effect<A, E, R>,
+) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previousValues = new Map<string, string | undefined>();
+      const names = new Set([
+        ...ENVIRONMENT_VARIABLE_DEFINITIONS.map((definition) => definition.name),
+        ...Object.keys(env),
+      ]);
+      for (const name of names) {
+        previousValues.set(name, process.env[name]);
+        const value = env[name];
+        if (value === undefined) {
+          delete process.env[name];
+        } else {
+          process.env[name] = value;
+        }
+      }
+      return previousValues;
+    }),
+    () => effect,
+    (previousValues) =>
+      Effect.sync(() => {
+        for (const [name, value] of previousValues) {
+          if (value === undefined) {
+            delete process.env[name];
+          } else {
+            process.env[name] = value;
+          }
+        }
+      }),
+  );
 
 const makeCliTestServerConfig = (baseDir: string) =>
   Effect.gen(function* () {
@@ -171,6 +217,36 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       assert.equal(error.option, "log-level");
       assert.equal(error.value, "Debug");
     }),
+  );
+
+  it.effect("validates config and exits without starting the server", () =>
+    withServerEnvironment(
+      {},
+      Effect.gen(function* () {
+        const { output } = yield* captureStdout(runCli(["--validate-config"]));
+
+        assert.isTrue(output.includes("Environment variable validation passed."));
+        assert.isTrue(output.includes("T3CODE_LOG_LEVEL"));
+        assert.isTrue(output.includes("(default Info)"));
+      }),
+    ),
+  );
+
+  it.effect("prints validation errors for invalid config values", () =>
+    withServerEnvironment(
+      {
+        T3CODE_PORT: "not-a-port",
+      },
+      Effect.gen(function* () {
+        const { result, output } = yield* captureStdoutExit(runCli(["--validate-config"]));
+
+        assert.isTrue(Exit.isFailure(result));
+        assert.isTrue(output.includes("Environment variable validation failed."));
+        assert.isTrue(output.includes("T3CODE_PORT"));
+        assert.isTrue(output.includes("integer port 1-65535"));
+        assert.isTrue(output.includes('"not-a-port"'));
+      }),
+    ),
   );
 
   it.effect("executes auth pairing subcommands and redacts secrets from list output", () =>
