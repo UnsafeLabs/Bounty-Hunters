@@ -1,13 +1,17 @@
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import (
     Annotated,
     Any,
     BinaryIO,
     TypeVar,
     cast,
+    Optional,
 )
 
 from annotated_doc import Doc
+from fastapi import HTTPException
+from fastapi import status
 from pydantic import GetJsonSchemaHandler
 from starlette.datastructures import URL as URL  # noqa: F401
 from starlette.datastructures import Address as Address  # noqa: F401
@@ -16,6 +20,14 @@ from starlette.datastructures import Headers as Headers  # noqa: F401
 from starlette.datastructures import QueryParams as QueryParams  # noqa: F401
 from starlette.datastructures import State as State  # noqa: F401
 from starlette.datastructures import UploadFile as StarletteUploadFile
+
+
+@dataclass
+class ValidationResult:
+    """Result of file validation."""
+    is_valid: bool
+    file_size: int
+    content_type: Optional[str]
 
 
 class UploadFile(StarletteUploadFile):
@@ -49,12 +61,37 @@ class UploadFile(StarletteUploadFile):
     @app.post("/uploadfile/")
     async def create_upload_file(file: UploadFile):
         return {"filename": file.filename}
-    ```
-    """
+        str | None, Doc("The content type of the request, from the headers.")
+    ]
 
-    file: Annotated[
-        BinaryIO,
-        Doc("The standard Python file object (non-async)."),
+    def __init__(
+        self,
+        file: BinaryIO,
+        *,
+        size: int | None = None,
+        filename: str | None = None,
+        headers: "Headers | None" = None,
+        max_size: int | None = None,
+        allowed_content_types: list[str] | None = None,
+    ) -> None:
+        """
+        Initialize an UploadFile.
+
+        Args:
+            file: The file object.
+            size: The size of the file in bytes.
+            filename: The original file name.
+            headers: The headers of the request.
+            max_size: Maximum allowed file size in bytes. If exceeded, raises 413.
+            allowed_content_types: List of allowed MIME types. If file type is not in list, raises 415.
+        """
+        super().__init__(file, size=size, filename=filename, headers=headers)
+        self.max_size = max_size
+        self.allowed_content_types = allowed_content_types
+
+    async def write(
+        self,
+        data: Annotated[
     ]
     filename: Annotated[str | None, Doc("The original file name.")]
     size: Annotated[int | None, Doc("The size of the file in bytes.")]
@@ -104,12 +141,54 @@ class UploadFile(StarletteUploadFile):
     async def seek(
         self,
         offset: Annotated[
-            int,
-            Doc(
-                """
-                The position in bytes to seek to in the file.
-                """
-            ),
+        """
+        return await super().close()
+
+    async def validate(self) -> ValidationResult:
+        """
+        Validate the uploaded file against size and content type constraints.
+
+        Returns:
+            ValidationResult with is_valid, file_size, and content_type fields.
+
+        Raises:
+            HTTPException 413 if file exceeds max_size.
+            HTTPException 415 if content type is not allowed.
+        """
+        # Determine file size
+        file_size = self.size
+        if file_size is None:
+            # If size is not set, try to determine it by seeking to end
+            current_pos = await self.tell()
+            await self.seek(0, 2)  # Seek to end
+            file_size = await self.tell()
+            await self.seek(current_pos)  # Restore position
+
+        # Determine content type
+        content_type = self.content_type
+
+        # Check size constraint
+        if self.max_size is not None and file_size is not None and file_size > self.max_size:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File size {file_size} exceeds maximum allowed size {self.max_size}",
+            )
+
+        # Check content type constraint
+        if self.allowed_content_types is not None and content_type is not None:
+            if content_type not in self.allowed_content_types:
+                raise HTTPException(
+                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail=f"Content type '{content_type}' is not allowed. Allowed types: {self.allowed_content_types}",
+                )
+
+        return ValidationResult(
+            is_valid=True, file_size=file_size or 0, content_type=content_type
+        )
+
+    @classmethod
+    def _validate(cls, __input_value: Any, _: Any) -> "UploadFile":
+        if not isinstance(__input_value, StarletteUploadFile):
         ],
     ) -> None:
         """
