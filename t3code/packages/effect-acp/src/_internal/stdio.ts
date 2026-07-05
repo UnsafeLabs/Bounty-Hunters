@@ -46,12 +46,13 @@ export const makeInMemoryStdio = Effect.fn("makeInMemoryStdio")(function* () {
 
 export const makeTerminationError = (
   handle: ChildProcessSpawner.ChildProcessHandle,
-): Effect.Effect<AcpError.AcpError> =>
+): Effect.Effect<AcpError.AcpError | undefined> =>
   Effect.match(handle.exitCode, {
     onFailure: (cause) =>
       new AcpError.AcpTransportError({
         detail: "Failed to determine ACP process exit status",
         cause,
       }),
-    onSuccess: (code) => new AcpError.AcpProcessExitedError({ code }),
+    onSuccess: (code) =>
+      code === 0 || code === 1 ? undefined : new AcpError.AcpProcessExitedError({ code }),
   });
