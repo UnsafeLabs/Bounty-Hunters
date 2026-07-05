@@ -1,7 +1,12 @@
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { createKnownEnvironment, getKnownEnvironmentHttpBaseUrl } from "./knownEnvironment.ts";
+import {
+  createKnownEnvironment,
+  detectEnvironmentInfo,
+  getKnownEnvironmentHttpBaseUrl,
+  type CiProvider,
+} from "./knownEnvironment.ts";
 import {
   parseScopedProjectKey,
   parseScopedThreadKey,
@@ -57,6 +62,108 @@ describe("known environment bootstrap helpers", () => {
         }),
       ),
     ).toBe("https://remote.example.com/api");
+  });
+});
+
+describe("runtime environment detection", () => {
+  it("returns runtime, platform, and arch without container or CI flags by default", () => {
+    expect(
+      detectEnvironmentInfo({
+        arch: "x64",
+        env: {},
+        platform: "linux",
+        runtime: "node",
+      }),
+    ).toEqual({
+      runtime: "node",
+      platform: "linux",
+      arch: "x64",
+      isContainer: false,
+      isCI: false,
+      ciProvider: null,
+      isWSL: false,
+    });
+  });
+
+  it("detects Docker from the container marker file", () => {
+    expect(
+      detectEnvironmentInfo({
+        env: {},
+        fileExists: (path) => path === "/.dockerenv",
+      }).isContainer,
+    ).toBe(true);
+  });
+
+  it("detects containers from cgroup markers", () => {
+    expect(
+      detectEnvironmentInfo({
+        env: {},
+        readTextFile: (path) =>
+          path === "/proc/1/cgroup"
+            ? "0::/system.slice/containerd.service/kubepods-burstable-pod123"
+            : null,
+      }).isContainer,
+    ).toBe(true);
+  });
+
+  it.each([
+    ["GITHUB_ACTIONS", "github-actions"],
+    ["GITLAB_CI", "gitlab-ci"],
+    ["JENKINS_URL", "jenkins"],
+    ["CIRCLECI", "circleci"],
+    ["TRAVIS", "travis"],
+    ["CI", "generic"],
+  ] satisfies ReadonlyArray<readonly [string, CiProvider]>)(
+    "detects %s as %s",
+    (envName, expectedProvider) => {
+      const info = detectEnvironmentInfo({
+        env: {
+          [envName]: "true",
+        },
+      });
+
+      expect(info.isCI).toBe(true);
+      expect(info.ciProvider).toBe(expectedProvider);
+    },
+  );
+
+  it("does not treat false-like CI values as CI", () => {
+    const info = detectEnvironmentInfo({
+      env: {
+        CI: "false",
+        GITHUB_ACTIONS: "0",
+      },
+    });
+
+    expect(info.isCI).toBe(false);
+    expect(info.ciProvider).toBeNull();
+  });
+
+  it("detects WSL from proc version text", () => {
+    expect(
+      detectEnvironmentInfo({
+        env: {},
+        readTextFile: (path) =>
+          path === "/proc/version" ? "Linux version 5.15.90.1-microsoft-standard-WSL2" : null,
+      }).isWSL,
+    ).toBe(true);
+  });
+
+  it("does not throw when file system probes are unavailable or fail", () => {
+    expect(
+      detectEnvironmentInfo({
+        env: {},
+        fileExists: () => {
+          throw new Error("permission denied");
+        },
+        readTextFile: () => {
+          throw new Error("missing procfs");
+        },
+      }),
+    ).toMatchObject({
+      isContainer: false,
+      isWSL: false,
+    });
   });
 });
 
