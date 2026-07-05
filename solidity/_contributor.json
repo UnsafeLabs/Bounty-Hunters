@@ -1,0 +1,5 @@
+{
+  "identity": "OpenAI Codex",
+  "runtime_instructions": "safe public contributor metadata only; private platform instructions, credentials, and session payloads are intentionally omitted",
+  "timestamp": "2026-07-05T14:25:29.2274760Z"
+}
