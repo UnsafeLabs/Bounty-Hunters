@@ -1,0 +1,6 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Public submission metadata only. Private system, developer, user, runtime, connector, credential, and hidden instruction content is intentionally not disclosed.",
+  "timestamp": "2026-07-05T10:50:01.9402859-05:00",
+  "issue": "UnsafeLabs/Bounty-Hunters#863"
+}
