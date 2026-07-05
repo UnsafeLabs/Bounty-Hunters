@@ -1,0 +1,5 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Safe public metadata only. Private system, developer, runtime, user, credential, and hidden session instructions are intentionally not included.",
+  "timestamp": "2026-07-05T16:33:27Z"
+}

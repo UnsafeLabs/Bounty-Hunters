@@ -23,6 +23,8 @@ import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 const decodeDesktopBackendBootstrap = Schema.decodeEffect(
@@ -106,6 +108,8 @@ function makeManagerLayer(input: {
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>;
   readonly backendOutputLog?: Partial<DesktopObservability.DesktopBackendOutputLogShape>;
   readonly desktopState?: DesktopState.DesktopStateShape;
+  readonly electronApp?: Partial<ElectronApp.ElectronAppShape>;
+  readonly electronDialog?: Partial<ElectronDialog.ElectronDialogShape>;
   readonly desktopWindow?: Partial<DesktopWindow.DesktopWindowShape>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
 }) {
@@ -128,6 +132,36 @@ function makeManagerLayer(input: {
           writeOutputChunk: () => Effect.void,
           ...input.backendOutputLog,
         } satisfies DesktopObservability.DesktopBackendOutputLogShape),
+        Layer.succeed(ElectronApp.ElectronApp, {
+          metadata: Effect.succeed({
+            appVersion: "0.0.0-test",
+            appPath: "/app",
+            isPackaged: false,
+            resourcesPath: "/resources",
+            runningUnderArm64Translation: false,
+          }),
+          name: Effect.succeed("T3 Code"),
+          whenReady: Effect.void,
+          quit: Effect.void,
+          exit: () => Effect.void,
+          relaunch: () => Effect.void,
+          setPath: () => Effect.void,
+          setName: () => Effect.void,
+          setAboutPanelOptions: () => Effect.void,
+          setAppUserModelId: () => Effect.void,
+          setDesktopName: () => Effect.void,
+          setDockIcon: () => Effect.void,
+          appendCommandLineSwitch: () => Effect.void,
+          on: () => Effect.void,
+          ...input.electronApp,
+        } satisfies ElectronApp.ElectronAppShape),
+        Layer.succeed(ElectronDialog.ElectronDialog, {
+          pickFolder: () => Effect.succeed(Option.none()),
+          confirm: () => Effect.succeed(false),
+          showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
+          showErrorBox: () => Effect.void,
+          ...input.electronDialog,
+        } satisfies ElectronDialog.ElectronDialogShape),
         Layer.succeed(DesktopWindow.DesktopWindow, {
           createMain: Effect.die("unexpected createMain"),
           ensureMain: Effect.die("unexpected ensureMain"),
@@ -388,6 +422,131 @@ describe("DesktopBackendManager", () => {
         assert.equal(yield* Queue.size(starts), 0);
         yield* TestClock.adjust(Duration.millis(1));
         assert.equal(yield* Queue.take(starts), 3);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("restarts a ready backend after three failed health checks", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      const readyEvents = yield* Queue.unbounded<void>();
+      const dialogs = yield* Queue.unbounded<string>();
+      let startCount = 0;
+      let requestCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            const closed = yield* Deferred.make<void>();
+            startCount += 1;
+            yield* Queue.offer(starts, startCount);
+
+            const close = Deferred.succeed(closed, void 0).pipe(Effect.asVoid);
+            yield* Scope.addFinalizer(scope, close);
+            return makeProcess({
+              exitCode: Deferred.await(closed).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+              kill: () => close,
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer((request) =>
+          Effect.sync(() => {
+            requestCount += 1;
+            const status = requestCount === 1 || requestCount >= 5 ? 200 : 503;
+            return responseForRequest(request, status);
+          }),
+        ),
+        desktopWindow: {
+          handleBackendReady: Queue.offer(readyEvents, void 0).pipe(Effect.asVoid),
+        },
+        electronDialog: {
+          showMessageBox: (options) =>
+            Queue.offer(dialogs, options.message).pipe(
+              Effect.as({ response: 0, checkboxChecked: false }),
+            ),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        assert.equal(yield* Queue.take(starts), 1);
+        yield* Queue.take(readyEvents);
+        assert.equal((yield* manager.snapshot).ready, true);
+
+        for (let i = 0; i < 3 && (yield* Queue.size(starts)) === 0; i += 1) {
+          yield* TestClock.adjust(Duration.seconds(18));
+          yield* Effect.yieldNow;
+          yield* TestClock.adjust(Duration.millis(500));
+          yield* Effect.yieldNow;
+        }
+
+        assert.equal(yield* Queue.take(starts), 2);
+        yield* Queue.take(readyEvents);
+        assert.equal(yield* Queue.take(dialogs), "T3 Code backend is restarting");
+        assert.isAtLeast(requestCount, 5);
+        assert.equal((yield* manager.snapshot).ready, true);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("prompts for manual recovery after three failed automatic restarts", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      const dialogs = yield* Queue.unbounded<string>();
+      const quitCount = yield* Ref.make(0);
+      let startCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.sync(() => {
+            startCount += 1;
+            return makeProcess({
+              exitCode: Queue.offer(starts, startCount).pipe(
+                Effect.as(ChildProcessSpawner.ExitCode(1)),
+              ),
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer(() => Effect.never),
+        electronApp: {
+          quit: Ref.update(quitCount, (count) => count + 1),
+        },
+        electronDialog: {
+          showMessageBox: (options) =>
+            Queue.offer(dialogs, options.message).pipe(
+              Effect.as({ response: 1, checkboxChecked: false }),
+            ),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+
+        assert.equal(yield* Queue.take(starts), 1);
+        yield* TestClock.adjust(Duration.millis(500));
+        assert.equal(yield* Queue.take(starts), 2);
+        yield* TestClock.adjust(Duration.seconds(1));
+        assert.equal(yield* Queue.take(starts), 3);
+        yield* TestClock.adjust(Duration.seconds(2));
+        assert.equal(yield* Queue.take(starts), 4);
+        yield* Effect.yieldNow;
+
+        assert.equal(yield* Queue.take(dialogs), "T3 Code backend could not be restarted");
+        assert.equal(yield* Ref.get(quitCount), 1);
+        assert.equal((yield* manager.snapshot).desiredRunning, false);
       }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
     }),
   );
