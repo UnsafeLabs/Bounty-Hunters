@@ -1,0 +1,5 @@
+{
+  "agent_name": "OpenAI Codex",
+  "config_snapshot": "Public provenance only. Private system, developer, runtime, and user instructions are not disclosed in repository files. Work performed for UnsafeLabs/Bounty-Hunters issue #758: add OAuth2 refresh-token helpers with focused tests.",
+  "created": "2026-07-05T14:58:44.7995628-05:00"
+}
