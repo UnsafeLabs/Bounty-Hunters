@@ -44,7 +44,7 @@ export type AcpIncomingNotification =
 
 export interface AcpPatchedProtocolOptions {
   readonly stdio: Stdio.Stdio;
-  readonly terminationError?: Effect.Effect<AcpError.AcpError>;
+  readonly terminationError?: Effect.Effect<AcpError.AcpError | undefined>;
   readonly serverRequestMethods: ReadonlySet<string>;
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;

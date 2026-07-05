@@ -38,8 +38,9 @@ export interface AcpClientOptions {
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
   readonly onSessionExpired?: (
-    error: AuthenticationError,
-  ) => Effect.Effect<{ accessToken: string; refreshToken?: string }, AuthenticationError>;
+    error: AcpError.AuthenticationError,
+    context: { readonly sessionId: string | undefined; readonly refreshToken: string | undefined },
+  ) => Effect.Effect<{ accessToken: string; refreshToken?: string }, AcpError.AuthenticationError>;
   readonly initialAccessToken?: string;
   readonly initialRefreshToken?: string;
 }
@@ -325,7 +326,7 @@ interface BufferedNotificationHandler<A> {
 export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
   stdio: Stdio.Stdio,
   options: AcpClientOptions = {},
-  terminationError?: Effect.Effect<AcpError.AcpError>,
+  terminationError?: Effect.Effect<AcpError.AcpError | undefined>,
 ): Effect.fn.Return<AcpClientShape, never, Scope.Scope> {
   const currentAccessToken = yield* Ref.make<string | undefined>(options.initialAccessToken);
   const currentRefreshToken = yield* Ref.make<string | undefined>(options.initialRefreshToken);
@@ -611,16 +612,13 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
             Effect.gen(function* () {
               const error = Cause.squash(cause);
               const authError =
-                error instanceof AuthenticationError ||
-                error instanceof AcpRequestError ||
-                error instanceof AcpTransportError ||
-                error instanceof AcpProtocolParseError
+                error instanceof AuthenticationError
                   ? error
                   : new AuthenticationError({
-                      message: "Reauthentication failed",
-                      cause: cause,
+                      message: error instanceof Error ? error.message : "Reauthentication failed",
+                      cause: error,
                     });
-              yield* Deferred.fail(newDeferred, authError as any);
+              yield* Deferred.fail(newDeferred, authError);
               return yield* Effect.fail(authError);
             }),
           onSuccess: () =>
@@ -652,8 +650,10 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
         cause: originalError,
       });
 
+      const expiredSessionId = yield* Ref.get(currentSessionId);
+      const expiredRefreshToken = yield* Ref.get(currentRefreshToken);
       const newTokens = yield* options
-        .onSessionExpired(authError)
+        .onSessionExpired(authError, { sessionId: expiredSessionId, refreshToken: expiredRefreshToken })
         .pipe(Effect.retry(Schedule.recurs(1)));
 
       yield* Ref.set(currentAccessToken, newTokens.accessToken);
