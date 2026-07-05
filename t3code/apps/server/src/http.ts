@@ -38,6 +38,19 @@ const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+export const DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES = 10 * 1024 * 1024;
+export const FILE_UPLOAD_REQUEST_BODY_SIZE_LIMIT_BYTES = 50 * 1024 * 1024;
+export const MAX_BODY_SIZE_RESPONSE_HEADER = "X-Max-Body-Size";
+
+export interface RequestBodySizeLimitOverride {
+  readonly path: string | RegExp;
+  readonly limitBytes: number;
+}
+
+export interface RequestBodySizeLimitDecision {
+  readonly limitBytes: number;
+  readonly receivedBytes: number;
+}
 
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: [...browserApiCorsAllowedMethods],
@@ -59,6 +72,64 @@ export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
   redirectUrl.search = requestUrl.search;
   redirectUrl.hash = requestUrl.hash;
   return redirectUrl.toString();
+}
+
+export function resolveRequestBodySizeLimit(
+  pathname: string,
+  overrides: readonly RequestBodySizeLimitOverride[] = [],
+): number {
+  const override = overrides.find((entry) =>
+    typeof entry.path === "string" ? entry.path === pathname : entry.path.test(pathname),
+  );
+  if (override) {
+    return override.limitBytes;
+  }
+  return /(?:^|[/_-])(?:upload|uploads|attachment|attachments)(?:$|[/_-])/.test(pathname)
+    ? FILE_UPLOAD_REQUEST_BODY_SIZE_LIMIT_BYTES
+    : DEFAULT_REQUEST_BODY_SIZE_LIMIT_BYTES;
+}
+
+export function parseRequestContentLength(
+  headers: Readonly<Record<string, string | undefined>>,
+): number | null {
+  const value = headers["content-length"] ?? headers["Content-Length"];
+  if (value === undefined) {
+    return null;
+  }
+  const receivedBytes = Number(value);
+  if (!Number.isSafeInteger(receivedBytes) || receivedBytes < 0) {
+    return null;
+  }
+  return receivedBytes;
+}
+
+export function resolveRequestBodySizeLimitDecision(input: {
+  readonly pathname: string;
+  readonly headers: Readonly<Record<string, string | undefined>>;
+  readonly overrides?: readonly RequestBodySizeLimitOverride[];
+}): RequestBodySizeLimitDecision | null {
+  const receivedBytes = parseRequestContentLength(input.headers);
+  if (receivedBytes === null) {
+    return null;
+  }
+  const limitBytes = resolveRequestBodySizeLimit(input.pathname, input.overrides);
+  return receivedBytes > limitBytes ? { limitBytes, receivedBytes } : null;
+}
+
+export function makeRequestBodyTooLargeResponse(decision: RequestBodySizeLimitDecision) {
+  return HttpServerResponse.jsonUnsafe(
+    {
+      error: "Payload Too Large",
+      limit: decision.limitBytes,
+      received: decision.receivedBytes,
+    },
+    {
+      status: 413,
+      headers: {
+        [MAX_BODY_SIZE_RESPONSE_HEADER]: String(decision.limitBytes),
+      },
+    },
+  );
 }
 
 const requireAuthenticatedRequest = Effect.gen(function* () {
@@ -92,6 +163,14 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     yield* requireAuthenticatedRequest;
     const request = yield* HttpServerRequest.HttpServerRequest;
+    const sizeLimitDecision = resolveRequestBodySizeLimitDecision({
+      pathname: OTLP_TRACES_PROXY_PATH,
+      headers: request.headers,
+    });
+    if (sizeLimitDecision) {
+      return makeRequestBodyTooLargeResponse(sizeLimitDecision);
+    }
+
     const config = yield* ServerConfig;
     const otlpTracesUrl = config.otlpTracesUrl;
     const browserTraceCollector = yield* BrowserTraceCollector;
