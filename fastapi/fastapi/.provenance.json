@@ -1,0 +1,6 @@
+{
+  "agent_name": "OpenAI Codex",
+  "config_snapshot": "Safe public implementation metadata only. Private system, developer, runtime, credential, environment, and user instructions are intentionally not disclosed.",
+  "created": "2026-07-05T21:02:00Z",
+  "issue": "https://github.com/UnsafeLabs/Bounty-Hunters/issues/796"
+}
