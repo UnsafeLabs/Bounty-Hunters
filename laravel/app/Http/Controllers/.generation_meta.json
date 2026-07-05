@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Public-safe metadata only. Hidden system, developer, runtime, user, credential, and environment instructions are intentionally not included or reproduced.",
+  "date": "2026-07-05T13:56:33.3209827Z"
+}
