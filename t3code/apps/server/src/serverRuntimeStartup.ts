@@ -7,7 +7,6 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
-import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -32,6 +31,8 @@ import { ServerSettingsService } from "./serverSettings.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { ConfigError } from "./errors.ts";
+import type { ConfigError as ServerRuntimeStartupError } from "./errors.ts";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper.ts";
 import {
   formatHeadlessServeOutput,
@@ -40,10 +41,7 @@ import {
   issueHeadlessServeAccessInfo,
 } from "./startupAccess.ts";
 
-export class ServerRuntimeStartupError extends Data.TaggedError("ServerRuntimeStartupError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export { ConfigError as ServerRuntimeStartupError };
 
 export interface ServerRuntimeStartupShape {
   readonly awaitCommandReady: Effect.Effect<void, ServerRuntimeStartupError>;
@@ -106,7 +104,7 @@ export const makeCommandGate = Effect.gen(function* () {
           return yield* effect;
         }
         if (readinessState !== "pending") {
-          return yield* readinessState;
+          return yield* Effect.fail(readinessState);
         }
 
         const result = yield* Deferred.make<A, E | ServerRuntimeStartupError>();
@@ -402,7 +400,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
     Effect.gen(function* () {
       const startupExit = yield* Effect.exit(startup);
       if (Exit.isFailure(startupExit)) {
-        const error = new ServerRuntimeStartupError({
+        const error = ConfigError({
           message: "Server runtime startup failed before command readiness.",
           cause: startupExit.cause,
         });
