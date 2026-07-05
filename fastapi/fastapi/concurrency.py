@@ -1,7 +1,8 @@
-from collections.abc import AsyncGenerator
+import asyncio
+from collections.abc import AsyncGenerator, Awaitable, Sequence
 from contextlib import AbstractContextManager
 from contextlib import asynccontextmanager as asynccontextmanager
-from typing import TypeVar
+from typing import Any, TypeVar, cast
 
 import anyio.to_thread
 from anyio import CapacityLimiter
@@ -12,6 +13,77 @@ from starlette.concurrency import (  # noqa
 )
 
 _T = TypeVar("_T")
+_MISSING = object()
+
+
+class ConcurrencyError(Exception):
+    def __init__(
+        self,
+        failures: Sequence[BaseException],
+        partial_results: Sequence[Any],
+    ) -> None:
+        self.failures = list(failures)
+        self.partial_results = list(partial_results)
+        super().__init__(
+            f"{len(self.failures)} task(s) failed while running concurrently"
+        )
+
+
+async def run_concurrently(
+    coroutines: Sequence[Awaitable[_T]],
+    max_concurrency: int = 5,
+    timeout: float | None = None,
+) -> list[_T]:
+    if max_concurrency < 1:
+        raise ValueError("max_concurrency must be at least 1")
+
+    if not coroutines:
+        return []
+
+    semaphore = asyncio.Semaphore(max_concurrency)
+    results: list[object | _T] = [_MISSING] * len(coroutines)
+    failures: list[tuple[int, BaseException]] = []
+
+    async def run_one(index: int, coroutine: Awaitable[_T]) -> None:
+        started = False
+        try:
+            async with semaphore:
+                started = True
+                results[index] = await coroutine
+        except asyncio.CancelledError:
+            if not started:
+                close = getattr(coroutine, "close", None)
+                if callable(close):
+                    close()
+            raise
+        except Exception as exc:
+            failures.append((index, exc))
+
+    tasks = [
+        asyncio.create_task(run_one(index, coroutine))
+        for index, coroutine in enumerate(coroutines)
+    ]
+
+    try:
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
+    except TimeoutError as exc:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        failures.append((len(coroutines), exc))
+
+    if failures:
+        failures.sort(key=lambda failure: failure[0])
+        partial_results = [
+            None if result is _MISSING else cast(_T, result) for result in results
+        ]
+        raise ConcurrencyError(
+            [failure for _, failure in failures],
+            partial_results=partial_results,
+        )
+
+    return [cast(_T, result) for result in results]
 
 
 @asynccontextmanager
