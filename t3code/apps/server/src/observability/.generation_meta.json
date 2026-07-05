@@ -1,0 +1,17 @@
+{
+  "generated_by": "OpenAI Codex",
+  "generated_at_utc": "2026-07-05T18:13:00.1322805Z",
+  "public_task": "UnsafeLabs/Bounty-Hunters issue #856: Add sliding window metrics aggregation with Effect.Stream",
+  "private_instructions_included": false,
+  "files_added": [
+    "apps/server/src/observability/Services/MetricsAggregator.ts",
+    "apps/server/src/observability/Services/MetricsAggregator.test.ts"
+  ],
+  "files_updated": [
+    "apps/server/src/observability/RpcInstrumentation.ts",
+    "apps/server/src/observability/Layers/Observability.ts",
+    "apps/server/src/http.ts",
+    "apps/server/src/server.ts",
+    "apps/server/src/server.test.ts"
+  ]
+}

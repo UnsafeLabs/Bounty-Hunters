@@ -14,6 +14,7 @@ import {
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./RpcInstrumentation.ts";
+import { makeMetricsAggregatorLive, MetricsAggregator } from "./Services/MetricsAggregator.ts";
 
 const hasMetricSnapshot = (
   snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
@@ -87,6 +88,24 @@ describe("RpcInstrumentation", () => {
         true,
       );
     }),
+  );
+
+  it.effect("records aggregate metrics when the MetricsAggregator service is present", () =>
+    Effect.gen(function* () {
+      const aggregator = yield* MetricsAggregator;
+
+      yield* observeRpcEffect("rpc.instrumentation.aggregate", Effect.succeed("ok"), {
+        "rpc.aggregate": "test",
+      });
+
+      const windows = yield* aggregator.getWindows;
+      const aggregate = windows
+        .flatMap((window) => window.methods)
+        .find((method) => method.method === "rpc.instrumentation.aggregate");
+
+      assert.equal(aggregate?.requestCount, 1);
+      assert.equal(aggregate?.successCount, 1);
+    }).pipe(Effect.provide(makeMetricsAggregatorLive({ autoRotate: false }))),
   );
 
   it.effect("records failure outcomes for unary RPC handlers", () =>

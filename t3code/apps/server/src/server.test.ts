@@ -88,6 +88,10 @@ import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
 } from "./observability/Services/BrowserTraceCollector.ts";
+import {
+  AGGREGATED_METRICS_PATH,
+  makeMetricsAggregatorLive,
+} from "./observability/Services/MetricsAggregator.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import {
   ProjectSetupScriptRunner,
@@ -693,6 +697,7 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.browserTraceCollector,
         }),
       ),
+      Layer.provide(makeMetricsAggregatorLive({ autoRotate: false })),
       Layer.provide(
         Layer.mock(ServerLifecycleEvents)({
           publish: (event) => Effect.succeed({ ...(event as any), sequence: 1 }),
@@ -1064,6 +1069,36 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.status, 200);
       assertBrowserApiCorsHeaders(response.headers);
       assert.deepEqual(body, testEnvironmentDescriptor);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves authenticated aggregated metrics as timestamped JSON windows", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const url = yield* getHttpServerUrl(AGGREGATED_METRICS_PATH);
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          headers: {
+            cookie,
+          },
+        }),
+      );
+      const body = (yield* Effect.promise(() => response.json())) as ReadonlyArray<{
+        readonly startedAt: string;
+        readonly endedAt: string;
+        readonly startMs: number;
+        readonly endMs: number;
+        readonly methods: ReadonlyArray<unknown>;
+      }>;
+
+      assert.equal(response.status, 200);
+      assert.isAtLeast(body.length, 1);
+      assert.match(body[0]?.startedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+      assert.match(body[0]?.endedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+      assert.isAtLeast(body[0]?.endMs ?? 0, body[0]?.startMs ?? 0);
+      assert.isArray(body[0]?.methods);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
