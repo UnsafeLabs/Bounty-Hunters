@@ -43,6 +43,7 @@ import * as Semaphore from "effect/Semaphore";
 import { ServerConfig } from "../../config.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
+import { makeProviderCache } from "../ProviderCache.ts";
 import {
   hydrateCachedProvider,
   isCachedProviderCorrelated,
@@ -278,6 +279,7 @@ export const ProviderRegistryLive = Layer.effect(
     const liveSubsRef = yield* Ref.make<ReadonlyMap<ProviderInstanceId, ProviderInstance>>(
       new Map(),
     );
+    const providerCache = yield* makeProviderCache();
     // Serialize `syncLiveSources` so a rapid burst of reconciles doesn't
     // interleave two passes clobbering each other's fiber bookkeeping.
     const syncSemaphore = yield* Semaphore.make(1);
@@ -430,13 +432,19 @@ export const ProviderRegistryLive = Layer.effect(
     const refreshOneSource = Effect.fn("refreshOneSource")(function* (
       providerSource: ProviderSnapshotSource,
     ) {
-      return yield* providerSource.refresh.pipe(
-        Effect.flatMap((nextProvider) =>
-          correlateSnapshotWithSource(providerSource, nextProvider).pipe(
-            Effect.flatMap(syncProvider),
+      return yield* providerCache
+        .refreshProvider({
+          instanceId: providerSource.instanceId,
+          driver: providerSource.driverKind,
+          refresh: providerSource.refresh,
+        })
+        .pipe(
+          Effect.flatMap((nextProvider) =>
+            correlateSnapshotWithSource(providerSource, nextProvider).pipe(
+              Effect.flatMap(syncProvider),
+            ),
           ),
-        ),
-      );
+        );
     });
 
     const refreshAll = Effect.fn("refreshAll")(function* () {
@@ -542,6 +550,17 @@ export const ProviderRegistryLive = Layer.effect(
           newlyAdded.push([instanceId, instance] as const);
         }
 
+        yield* Effect.forEach(
+          newlyAdded,
+          ([instanceId]) => providerCache.invalidateProvider(instanceId),
+          { concurrency: "unbounded", discard: true },
+        );
+        yield* Effect.forEach(
+          Array.from(previousSubs.keys()).filter((instanceId) => !knownInstanceIds.has(instanceId)),
+          providerCache.invalidateProvider,
+          { concurrency: "unbounded", discard: true },
+        );
+
         // Fork long-lived subscriptions to each new/rebuilt instance's
         // change stream BEFORE kicking off refreshes — if the driver's
         // own initial probe (line 140 in `makeManagedServerProvider`)
@@ -550,7 +569,12 @@ export const ProviderRegistryLive = Layer.effect(
         for (const [, instance] of newlyAdded) {
           const source = buildSnapshotSource(instance);
           yield* Stream.runForEach(source.streamChanges, (provider) =>
-            correlateSnapshotWithSource(source, provider).pipe(Effect.flatMap(syncProvider)),
+            providerCache
+              .rememberProvider(provider)
+              .pipe(
+                Effect.andThen(correlateSnapshotWithSource(source, provider)),
+                Effect.flatMap(syncProvider),
+              ),
           ).pipe(Effect.forkScoped);
         }
 

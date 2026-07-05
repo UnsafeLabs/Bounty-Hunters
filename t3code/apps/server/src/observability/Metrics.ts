@@ -58,6 +58,10 @@ export const providerRuntimeEventsTotal = Metric.counter("t3_provider_runtime_ev
   description: "Total canonical provider runtime events processed.",
 });
 
+export const providerCacheRequestsTotal = Metric.counter("t3_provider_cache_requests_total", {
+  description: "Total provider API response cache requests by cache kind and outcome.",
+});
+
 export const gitCommandsTotal = Metric.counter("t3_git_commands_total", {
   description: "Total git commands executed by the server runtime.",
 });
