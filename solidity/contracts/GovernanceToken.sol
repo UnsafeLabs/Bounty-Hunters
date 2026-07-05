@@ -22,41 +22,57 @@ contract GovernanceToken is ERC20 {
     event DelegateChanged(address indexed delegator, address indexed toDelegate);
     event ProposalCreated(uint256 indexed proposalId, string description);
     event VoteCast(uint256 indexed proposalId, address indexed voter, bool support);
+    event Snapshot(uint256 timestamp);
+
+    modifier onlyOwner() {
+        require(msg.sender == admin, "Not admin");
+        _;
+    }
 
     constructor(uint256 initialSupply) ERC20("Governance", "GOV") {
         _mint(msg.sender, initialSupply);
         admin = msg.sender;
     }
 
-    // BUG: Uses tx.origin instead of msg.sender — phishing vulnerability
     function delegateVote(address to) external {
-        require(tx.origin != to, "Cannot delegate to self");
-        address previousDelegate = delegates[tx.origin];
+        address delegator = msg.sender;
+        require(delegator != address(0), "Invalid sender");
+        require(to != address(0), "Invalid delegate");
+        require(delegator != to, "Cannot delegate to self");
+
+        address previousDelegate = delegates[delegator];
+        uint256 delegatorBalance = balanceOf(delegator);
+
         if (previousDelegate != address(0)) {
-            delegatedPower[previousDelegate] -= balanceOf(tx.origin);
+            delegatedPower[previousDelegate] -= delegatorBalance;
         }
-        delegates[tx.origin] = to;
-        delegatedPower[to] += balanceOf(tx.origin);
-        emit DelegateChanged(tx.origin, to);
+
+        delegates[delegator] = to;
+        delegatedPower[to] += delegatorBalance;
+
+        emit DelegateChanged(delegator, to);
     }
 
-    // BUG: Same tx.origin issue
     function revokeDelegate() external {
-        address currentDelegate = delegates[tx.origin];
+        address delegator = msg.sender;
+        require(delegator != address(0), "Invalid sender");
+
+        address currentDelegate = delegates[delegator];
         require(currentDelegate != address(0), "No delegate");
-        delegatedPower[currentDelegate] -= balanceOf(tx.origin);
-        delegates[tx.origin] = address(0);
-        emit DelegateChanged(tx.origin, address(0));
+
+        delegatedPower[currentDelegate] -= balanceOf(delegator);
+        delegates[delegator] = address(0);
+
+        emit DelegateChanged(delegator, address(0));
     }
 
-    // BUG: tx.origin for admin check
-    function snapshot() external {
-        require(tx.origin == admin, "Not admin");
-        // snapshot logic placeholder
+    function snapshot() external onlyOwner {
+        emit Snapshot(block.timestamp);
     }
 
     function getVotingPower(address account) public view returns (uint256) {
-        return balanceOf(account) + delegatedPower[account];
+        uint256 ownPower = delegates[account] == address(0) ? balanceOf(account) : 0;
+        return ownPower + delegatedPower[account];
     }
 
     function createProposal(string calldata description, uint256 duration) external returns (uint256) {
@@ -87,5 +103,23 @@ contract GovernanceToken is ERC20 {
             proposal.againstVotes += power;
         }
         emit VoteCast(proposalId, msg.sender, support);
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        if (from != address(0)) {
+            address fromDelegate = delegates[from];
+            if (fromDelegate != address(0)) {
+                delegatedPower[fromDelegate] -= value;
+            }
+        }
+
+        if (to != address(0)) {
+            address toDelegate = delegates[to];
+            if (toDelegate != address(0)) {
+                delegatedPower[toDelegate] += value;
+            }
+        }
+
+        super._update(from, to, value);
     }
 }
