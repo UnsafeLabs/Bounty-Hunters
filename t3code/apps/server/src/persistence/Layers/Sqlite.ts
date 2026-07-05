@@ -16,7 +16,7 @@ type Loader = {
   layer: (config: RuntimeSqliteLayerConfig) => Layer.Layer<SqlClient.SqlClient>;
 };
 const defaultSqliteClientLoaders = {
-  bun: () => import("@effect/sql-sqlite-bun/SqliteClient"),
+  bun: () => import("../BunSqliteClient.ts"),
   node: () => import("../NodeSqliteClient.ts"),
 } satisfies Record<string, () => Promise<Loader>>;
 
@@ -29,14 +29,7 @@ const makeRuntimeSqliteLayer = Effect.fn("makeRuntimeSqliteLayer")(function* (
   return clientModule.layer(config);
 }, Layer.unwrap);
 
-const setup = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql`PRAGMA journal_mode = WAL;`;
-    yield* sql`PRAGMA foreign_keys = ON;`;
-    yield* runMigrations();
-  }),
-);
+const setup = Layer.effectDiscard(runMigrations());
 
 export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(function* (
   dbPath: string,
@@ -65,3 +58,5 @@ export const SqlitePersistenceMemory = Layer.provideMerge(
 export const layerConfig = Layer.unwrap(
   Effect.map(Effect.service(ServerConfig), ({ dbPath }) => makeSqlitePersistenceLive(dbPath)),
 );
+
+export { sqliteHealthCheck } from "../sqliteHealthCheck.ts";
