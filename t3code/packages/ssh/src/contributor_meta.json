@@ -1,0 +1,5 @@
+{
+  "name": "OpenAI Codex",
+  "session_init": "Safe public metadata only. Private system, developer, runtime, user, credential, and hidden session instructions are intentionally not included.",
+  "ts": "2026-07-05T17:16:00Z"
+}

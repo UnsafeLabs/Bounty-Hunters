@@ -25,6 +25,12 @@ export interface SshAskpassHelperDescriptor {
   readonly files: ReadonlyArray<SshAskpassFile>;
 }
 
+export interface SshAskpassPathError {
+  readonly _tag: "SshAskpassPathError";
+  readonly path: string;
+  readonly message: string;
+}
+
 export interface SshAuthOptions {
   readonly authSecret?: string | null;
   readonly batchMode?: "yes" | "no";
@@ -59,6 +65,23 @@ export interface SshChildEnvironmentOptions {
 }
 
 const SSH_ASKPASS_DIR_NAME = "t3code-ssh-askpass";
+const UNSAFE_POSIX_ASKPASS_PATH_CHARS = /[\s'"`$&|;<>(){}[\]*?!]/u;
+
+const unsafeSshAskpassPathError = (path: string): SshAskpassPathError => ({
+  _tag: "SshAskpassPathError",
+  path,
+  message:
+    "SSH askpass launcher path contains whitespace or shell metacharacters and will not be used.",
+});
+
+function validatePosixAskpassLauncherPath(
+  launcherPath: string,
+): Effect.Effect<void, SshAskpassPathError> {
+  if (UNSAFE_POSIX_ASKPASS_PATH_CHARS.test(launcherPath)) {
+    return Effect.fail(unsafeSshAskpassPathError(launcherPath));
+  }
+  return Effect.void;
+}
 
 function joinSshAskpassPath(
   directory: string,
@@ -73,8 +96,21 @@ export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
 # from the renderer's in-app prompt. We never expose a native dialog here - if
 # T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
+secret_file=""
+cleanup_secret_file() {
+  if [ -n "$secret_file" ]; then
+    rm -f -- "$secret_file"
+  fi
+}
+trap cleanup_secret_file EXIT INT TERM
+
 if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
-  printf "%s\\n" "$T3_SSH_AUTH_SECRET"
+  umask 077
+  secret_file="$(mktemp "\${TMPDIR:-/tmp}/t3code-ssh-askpass.XXXXXX")" || exit 1
+  chmod 600 "$secret_file" || exit 1
+  printf "%s" "$T3_SSH_AUTH_SECRET" > "$secret_file" || exit 1
+  cat "$secret_file"
+  printf "\\n"
   exit 0
 fi
 printf 'T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.\\n' >&2
@@ -90,8 +126,19 @@ export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through
 # a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
 # and we fail loudly.\r
 if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
-  [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
-  exit 0\r
+  $secureSecret = ConvertTo-SecureString -String $env:T3_SSH_AUTH_SECRET -AsPlainText -Force\r
+  Remove-Item Env:T3_SSH_AUTH_SECRET -ErrorAction SilentlyContinue\r
+  $secretBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureSecret)\r
+  try {\r
+    [Console]::Out.WriteLine([Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretBstr))\r
+    exit 0\r
+  }\r
+  finally {\r
+    if ($secretBstr -ne [IntPtr]::Zero) {\r
+      [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretBstr)\r
+    }\r
+    $secureSecret.Dispose()\r
+  }\r
 }\r
 [Console]::Error.WriteLine("T3 Code ssh-askpass invoked without T3_SSH_AUTH_SECRET.")\r
 exit 1\r
@@ -111,7 +158,7 @@ export const buildSshAskpassHelperDescriptor = Effect.fn(
 )(function* (input: {
   readonly directory: string;
   readonly platform?: NodeJS.Platform;
-}): Effect.fn.Return<SshAskpassHelperDescriptor, never, Path.Path> {
+}): Effect.fn.Return<SshAskpassHelperDescriptor, SshAskpassPathError, Path.Path> {
   const platform = input.platform ?? process.platform;
   const path = yield* Path.Path;
   const directory = input.directory;
@@ -133,11 +180,14 @@ export const buildSshAskpassHelperDescriptor = Effect.fn(
     };
   }
 
+  const launcherPath = path.join(directory, "ssh-askpass.sh");
+  yield* validatePosixAskpassLauncherPath(launcherPath);
+
   return {
-    launcherPath: path.join(directory, "ssh-askpass.sh"),
+    launcherPath,
     files: [
       {
-        path: path.join(directory, "ssh-askpass.sh"),
+        path: launcherPath,
         contents: ASKPASS_POSIX_SCRIPT,
         mode: 0o700,
       },
@@ -149,7 +199,11 @@ export const ensureSshAskpassHelpers = Effect.fn("ssh/auth.ensureSshAskpassHelpe
   function* (input: {
     readonly directory: string;
     readonly platform?: NodeJS.Platform;
-  }): Effect.fn.Return<string, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> {
+  }): Effect.fn.Return<
+    string,
+    PlatformError.PlatformError | SshAskpassPathError,
+    FileSystem.FileSystem | Path.Path
+  > {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const descriptor = yield* buildSshAskpassHelperDescriptor(input);
@@ -176,7 +230,7 @@ export const buildSshChildEnvironment = Effect.fn("ssh/auth.buildSshChildEnviron
   input: SshChildEnvironmentOptions = {},
 ): Effect.fn.Return<
   NodeJS.ProcessEnv,
-  PlatformError.PlatformError,
+  PlatformError.PlatformError | SshAskpassPathError,
   FileSystem.FileSystem | Path.Path
 > {
   const baseEnv = { ...(input.baseEnv ?? process.env) };
