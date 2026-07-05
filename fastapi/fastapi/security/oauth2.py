@@ -1,3 +1,4 @@
+from typing import Annotated, Any, Dict, Optional, cast
 from typing import Annotated, Any, cast
 
 from annotated_doc import Doc
@@ -8,6 +9,7 @@ from fastapi.param_functions import Form
 from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from starlette.requests import Request
+from starlette.responses import Response
 from starlette.status import HTTP_401_UNAUTHORIZED
 
 
@@ -94,9 +96,130 @@ class OAuth2PasswordRequestForm:
                 """
                 `password` string. The OAuth2 spec requires the exact field name
                 `password`.
+                """
+            ),
+        ] = "",
+        client_id: Annotated[
+            str | None,
+            Form(),
+            Doc(
+                """
+                The optional `client_id` string. Some OAuth2 providers require it.
+                """
+            ),
+        ] = None,
+        client_secret: Annotated[
+            str | None,
+            Form(),
+            Doc(
+                """
+                The optional `client_secret` string. Some OAuth2 providers require it.
+                """
+            ),
+        ] = None,
+    ):
+        self.grant_type = grant_type
+        self.username = username
+        self.password = password
+        self.scopes = scope.split()
+        self.client_id = client_id
+        self.client_secret = client_secret
 
-                Read more about it in the
-                [FastAPI docs for Simple OAuth2 with Password and Bearer](https://fastapi.tiangolo.com/tutorial/security/simple-oauth2/).
+
+class OAuth2PasswordRequestFormStrict(OAuth2PasswordRequestForm):
+    """
+    This is a dependency class to collect the `username` and `password` as form data
+    for an OAuth2 password flow, with strict enforcement that `grant_type` is "password".
+
+    Read more about it in the
+    [FastAPI docs for Simple OAuth2 with Password and Bearer](https://fastapi.tiangolo.com/tutorial/security/simple-oauth2/).
+    """
+
+    def __init__(
+        self,
+        *,
+        grant_type: Annotated[
+            str,
+            Form(pattern="^password$"),
+            Doc(
+                """
+                The OAuth2 spec says it is required and MUST be the fixed string
+                "password". This dependency class enforces it strictly.
+                """
+            ),
+        ],
+        username: Annotated[
+            str,
+            Form(),
+            Doc(
+                """
+                `username` string. The OAuth2 spec requires the exact field name
+                `username`.
+                """
+            ),
+        ],
+        password: Annotated[
+            str,
+            Form(json_schema_extra={"format": "password"}),
+            Doc(
+                """
+                `password` string. The OAuth2 spec requires the exact field name
+                `password`.
+                """
+            ),
+        ],
+        scope: Annotated[
+            str,
+            Form(),
+            Doc(
+                """
+                A single string with actually several scopes separated by spaces.
+                """
+            ),
+        ] = "",
+        client_id: Annotated[
+            str | None,
+            Form(),
+            Doc(
+                """
+                The optional `client_id` string.
+                """
+            ),
+        ] = None,
+        client_secret: Annotated[
+            str | None,
+            Form(),
+            Doc(
+                """
+                The optional `client_secret` string.
+                """
+            ),
+        ] = None,
+    ):
+        self.grant_type = grant_type
+        self.username = username
+        self.password = password
+        self.scopes = scope.split()
+        self.client_id = client_id
+        self.client_secret = client_secret
+
+
+class OAuth2RefreshRequestForm:
+    """
+    This is a dependency class to collect the `refresh_token` and optional `scope`
+    as form data for an OAuth2 refresh token flow.
+
+    The OAuth2 specification dictates that for a refresh token flow the data should be
+    collected using form data (instead of JSON) and that it should have the specific
+    fields `grant_type` (fixed to "refresh_token"), `refresh_token`, and optionally
+    `scope` and `client_id`/`client_secret`.
+
+    Read more about it in the
+    [FastAPI docs for OAuth2](https://fastapi.tiangolo.com/tutorial/security/).
+
+    ## Example
+
+    
                 """
             ),
         ],
