@@ -231,6 +231,7 @@ addopts = [
 strict_xfail = true
 filterwarnings = [
     "error",
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning",
 ]
 timeout = "20"
 

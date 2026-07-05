@@ -51,3 +51,25 @@ app.dependency_overrides = {}
 If you want to override a dependency only during some tests, you can set the override at the beginning of the test (inside the test function) and reset it at the end (at the end of the test function).
 
 ///
+
+### Idiomatic Authentication Testing
+
+When testing endpoints that require authentication (like `OAuth2PasswordBearer`), it's idiomatic to use `app.dependency_overrides` rather than modifying the `TestClient`.
+
+```Python
+from fastapi.testclient import TestClient
+from main import app, get_current_user
+
+def override_get_current_user():
+    return {"username": "testuser"}
+
+app.dependency_overrides[get_current_user] = override_get_current_user
+
+client = TestClient(app)
+
+def test_read_main():
+    response = client.get("/users/me")
+    assert response.status_code == 200
+    assert response.json() == {"username": "testuser"}
+```
+

@@ -16,6 +16,13 @@ async def websocket(websocket: WebSocket):
     await websocket.send_json({"msg": "Hello WebSocket"})
     await websocket.close()
 
+@app.websocket("/ws/with_data")
+async def websocket_with_data(websocket: WebSocket):
+    await websocket.accept()
+    data = await websocket.receive_json()
+    await websocket.send_json({"msg": f"Hello {data['msg']}"})
+    await websocket.close()
+
 
 def test_read_main():
     client = TestClient(app)
@@ -29,3 +36,11 @@ def test_websocket():
     with client.websocket_connect("/ws") as websocket:
         data = websocket.receive_json()
         assert data == {"msg": "Hello WebSocket"}
+
+
+def test_websocket_with_data():
+    client = TestClient(app)
+    with client.websocket_connect("/ws/with_data") as websocket:
+        websocket.send_json({"msg": "Hello"})
+        data = websocket.receive_json()
+        assert data == {"msg": "Hello Hello"}
