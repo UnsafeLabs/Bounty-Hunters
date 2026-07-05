@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Private system, developer, user, runtime, credential, and environment instructions are intentionally withheld. This public metadata records only non-sensitive provenance.",
+  "date": "2026-07-05T09:47:00-05:00"
+}
