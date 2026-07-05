@@ -14,6 +14,7 @@ export interface CommandPaletteItem {
   readonly value: string;
   readonly searchTerms: ReadonlyArray<string>;
   readonly title: ReactNode;
+  readonly titleMatchIndexes?: ReadonlyArray<number>;
   readonly description?: string;
   readonly timestamp?: string;
   readonly icon: ReactNode;
@@ -175,37 +176,115 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   });
 }
 
-function rankSearchFieldMatch(field: string, normalizedQuery: string): number {
+export interface CommandPaletteFuzzyMatch {
+  readonly matchedIndexes: ReadonlyArray<number>;
+  readonly score: number;
+}
+
+function isAlphaNumeric(value: string): boolean {
+  return /[a-z0-9]/i.test(value);
+}
+
+function isLowercaseAsciiLetter(value: string): boolean {
+  return value >= "a" && value <= "z";
+}
+
+function isUppercaseAsciiLetter(value: string): boolean {
+  return value >= "A" && value <= "Z";
+}
+
+function isWordBoundary(value: string, index: number): boolean {
+  if (index === 0) {
+    return true;
+  }
+
+  const previous = value[index - 1] ?? "";
+  const current = value[index] ?? "";
+  return (
+    !isAlphaNumeric(previous) ||
+    (isLowercaseAsciiLetter(previous) && isUppercaseAsciiLetter(current))
+  );
+}
+
+export function matchCommandPaletteSearchField(
+  field: string,
+  normalizedQuery: string,
+): CommandPaletteFuzzyMatch | null {
+  if (field.length === 0 || normalizedQuery.length === 0) {
+    return null;
+  }
+
+  const lowerField = field.toLowerCase();
+  const lowerQuery = normalizedQuery.toLowerCase();
+  const matchedIndexes: number[] = [];
+  let fieldIndex = 0;
+
+  for (const queryCharacter of lowerQuery) {
+    const nextIndex = lowerField.indexOf(queryCharacter, fieldIndex);
+    if (nextIndex === -1) {
+      return null;
+    }
+
+    matchedIndexes.push(nextIndex);
+    fieldIndex = nextIndex + 1;
+  }
+
   const normalizedField = normalizeSearchText(field);
-  if (normalizedField.length === 0 || !normalizedField.includes(normalizedQuery)) {
-    return Number.NEGATIVE_INFINITY;
-  }
+  let score = 1_000;
+
   if (normalizedField === normalizedQuery) {
-    return 3;
+    score += 500;
+  } else if (normalizedField.startsWith(normalizedQuery)) {
+    score += 250;
   }
-  if (normalizedField.startsWith(normalizedQuery)) {
-    return 2;
+
+  for (let index = 0; index < matchedIndexes.length; index += 1) {
+    const matchedIndex = matchedIndexes[index] ?? 0;
+    score += 20;
+
+    if (isWordBoundary(field, matchedIndex)) {
+      score += 40;
+    }
+
+    if (index > 0 && matchedIndex === (matchedIndexes[index - 1] ?? 0) + 1) {
+      score += 25;
+    }
   }
-  return 1;
+
+  score += Math.max(0, 80 - field.length);
+
+  return { matchedIndexes, score };
 }
 
 function rankCommandPaletteItemMatch(
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem,
   normalizedQuery: string,
-): number {
+): { matchedIndexes: ReadonlyArray<number>; rank: number; termIndex: number } | null {
   const terms = item.searchTerms.filter((term) => term.length > 0);
   if (terms.length === 0) {
-    return 0;
+    return null;
   }
 
+  let bestMatch: { matchedIndexes: ReadonlyArray<number>; rank: number; termIndex: number } | null =
+    null;
   for (const [index, field] of terms.entries()) {
-    const fieldRank = rankSearchFieldMatch(field, normalizedQuery);
-    if (fieldRank !== Number.NEGATIVE_INFINITY) {
-      return 1_000 - index * 100 + fieldRank;
+    const fieldMatch = matchCommandPaletteSearchField(field, normalizedQuery);
+    if (!fieldMatch) {
+      continue;
+    }
+
+    const candidate = {
+      matchedIndexes: fieldMatch.matchedIndexes,
+      rank: 10_000 - index * 1_000 + fieldMatch.score,
+      termIndex: index,
+    };
+
+    if (!bestMatch || candidate.rank > bestMatch.rank) {
+      bestMatch = candidate;
     }
   }
 
-  return 0;
+  return bestMatch;
 }
 
 export function filterCommandPaletteGroups(input: {
@@ -254,15 +333,20 @@ export function filterCommandPaletteGroups(input: {
   return searchableGroups.flatMap((group) => {
     const items = group.items
       .map((item, index) => {
-        const haystack = normalizeSearchText(item.searchTerms.join(" "));
-        if (!haystack.includes(normalizedQuery)) {
+        const match = rankCommandPaletteItemMatch(item, normalizedQuery);
+        if (!match) {
           return null;
         }
 
+        const matchedItem =
+          match.termIndex === 0 && typeof item.title === "string"
+            ? { ...item, titleMatchIndexes: match.matchedIndexes }
+            : item;
+
         return {
-          item,
+          item: matchedItem,
           index,
-          rank: rankCommandPaletteItemMatch(item, normalizedQuery),
+          rank: match.rank,
         };
       })
       .filter(

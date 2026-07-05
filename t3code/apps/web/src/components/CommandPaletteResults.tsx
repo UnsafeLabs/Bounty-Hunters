@@ -73,7 +73,7 @@ function DisabledCommandPaletteResultRow(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <span className="truncate">{renderCommandPaletteTitle(props.item)}</span>
           </span>
           <span className="truncate text-muted-foreground/70 text-xs">
             {props.item.description}
@@ -82,7 +82,7 @@ function DisabledCommandPaletteResultRow(props: {
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <span className="truncate">{renderCommandPaletteTitle(props.item)}</span>
         </span>
       )}
       {props.item.titleTrailingContent}
@@ -119,7 +119,7 @@ function CommandPaletteResultRow(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <span className="truncate">{renderCommandPaletteTitle(props.item)}</span>
           </span>
           <span className="truncate text-muted-foreground/70 text-xs">
             {props.item.description}
@@ -128,7 +128,7 @@ function CommandPaletteResultRow(props: {
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <span className="truncate">{renderCommandPaletteTitle(props.item)}</span>
         </span>
       )}
       {props.item.titleTrailingContent}
@@ -143,4 +143,35 @@ function CommandPaletteResultRow(props: {
       ) : null}
     </CommandItem>
   );
+}
+
+function renderCommandPaletteTitle(item: CommandPaletteActionItem | CommandPaletteSubmenuItem) {
+  if (
+    typeof item.title !== "string" ||
+    !item.titleMatchIndexes ||
+    item.titleMatchIndexes.length === 0
+  ) {
+    return item.title;
+  }
+
+  const highlightedIndexes = new Set(item.titleMatchIndexes);
+  const titleParts = [];
+
+  for (let index = 0; index < item.title.length; index += 1) {
+    const character = item.title[index];
+    titleParts.push(
+      highlightedIndexes.has(index) ? (
+        <span
+          className="command-palette-match-highlight font-semibold text-primary underline decoration-primary/50 underline-offset-2"
+          key={index}
+        >
+          {character}
+        </span>
+      ) : (
+        character
+      ),
+    );
+  }
+
+  return titleParts;
 }

@@ -4,6 +4,7 @@ import type { Thread } from "../types";
 import {
   buildThreadActionItems,
   filterCommandPaletteGroups,
+  matchCommandPaletteSearchField,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
 
@@ -162,5 +163,182 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+  });
+});
+
+describe("filterCommandPaletteGroups", () => {
+  it("fuzzy matches command titles across word boundaries and exposes highlight indexes", () => {
+    const group: CommandPaletteGroup = {
+      value: "actions",
+      label: "Actions",
+      items: [
+        {
+          kind: "action",
+          value: "open-file",
+          searchTerms: ["Open File"],
+          title: "Open File",
+          icon: null,
+          run: async () => undefined,
+        },
+      ],
+    };
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [group],
+      query: "ofl",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(["open-file"]);
+    expect(groups[0]?.items[0]?.titleMatchIndexes).toEqual([0, 5, 7]);
+  });
+
+  it("sorts better fuzzy title matches ahead of looser matches", () => {
+    const group: CommandPaletteGroup = {
+      value: "actions",
+      label: "Actions",
+      items: [
+        {
+          kind: "action",
+          value: "open-folder",
+          searchTerms: ["Open Folder"],
+          title: "Open Folder",
+          icon: null,
+          run: async () => undefined,
+        },
+        {
+          kind: "action",
+          value: "open-file",
+          searchTerms: ["Open File"],
+          title: "Open File",
+          icon: null,
+          run: async () => undefined,
+        },
+      ],
+    };
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [group],
+      query: "ofl",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(["open-file", "open-folder"]);
+  });
+
+  it("keeps empty queries in the default order", () => {
+    const group: CommandPaletteGroup = {
+      value: "actions",
+      label: "Actions",
+      items: [
+        {
+          kind: "action",
+          value: "second",
+          searchTerms: ["Second"],
+          title: "Second",
+          icon: null,
+          run: async () => undefined,
+        },
+        {
+          kind: "action",
+          value: "first",
+          searchTerms: ["First"],
+          title: "First",
+          icon: null,
+          run: async () => undefined,
+        },
+      ],
+    };
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [group],
+      query: "",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(["second", "first"]);
+    expect(groups[0]?.items[0]?.titleMatchIndexes).toBeUndefined();
+  });
+
+  it("filters single-character queries", () => {
+    const group: CommandPaletteGroup = {
+      value: "actions",
+      label: "Actions",
+      items: [
+        {
+          kind: "action",
+          value: "open-file",
+          searchTerms: ["Open File"],
+          title: "Open File",
+          icon: null,
+          run: async () => undefined,
+        },
+        {
+          kind: "action",
+          value: "save-file",
+          searchTerms: ["Save File"],
+          title: "Save File",
+          icon: null,
+          run: async () => undefined,
+        },
+        {
+          kind: "action",
+          value: "close-file",
+          searchTerms: ["Close File"],
+          title: "Close File",
+          icon: null,
+          run: async () => undefined,
+        },
+      ],
+    };
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [group],
+      query: "o",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(["open-file", "close-file"]);
+  });
+
+  it("handles 200+ registered commands with linear fuzzy matching", () => {
+    const group: CommandPaletteGroup = {
+      value: "actions",
+      label: "Actions",
+      items: Array.from({ length: 250 }, (_, index) => ({
+        kind: "action" as const,
+        value: `command-${index}`,
+        searchTerms: [`Command ${index.toString().padStart(3, "0")}`],
+        title: `Command ${index.toString().padStart(3, "0")}`,
+        icon: null,
+        run: async () => undefined,
+      })),
+    };
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [group],
+      query: "cmd",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items).toHaveLength(250);
+    expect(groups[0]?.items[0]?.titleMatchIndexes).toEqual([0, 2, 6]);
+  });
+});
+
+describe("matchCommandPaletteSearchField", () => {
+  it("returns null when query characters are missing", () => {
+    expect(matchCommandPaletteSearchField("Open File", "oz")).toBeNull();
   });
 });
