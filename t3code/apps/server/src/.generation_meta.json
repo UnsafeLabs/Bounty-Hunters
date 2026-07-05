@@ -1,0 +1,5 @@
+{
+  "agent": "OpenAI Codex",
+  "initial_directives": "Public-safe summary: implement issue #833 by adding a Prometheus metrics endpoint with Effect.Metric integration, targeted tests, and truthful public metadata. Private system, developer, runtime, credential, and user instructions are intentionally not included in this public repository file.",
+  "date": "2026-07-05T20:45:00Z"
+}

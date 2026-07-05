@@ -86,6 +86,12 @@ describe("RpcInstrumentation", () => {
         }),
         true,
       );
+      assert.equal(
+        hasMetricSnapshot(snapshots, "rpc_duration_seconds", {
+          method: "rpc.instrumentation.success",
+        }),
+        true,
+      );
     }),
   );
 
@@ -138,6 +144,12 @@ describe("RpcInstrumentation", () => {
       );
       assert.equal(
         hasMetricSnapshot(snapshots, "t3_rpc_request_duration", {
+          method: "rpc.instrumentation.stream",
+        }),
+        true,
+      );
+      assert.equal(
+        hasMetricSnapshot(snapshots, "rpc_duration_seconds", {
           method: "rpc.instrumentation.stream",
         }),
         true,

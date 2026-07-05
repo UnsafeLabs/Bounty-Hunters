@@ -24,8 +24,13 @@ import {
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
+import {
+  formatPrometheusMetrics,
+  PROMETHEUS_CONTENT_TYPE,
+} from "./observability/PrometheusExporter.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { respondToAuthError } from "./auth/http.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import {
@@ -38,6 +43,7 @@ const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+const METRICS_AUTH_DISABLED_ENV = "METRICS_AUTH_DISABLED";
 
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: [...browserApiCorsAllowedMethods],
@@ -67,6 +73,21 @@ const requireAuthenticatedRequest = Effect.gen(function* () {
   yield* serverAuth.authenticateHttpRequest(request);
 });
 
+const shouldSkipMetricsAuth = () => process.env[METRICS_AUTH_DISABLED_ENV] === "true";
+
+const readActiveSessionCount = Effect.gen(function* () {
+  const sessions = yield* SessionCredentialService;
+  return yield* sessions.listActive().pipe(
+    Effect.map((activeSessions) => activeSessions.length),
+    Effect.tapError((cause) =>
+      Effect.logWarning("Failed to read active session count for Prometheus metrics", {
+        cause,
+      }),
+    ),
+    Effect.catch(() => Effect.succeed(0)),
+  );
+});
+
 export const serverEnvironmentRouteLayer = HttpRouter.add(
   "GET",
   "/.well-known/t3/environment",
@@ -79,6 +100,25 @@ export const serverEnvironmentRouteLayer = HttpRouter.add(
       headers: browserApiCorsHeaders,
     });
   }),
+);
+
+export const prometheusMetricsRouteLayer = HttpRouter.add(
+  "GET",
+  "/metrics",
+  Effect.gen(function* () {
+    if (!shouldSkipMetricsAuth()) {
+      yield* requireAuthenticatedRequest;
+    }
+
+    const activeSessions = yield* readActiveSessionCount;
+    const body = yield* formatPrometheusMetrics({ activeSessions });
+
+    return HttpServerResponse.text(body, {
+      status: 200,
+      contentType: PROMETHEUS_CONTENT_TYPE,
+      headers: browserApiCorsHeaders,
+    });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
 class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{

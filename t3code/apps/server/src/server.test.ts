@@ -1067,6 +1067,49 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("requires authentication for Prometheus metrics by default", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const url = yield* getHttpServerUrl("/metrics");
+      const response = yield* Effect.promise(() => fetch(url));
+      const body = (yield* Effect.promise(() => response.json())) as {
+        readonly error: string;
+      };
+
+      assert.equal(response.status, 401);
+      assert.equal(body.error, "Authentication required.");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves Prometheus metrics when metrics auth is disabled", () =>
+    Effect.gen(function* () {
+      const previousMetricsAuthDisabled = process.env.METRICS_AUTH_DISABLED;
+      process.env.METRICS_AUTH_DISABLED = "true";
+      try {
+        yield* buildAppUnderTest();
+
+        const url = yield* getHttpServerUrl("/metrics");
+        const response = yield* Effect.promise(() => fetch(url));
+        const body = yield* Effect.promise(() => response.text());
+
+        assert.equal(response.status, 200);
+        assert.isTrue(
+          response.headers.get("content-type")?.startsWith("text/plain; version=0.0.4"),
+        );
+        assert.include(body, "# TYPE active_sessions gauge");
+        assert.include(body, "active_sessions 0");
+        assert.include(body, "# TYPE memory_usage_bytes gauge");
+      } finally {
+        if (previousMetricsAuthDisabled === undefined) {
+          delete process.env.METRICS_AUTH_DISABLED;
+        } else {
+          process.env.METRICS_AUTH_DISABLED = previousMetricsAuthDisabled;
+        }
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("reports unauthenticated session state without requiring auth", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();

@@ -19,6 +19,11 @@ export const rpcRequestDuration = Metric.timer("t3_rpc_request_duration", {
   description: "RPC request handling duration.",
 });
 
+export const rpcDurationSeconds = Metric.histogram("rpc_duration_seconds", {
+  description: "RPC request handling duration in seconds.",
+  boundaries: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+});
+
 export const orchestrationCommandsTotal = Metric.counter("t3_orchestration_commands_total", {
   description: "Total orchestration commands dispatched.",
 });
@@ -72,6 +77,14 @@ export const terminalSessionsTotal = Metric.counter("t3_terminal_sessions_total"
 
 export const terminalRestartsTotal = Metric.counter("t3_terminal_restarts_total", {
   description: "Total terminal restart requests handled.",
+});
+
+export const activeSessionsGauge = Metric.gauge("active_sessions", {
+  description: "Current active authenticated server sessions.",
+});
+
+export const memoryUsageBytesGauge = Metric.gauge("memory_usage_bytes", {
+  description: "Current server process resident set memory in bytes.",
 });
 
 export const metricAttributes = (

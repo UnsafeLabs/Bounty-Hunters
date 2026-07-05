@@ -8,7 +8,12 @@ import * as References from "effect/References";
 import * as Stream from "effect/Stream";
 
 import { outcomeFromExit } from "./Attributes.ts";
-import { metricAttributes, rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
+import {
+  metricAttributes,
+  rpcDurationSeconds,
+  rpcRequestDuration,
+  rpcRequestsTotal,
+} from "./Metrics.ts";
 
 const RPC_SPAN_PREFIX = "ws.rpc";
 const DEFAULT_RPC_SPAN_ATTRIBUTES = {
@@ -69,10 +74,15 @@ const recordRpcStreamMetrics = <E>(
   Effect.gen(function* () {
     const endedAt = yield* Clock.currentTimeNanos;
     const elapsedNanos = endedAt > startedAt ? endedAt - startedAt : 0n;
+    const duration = Duration.nanos(elapsedNanos);
 
     yield* Metric.update(
       Metric.withAttributes(rpcRequestDuration, metricAttributes({ method })),
-      Duration.nanos(elapsedNanos),
+      duration,
+    );
+    yield* Metric.update(
+      Metric.withAttributes(rpcDurationSeconds, metricAttributes({ method })),
+      Duration.toSeconds(duration),
     );
     yield* Metric.update(
       Metric.withAttributes(
@@ -86,20 +96,48 @@ const recordRpcStreamMetrics = <E>(
     );
   });
 
+const observeRpcEffectMetrics = <A, E, R>(
+  method: string,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.gen(function* () {
+    const startedAt = yield* Clock.currentTimeNanos;
+    const exit = yield* Effect.exit(effect);
+    const endedAt = yield* Clock.currentTimeNanos;
+    const elapsedNanos = endedAt > startedAt ? endedAt - startedAt : 0n;
+    const duration = Duration.nanos(elapsedNanos);
+
+    yield* Metric.update(
+      Metric.withAttributes(rpcRequestDuration, metricAttributes({ method })),
+      duration,
+    );
+    yield* Metric.update(
+      Metric.withAttributes(rpcDurationSeconds, metricAttributes({ method })),
+      Duration.toSeconds(duration),
+    );
+    yield* Metric.update(
+      Metric.withAttributes(
+        rpcRequestsTotal,
+        metricAttributes({
+          method,
+          outcome: outcomeFromExit(exit),
+        }),
+      ),
+      1,
+    );
+
+    if (Exit.isSuccess(exit)) {
+      return exit.value;
+    }
+    return yield* Effect.failCause(exit.cause);
+  });
+
 export const observeRpcEffect = <A, E, R>(
   method: string,
   effect: Effect.Effect<A, E, R>,
   traceAttributes?: Readonly<Record<string, unknown>>,
 ): Effect.Effect<A, E, R> => {
-  const instrumented = effect.pipe(
-    withMetrics({
-      counter: rpcRequestsTotal,
-      timer: rpcRequestDuration,
-      attributes: {
-        method,
-      },
-    }),
-  );
+  const instrumented = observeRpcEffectMetrics(method, effect);
 
   return withRpcEffectTracing(method, instrumented, traceAttributes);
 };
