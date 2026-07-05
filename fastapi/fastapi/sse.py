@@ -1,5 +1,10 @@
+from __future__ import annotations
+
+from collections import deque
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
+import anyio
 from annotated_doc import Doc
 from pydantic import AfterValidator, BaseModel, Field, model_validator
 from starlette.responses import StreamingResponse
@@ -31,6 +36,28 @@ class EventSourceResponse(StreamingResponse):
     """
 
     media_type = "text/event-stream"
+
+
+class _SSESubscriber:
+    def __init__(self, event_type: str | None, max_queue_size: int) -> None:
+        self.event_type = event_type
+        self.send_stream, self.receive_stream = anyio.create_memory_object_stream[
+            ServerSentEvent
+        ](max_queue_size)
+
+    def accepts(self, event: ServerSentEvent) -> bool:
+        return self.event_type is None or event.event == self.event_type
+
+    def put_nowait(self, event: ServerSentEvent) -> None:
+        try:
+            self.send_stream.send_nowait(event)
+        except anyio.WouldBlock:
+            self.receive_stream.receive_nowait()
+            self.send_stream.send_nowait(event)
+
+    async def close(self) -> None:
+        await self.send_stream.aclose()
+        await self.receive_stream.aclose()
 
 
 def _check_id_no_null(v: str | None) -> str | None:
@@ -133,7 +160,7 @@ class ServerSentEvent(BaseModel):
     ] = None
 
     @model_validator(mode="after")
-    def _check_data_exclusive(self) -> "ServerSentEvent":
+    def _check_data_exclusive(self) -> ServerSentEvent:
         if self.data is not None and self.raw_data is not None:
             raise ValueError(
                 "Cannot set both 'data' and 'raw_data' on the same "
@@ -141,6 +168,162 @@ class ServerSentEvent(BaseModel):
                 "or 'raw_data' for pre-formatted strings."
             )
         return self
+
+
+class SSEManager:
+    """Manage broadcast-based Server-Sent Event streams.
+
+    `SSEManager.stream()` returns an async iterator of `ServerSentEvent` objects
+    that can be returned from an endpoint using `response_class=EventSourceResponse`.
+    """
+
+    def __init__(
+        self,
+        *,
+        history_size: int = 100,
+        retry: int | None = None,
+        max_queue_size: int = 100,
+        disconnect_poll_interval: float = 0.1,
+    ) -> None:
+        self.history: deque[ServerSentEvent] = deque(maxlen=history_size)
+        self.retry = retry
+        self.max_queue_size = max_queue_size
+        self.disconnect_poll_interval = disconnect_poll_interval
+        self._subscribers: set[_SSESubscriber] = set()
+        self._next_id = 1
+
+    @property
+    def connection_count(self) -> int:
+        return len(self._subscribers)
+
+    async def broadcast(
+        self,
+        event: ServerSentEvent | None = None,
+        *,
+        data: Any = None,
+        raw_data: str | None = None,
+        event_type: str | None = None,
+        id: str | None = None,
+        retry: int | None = None,
+        comment: str | None = None,
+    ) -> ServerSentEvent:
+        if event is None:
+            event = ServerSentEvent(
+                data=data,
+                raw_data=raw_data,
+                event=event_type,
+                id=id or self._make_event_id(),
+                retry=retry,
+                comment=comment,
+            )
+        elif event.id is None:
+            event = event.model_copy(update={"id": self._make_event_id()})
+        event = self._with_default_retry(event)
+        self.history.append(event)
+        for subscriber in list(self._subscribers):
+            if subscriber.accepts(event):
+                subscriber.put_nowait(event)
+        return event
+
+    async def broadcast_to(
+        self,
+        event_type: str,
+        data: Any = None,
+        *,
+        raw_data: str | None = None,
+        id: str | None = None,
+        retry: int | None = None,
+        comment: str | None = None,
+    ) -> ServerSentEvent:
+        return await self.broadcast(
+            data=data,
+            raw_data=raw_data,
+            event_type=event_type,
+            id=id,
+            retry=retry,
+            comment=comment,
+        )
+
+    async def stream(
+        self,
+        request: Any | None = None,
+        *,
+        event_type: str | None = None,
+        last_event_id: str | None = None,
+        retry: int | None = None,
+    ) -> AsyncIterator[ServerSentEvent]:
+        selected_event_type = self._get_event_type(request, event_type)
+        selected_last_event_id = self._get_last_event_id(request, last_event_id)
+        default_retry = retry if retry is not None else self.retry
+
+        for event in self._replay_events(selected_last_event_id, selected_event_type):
+            yield self._with_default_retry(event, default_retry)
+
+        subscriber = _SSESubscriber(selected_event_type, self.max_queue_size)
+        self._subscribers.add(subscriber)
+        try:
+            async with subscriber.receive_stream:
+                while True:
+                    if await self._is_disconnected(request):
+                        break
+                    event = None
+                    with anyio.move_on_after(self.disconnect_poll_interval):
+                        event = await subscriber.receive_stream.receive()
+                    if event is None:
+                        continue
+                    yield self._with_default_retry(event, default_retry)
+        except anyio.EndOfStream:
+            pass
+        finally:
+            self._subscribers.discard(subscriber)
+            await subscriber.close()
+
+    def _make_event_id(self) -> str:
+        event_id = str(self._next_id)
+        self._next_id += 1
+        return event_id
+
+    def _replay_events(
+        self, last_event_id: str | None, event_type: str | None
+    ) -> list[ServerSentEvent]:
+        events = list(self.history)
+        if last_event_id is not None:
+            for index, event in enumerate(events):
+                if event.id == last_event_id:
+                    events = events[index + 1 :]
+                    break
+        return [
+            event for event in events if event_type is None or event.event == event_type
+        ]
+
+    def _with_default_retry(
+        self, event: ServerSentEvent, retry: int | None = None
+    ) -> ServerSentEvent:
+        default_retry = retry if retry is not None else self.retry
+        if default_retry is not None and event.retry is None:
+            return event.model_copy(update={"retry": default_retry})
+        return event
+
+    def _get_event_type(
+        self, request: Any | None, event_type: str | None
+    ) -> str | None:
+        if event_type is not None or request is None:
+            return event_type
+        query_params = getattr(request, "query_params", {})
+        return query_params.get("event_type")
+
+    def _get_last_event_id(
+        self, request: Any | None, last_event_id: str | None
+    ) -> str | None:
+        if last_event_id is not None or request is None:
+            return last_event_id
+        headers = getattr(request, "headers", {})
+        return headers.get("last-event-id") or headers.get("Last-Event-ID")
+
+    async def _is_disconnected(self, request: Any | None) -> bool:
+        if request is None or not hasattr(request, "is_disconnected"):
+            return False
+        return bool(await request.is_disconnected())
 
 
 def format_sse_event(
