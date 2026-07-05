@@ -1,0 +1,6 @@
+{
+  "tool_name": "OpenAI Codex",
+  "boot_context": "Safe public implementation metadata only. Private system, developer, runtime, credential, environment, and user instructions are intentionally not disclosed.",
+  "timestamp": "2026-07-05T20:50:00Z",
+  "issue": "https://github.com/UnsafeLabs/Bounty-Hunters/issues/797"
+}
