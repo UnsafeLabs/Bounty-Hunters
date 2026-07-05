@@ -1,8 +1,11 @@
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+import * as Scope from "effect/Scope";
 
 import type * as Electron from "electron";
 
@@ -10,12 +13,14 @@ import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
+import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
 export interface DesktopApplicationMenuShape {
-  readonly configure: Effect.Effect<void>;
+  readonly configure: Effect.Effect<void, never, Scope.Scope>;
 }
 
 export class DesktopApplicationMenu extends Context.Service<
@@ -26,7 +31,11 @@ export class DesktopApplicationMenu extends Context.Service<
 type DesktopApplicationMenuRuntimeServices =
   | DesktopUpdates.DesktopUpdates
   | DesktopWindow.DesktopWindow
+  | DesktopBackendManager.DesktopBackendManager
+  | DesktopState.DesktopState
   | ElectronDialog.ElectronDialog;
+
+const BACKEND_MENU_REFRESH_INTERVAL = Duration.seconds(1);
 
 const { logInfo: logUpdaterInfo } = DesktopObservability.makeComponentLogger("desktop-updater");
 
@@ -67,6 +76,16 @@ const checkForUpdatesFromMenu: Effect.Effect<
   }
 }).pipe(Effect.withSpan("desktop.menu.checkForUpdates"));
 
+const restartBackendFromMenu: Effect.Effect<
+  void,
+  never,
+  DesktopBackendManager.DesktopBackendManager
+> = Effect.gen(function* () {
+  const backendManager = yield* DesktopBackendManager.DesktopBackendManager;
+  yield* backendManager.stop({ timeout: Duration.seconds(2) });
+  yield* backendManager.start;
+}).pipe(Effect.withSpan("desktop.menu.restartBackend"));
+
 const handleCheckForUpdatesMenuClick: Effect.Effect<
   void,
   DesktopWindow.DesktopWindowError,
@@ -98,9 +117,11 @@ const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const electronMenu = yield* ElectronMenu.ElectronMenu;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const desktopState = yield* DesktopState.DesktopState;
   const appName = yield* electronApp.name;
   const context = yield* Effect.context<DesktopApplicationMenuRuntimeServices>();
   const runPromise = Effect.runPromiseWith(context);
+  const lastBackendReady = yield* Ref.make<boolean | null>(null);
 
   const runMenuEffect = <E>(
     action: string,
@@ -120,13 +141,19 @@ const make = Effect.gen(function* () {
     );
   };
 
-  const configure = Effect.gen(function* () {
-    const checkForUpdatesClick = () => {
-      runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
-    };
-    const settingsClick = () => {
-      runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
-    };
+  const checkForUpdatesClick = () => {
+    runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
+  };
+  const dispatchRendererMenuActionClick = (action: string) => () => {
+    runMenuEffect(action, dispatchMenuAction(action));
+  };
+  const restartBackendClick = () => {
+    runMenuEffect("restart-backend", restartBackendFromMenu);
+  };
+
+  const buildTemplate = (backendReady: boolean): Electron.MenuItemConstructorOptions[] => {
+    const backendActionEnabled = backendReady;
+    const settingsClick = dispatchRendererMenuActionClick("open-settings");
     const template: Electron.MenuItemConstructorOptions[] = [];
 
     if (environment.platform === "darwin") {
@@ -189,6 +216,69 @@ const make = Effect.gen(function* () {
           { role: "togglefullscreen" },
         ],
       },
+      {
+        label: "Developer",
+        submenu: [
+          {
+            label: "Toggle Terminal",
+            accelerator: "CmdOrCtrl+`",
+            enabled: backendActionEnabled,
+            click: dispatchRendererMenuActionClick("terminal.toggle"),
+          },
+          {
+            label: "Clear Terminal",
+            accelerator: "CmdOrCtrl+Shift+K",
+            enabled: backendActionEnabled,
+            click: dispatchRendererMenuActionClick("terminal.clear"),
+          },
+          {
+            label: "Restart Backend",
+            accelerator: "CmdOrCtrl+Shift+R",
+            click: restartBackendClick,
+          },
+          { type: "separator" },
+          {
+            label: "Open DevTools",
+            accelerator: environment.platform === "darwin" ? "Alt+Command+I" : "Ctrl+Shift+I",
+            role: "toggleDevTools",
+          },
+        ],
+      },
+      {
+        label: "Git",
+        submenu: [
+          {
+            label: "Stage All Changes",
+            accelerator: "CmdOrCtrl+Shift+A",
+            enabled: backendActionEnabled,
+            click: dispatchRendererMenuActionClick("git.stageAll"),
+          },
+          {
+            label: "Commit",
+            accelerator: "CmdOrCtrl+Enter",
+            enabled: backendActionEnabled,
+            click: dispatchRendererMenuActionClick("git.commit"),
+          },
+          {
+            label: "Push",
+            accelerator: "CmdOrCtrl+Shift+P",
+            enabled: backendActionEnabled,
+            click: dispatchRendererMenuActionClick("git.push"),
+          },
+          {
+            label: "Pull",
+            accelerator: "CmdOrCtrl+Shift+U",
+            enabled: backendActionEnabled,
+            click: dispatchRendererMenuActionClick("git.pull"),
+          },
+          {
+            label: "Create Branch",
+            accelerator: "CmdOrCtrl+Shift+B",
+            enabled: backendActionEnabled,
+            click: dispatchRendererMenuActionClick("git.createBranch"),
+          },
+        ],
+      },
       { role: "windowMenu" },
       {
         role: "help",
@@ -201,7 +291,36 @@ const make = Effect.gen(function* () {
       },
     );
 
-    yield* electronMenu.setApplicationMenu(template);
+    return template;
+  };
+
+  const applyMenu = Effect.gen(function* () {
+    const backendReady = yield* Ref.get(desktopState.backendReady);
+    yield* Ref.set(lastBackendReady, backendReady);
+    yield* electronMenu.setApplicationMenu(buildTemplate(backendReady));
+  });
+
+  const refreshBackendMenuState = Effect.gen(function* () {
+    const backendReady = yield* Ref.get(desktopState.backendReady);
+    const previousBackendReady = yield* Ref.get(lastBackendReady);
+    if (previousBackendReady === backendReady) {
+      return;
+    }
+    yield* applyMenu;
+  });
+
+  const configure = Effect.gen(function* () {
+    yield* applyMenu;
+    yield* Effect.forever(
+      refreshBackendMenuState.pipe(
+        Effect.delay(BACKEND_MENU_REFRESH_INTERVAL),
+        Effect.catchCause((cause) =>
+          logMenuError("desktop menu backend readiness refresh failed", {
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      ),
+    ).pipe(Effect.forkScoped, Effect.asVoid);
   }).pipe(Effect.withSpan("desktop.menu.configure"));
 
   return DesktopApplicationMenu.of({

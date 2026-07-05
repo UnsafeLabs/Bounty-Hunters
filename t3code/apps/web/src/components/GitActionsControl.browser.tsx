@@ -103,9 +103,11 @@ vi.mock("~/lib/gitReactQuery", () => ({
     publishRepository: vi.fn(() => ["publish-repository"]),
     pull: vi.fn(() => ["pull"]),
     runStackedAction: vi.fn(() => ["run-stacked-action"]),
+    stageAll: vi.fn(() => ["stage-all"]),
   },
   gitPullMutationOptions: vi.fn(() => ({ __kind: "pull" })),
   gitRunStackedActionMutationOptions: vi.fn(() => ({ __kind: "run-stacked-action" })),
+  gitStageAllMutationOptions: vi.fn(() => ({ __kind: "stage-all" })),
   invalidateGitQueries: invalidateGitQueriesSpy,
   sourceControlPublishRepositoryMutationOptions: vi.fn(() => ({ __kind: "publish-repository" })),
 }));

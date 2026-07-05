@@ -69,6 +69,7 @@ import {
   gitMutationKeys,
   gitPullMutationOptions,
   gitRunStackedActionMutationOptions,
+  gitStageAllMutationOptions,
   sourceControlPublishRepositoryMutationOptions,
 } from "~/lib/gitReactQuery";
 import { refreshGitStatus, useGitStatus } from "~/lib/gitStatusState";
@@ -1088,6 +1089,9 @@ export default function GitActionsControl({
   const pullMutation = useMutation(
     gitPullMutationOptions({ environmentId: activeEnvironmentId, cwd: gitCwd, queryClient }),
   );
+  const stageAllMutation = useMutation(
+    gitStageAllMutationOptions({ environmentId: activeEnvironmentId, cwd: gitCwd, queryClient }),
+  );
 
   const isRunStackedActionRunning =
     useIsMutating({
@@ -1095,11 +1099,14 @@ export default function GitActionsControl({
     }) > 0;
   const isPullRunning =
     useIsMutating({ mutationKey: gitMutationKeys.pull(activeEnvironmentId, gitCwd) }) > 0;
+  const isStageAllRunning =
+    useIsMutating({ mutationKey: gitMutationKeys.stageAll(activeEnvironmentId, gitCwd) }) > 0;
   const isPublishRunning =
     useIsMutating({
       mutationKey: gitMutationKeys.publishRepository(activeEnvironmentId, gitCwd),
     }) > 0;
-  const isGitActionRunning = isRunStackedActionRunning || isPullRunning || isPublishRunning;
+  const isGitActionRunning =
+    isRunStackedActionRunning || isPullRunning || isStageAllRunning || isPublishRunning;
   const isSelectingWorktreeBase =
     !activeServerThread &&
     activeDraftThread?.envMode === "worktree" &&
@@ -1488,6 +1495,30 @@ export default function GitActionsControl({
     });
   };
 
+  const runPullWithToast = useCallback(() => {
+    const promise = pullMutation.mutateAsync();
+    void toastManager.promise<
+      Awaited<ReturnType<typeof pullMutation.mutateAsync>>,
+      ThreadToastData
+    >(promise, {
+      loading: { title: "Pulling...", data: threadToastData },
+      success: (result) => ({
+        title: result.status === "pulled" ? "Pulled" : "Already up to date",
+        description:
+          result.status === "pulled"
+            ? `Updated ${result.refName} from ${result.upstreamRef ?? "upstream"}`
+            : `${result.refName} is already synchronized.`,
+        data: threadToastData,
+      }),
+      error: (err) => ({
+        title: "Pull failed",
+        description: err instanceof Error ? err.message : "An error occurred.",
+        data: threadToastData,
+      }),
+    });
+    void promise.catch(() => undefined);
+  }, [pullMutation, threadToastData]);
+
   const runDialogActionOnNewBranch = () => {
     if (!isCommitDialogOpen) return;
     const commitMessage = dialogCommitMessage.trim();
@@ -1516,27 +1547,7 @@ export default function GitActionsControl({
       return;
     }
     if (quickAction.kind === "run_pull") {
-      const promise = pullMutation.mutateAsync();
-      void toastManager.promise<
-        Awaited<ReturnType<typeof pullMutation.mutateAsync>>,
-        ThreadToastData
-      >(promise, {
-        loading: { title: "Pulling...", data: threadToastData },
-        success: (result) => ({
-          title: result.status === "pulled" ? "Pulled" : "Already up to date",
-          description:
-            result.status === "pulled"
-              ? `Updated ${result.refName} from ${result.upstreamRef ?? "upstream"}`
-              : `${result.refName} is already synchronized.`,
-          data: threadToastData,
-        }),
-        error: (err) => ({
-          title: "Pull failed",
-          description: err instanceof Error ? err.message : "An error occurred.",
-          data: threadToastData,
-        }),
-      });
-      void promise.catch(() => undefined);
+      runPullWithToast();
       return;
     }
     if (quickAction.kind === "show_hint") {
@@ -1553,24 +1564,27 @@ export default function GitActionsControl({
     }
   };
 
-  const openDialogForMenuItem = (item: GitActionMenuItem) => {
-    if (item.disabled) return;
-    if (item.kind === "open_pr") {
-      void openExistingPr();
-      return;
-    }
-    if (item.dialogAction === "push") {
-      void runGitActionWithToast({ action: "push" });
-      return;
-    }
-    if (item.dialogAction === "create_pr") {
-      void runGitActionWithToast({ action: "create_pr" });
-      return;
-    }
-    setExcludedFiles(new Set());
-    setIsEditingFiles(false);
-    setIsCommitDialogOpen(true);
-  };
+  const openDialogForMenuItem = useCallback(
+    (item: GitActionMenuItem) => {
+      if (item.disabled) return;
+      if (item.kind === "open_pr") {
+        void openExistingPr();
+        return;
+      }
+      if (item.dialogAction === "push") {
+        void runGitActionWithToast({ action: "push" });
+        return;
+      }
+      if (item.dialogAction === "create_pr") {
+        void runGitActionWithToast({ action: "create_pr" });
+        return;
+      }
+      setExcludedFiles(new Set());
+      setIsEditingFiles(false);
+      setIsCommitDialogOpen(true);
+    },
+    [openExistingPr, runGitActionWithToast],
+  );
 
   const runDialogAction = () => {
     if (!isCommitDialogOpen) return;
@@ -1585,6 +1599,136 @@ export default function GitActionsControl({
       ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
     });
   };
+
+  useEffect(() => {
+    const onMenuAction = window.desktopBridge?.onMenuAction;
+    if (typeof onMenuAction !== "function") {
+      return;
+    }
+
+    const showUnavailableToast = (title: string, description: string) => {
+      toastManager.add({
+        type: "info",
+        title,
+        description,
+        data: threadToastData,
+      });
+    };
+
+    const runStageAll = () => {
+      if (!gitCwd || !activeEnvironmentId) {
+        showUnavailableToast("Stage All Changes", "Git actions are unavailable.");
+        return;
+      }
+      if (!gitStatusForActions?.hasWorkingTreeChanges) {
+        showUnavailableToast("Stage All Changes", "There are no working tree changes to stage.");
+        return;
+      }
+      if (isGitActionRunning) {
+        showUnavailableToast("Stage All Changes", "Another Git action is already running.");
+        return;
+      }
+
+      const promise = stageAllMutation.mutateAsync();
+      void toastManager.promise<
+        Awaited<ReturnType<typeof stageAllMutation.mutateAsync>>,
+        ThreadToastData
+      >(promise, {
+        loading: { title: "Staging changes...", data: threadToastData },
+        success: () => ({ title: "Changes staged", data: threadToastData }),
+        error: (err) => ({
+          title: "Stage failed",
+          description: err instanceof Error ? err.message : "An error occurred.",
+          data: threadToastData,
+        }),
+      });
+      void promise.catch(() => undefined);
+    };
+
+    const runMenuItem = (itemId: GitActionMenuItem["id"], actionLabel: string) => {
+      const item = gitActionMenuItems.find((entry) => entry.id === itemId);
+      if (!item) {
+        showUnavailableToast(actionLabel, "Git status is unavailable.");
+        return;
+      }
+      if (item.disabled) {
+        showUnavailableToast(
+          actionLabel,
+          getMenuActionDisabledReason({
+            item,
+            gitStatus: gitStatusForActions,
+            isBusy: isGitActionRunning,
+            hasPrimaryRemote,
+          }) ?? "This Git action is currently unavailable.",
+        );
+        return;
+      }
+      openDialogForMenuItem(item);
+    };
+
+    const unsubscribe = onMenuAction((action) => {
+      switch (action) {
+        case "git.stageAll":
+          runStageAll();
+          return;
+        case "git.commit":
+          runMenuItem("commit", "Commit");
+          return;
+        case "git.push":
+          runMenuItem("push", "Push");
+          return;
+        case "git.pull":
+          if (!gitStatusForActions) {
+            showUnavailableToast("Pull", "Git status is unavailable.");
+            return;
+          }
+          if (isGitActionRunning) {
+            showUnavailableToast("Pull", "Another Git action is already running.");
+            return;
+          }
+          if (!gitStatusForActions.refName || !gitStatusForActions.hasUpstream) {
+            showUnavailableToast("Pull", "The current branch has no upstream to pull from.");
+            return;
+          }
+          runPullWithToast();
+          return;
+        case "git.createBranch":
+          if (isGitActionRunning) {
+            showUnavailableToast("Create Branch", "Another Git action is already running.");
+            return;
+          }
+          if (!gitStatusForActions?.hasWorkingTreeChanges) {
+            showUnavailableToast(
+              "Create Branch",
+              "Make working tree changes before creating a feature branch from this menu.",
+            );
+            return;
+          }
+          void runGitActionWithToast({
+            action: "commit",
+            featureBranch: true,
+            skipDefaultBranchPrompt: true,
+          });
+          return;
+      }
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [
+    activeEnvironmentId,
+    gitActionMenuItems,
+    gitCwd,
+    gitStatusForActions,
+    hasPrimaryRemote,
+    isGitActionRunning,
+    openDialogForMenuItem,
+    runGitActionWithToast,
+    runPullWithToast,
+    stageAllMutation,
+    threadToastData,
+  ]);
 
   const openChangedFileInEditor = useCallback(
     (filePath: string) => {

@@ -12,6 +12,8 @@ import type {
   VcsListRefsResult,
   VcsPullInput,
   VcsPullResult,
+  VcsStageAllInput,
+  VcsStageAllResult,
   VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
   VcsStatusInput,
@@ -529,6 +531,7 @@ export interface EnvironmentApi {
     switchRef: (input: VcsSwitchRefInput) => Promise<VcsSwitchRefResult>;
     init: (input: VcsInitInput) => Promise<void>;
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
+    stageAll: (input: VcsStageAllInput) => Promise<VcsStageAllResult>;
     refreshStatus: (input: VcsStatusInput) => Promise<VcsStatusResult>;
     onStatus: (
       input: VcsStatusInput,

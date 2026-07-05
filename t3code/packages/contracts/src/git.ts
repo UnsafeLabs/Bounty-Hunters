@@ -109,6 +109,16 @@ export const VcsPullInput = Schema.Struct({
 });
 export type VcsPullInput = typeof VcsPullInput.Type;
 
+export const VcsStageAllInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type VcsStageAllInput = typeof VcsStageAllInput.Type;
+
+export const VcsStageAllResult = Schema.Struct({
+  staged: Schema.Boolean,
+});
+export type VcsStageAllResult = typeof VcsStageAllResult.Type;
+
 export const GitRunStackedActionInput = Schema.Struct({
   actionId: TrimmedNonEmptyStringSchema,
   cwd: TrimmedNonEmptyStringSchema,

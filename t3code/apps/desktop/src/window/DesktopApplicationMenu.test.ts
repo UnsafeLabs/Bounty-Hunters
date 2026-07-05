@@ -4,6 +4,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 
 import type * as Electron from "electron";
 
@@ -11,8 +12,10 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopApplicationMenu from "./DesktopApplicationMenu.ts";
+import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
@@ -63,6 +66,30 @@ const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, {
   install: Effect.die("unexpected install"),
 } satisfies DesktopUpdates.DesktopUpdatesShape);
 
+const desktopBackendManagerLayer = Layer.succeed(DesktopBackendManager.DesktopBackendManager, {
+  start: Effect.void,
+  stop: () => Effect.void,
+  currentConfig: Effect.succeed(Option.none()),
+  snapshot: Effect.succeed({
+    desiredRunning: true,
+    ready: true,
+    activePid: Option.none(),
+    restartAttempt: 0,
+    restartScheduled: false,
+  }),
+} satisfies DesktopBackendManager.DesktopBackendManagerShape);
+
+const makeDesktopStateLayer = (backendReady: boolean) =>
+  Layer.effect(
+    DesktopState.DesktopState,
+    Effect.gen(function* () {
+      return {
+        backendReady: yield* Ref.make(backendReady),
+        quitting: yield* Ref.make(false),
+      } satisfies DesktopState.DesktopStateShape;
+    }),
+  );
+
 const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
   Layer.succeed(DesktopWindow.DesktopWindow, {
     createMain: Effect.die("unexpected createMain"),
@@ -94,12 +121,14 @@ describe("DesktopApplicationMenu", () => {
 
       yield* Effect.gen(function* () {
         const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
-        yield* menu.configure;
+        yield* Effect.scoped(menu.configure);
       }).pipe(
         Effect.provide(
           DesktopApplicationMenu.layer.pipe(
             Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
             Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
+            Layer.provideMerge(desktopBackendManagerLayer),
+            Layer.provideMerge(makeDesktopStateLayer(true)),
             Layer.provideMerge(desktopUpdatesLayer),
             Layer.provideMerge(electronDialogLayer),
             Layer.provideMerge(electronAppLayer),
@@ -125,8 +154,72 @@ describe("DesktopApplicationMenu", () => {
         throw new Error("Expected Settings menu item to have a click handler.");
       }
 
+      const developerMenu = template.find((item) => item.label === "Developer");
+      assert.isDefined(developerMenu);
+      if (!Array.isArray(developerMenu.submenu)) {
+        throw new Error("Expected Developer menu submenu to be an array.");
+      }
+      assert.includeMembers(
+        developerMenu.submenu.map((item) => item.label),
+        ["Toggle Terminal", "Clear Terminal", "Restart Backend", "Open DevTools"],
+      );
+
+      const gitMenu = template.find((item) => item.label === "Git");
+      assert.isDefined(gitMenu);
+      if (!Array.isArray(gitMenu.submenu)) {
+        throw new Error("Expected Git menu submenu to be an array.");
+      }
+      assert.includeMembers(
+        gitMenu.submenu.map((item) => item.label),
+        ["Stage All Changes", "Commit", "Push", "Pull", "Create Branch"],
+      );
+
       settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
       assert.equal(yield* Deferred.await(selectedAction), "open-settings");
+    }),
+  );
+
+  it.effect("disables backend-dependent menu actions until the backend is ready", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* Effect.gen(function* () {
+        const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
+        yield* Effect.scoped(menu.configure);
+      }).pipe(
+        Effect.provide(
+          DesktopApplicationMenu.layer.pipe(
+            Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
+            Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
+            Layer.provideMerge(desktopBackendManagerLayer),
+            Layer.provideMerge(makeDesktopStateLayer(false)),
+            Layer.provideMerge(desktopUpdatesLayer),
+            Layer.provideMerge(electronDialogLayer),
+            Layer.provideMerge(electronAppLayer),
+            Layer.provideMerge(
+              DesktopEnvironment.layer(environmentInput).pipe(
+                Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const developerMenu = template.find((item) => item.label === "Developer");
+      const gitMenu = template.find((item) => item.label === "Git");
+      assert.isDefined(developerMenu);
+      assert.isDefined(gitMenu);
+      if (!Array.isArray(developerMenu.submenu) || !Array.isArray(gitMenu.submenu)) {
+        throw new Error("Expected Developer and Git menu submenus to be arrays.");
+      }
+
+      assert.isFalse(
+        developerMenu.submenu.find((item) => item.label === "Toggle Terminal")?.enabled,
+      );
+      assert.isFalse(gitMenu.submenu.find((item) => item.label === "Commit")?.enabled);
     }),
   );
 });

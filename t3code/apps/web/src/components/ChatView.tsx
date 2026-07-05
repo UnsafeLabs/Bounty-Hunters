@@ -2460,6 +2460,62 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThreadKey, focusComposer, terminalState.terminalOpen]);
 
   useEffect(() => {
+    const onMenuAction = window.desktopBridge?.onMenuAction;
+    if (typeof onMenuAction !== "function") {
+      return;
+    }
+
+    const unsubscribe = onMenuAction((action) => {
+      if (action === "terminal.toggle") {
+        toggleTerminalVisibility();
+        return;
+      }
+
+      if (action !== "terminal.clear") {
+        return;
+      }
+
+      const api = readEnvironmentApi(environmentId);
+      if (!api || !activeThreadId) {
+        toastManager.add({
+          type: "error",
+          title: "Terminal unavailable",
+          description: "Open a thread with a connected environment before clearing the terminal.",
+        });
+        return;
+      }
+
+      const terminalId =
+        terminalState.activeTerminalId ||
+        terminalState.terminalIds[0] ||
+        DEFAULT_THREAD_TERMINAL_ID;
+      if (!terminalState.terminalOpen) {
+        setTerminalOpen(true);
+      }
+
+      void api.terminal.clear({ threadId: activeThreadId, terminalId }).catch((error: unknown) => {
+        toastManager.add({
+          type: "error",
+          title: "Clear terminal failed",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+      });
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [
+    activeThreadId,
+    environmentId,
+    setTerminalOpen,
+    terminalState.activeTerminalId,
+    terminalState.terminalIds,
+    terminalState.terminalOpen,
+    toggleTerminalVisibility,
+  ]);
+
+  useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (!activeThreadId || useCommandPaletteStore.getState().open || event.defaultPrevented) {
         return;

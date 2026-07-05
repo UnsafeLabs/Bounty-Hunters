@@ -1586,6 +1586,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const stageAll: GitVcsDriver.GitVcsDriverShape["stageAll"] = Effect.fn("stageAll")(
+    function* (input) {
+      yield* executeGit("GitVcsDriver.stageAll", input.cwd, ["add", "--all"], {
+        timeoutMs: 10_000,
+        fallbackErrorMessage: "git add --all failed",
+      });
+      return { staged: true };
+    },
+  );
+
   const readRangeContext: GitVcsDriver.GitVcsDriverShape["readRangeContext"] = Effect.fn(
     "readRangeContext",
   )(function* (cwd, baseRef) {
@@ -2123,6 +2133,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     commit,
     pushCurrentBranch,
     pullCurrentBranch,
+    stageAll,
     readRangeContext,
     readConfigValue,
     listRefs,

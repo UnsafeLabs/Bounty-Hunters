@@ -35,6 +35,8 @@ export const gitMutationKeys = {
     ["git", "mutation", "run-stacked-action", environmentId ?? null, cwd] as const,
   pull: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "mutation", "pull", environmentId ?? null, cwd] as const,
+  stageAll: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "stage-all", environmentId ?? null, cwd] as const,
   preparePullRequestThread: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "mutation", "prepare-pull-request-thread", environmentId ?? null, cwd] as const,
   publishRepository: (environmentId: EnvironmentId | null, cwd: string | null) =>
@@ -224,6 +226,24 @@ export function gitPullMutationOptions(input: {
       if (!input.cwd || !input.environmentId) throw new Error("Git pull is unavailable.");
       const api = ensureEnvironmentApi(input.environmentId);
       return api.vcs.pull({ cwd: input.cwd });
+    },
+    onSuccess: async () => {
+      await invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd);
+    },
+  });
+}
+
+export function gitStageAllMutationOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  queryClient: QueryClient;
+}) {
+  return mutationOptions({
+    mutationKey: gitMutationKeys.stageAll(input.environmentId, input.cwd),
+    mutationFn: async () => {
+      if (!input.cwd || !input.environmentId) throw new Error("Git stage all is unavailable.");
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.vcs.stageAll({ cwd: input.cwd });
     },
     onSuccess: async () => {
       await invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd);
