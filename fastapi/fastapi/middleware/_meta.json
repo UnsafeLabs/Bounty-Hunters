@@ -1,0 +1,6 @@
+{
+  "developer": "Antigravity",
+  "bounty_name": "$300 FastAPI Dynamic CORS Middleware Bounty",
+  "status": "completed",
+  "files_modified": ["fastapi/fastapi/middleware/cors.py"]
+}
