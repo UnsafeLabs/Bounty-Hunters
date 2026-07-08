@@ -124,6 +124,18 @@
        01  WS-VALIDATION-MSG           PIC X(128).
        01  WS-AUDIT-TIMESTAMP          PIC X(26).
        01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
+       01  WS-LOCK-RESOURCE            PIC X(16)
+           VALUE 'CERT-STORE-FILE'.
+       01  WS-LOCK-RESP                PIC S9(9) COMP VALUE 0.
+       01  WS-LOCK-RETRY-COUNT         PIC 9(2) VALUE 0.
+       01  WS-MAX-LOCK-RETRIES         PIC 9(2) VALUE 3.
+       01  WS-LOCK-BACKOFF-MSEC        PIC 9(4) VALUE 100.
+       01  WS-LOCK-ACQUIRED            PIC X VALUE 'N'.
+           88  WS-LOCK-IS-ACQUIRED     VALUE 'Y'.
+           88  WS-LOCK-NOT-ACQUIRED    VALUE 'N'.
+       01  WS-CERT-STORE-OPENED        PIC X VALUE 'N'.
+           88  WS-CERT-STORE-IS-OPENED VALUE 'Y'.
+           88  WS-CERT-STORE-NOT-OPENED VALUE 'N'.
        PROCEDURE DIVISION.
        0000-MAIN-CONTROL.
            PERFORM 1000-INITIALIZE
@@ -142,14 +154,6 @@
            SET WS-HOSTNAME-NO-MATCH TO TRUE
            SET WS-CHAIN-IS-VALID TO TRUE
            MOVE FUNCTION CURRENT-DATE TO WS-CURRENT-DATE-TIME
-           OPEN INPUT CERT-STORE-FILE
-           IF NOT WS-FILE-OK
-               DISPLAY 'TLSVAL-E001: CERT STORE FAILED '
-                   WS-FILE-STATUS
-               MOVE 12 TO WS-RETURN-CODE
-               PERFORM 9000-CLEANUP
-               STOP RUN
-           END-IF
            OPEN INPUT CRL-FILE
            IF WS-CRL-OK
                SET WS-CRL-IS-LOADED TO TRUE
@@ -159,11 +163,52 @@
            OPEN EXTEND AUDIT-LOG-FILE
            DISPLAY 'TLSVAL-I001: VALIDATION STARTED'
            .
+       1010-ACQUIRE-CERT-STORE-LOCK.
+           MOVE 0 TO WS-LOCK-RETRY-COUNT
+           MOVE 100 TO WS-LOCK-BACKOFF-MSEC
+           SET WS-LOCK-NOT-ACQUIRED TO TRUE
+           PERFORM UNTIL WS-LOCK-IS-ACQUIRED
+               OR WS-LOCK-RETRY-COUNT >= WS-MAX-LOCK-RETRIES
+               EXEC CICS ENQ
+                    RESOURCE(WS-LOCK-RESOURCE)
+                    LENGTH(16)
+                    RESP(WS-LOCK-RESP)
+               END-EXEC
+               IF WS-LOCK-RESP = DFHRESP(NORMAL)
+                   SET WS-LOCK-IS-ACQUIRED TO TRUE
+               ELSE
+                   ADD 1 TO WS-LOCK-RETRY-COUNT
+                   PERFORM 1020-LOCK-BACKOFF
+               END-IF
+           END-PERFORM
+           EXIT.
+       1020-LOCK-BACKOFF.
+           CALL 'CBL_THREAD_SLEEP' USING WS-LOCK-BACKOFF-MSEC
+           EXIT.
        2000-VALIDATE-CERT-CHAIN.
            IF WS-CHAIN-LENGTH = 0
                SET WS-CHAIN-IS-INVALID TO TRUE
                GO TO 2000-EXIT
            END-IF
+           PERFORM 1010-ACQUIRE-CERT-STORE-LOCK
+           IF WS-LOCK-NOT-ACQUIRED
+               DISPLAY 'TLSVAL-E000: CERT STORE LOCK FAILED '
+                   WS-LOCK-RETRY-COUNT
+               SET WS-CHAIN-IS-INVALID TO TRUE
+               MOVE 'CERT STORE LOCK FAILED'
+                   TO WS-VALIDATION-MSG
+               GO TO 2000-EXIT
+           END-IF
+           OPEN INPUT CERT-STORE-FILE
+           IF NOT WS-FILE-OK
+               DISPLAY 'TLSVAL-E001: CERT STORE FAILED '
+                   WS-FILE-STATUS
+               SET WS-CHAIN-IS-INVALID TO TRUE
+               MOVE 'CERT STORE OPEN FAILED'
+                   TO WS-VALIDATION-MSG
+               GO TO 2000-EXIT
+           END-IF
+           SET WS-CERT-STORE-IS-OPENED TO TRUE
            PERFORM VARYING WS-CHAIN-INDEX FROM 1 BY 1
                UNTIL WS-CHAIN-INDEX > WS-CHAIN-LENGTH + 1
                MOVE WS-CHN-SERIAL(WS-CHAIN-INDEX)
@@ -348,8 +393,24 @@
            WRITE AUDIT-LOG-RECORD
            .
        9000-CLEANUP.
-           CLOSE CERT-STORE-FILE
+           PERFORM 9110-CLOSE-CERT-STORE
+           PERFORM 9100-RELEASE-CERT-STORE-LOCK
            CLOSE CRL-FILE
            CLOSE AUDIT-LOG-FILE
            DISPLAY 'TLSVAL-I099: RC=' WS-RETURN-CODE
            .
+       9110-CLOSE-CERT-STORE.
+           IF WS-CERT-STORE-IS-OPENED
+               CLOSE CERT-STORE-FILE
+               SET WS-CERT-STORE-NOT-OPENED TO TRUE
+           END-IF
+           EXIT.
+       9100-RELEASE-CERT-STORE-LOCK.
+           IF WS-LOCK-IS-ACQUIRED
+               EXEC CICS DEQ
+                    RESOURCE(WS-LOCK-RESOURCE)
+                    LENGTH(16)
+               END-EXEC
+               SET WS-LOCK-NOT-ACQUIRED TO TRUE
+           END-IF
+           EXIT.
