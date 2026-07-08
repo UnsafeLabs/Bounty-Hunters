@@ -1,5 +1,5 @@
 import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
-import * as fs from "fs";
+import { readFileSync, existsSync } from "fs";
 
 export interface KnownEnvironmentConnectionTarget {
   readonly httpBaseUrl: string;
@@ -42,91 +42,89 @@ export function getKnownEnvironmentHttpBaseUrl(
   return environment?.target.httpBaseUrl ?? null;
 }
 
-    environmentId: descriptor.environmentId,
+export function attachEnvironmentDescriptor(
+  environment: KnownEnvironment,
+  descriptor: ExecutionEnvironmentDescriptor,
     label: descriptor.label,
   };
 }
 
 export interface EnvironmentInfo {
-  readonly runtime: string;
-  readonly platform: string;
-  readonly arch: string;
-  readonly isContainer: boolean;
-  readonly isCI: boolean;
-  readonly ciProvider: string | null;
-  readonly isWSL: boolean;
+  runtime: string;
+  platform: string;
+  arch: string;
+  isContainer: boolean;
+  isCI: boolean;
+  ciProvider: string | null;
+  isWSL: boolean;
 }
 
-function readFileSafe(path: string): string | null {
+function detectContainer(): boolean {
   try {
-    return fs.readFileSync(path, "utf-8");
+    if (existsSync("/.dockerenv")) {
+      return true;
+    }
+    const cgroup = readFileSync("/proc/self/cgroup", "utf-8");
+    return cgroup.includes("docker") || cgroup.includes("containerd");
   } catch {
-    return null;
+    return false;
   }
 }
 
-function checkIsContainer(): boolean {
-  // Check for Docker-specific file
-  if (readFileSafe("/.dockerenv") !== null) {
-    return true;
+function detectCI(): { isCI: boolean; ciProvider: string | null } {
+  const ciProviders: [string, string][] = [
+    ["CI", "generic"],
+    ["GITHUB_ACTIONS", "github"],
+    ["GITLAB_CI", "gitlab"],
+    ["JENKINS_URL", "jenkins"],
+    ["CIRCLECI", "circleci"],
+    ["TRAVIS", "travis"],
+  ];
+
+  for (const [envVar, provider] of ciProviders) {
+    if (process.env[envVar]) {
+      return { isCI: true, ciProvider: provider };
+    }
   }
 
-  // Check cgroup for container indicators
-  const cgroup = readFileSafe("/proc/self/cgroup");
-  if (cgroup !== null && cgroup.includes("docker")) {
-    return true;
-  }
-
-  return false;
+  return { isCI: false, ciProvider: null };
 }
 
-function checkCIProvider(): string | null {
-  if (process.env.CI === "true" || process.env.CI === "1") {
-    return "ci";
+function detectWSL(): boolean {
+  try {
+    const version = readFileSync("/proc/version", "utf-8");
+    return version.includes("Microsoft") || version.includes("microsoft");
+  } catch {
+    return false;
   }
-  if (process.env.GITHUB_ACTIONS === "true" || process.env.GITHUB_ACTIONS === "1") {
-    return "github";
-  }
-  if (process.env.GITLAB_CI === "true" || process.env.GITLAB_CI === "1") {
-    return "gitlab";
-  }
-  if (process.env.JENKINS_URL && process.env.JENKINS_URL.length > 0) {
-    return "jenkins";
-  }
-  if (process.env.CIRCLECI === "true" || process.env.CIRCLECI === "1") {
-    return "circleci";
-  }
-  if (process.env.TRAVIS === "true" || process.env.TRAVIS === "1") {
-    return "travis";
-  }
-
-  return null;
 }
 
-function checkIsWSL(): boolean {
-  const procVersion = readFileSafe("/proc/version");
-  if (procVersion !== null && procVersion.toLowerCase().includes("microsoft")) {
-    return true;
-  }
-  return false;
-}
-
-export function detectEnvironment(): EnvironmentInfo {
-  const ciProvider = checkCIProvider();
-  const isCI = ciProvider !== null;
+export function getEnvironmentInfo(): EnvironmentInfo {
+  const { isCI, ciProvider } = detectCI();
 
   return {
-    runtime: typeof process !== "undefined" && process.versions?.node ? "node" : "unknown",
-    platform: typeof process !== "undefined" ? process.platform : "unknown",
-    arch: typeof process !== "undefined" ? process.arch : "unknown",
-    isContainer: checkIsContainer(),
+    runtime: (() => {
+      if (typeof Bun !== "undefined") return "bun";
+      if (typeof Deno !== "undefined") return "deno";
+      if (typeof process !== "undefined" && process.versions?.node) return "node";
+      if (typeof window !== "undefined") return "browser";
+      return "unknown";
+    })(),
+    platform: (() => {
+      if (typeof process !== "undefined" && process.platform) return process.platform;
+      if (typeof navigator !== "undefined" && navigator.platform) return navigator.platform;
+      return "unknown";
+    })(),
+    arch: (() => {
+      if (typeof process !== "undefined" && process.arch) return process.arch;
+      return "unknown";
+    })(),
+    isContainer: detectContainer(),
     isCI,
-    ciProvider: isCI ? ciProvider : null,
-    isWSL: checkIsWSL(),
+    ciProvider,
+    isWSL: detectWSL(),
   };
 }
-  return {
-    ...environment,
     environmentId: descriptor.environmentId,
     label: descriptor.label,
   };
