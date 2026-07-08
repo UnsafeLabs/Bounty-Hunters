@@ -1,5 +1,6 @@
 import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import { readFileSync, existsSync } from "fs";
+import { env, platform, arch } from "process";
 
 export interface KnownEnvironmentConnectionTarget {
   readonly httpBaseUrl: string;
@@ -45,18 +46,21 @@ export function getKnownEnvironmentHttpBaseUrl(
 export function attachEnvironmentDescriptor(
   environment: KnownEnvironment,
   descriptor: ExecutionEnvironmentDescriptor,
+): KnownEnvironment {
+  return {
+    ...environment,
     label: descriptor.label,
   };
 }
 
 export interface EnvironmentInfo {
-  runtime: string;
-  platform: string;
-  arch: string;
-  isContainer: boolean;
-  isCI: boolean;
-  ciProvider: string | null;
-  isWSL: boolean;
+  readonly runtime: string;
+  readonly platform: string;
+  readonly arch: string;
+  readonly isContainer: boolean;
+  readonly isCI: boolean;
+  readonly ciProvider: string | null;
+  readonly isWSL: boolean;
 }
 
 function detectContainer(): boolean {
@@ -72,17 +76,17 @@ function detectContainer(): boolean {
 }
 
 function detectCI(): { isCI: boolean; ciProvider: string | null } {
-  const ciProviders: [string, string][] = [
-    ["CI", "generic"],
-    ["GITHUB_ACTIONS", "github"],
-    ["GITLAB_CI", "gitlab"],
-    ["JENKINS_URL", "jenkins"],
-    ["CIRCLECI", "circleci"],
-    ["TRAVIS", "travis"],
-  ];
+  const ciProviders: Record<string, string> = {
+    CI: "ci",
+    GITHUB_ACTIONS: "github-actions",
+    GITLAB_CI: "gitlab",
+    JENKINS_URL: "jenkins",
+    CIRCLECI: "circleci",
+    TRAVIS: "travis",
+  };
 
-  for (const [envVar, provider] of ciProviders) {
-    if (process.env[envVar]) {
+  for (const [envVar, provider] of Object.entries(ciProviders)) {
+    if (env[envVar] !== undefined) {
       return { isCI: true, ciProvider: provider };
     }
   }
@@ -99,33 +103,27 @@ function detectWSL(): boolean {
   }
 }
 
+function getRuntime(): string {
+  if (typeof Bun !== "undefined") return "bun";
+  if (typeof Deno !== "undefined") return "deno";
+  if (typeof process !== "undefined" && process.versions?.node) return "node";
+  if (typeof window !== "undefined") return "browser";
+  return "unknown";
+}
+
 export function getEnvironmentInfo(): EnvironmentInfo {
   const { isCI, ciProvider } = detectCI();
 
   return {
-    runtime: (() => {
-      if (typeof Bun !== "undefined") return "bun";
-      if (typeof Deno !== "undefined") return "deno";
-      if (typeof process !== "undefined" && process.versions?.node) return "node";
-      if (typeof window !== "undefined") return "browser";
-      return "unknown";
-    })(),
-    platform: (() => {
-      if (typeof process !== "undefined" && process.platform) return process.platform;
-      if (typeof navigator !== "undefined" && navigator.platform) return navigator.platform;
-      return "unknown";
-    })(),
-    arch: (() => {
-      if (typeof process !== "undefined" && process.arch) return process.arch;
-      return "unknown";
-    })(),
+    runtime: getRuntime(),
+    platform: platform,
+    arch: arch,
     isContainer: detectContainer(),
     isCI,
     ciProvider,
     isWSL: detectWSL(),
   };
 }
-    environmentId: descriptor.environmentId,
-    label: descriptor.label,
-  };
+
+export const environmentInfo: EnvironmentInfo = getEnvironmentInfo();
 }
