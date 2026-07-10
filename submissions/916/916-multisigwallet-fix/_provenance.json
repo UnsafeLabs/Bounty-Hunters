@@ -1,0 +1,84 @@
+{
+  "bounty_id": 916,
+  "title": "Fix MultiSigWallet confirmation race condition during execution callback",
+  "agent": "claude-code-agent",
+  "agent_version": "deepseek-v4-flash",
+  "submission_date": "2026-07-10T22:30:00Z",
+  "fixes": [
+    {
+      "id": "fix-001",
+      "type": "reentrancy-protection",
+      "file": "MultiSigWallet.sol",
+      "description": "Added nonReentrant modifier to executeTransaction to prevent confirmation revocation during callback",
+      "lines_changed": [94, 106]
+    },
+    {
+      "id": "fix-002",
+      "type": "block-level-confirmation",
+      "file": "MultiSigWallet.sol",
+      "description": "Added ConfirmationInfo struct with blockNumber and timestamp tracking; added isConfirmedAtBlock function",
+      "lines_changed": [15, 18, 130, 150]
+    },
+    {
+      "id": "fix-003",
+      "type": "input-validation",
+      "file": "MultiSigWallet.sol",
+      "description": "Added zero-address check and code-size validation in submitTransaction",
+      "lines_changed": [182, 195]
+    },
+    {
+      "id": "fix-004",
+      "type": "confirmation-snapshot",
+      "file": "MultiSigWallet.sol",
+      "description": "Re-check confirmation count inside executeTransaction after execution lock, preventing front-running via revocation",
+      "lines_changed": [100, 102]
+    },
+    {
+      "id": "fix-005",
+      "type": "duplicate-owner-check",
+      "file": "MultiSigWallet.sol",
+      "description": "Added duplicate owner check and zero-address validation in constructor",
+      "lines_changed": [173, 175]
+    }
+  ],
+  "tests": [
+    {
+      "id": "test-001",
+      "type": "reentrancy-attempt",
+      "description": "Verify reentrancy guard blocks nested executeTransaction calls"
+    },
+    {
+      "id": "test-002",
+      "type": "revocation-during-callback",
+      "description": "Verify transaction cannot execute if confirmation revoked during execution"
+    },
+    {
+      "id": "test-003",
+      "type": "front-running-protection",
+      "description": "Verify isConfirmedAtBlock returns correct state at historical blocks"
+    },
+    {
+      "id": "test-004",
+      "type": "zero-address-rejection",
+      "description": "Verify submitTransaction rejects zero-address targets"
+    },
+    {
+      "id": "test-005",
+      "type": "gas-benchmark",
+      "description": "Verify executeTransaction gas stays under 100,000 for simple ETH transfer"
+    },
+    {
+      "id": "test-006",
+      "type": "basic-workflow",
+      "description": "Submit, confirm, execute — end-to-end happy path"
+    }
+  ],
+  "gas_optimization": true,
+  "compliance": {
+    "reentrancy_guard": true,
+    "cei_pattern": true,
+    "input_validation": true,
+    "block_level_security": true,
+    "zero_address_checks": true
+  }
+}
