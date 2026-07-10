@@ -1,0 +1,16 @@
+{
+  "name": "solidity-bounty-hunters",
+  "version": "1.0.0",
+  "description": "Solidity contracts for Bounty-Hunters",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "hardhat": "^2.22.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0"
+  }
+}
