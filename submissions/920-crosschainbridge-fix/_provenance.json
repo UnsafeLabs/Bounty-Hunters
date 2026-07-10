@@ -1,0 +1,92 @@
+{
+  "bounty_id": 920,
+  "title": "Fix cross-chain replay attack in CrossChainBridge signature verification",
+  "agent": "claude-code-agent",
+  "agent_version": "deepseek-v4-flash",
+  "submission_date": "2026-07-10T22:30:00Z",
+  "fixes": [
+    {
+      "id": "fix-001",
+      "type": "eip-712-implementation",
+      "file": "CrossChainBridge.sol",
+      "description": "Refactored to inherit from OpenZeppelin EIP712; replaces raw abi.encodePacked with typed structured data",
+      "lines_changed": [4, 14]
+    },
+    {
+      "id": "fix-002",
+      "type": "chain-id-binding",
+      "file": "CrossChainBridge.sol",
+      "description": "EIP712._hashTypedDataV4 includes block.chainid via domain separator — prevents cross-chain replay",
+      "lines_changed": [100, 115]
+    },
+    {
+      "id": "fix-003",
+      "type": "contract-address-binding",
+      "file": "CrossChainBridge.sol",
+      "description": "EIP712 domain includes verifyingContract — prevents post-upgrade replay",
+      "lines_changed": [55, 60]
+    },
+    {
+      "id": "fix-004",
+      "type": "per-sender-nonces",
+      "file": "CrossChainBridge.sol",
+      "description": "Replaced global nonce with per-sender mapping; nonce included in EIP-712 struct — prevents same-chain replay",
+      "lines_changed": [23, 35, 85]
+    },
+    {
+      "id": "fix-005",
+      "type": "ecrecover-zero-address",
+      "file": "CrossChainBridge.sol",
+      "description": "Explicit require(recovered != address(0)) in _verifySignature — prevents invalid signature acceptance",
+      "lines_changed": [145, 147]
+    },
+    {
+      "id": "fix-006",
+      "type": "constructor-validation",
+      "file": "CrossChainBridge.sol",
+      "description": "Added zero-address validation for bridgeToken and validator in constructor",
+      "lines_changed": [58, 61]
+    }
+  ],
+  "tests": [
+    {
+      "id": "test-001",
+      "type": "cross-chain-replay",
+      "description": "Verify signature from chain A cannot be replayed on chain B"
+    },
+    {
+      "id": "test-002",
+      "type": "same-chain-replay",
+      "description": "Verify same transfer cannot be processed twice with same nonce"
+    },
+    {
+      "id": "test-003",
+      "type": "post-upgrade-replay",
+      "description": "Verify old signatures are invalid after contract upgrade (different address)"
+    },
+    {
+      "id": "test-004",
+      "type": "invalid-signature-rejection",
+      "description": "Verify bad signatures return false (not accept zero-address from ecrecover)"
+    },
+    {
+      "id": "test-005",
+      "type": "nonce-increment",
+      "description": "Verify nonce increments correctly after each initiateTransfer"
+    },
+    {
+      "id": "test-006",
+      "type": "happy-path",
+      "description": "Verify successful initiate → process flow with EIP-712 signatures"
+    }
+  ],
+  "gas_optimization": false,
+  "compliance": {
+    "eip_712": true,
+    "chain_id_binding": true,
+    "nonce_binding": true,
+    "contract_address_binding": true,
+    "ecrecover_validation": true,
+    "zero_address_checks": true
+  }
+}
