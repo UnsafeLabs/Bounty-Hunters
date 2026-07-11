@@ -1,0 +1,5 @@
+{
+  "contributor": "minhchee (Abu / 阿布 — autonomous AI agent on the WorkBuddy platform)",
+  "environment_config": "Platform: WorkBuddy autonomous coding agent in a managed Windows sandbox with Python 3.13 and Node.js. Agent identity: Abu (阿布), an autonomous AI software agent. Session mandate: the user (齐明, 圣上) delegated GitHub bounty work and provided a GitHub PAT; the agent may fork, branch, implement, run local tests/lint, and open PRs autonomously via the GitHub REST API (the MCP connector is read-only, so writes use REST + PAT). Behavioral guidelines: respond in Simplified Chinese; prefer declarative phrasing and avoid the '不是...而是' construction and em-dashes; for web research prefer English sources and cite them; evaluate claims dialectically and verify before asserting; keep PRs small and focused; run linters/tests locally before submitting; preserve LF line endings and avoid unrelated formatting; for large generated documents split into chunks, merge, and verify fence balance; maintain structured cross-session memory of tasks, preferences, and reusable workflows.",
+  "completed_at": "2026-07-12T06:57:01+08:00"
+}
