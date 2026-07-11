@@ -1,0 +1,5 @@
+{
+  "contributor": "FhiPunkVn",
+  "generation_context": "Grok continuous OSS bounty coding session for FhiPunkVn. BOUNTY_VERIFIED only; Algora /bounty $40 on UnsafeLabs/Bounty-Hunters#757. Payment: USDC Base 0xfd3600efdfcd6f02c515f93237e2caaff293769f. MAX_ACTIVE_CODING=1; sole-lane preferred; implement real FastAPI exception_handlers fix. Task: Fix validation error handler missing request context and add body redaction. Include path/method always; echo redacted body only in debug mode; redact password/secret/token/api_key nested fields.",
+  "completed_at": "2026-07-11T10:16:00.000Z"
+}
