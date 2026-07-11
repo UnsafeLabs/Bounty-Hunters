@@ -3,7 +3,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -17,6 +17,13 @@ import {
   getTriggerDisplayModelLabel,
   getTriggerDisplayModelName,
 } from "./providerIconUtils";
+import {
+  PROVIDER_MODEL_PICKER_STORAGE_KEY,
+  clearPersistedProviderModelSelection,
+  readPersistedProviderModelSelection,
+  resolveProviderModelSelection,
+  writePersistedProviderModelSelection,
+} from "./providerModelPickerPersistence";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
@@ -86,9 +93,89 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
+  // Restore last selection from localStorage once instances/models are ready.
+  // Empty storage leaves parent-controlled props unchanged.
+  const didRestoreRef = useRef(false);
+  useEffect(() => {
+    if (didRestoreRef.current || props.disabled) return;
+    if (props.instanceEntries.length === 0) return;
+    const persisted = readPersistedProviderModelSelection();
+    if (!persisted) {
+      didRestoreRef.current = true;
+      return;
+    }
+    const resolved = resolveProviderModelSelection(
+      persisted,
+      props.instanceEntries,
+      props.modelOptionsByInstance,
+    );
+    didRestoreRef.current = true;
+    if (!resolved || !resolved.model) return;
+    if (
+      resolved.instanceId === props.activeInstanceId &&
+      resolved.model === props.model
+    ) {
+      return;
+    }
+    props.onInstanceModelChange(resolved.instanceId, resolved.model);
+  }, [
+    props.activeInstanceId,
+    props.disabled,
+    props.instanceEntries,
+    props.model,
+    props.modelOptionsByInstance,
+    props.onInstanceModelChange,
+  ]);
+
+  // Cross-tab sync: when another tab updates the namespaced key, apply it.
+  useEffect(() => {
+    if (props.disabled) return;
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== PROVIDER_MODEL_PICKER_STORAGE_KEY) return;
+      const persisted = readPersistedProviderModelSelection();
+      const resolved = resolveProviderModelSelection(
+        persisted,
+        props.instanceEntries,
+        props.modelOptionsByInstance,
+      );
+      if (!resolved || !resolved.model) return;
+      if (
+        resolved.instanceId === props.activeInstanceId &&
+        resolved.model === props.model
+      ) {
+        return;
+      }
+      props.onInstanceModelChange(resolved.instanceId, resolved.model);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [
+    props.activeInstanceId,
+    props.disabled,
+    props.instanceEntries,
+    props.model,
+    props.modelOptionsByInstance,
+    props.onInstanceModelChange,
+  ]);
+
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
+    writePersistedProviderModelSelection({ instanceId, model });
     props.onInstanceModelChange(instanceId, model);
+    setIsMenuOpen(false);
+  };
+
+  const handleResetToDefault = () => {
+    if (props.disabled) return;
+    clearPersistedProviderModelSelection();
+    const fallback = resolveProviderModelSelection(
+      null,
+      props.instanceEntries,
+      props.modelOptionsByInstance,
+    );
+    if (fallback && fallback.model) {
+      props.onInstanceModelChange(fallback.instanceId, fallback.model);
+    }
     setIsMenuOpen(false);
   };
 
@@ -169,18 +256,33 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         align="start"
         className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] *:data-[slot=popover-viewport]:p-0"
       >
-        <ModelPickerContent
-          activeInstanceId={activeInstanceId}
-          model={props.model}
-          lockedProvider={props.lockedProvider}
-          lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
-          instanceEntries={props.instanceEntries}
-          {...(props.keybindings ? { keybindings: props.keybindings } : {})}
-          modelOptionsByInstance={props.modelOptionsByInstance}
-          terminalOpen={props.terminalOpen ?? false}
-          onRequestClose={() => setIsMenuOpen(false)}
-          onInstanceModelChange={handleInstanceModelChange}
-        />
+        <div className="flex flex-col">
+          <ModelPickerContent
+            activeInstanceId={activeInstanceId}
+            model={props.model}
+            lockedProvider={props.lockedProvider}
+            lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
+            instanceEntries={props.instanceEntries}
+            {...(props.keybindings ? { keybindings: props.keybindings } : {})}
+            modelOptionsByInstance={props.modelOptionsByInstance}
+            terminalOpen={props.terminalOpen ?? false}
+            onRequestClose={() => setIsMenuOpen(false)}
+            onInstanceModelChange={handleInstanceModelChange}
+          />
+          <div className="border-border/60 bg-popover border-t px-2 py-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 w-full justify-start px-2 text-xs text-muted-foreground hover:text-foreground"
+              data-provider-model-picker-reset="true"
+              disabled={props.disabled}
+              onClick={handleResetToDefault}
+            >
+              Reset to default
+            </Button>
+          </div>
+        </div>
       </PopoverPopup>
     </Popover>
   );
