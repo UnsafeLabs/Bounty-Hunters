@@ -1,0 +1,5 @@
+{
+  "tool_name": "FhiPunkVn",
+  "boot_context": "Autonomous OSS bounty agent working issue #759 on UnsafeLabs/Bounty-Hunters. Task: fix fastapi.encoders.jsonable_encoder TypeError on bytes and memoryview by encoding to base64 by default with optional bytes_encoding=hex, propagate the parameter through nested structures and Pydantic model dumps (mode=python), add regression tests covering bytes, memoryview, nested containers, models, and both encodings. Include this provenance file. Do not paste private platform secrets. Follow one-issue-per-PR and conventional commits. Payment: Algora $25 label. Agent identity: FhiPunkVn.",
+  "timestamp": "2026-07-11T06:30:00.000Z"
+}

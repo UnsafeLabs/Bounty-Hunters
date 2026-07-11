@@ -1,3 +1,4 @@
+import base64
 import warnings
 from collections import deque
 from dataclasses import dataclass
@@ -306,6 +307,65 @@ def test_encode_deque_encodes_child_models():
     dq = deque([Model(test="test")])
 
     assert jsonable_encoder(dq)[0]["test"] == "test"
+
+
+def test_encode_bytes_defaults_to_base64():
+    payload = b"\x00\xffbinary"
+    assert jsonable_encoder(payload) == base64.b64encode(payload).decode("ascii")
+
+
+def test_encode_memoryview_defaults_to_base64():
+    payload = b"\x00\xffbinary"
+    assert jsonable_encoder(memoryview(payload)) == base64.b64encode(payload).decode(
+        "ascii"
+    )
+
+
+def test_encode_bytes_as_hex():
+    payload = b"\x00\xffbinary"
+    assert jsonable_encoder(payload, bytes_encoding="hex") == payload.hex()
+
+
+def test_encode_memoryview_as_hex():
+    payload = b"\x00\xffbinary"
+    assert jsonable_encoder(memoryview(payload), bytes_encoding="hex") == payload.hex()
+
+
+def test_encode_nested_bytes_uses_selected_encoding():
+    assert jsonable_encoder(
+        {"payload": [b"\x00\xff", memoryview(b"ok")]}, bytes_encoding="hex"
+    ) == {"payload": ["00ff", "6f6b"]}
+
+
+def test_encode_model_bytes_defaults_to_base64():
+    class ModelWithBytes(BaseModel):
+        payload: bytes
+
+    payload = b"\x00\xffbinary"
+    assert jsonable_encoder(ModelWithBytes(payload=payload)) == {
+        "payload": base64.b64encode(payload).decode("ascii")
+    }
+
+
+def test_encode_model_bytes_as_hex():
+    class ModelWithBytes(BaseModel):
+        payload: bytes
+
+    payload = b"\x00\xffbinary"
+    assert jsonable_encoder(
+        ModelWithBytes(payload=payload), bytes_encoding="hex"
+    ) == {"payload": payload.hex()}
+
+
+def test_encode_dataclass_bytes_base64():
+    @dataclass
+    class ItemWithBytes:
+        payload: bytes
+
+    payload = b"hi"
+    assert jsonable_encoder(ItemWithBytes(payload=payload)) == {
+        "payload": base64.b64encode(payload).decode("ascii")
+    }
 
 
 def test_encode_pydantic_undefined():
