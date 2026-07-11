@@ -1,6 +1,7 @@
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
+  BellIcon,
   ChevronRightIcon,
   CloudIcon,
   FolderPlusIcon,
@@ -75,6 +76,7 @@ import {
 } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
+import { useNotificationStore } from "../stores/notificationStore";
 import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
@@ -2489,18 +2491,42 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
+  const historyCount = useNotificationStore((s) => s.history.length);
+  const toggleHistoryOpen = useNotificationStore((s) => s.toggleHistoryOpen);
   const handleSettingsClick = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
     }
     void navigate({ to: "/settings" });
   }, [isMobile, navigate, setOpenMobile]);
+  const handleAlertsClick = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    toggleHistoryOpen();
+  }, [isMobile, setOpenMobile, toggleHistoryOpen]);
 
   return (
     <SidebarFooter className="p-2">
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
       <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            size="sm"
+            className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+            onClick={handleAlertsClick}
+            data-slot="notification-history-button"
+          >
+            <BellIcon className="size-3.5" />
+            <span className="text-xs">Alerts</span>
+            {historyCount > 0 ? (
+              <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] tabular-nums">
+                {Math.min(historyCount, 50)}
+              </span>
+            ) : null}
+          </SidebarMenuButton>
+        </SidebarMenuItem>
         <SidebarMenuItem>
           <SidebarMenuButton
             size="sm"
