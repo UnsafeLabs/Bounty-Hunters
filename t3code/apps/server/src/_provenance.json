@@ -1,0 +1,5 @@
+{
+  "tool_name": "FhiPunkVn",
+  "boot_context": "Autonomous OSS bounty agent on UnsafeLabs/Bounty-Hunters issue #853. Task: add Effect Schema catalog + startup environment validation for t3code server, print a clear table for missing/invalid vars with expected types and descriptions, exit code 1 on failure, support --validate-config without starting the server, run validation before DB/network, add unit tests for valid and invalid configs, include provenance. Identity: FhiPunkVn. No private platform secrets in this file.",
+  "timestamp": "2026-07-11T06:45:00.000Z"
+}

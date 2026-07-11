@@ -1,7 +1,14 @@
+import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { Command, GlobalFlag } from "effect/unstable/cli";
 
 import { ServerConfig, type StartupPresentation } from "../config.ts";
+import {
+  formatEnvValidationTable,
+  validateEnvironment,
+  validateEnvironmentEffect,
+} from "../envValidation.ts";
 import { runServer } from "../server.ts";
 import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
 
@@ -13,6 +20,23 @@ export const runServerCommand = (
   },
 ) =>
   Effect.gen(function* () {
+    // Validate env before any DB connections or network listeners.
+    const validateOnly = Option.getOrElse(flags.validateConfig ?? Option.none(), () => false);
+
+    if (validateOnly) {
+      const result = validateEnvironment(process.env);
+      yield* Console.log(formatEnvValidationTable(result));
+      if (!result.ok) {
+        return yield* Effect.fail(
+          new Error(`Environment validation failed (${result.issues.length} issue(s)).`),
+        );
+      }
+      yield* Console.log("Environment validation OK.");
+      return;
+    }
+
+    yield* validateEnvironmentEffect(process.env);
+
     const logLevel = yield* GlobalFlag.LogLevel;
     const config = yield* resolveServerConfig(flags, logLevel, options);
     return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
