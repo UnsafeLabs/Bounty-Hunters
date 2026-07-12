@@ -4,8 +4,11 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Result from "effect/Result";
 
 import {
+  ASKPASS_POSIX_SCRIPT,
+  ASKPASS_WINDOWS_SCRIPT,
   buildSshAskpassHelperDescriptor,
   buildSshChildEnvironment,
   isSshAuthFailure,
@@ -47,8 +50,43 @@ describe("ssh auth", () => {
       assert.equal(env.T3_SSH_AUTH_SECRET, "super-secret");
       assert.equal(env.DISPLAY, "t3code");
       assert.equal(yield* fs.exists(askpassPath), true);
-      assert.include(yield* fs.readFileString(askpassPath), 'printf "%s\\n" "$T3_SSH_AUTH_SECRET"');
+      assert.include(yield* fs.readFileString(askpassPath), "mktemp");
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it("builds a POSIX askpass script with private temp files and cleanup traps", () => {
+    assert.include(ASKPASS_POSIX_SCRIPT, 'mktemp "${TMPDIR:-/tmp}/t3code-ssh-askpass.XXXXXX"');
+    assert.include(ASKPASS_POSIX_SCRIPT, 'chmod 600 "$secret_file"');
+    assert.include(ASKPASS_POSIX_SCRIPT, "trap cleanup EXIT");
+    assert.include(ASKPASS_POSIX_SCRIPT, "trap abort INT TERM");
+    assert.include(ASKPASS_POSIX_SCRIPT, 'rm -f "$secret_file"');
+  });
+
+  it.effect("rejects POSIX askpass helper paths with shell metacharacters", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.result(
+        buildSshAskpassHelperDescriptor({
+          directory: "/tmp/t3code askpass;bad",
+          platform: "linux",
+        }),
+      );
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.equal(result.failure._tag, "SshUnsafeAskpassPathError");
+      }
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("marks the POSIX askpass helper executable for owner-only access", () =>
+    Effect.gen(function* () {
+      const descriptor = yield* buildSshAskpassHelperDescriptor({
+        directory: "/tmp/t3code-ssh-askpass",
+        platform: "linux",
+      });
+
+      assert.equal(descriptor.files.at(0)?.mode, 0o700);
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("builds a windows askpass launcher pair", () =>
@@ -63,6 +101,9 @@ describe("ssh auth", () => {
         descriptor.files.map((file) => file.path.split("\\").at(-1)),
         ["ssh-askpass.cmd", "ssh-askpass.ps1"],
       );
+      assert.include(ASKPASS_WINDOWS_SCRIPT, "ConvertTo-SecureString");
+      assert.include(ASKPASS_WINDOWS_SCRIPT, "SecureStringToBSTR");
+      assert.include(ASKPASS_WINDOWS_SCRIPT, "ZeroFreeBSTR");
     }),
   );
 });
