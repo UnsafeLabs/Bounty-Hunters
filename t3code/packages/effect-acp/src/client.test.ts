@@ -146,6 +146,235 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
     }),
   );
 
+  it.effect("refreshes authentication once when the active session expires", () =>
+    Effect.gen(function* () {
+      const expiredSessions = yield* Ref.make<Array<string>>([]);
+      const handle = yield* makeHandle({ ACP_MOCK_PROMPT_EXPIRES_ONCE: "1" });
+      const scope = yield* Scope.make();
+      const acpLayer = AcpClient.layerChildProcess(handle, {
+        onSessionExpired: (sessionId) =>
+          Ref.update(expiredSessions, (current) => [...current, sessionId]),
+      });
+      const context = yield* Layer.buildWithScope(acpLayer, scope);
+
+      yield* Effect.gen(function* () {
+        const acp = yield* AcpClient.AcpClient;
+
+        yield* acp.handleRequestPermission(() =>
+          Effect.succeed({
+            outcome: {
+              outcome: "selected",
+              optionId: "allow",
+            },
+          }),
+        );
+        yield* acp.handleElicitation(() =>
+          Effect.succeed({
+            action: {
+              action: "accept",
+              content: {
+                approved: true,
+              },
+            },
+          }),
+        );
+        yield* acp.handleExtRequest(
+          "x/typed_request",
+          Schema.Struct({ message: Schema.String }),
+          () => Effect.succeed({ ok: true }),
+        );
+        yield* acp.handleExtNotification(
+          "x/typed_notification",
+          Schema.Struct({ count: Schema.Number }),
+          () => Effect.void,
+        );
+
+        yield* acp.agent.initialize({
+          protocolVersion: 1,
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+          },
+          clientInfo: {
+            name: "effect-acp-test",
+            version: "0.0.0",
+          },
+        });
+
+        yield* acp.agent.authenticate({
+          methodId: "cursor_login",
+          _meta: {
+            accessToken: "request-access-token",
+            refreshToken: "request-refresh-token",
+          },
+        });
+
+        const session = yield* acp.agent.createSession({
+          cwd: process.cwd(),
+          mcpServers: [],
+        });
+        const prompt = yield* acp.agent.prompt({
+          sessionId: session.sessionId,
+          prompt: [{ type: "text", text: "hello" }],
+        });
+        assert.equal(prompt.stopReason, "end_turn");
+        assert.deepEqual(yield* Ref.get(expiredSessions), [session.sessionId]);
+
+        const authState = (yield* acp.raw.request("x/auth_state", {})) as {
+          readonly authenticateCount: number;
+          readonly lastRefreshToken: unknown;
+          readonly logoutCount: number;
+          readonly promptCount: number;
+        };
+        assert.equal(authState.authenticateCount, 2);
+        assert.equal(authState.logoutCount, 1);
+        assert.equal(authState.promptCount, 2);
+        assert.equal(authState.lastRefreshToken, "refresh-token-1");
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+    }),
+  );
+
+  it.effect("coalesces concurrent authentication refresh and replays queued prompts", () =>
+    Effect.gen(function* () {
+      const expiredSessions = yield* Ref.make<Array<string>>([]);
+      const handle = yield* makeHandle({ ACP_MOCK_CONCURRENT_PROMPT_EXPIRES: "1" });
+      const scope = yield* Scope.make();
+      const acpLayer = AcpClient.layerChildProcess(handle, {
+        onSessionExpired: (sessionId) =>
+          Ref.update(expiredSessions, (current) => [...current, sessionId]),
+      });
+      const context = yield* Layer.buildWithScope(acpLayer, scope);
+
+      yield* Effect.gen(function* () {
+        const acp = yield* AcpClient.AcpClient;
+
+        yield* acp.handleRequestPermission(() =>
+          Effect.succeed({
+            outcome: {
+              outcome: "selected",
+              optionId: "allow",
+            },
+          }),
+        );
+        yield* acp.handleElicitation(() =>
+          Effect.succeed({
+            action: {
+              action: "accept",
+              content: {
+                approved: true,
+              },
+            },
+          }),
+        );
+        yield* acp.handleExtRequest(
+          "x/typed_request",
+          Schema.Struct({ message: Schema.String }),
+          () => Effect.succeed({ ok: true }),
+        );
+        yield* acp.handleExtNotification(
+          "x/typed_notification",
+          Schema.Struct({ count: Schema.Number }),
+          () => Effect.void,
+        );
+
+        yield* acp.agent.initialize({
+          protocolVersion: 1,
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+          },
+          clientInfo: {
+            name: "effect-acp-test",
+            version: "0.0.0",
+          },
+        });
+        yield* acp.agent.authenticate({ methodId: "cursor_login" });
+
+        const session = yield* acp.agent.createSession({
+          cwd: process.cwd(),
+          mcpServers: [],
+        });
+
+        const prompts = yield* Effect.all(
+          [
+            acp.agent.prompt({
+              sessionId: session.sessionId,
+              prompt: [{ type: "text", text: "one" }],
+            }),
+            acp.agent.prompt({
+              sessionId: session.sessionId,
+              prompt: [{ type: "text", text: "two" }],
+            }),
+          ],
+          { concurrency: 2 },
+        );
+        assert.deepEqual(
+          prompts.map((prompt) => prompt.stopReason),
+          ["end_turn", "end_turn"],
+        );
+
+        const authState = (yield* acp.raw.request("x/auth_state", {})) as {
+          readonly authenticateCount: number;
+          readonly logoutCount: number;
+          readonly promptCount: number;
+        };
+        assert.equal(authState.authenticateCount, 2);
+        assert.equal(authState.logoutCount, 1);
+        assert.equal(authState.promptCount, 4);
+        assert.deepEqual(yield* Ref.get(expiredSessions), [session.sessionId]);
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+    }),
+  );
+
+  it.effect("fails expired requests with a typed authentication error when refresh fails", () =>
+    Effect.gen(function* () {
+      const handle = yield* makeHandle({
+        ACP_MOCK_PROMPT_EXPIRES_ONCE: "1",
+        ACP_MOCK_REFRESH_FAIL: "1",
+      });
+      const scope = yield* Scope.make();
+      const acpLayer = AcpClient.layerChildProcess(handle);
+      const context = yield* Layer.buildWithScope(acpLayer, scope);
+
+      const result = yield* Effect.gen(function* () {
+        const acp = yield* AcpClient.AcpClient;
+
+        yield* acp.agent.initialize({
+          protocolVersion: 1,
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+          },
+          clientInfo: {
+            name: "effect-acp-test",
+            version: "0.0.0",
+          },
+        });
+        yield* acp.agent.authenticate({ methodId: "cursor_login" });
+
+        const session = yield* acp.agent.createSession({
+          cwd: process.cwd(),
+          mcpServers: [],
+        });
+
+        return yield* Effect.exit(
+          acp.agent.prompt({
+            sessionId: session.sessionId,
+            prompt: [{ type: "text", text: "hello" }],
+          }),
+        );
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+
+      if (result._tag !== "Failure") {
+        assert.fail("Expected prompt to fail when refresh fails");
+      }
+      const rendered = Cause.pretty(result.cause);
+      assert.include(rendered, "AcpAuthenticationError");
+      assert.include(rendered, "ACP re-authentication failed");
+      assert.include(rendered, "mock-session-1");
+    }),
+  );
+
   it.effect(
     "returns formatted invalid params when a typed extension request payload is wrong",
     () =>

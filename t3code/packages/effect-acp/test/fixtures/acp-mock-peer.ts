@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 
 import * as AcpAgent from "../../src/agent.ts";
+import * as AcpError from "../../src/errors.ts";
 
 if (process.env.ACP_MOCK_MALFORMED_OUTPUT === "1") {
   process.stdout.write("{not-json}\n");
@@ -16,6 +17,16 @@ if (process.env.ACP_MOCK_EXIT_IMMEDIATELY_CODE !== undefined) {
 }
 
 const sessionId = "mock-session-1";
+let authenticateCount = 0;
+let logoutCount = 0;
+let promptCount = 0;
+let lastRefreshToken: unknown = null;
+
+const authExpired = () =>
+  AcpError.AcpRequestError.authRequired("Session authentication expired", {
+    status: 401,
+    sessionId,
+  });
 
 const program = Effect.gen(function* () {
   const agent = yield* AcpAgent.AcpAgent;
@@ -35,8 +46,35 @@ const program = Effect.gen(function* () {
     }),
   );
 
-  yield* agent.handleAuthenticate(() => Effect.succeed({}));
-  yield* agent.handleLogout(() => Effect.succeed({}));
+  yield* agent.handleAuthenticate((request) =>
+    Effect.gen(function* () {
+      const meta =
+        request._meta && typeof request._meta === "object" && !Array.isArray(request._meta)
+          ? request._meta
+          : undefined;
+      lastRefreshToken = meta?.refreshToken ?? null;
+      authenticateCount++;
+      if (process.env.ACP_MOCK_REFRESH_FAIL === "1" && authenticateCount > 1) {
+        return yield* AcpError.AcpRequestError.authRequired("Refresh failed", {
+          status: 401,
+          sessionId,
+        });
+      }
+
+      return {
+        _meta: {
+          accessToken: `access-token-${authenticateCount}`,
+          refreshToken: `refresh-token-${authenticateCount}`,
+        },
+      };
+    }),
+  );
+  yield* agent.handleLogout(() =>
+    Effect.sync(() => {
+      logoutCount++;
+      return {};
+    }),
+  );
   yield* agent.handleCreateSession(() =>
     Effect.succeed({
       sessionId,
@@ -56,6 +94,15 @@ const program = Effect.gen(function* () {
 
   yield* agent.handlePrompt(() =>
     Effect.gen(function* () {
+      promptCount++;
+      if (process.env.ACP_MOCK_PROMPT_EXPIRES_ONCE === "1" && promptCount === 1) {
+        return yield* authExpired();
+      }
+      if (process.env.ACP_MOCK_CONCURRENT_PROMPT_EXPIRES === "1" && promptCount <= 2) {
+        yield* Effect.sleep("50 millis");
+        return yield* authExpired();
+      }
+
       yield* agent.client.requestPermission({
         sessionId,
         options: [
@@ -120,12 +167,20 @@ const program = Effect.gen(function* () {
     }),
   );
 
-  yield* agent.handleUnknownExtRequest((method, params) =>
-    Effect.succeed({
+  yield* agent.handleUnknownExtRequest((method, params) => {
+    if (method === "x/auth_state") {
+      return Effect.succeed({
+        authenticateCount,
+        logoutCount,
+        lastRefreshToken,
+        promptCount,
+      });
+    }
+    return Effect.succeed({
       echoedMethod: method,
       echoedParams: params ?? null,
-    }),
-  );
+    });
+  });
 
   return yield* Effect.never;
 });

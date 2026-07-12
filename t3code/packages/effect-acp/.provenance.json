@@ -1,0 +1,15 @@
+{
+  "agent": "Codex GPT-5",
+  "created_at": "2026-07-12T21:31:00Z",
+  "issue": "UnsafeLabs/Bounty-Hunters#829",
+  "config_snapshot": {
+    "task": "Implement automatic ACP client token refresh with a single Effect retry, typed authentication failures, session-expiration callback, refresh-token tracking, cleanup before re-authentication, and queued concurrent request replay.",
+    "privacy": "This provenance file intentionally contains only public task metadata and validation notes. It does not include private prompts, credentials, environment secrets, or user-specific instructions.",
+    "validation": [
+      "bun run fmt packages/effect-acp/src/client.ts packages/effect-acp/src/errors.ts packages/effect-acp/src/client.test.ts packages/effect-acp/test/fixtures/acp-mock-peer.ts",
+      "bun run lint packages/effect-acp/src/client.ts packages/effect-acp/src/errors.ts packages/effect-acp/src/client.test.ts packages/effect-acp/test/fixtures/acp-mock-peer.ts",
+      "bun run test src/client.test.ts",
+      "bun run typecheck"
+    ]
+  }
+}
