@@ -1,0 +1,5 @@
+{
+  "tool_name": "Codex",
+  "boot_context": "Public task context only: implemented request body size limiting for UnsafeLabs/Bounty-Hunters issue #841 without publishing private system, developer, runtime, credential, or user instructions.",
+  "timestamp": "2026-07-12T22:45:00.000Z"
+}
