@@ -10,11 +10,10 @@ import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import { identity } from "effect/Function";
 import * as Layer from "effect/Layer";
+import * as Pool from "effect/Pool";
 import * as Scope from "effect/Scope";
-import * as Semaphore from "effect/Semaphore";
 import * as Context from "effect/Context";
 import * as Stream from "effect/Stream";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
@@ -24,6 +23,18 @@ import { SqlError, classifySqliteError } from "effect/unstable/sql/SqlError";
 import * as Statement from "effect/unstable/sql/Statement";
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
+const ACQUIRE_TIMEOUT = Duration.seconds(10);
+const POOL_MIN_SIZE = 1;
+const POOL_MAX_SIZE = 5;
+const POOL_TTL = Duration.minutes(10);
+
+const classifyError = (cause: unknown, message: string, operation: string) =>
+  classifySqliteError(cause, { message, operation });
+
+const acquireTimeoutError = (cause: unknown) =>
+  new SqlError({
+    reason: classifyError(cause, "Timed out acquiring sqlite connection", "acquire"),
+  });
 
 export const TypeId: TypeId = "~local/sqlite-node/SqliteClient";
 
@@ -38,6 +49,7 @@ export interface SqliteClientConfig {
   readonly filename: string;
   readonly readonly?: boolean | undefined;
   readonly allowExtension?: boolean | undefined;
+  readonly disableWAL?: boolean | undefined;
   readonly prepareCacheSize?: number | undefined;
   readonly prepareCacheTTL?: Duration.Input | undefined;
   readonly spanAttributes?: Record<string, unknown> | undefined;
@@ -72,6 +84,38 @@ const checkNodeSqliteCompat = () => {
   return Effect.void;
 };
 
+const isMemoryDatabase = (filename: string) => filename === ":memory:";
+
+const configureDatabase = (db: DatabaseSync, options: SqliteClientConfig) =>
+  Effect.try({
+    try: () => {
+      if (
+        options.disableWAL !== true &&
+        options.readonly !== true &&
+        !isMemoryDatabase(options.filename)
+      ) {
+        db.prepare("PRAGMA journal_mode = WAL").all();
+      }
+      db.prepare("PRAGMA busy_timeout = 5000").all();
+      db.prepare("PRAGMA synchronous = NORMAL").all();
+      db.prepare("PRAGMA foreign_keys = ON").all();
+    },
+    catch: (cause) =>
+      new SqlError({
+        reason: classifyError(cause, "Failed to configure sqlite connection", "configure"),
+      }),
+  });
+
+const resetConnection = (connection: Connection) =>
+  Effect.all(
+    [
+      connection.executeUnprepared("PRAGMA busy_timeout = 5000", [], undefined),
+      connection.executeUnprepared("PRAGMA synchronous = NORMAL", [], undefined),
+      connection.executeUnprepared("PRAGMA foreign_keys = ON", [], undefined),
+    ],
+    { discard: true },
+  );
+
 const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
   options: SqliteClientConfig,
   openDatabase: () => DatabaseSync,
@@ -90,6 +134,7 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
       scope,
       Effect.sync(() => db.close()),
     );
+    yield* configureDatabase(db, options);
 
     const statementReaderCache = new WeakMap<StatementSync, boolean>();
     const hasRows = (statement: StatementSync): boolean => {
@@ -194,23 +239,29 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
     });
   });
 
-  const semaphore = yield* Semaphore.make(1);
-  const connection = yield* makeConnection;
-
-  const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
-  const transactionAcquirer = Effect.uninterruptibleMask((restore) => {
-    const fiber = Fiber.getCurrent()!;
-    const scope = Context.getUnsafe(fiber.context, Scope.Scope);
-    return Effect.as(
-      Effect.tap(restore(semaphore.take(1)), () => Scope.addFinalizer(scope, semaphore.release(1))),
-      connection,
+  const makePooledAcquirer = <A extends Connection>(pool: Pool.Pool<A, SqlError>) =>
+    Effect.acquireRelease(
+      Effect.mapError(Effect.timeout(Pool.get(pool), ACQUIRE_TIMEOUT), acquireTimeoutError),
+      (connection) => Effect.orDie(resetConnection(connection)),
     );
-  });
+
+  const pool = yield* isMemoryDatabase(options.filename)
+    ? Pool.make({
+        acquire: makeConnection,
+        size: 1,
+      })
+    : Pool.makeWithTTL({
+        acquire: makeConnection,
+        min: POOL_MIN_SIZE,
+        max: POOL_MAX_SIZE,
+        timeToLive: POOL_TTL,
+      });
+  const acquirer = makePooledAcquirer(pool);
 
   return yield* Client.make({
     acquirer,
     compiler,
-    transactionAcquirer,
+    transactionAcquirer: acquirer,
     spanAttributes: [
       ...(options.spanAttributes ? Object.entries(options.spanAttributes) : []),
       [ATTR_DB_SYSTEM_NAME, "sqlite"],

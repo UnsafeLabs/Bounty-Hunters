@@ -16,7 +16,7 @@ type Loader = {
   layer: (config: RuntimeSqliteLayerConfig) => Layer.Layer<SqlClient.SqlClient>;
 };
 const defaultSqliteClientLoaders = {
-  bun: () => import("@effect/sql-sqlite-bun/SqliteClient"),
+  bun: () => import("../BunSqliteClient.ts"),
   node: () => import("../NodeSqliteClient.ts"),
 } satisfies Record<string, () => Promise<Loader>>;
 
@@ -29,14 +29,40 @@ const makeRuntimeSqliteLayer = Effect.fn("makeRuntimeSqliteLayer")(function* (
   return clientModule.layer(config);
 }, Layer.unwrap);
 
-const setup = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql`PRAGMA journal_mode = WAL;`;
-    yield* sql`PRAGMA foreign_keys = ON;`;
-    yield* runMigrations();
-  }),
-);
+export const sqliteHealthCheck = Effect.fn("sqliteHealthCheck")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<Record<string, unknown>>`PRAGMA integrity_check;`;
+  const details = rows.map((row) => String(Object.values(row)[0] ?? ""));
+
+  return {
+    ok: details.length === 1 && details[0]?.toLowerCase() === "ok",
+    details,
+  };
+});
+
+const setup = (verifyWal: boolean) =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const journalMode = yield* sql<Record<string, unknown>>`PRAGMA journal_mode = WAL;`;
+      yield* sql`PRAGMA busy_timeout = 5000;`;
+      yield* sql`PRAGMA synchronous = NORMAL;`;
+      yield* sql`PRAGMA foreign_keys = ON;`;
+
+      const mode = String(Object.values(journalMode[0] ?? {})[0] ?? "").toLowerCase();
+      if (verifyWal && mode !== "wal") {
+        return yield* Effect.die(
+          new Error(`SQLite WAL mode verification failed: ${mode || "unknown"}`),
+        );
+      }
+
+      yield* runMigrations();
+    }),
+  );
+
+const isMemoryDatabase = (filename: string) => filename === ":memory:";
+
+const makeSetupLayer = (filename: string) => setup(!isMemoryDatabase(filename));
 
 export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(function* (
   dbPath: string,
@@ -46,7 +72,7 @@ export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(
   yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
 
   return Layer.provideMerge(
-    setup,
+    makeSetupLayer(dbPath),
     makeRuntimeSqliteLayer({
       filename: dbPath,
       spanAttributes: {
@@ -58,7 +84,7 @@ export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(
 }, Layer.unwrap);
 
 export const SqlitePersistenceMemory = Layer.provideMerge(
-  setup,
+  makeSetupLayer(":memory:"),
   makeRuntimeSqliteLayer({ filename: ":memory:" }),
 );
 
