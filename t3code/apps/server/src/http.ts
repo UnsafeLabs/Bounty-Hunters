@@ -24,6 +24,7 @@ import {
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
+import { MetricsAggregator } from "./observability/Services/MetricsAggregator.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { respondToAuthError } from "./auth/http.ts";
@@ -36,6 +37,7 @@ import {
 
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
+const AGGREGATED_METRICS_PATH = "/metrics/aggregated";
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
@@ -132,6 +134,20 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
           Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
         ),
       );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const aggregatedMetricsRouteLayer = HttpRouter.add(
+  "GET",
+  AGGREGATED_METRICS_PATH,
+  Effect.gen(function* () {
+    yield* requireAuthenticatedRequest;
+    const metricsAggregator = yield* MetricsAggregator;
+    const windows = yield* metricsAggregator.snapshot();
+    return HttpServerResponse.jsonUnsafe(windows, {
+      status: 200,
+      headers: browserApiCorsHeaders,
+    });
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

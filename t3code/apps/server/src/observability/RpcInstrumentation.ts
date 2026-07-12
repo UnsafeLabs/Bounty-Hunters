@@ -8,7 +8,13 @@ import * as References from "effect/References";
 import * as Stream from "effect/Stream";
 
 import { outcomeFromExit } from "./Attributes.ts";
-import { metricAttributes, rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
+import {
+  metricAttributes,
+  recordRpcAggregateSample,
+  rpcRequestDuration,
+  rpcRequestsTotal,
+  withMetrics,
+} from "./Metrics.ts";
 
 const RPC_SPAN_PREFIX = "ws.rpc";
 const DEFAULT_RPC_SPAN_ATTRIBUTES = {
@@ -69,6 +75,7 @@ const recordRpcStreamMetrics = <E>(
   Effect.gen(function* () {
     const endedAt = yield* Clock.currentTimeNanos;
     const elapsedNanos = endedAt > startedAt ? endedAt - startedAt : 0n;
+    const outcome = outcomeFromExit(exit);
 
     yield* Metric.update(
       Metric.withAttributes(rpcRequestDuration, metricAttributes({ method })),
@@ -79,11 +86,16 @@ const recordRpcStreamMetrics = <E>(
         rpcRequestsTotal,
         metricAttributes({
           method,
-          outcome: outcomeFromExit(exit),
+          outcome,
         }),
       ),
       1,
     );
+    yield* recordRpcAggregateSample({
+      method,
+      outcome,
+      durationMs: Number(elapsedNanos) / 1_000_000,
+    });
   });
 
 export const observeRpcEffect = <A, E, R>(
@@ -95,6 +107,7 @@ export const observeRpcEffect = <A, E, R>(
     withMetrics({
       counter: rpcRequestsTotal,
       timer: rpcRequestDuration,
+      rpcMethod: method,
       attributes: {
         method,
       },

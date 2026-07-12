@@ -88,6 +88,7 @@ import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
 } from "./observability/Services/BrowserTraceCollector.ts";
+import { MetricsAggregatorLive } from "./observability/Services/MetricsAggregator.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import {
   ProjectSetupScriptRunner,
@@ -693,6 +694,7 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.browserTraceCollector,
         }),
       ),
+      Layer.provideMerge(MetricsAggregatorLive),
       Layer.provide(
         Layer.mock(ServerLifecycleEvents)({
           publish: (event) => Effect.succeed({ ...(event as any), sequence: 1 }),
@@ -1064,6 +1066,29 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.status, 200);
       assertBrowserApiCorsHeaders(response.headers);
       assert.deepEqual(body, testEnvironmentDescriptor);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves authenticated aggregated metrics windows", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const response = yield* HttpClient.get("/metrics/aggregated", {
+        headers: {
+          cookie: yield* getAuthenticatedSessionCookieHeader(),
+        },
+      });
+      const body = (yield* response.json) as ReadonlyArray<{
+        readonly startedAt: string;
+        readonly endedAt: string;
+        readonly sampleCount: number;
+      }>;
+
+      assert.equal(response.status, 200);
+      assert.equal(body.length, 60);
+      assert.equal(typeof body[0]?.startedAt, "string");
+      assert.equal(typeof body[0]?.endedAt, "string");
+      assert.equal(typeof body[0]?.sampleCount, "number");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

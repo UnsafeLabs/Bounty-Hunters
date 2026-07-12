@@ -1,0 +1,5 @@
+{
+  "agent": "Codex",
+  "initial_directives": "Private system, developer, tool, and user-environment instructions are not reproduced here. Public task context: implement UnsafeLabs/Bounty-Hunters issue #856 for T3 Code by adding a MetricsAggregator service with sliding-window RPC metrics aggregation, JSON endpoint, bounded memory, and tests.",
+  "date": "2026-07-12T22:20:00.000Z"
+}

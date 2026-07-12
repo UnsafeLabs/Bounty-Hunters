@@ -8,6 +8,7 @@ import { OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/unstable/obse
 import { ServerConfig } from "../../config.ts";
 import { ServerLoggerLive } from "../../serverLogger.ts";
 import { BrowserTraceCollector } from "../Services/BrowserTraceCollector.ts";
+import { MetricsAggregatorLive } from "../Services/MetricsAggregator.ts";
 
 const otlpSerializationLayer = OtlpSerialization.layerJson;
 
@@ -81,6 +82,12 @@ export const ObservabilityLive = Layer.unwrap(
             },
           }).pipe(Layer.provideMerge(otlpSerializationLayer));
 
-    return Layer.mergeAll(ServerLoggerLive, traceReferencesLayer, tracerLayer, metricsLayer);
+    return Layer.mergeAll(
+      ServerLoggerLive,
+      traceReferencesLayer,
+      tracerLayer,
+      metricsLayer,
+      MetricsAggregatorLive,
+    );
   }),
 );

@@ -3,13 +3,16 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Metric from "effect/Metric";
+import * as Option from "effect/Option";
 import { dual } from "effect/Function";
 
 import {
   compactMetricAttributes,
   normalizeModelMetricLabel,
   outcomeFromExit,
+  type ObservabilityOutcome,
 } from "./Attributes.ts";
+import { MetricsAggregator } from "./Services/MetricsAggregator.ts";
 
 export const rpcRequestsTotal = Metric.counter("t3_rpc_requests_total", {
   description: "Total RPC requests handled by the websocket RPC server.",
@@ -87,6 +90,7 @@ export const increment = (
 export interface WithMetricsOptions {
   readonly counter?: Metric.Metric<number, unknown>;
   readonly timer?: Metric.Metric<Duration.Duration, unknown>;
+  readonly rpcMethod?: string;
   readonly attributes?:
     | Readonly<Record<string, unknown>>
     | (() => Readonly<Record<string, unknown>>);
@@ -94,6 +98,33 @@ export interface WithMetricsOptions {
     outcome: ReturnType<typeof outcomeFromExit>,
   ) => Readonly<Record<string, unknown>>;
 }
+
+export interface RpcAggregateMetricSampleInput {
+  readonly method: string;
+  readonly outcome: ObservabilityOutcome;
+  readonly durationMs: number;
+  readonly timestampMs?: number;
+}
+
+export const recordRpcAggregateSample = (
+  input: RpcAggregateMetricSampleInput,
+): Effect.Effect<void, never, never> =>
+  Effect.gen(function* () {
+    const metricsAggregator = yield* Effect.serviceOption(MetricsAggregator);
+    if (Option.isNone(metricsAggregator)) {
+      return;
+    }
+
+    const timestampMs = input.timestampMs ?? (yield* Clock.currentTimeMillis);
+    yield* metricsAggregator.value
+      .recordRpcSample({
+        method: input.method,
+        outcome: input.outcome,
+        durationMs: input.durationMs,
+        timestampMs,
+      })
+      .pipe(Effect.ignoreCause({ log: true }));
+  });
 
 const withMetricsImpl = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -107,6 +138,7 @@ const withMetricsImpl = <A, E, R>(
     const duration = Duration.nanos(elapsedNanos);
     const baseAttributes =
       typeof options.attributes === "function" ? options.attributes() : (options.attributes ?? {});
+    const outcome = outcomeFromExit(exit);
 
     if (options.timer) {
       yield* Metric.update(
@@ -116,7 +148,6 @@ const withMetricsImpl = <A, E, R>(
     }
 
     if (options.counter) {
-      const outcome = outcomeFromExit(exit);
       yield* Metric.update(
         Metric.withAttributes(
           options.counter,
@@ -128,6 +159,14 @@ const withMetricsImpl = <A, E, R>(
         ),
         1,
       );
+    }
+
+    if (options.rpcMethod) {
+      yield* recordRpcAggregateSample({
+        method: options.rpcMethod,
+        outcome,
+        durationMs: Number(elapsedNanos) / 1_000_000,
+      });
     }
 
     if (Exit.isSuccess(exit)) {
