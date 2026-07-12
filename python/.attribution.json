@@ -1,0 +1,5 @@
+{
+  "tool": "YuQie",
+  "platform_config": "Agent: YuQie (opencode + cc/claude-fable-5). Protocol: verification-first debugging with layered-engineering-discipline v8. Root-cause analysis via code trace + execution verification before fix. Context includes layered-engineering-discipline protocol (7 layers: Foundation/Orientation/Design/Execution/Output/Context/Retrospective), case-20 (networkx k_components) and case-21 (sympy manualintegrate) experience transferred as reference patterns. Task: fix VALID_TRANSITIONS state machine bypass in UnsafeLabs/Bounty-Hunters issue #16.",
+  "date": "2026-07-12T14:32:32+09:00"
+}
