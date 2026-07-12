@@ -15,7 +15,7 @@ import {
 } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { deriveServerPaths } from "../config.ts";
+import { DEFAULT_HTTP_COMPRESSION_LEVEL, deriveServerPaths } from "../config.ts";
 import { resolveServerConfig } from "./config.ts";
 
 const encodeDesktopBootstrap = Schema.encodeEffect(Schema.fromJsonString(DesktopBackendBootstrap));
@@ -92,6 +92,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   T3CODE_NO_BROWSER: "true",
                   T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
                   T3CODE_LOG_WS_EVENTS: "true",
+                  T3CODE_COMPRESSION_LEVEL: "8",
                 },
               }),
             ),
@@ -118,6 +119,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: true,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        httpCompressionLevel: 8,
       });
     }),
   );
@@ -184,6 +186,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: true,
         tailscaleServeEnabled: true,
         tailscaleServePort: 8443,
+        httpCompressionLevel: DEFAULT_HTTP_COMPRESSION_LEVEL,
       });
     }),
   );
@@ -253,6 +256,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: false,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        httpCompressionLevel: DEFAULT_HTTP_COMPRESSION_LEVEL,
       });
     }),
   );
@@ -327,6 +331,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: false,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        httpCompressionLevel: DEFAULT_HTTP_COMPRESSION_LEVEL,
       });
       assert.equal(join(baseDir, "userdata"), resolved.stateDir);
     }),
@@ -452,6 +457,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: true,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        httpCompressionLevel: DEFAULT_HTTP_COMPRESSION_LEVEL,
       });
     }),
   );
@@ -521,6 +527,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: false,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        httpCompressionLevel: DEFAULT_HTTP_COMPRESSION_LEVEL,
       });
     }),
   );
@@ -584,6 +591,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: false,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        httpCompressionLevel: DEFAULT_HTTP_COMPRESSION_LEVEL,
       });
     }),
   );

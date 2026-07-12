@@ -16,6 +16,7 @@ import { Argument, Flag } from "effect/unstable/cli";
 import { readBootstrapEnvelope } from "../bootstrap.ts";
 import {
   DEFAULT_PORT,
+  DEFAULT_HTTP_COMPRESSION_LEVEL,
   deriveServerPaths,
   ensureServerDirectories,
   resolveStaticDir,
@@ -135,6 +136,9 @@ const EnvServerConfig = Config.all({
   tailscaleServePort: Config.port("T3CODE_TAILSCALE_SERVE_PORT").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
+  ),
+  httpCompressionLevel: Config.int("T3CODE_COMPRESSION_LEVEL").pipe(
+    Config.withDefault(DEFAULT_HTTP_COMPRESSION_LEVEL),
   ),
 });
 
@@ -374,6 +378,7 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      httpCompressionLevel: env.httpCompressionLevel,
     };
 
     return config;

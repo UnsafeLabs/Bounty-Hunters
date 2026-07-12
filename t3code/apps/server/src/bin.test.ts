@@ -17,7 +17,12 @@ import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/unstable/cli";
 
 import { cli } from "./bin.ts";
-import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "./config.ts";
+import {
+  DEFAULT_HTTP_COMPRESSION_LEVEL,
+  deriveServerPaths,
+  ServerConfig,
+  type ServerConfigShape,
+} from "./config.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
@@ -78,6 +83,7 @@ const makeCliTestServerConfig = (baseDir: string) =>
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
+      httpCompressionLevel: DEFAULT_HTTP_COMPRESSION_LEVEL,
     } satisfies ServerConfigShape;
   });
 

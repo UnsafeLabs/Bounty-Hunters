@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 
 export const DEFAULT_PORT = 3773;
+export const DEFAULT_HTTP_COMPRESSION_LEVEL = 6;
 
 export const RuntimeMode = Schema.Literals(["web", "desktop"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
@@ -73,6 +74,7 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logWebSocketEvents: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
+  readonly httpCompressionLevel: number;
 }
 
 export const deriveServerPaths = Effect.fn(function* (
@@ -168,6 +170,7 @@ export class ServerConfig extends Context.Service<ServerConfig, ServerConfigShap
           logWebSocketEvents: false,
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
+          httpCompressionLevel: DEFAULT_HTTP_COMPRESSION_LEVEL,
           port: 0,
           host: undefined,
           desktopBootstrapToken: undefined,

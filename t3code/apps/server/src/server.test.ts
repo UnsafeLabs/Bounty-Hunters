@@ -54,7 +54,7 @@ import { vi } from "vitest";
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import type { ServerConfigShape } from "./config.ts";
-import { deriveServerPaths, ServerConfig } from "./config.ts";
+import { DEFAULT_HTTP_COMPRESSION_LEVEL, deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
@@ -371,6 +371,7 @@ const buildAppUnderTest = (options?: {
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
+      httpCompressionLevel: DEFAULT_HTTP_COMPRESSION_LEVEL,
       ...options?.config,
     };
     const layerConfig = Layer.succeed(ServerConfig, config);

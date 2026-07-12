@@ -8,7 +8,12 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
 
-import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "../../config.ts";
+import {
+  DEFAULT_HTTP_COMPRESSION_LEVEL,
+  deriveServerPaths,
+  ServerConfig,
+  type ServerConfigShape,
+} from "../../config.ts";
 import { ServerEnvironment } from "../Services/ServerEnvironment.ts";
 import { ServerEnvironmentLive } from "./ServerEnvironment.ts";
 
@@ -37,6 +42,7 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     logWebSocketEvents: false,
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
+    httpCompressionLevel: DEFAULT_HTTP_COMPRESSION_LEVEL,
     port: 0,
     host: undefined,
     desktopBootstrapToken: undefined,
