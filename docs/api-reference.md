@@ -48,7 +48,7 @@ Returns a paginated list of all available bounties.
 ### Create Bounty
 
 ```
-GET /bounties
+POST /bounties
 ```
 
 Creates a new bounty listing.
@@ -109,7 +109,7 @@ All endpoints are rate-limited. Current limits:
 | /bounties         | GET    | 100 req/min      |
 | /bounties         | POST   | 10 req/min       |
 | /bounties/:id     | GET    | 100 req/min      |
-  /bounties/:id/claims | POST | 5 req/min     |
+|   /bounties/:id/claims | POST | 5 req/min     |
 
 ## Error Codes
 

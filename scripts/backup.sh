@@ -21,7 +21,7 @@ log_message() {
 }
 
 # Check if backup directory exists
-if [ ! -d $BACKUP_DIR ]; then
+if [ ! -d "$BACKUP_DIR" ]; then
     echo "Creating backup directory..."
     mkdir -p $BACKUP_DIR
     if [ $? -ne 0 ]; then
