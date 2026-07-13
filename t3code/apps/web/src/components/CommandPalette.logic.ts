@@ -23,6 +23,7 @@ export interface CommandPaletteItem {
   /** Optional content rendered inline after the title text (before the timestamp). */
   readonly titleTrailingContent?: ReactNode;
   readonly shortcutCommand?: KeybindingCommand;
+  readonly fuzzyMatchIndices?: ReadonlyArray<number> | null;
 }
 
 export interface CommandPaletteActionItem extends CommandPaletteItem {
@@ -189,7 +190,7 @@ function rankSearchFieldMatch(field: string, normalizedQuery: string): number {
   return 1;
 }
 
-function rankCommandPaletteItemMatch(
+export function rankCommandPaletteItemMatch(
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem,
   normalizedQuery: string,
 ): number {
@@ -206,6 +207,57 @@ function rankCommandPaletteItemMatch(
   }
 
   return 0;
+}
+
+export interface FuzzyMatchResult {
+  readonly matched: boolean;
+  readonly score: number;
+  readonly indices: ReadonlyArray<number>;
+}
+
+export function fuzzyMatch(query: string, target: string): FuzzyMatchResult {
+  const q = normalizeSearchText(query);
+  const t = normalizeSearchText(target);
+  if (q.length === 0) {
+    return { matched: true, score: 0, indices: [] };
+  }
+  let qi = 0;
+  let score = 0;
+  let lastMatchIdx = -2;
+  let consecutive = 0;
+  const indices: number[] = [];
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) {
+      indices.push(ti);
+      const isConsecutive = ti === lastMatchIdx + 1;
+      if (isConsecutive) {
+        consecutive += 1;
+        score += 8 + consecutive * 2;
+      } else {
+        consecutive = 0;
+        score += 2;
+      }
+      const prev = t[ti - 1];
+      const isBoundary =
+        ti === 0 ||
+        prev === " " ||
+        prev === "-" ||
+        prev === "_" ||
+        prev === "/" ||
+        prev === "." ||
+        /[A-Z]/.test(target[ti]);
+      if (isBoundary) {
+        score += 12;
+      }
+      lastMatchIdx = ti;
+      qi += 1;
+    }
+  }
+  if (qi < q.length) {
+    return { matched: false, score: 0, indices: [] };
+  }
+  score += Math.max(0, 30 - target.length);
+  return { matched: true, score, indices };
 }
 
 export function filterCommandPaletteGroups(input: {
@@ -254,15 +306,37 @@ export function filterCommandPaletteGroups(input: {
   return searchableGroups.flatMap((group) => {
     const items = group.items
       .map((item, index) => {
+        const titleStr = typeof item.title === "string" ? item.title : "";
+        const titleFuzzy =
+          titleStr.length > 0
+            ? fuzzyMatch(normalizedQuery, titleStr)
+            : { matched: false, score: 0, indices: [] as number[] };
         const haystack = normalizeSearchText(item.searchTerms.join(" "));
-        if (!haystack.includes(normalizedQuery)) {
+        const hayFuzzy = fuzzyMatch(normalizedQuery, haystack);
+
+        let bestScore = Number.NEGATIVE_INFINITY;
+        let bestIndices: ReadonlyArray<number> | null = null;
+        if (titleFuzzy.matched) {
+          bestScore = titleFuzzy.score;
+          bestIndices = titleFuzzy.indices;
+        }
+        if (hayFuzzy.matched && hayFuzzy.score >= bestScore) {
+          bestScore = hayFuzzy.score;
+          bestIndices = hayFuzzy.indices;
+        }
+        if (bestScore === Number.NEGATIVE_INFINITY) {
           return null;
         }
 
+        const highlightedItem =
+          bestIndices && bestIndices.length > 0 && titleStr.length > 0
+            ? { ...item, fuzzyMatchIndices: bestIndices }
+            : item;
+
         return {
-          item,
+          item: highlightedItem,
           index,
-          rank: rankCommandPaletteItemMatch(item, normalizedQuery),
+          rank: bestScore,
         };
       })
       .filter(
