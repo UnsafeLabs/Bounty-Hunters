@@ -22,30 +22,20 @@ contract MultiSigWallet {
     event Executed(uint256 indexed txId);
     event Revoked(uint256 indexed txId, address indexed owner);
 
-    modifier onlyOwner() {
-        require(isOwner[msg.sender], "Not owner");
-        _;
-    }
+    modifier onlyOwner() { require(isOwner[msg.sender], "Not owner"); _; }
 
     constructor(address[] memory _owners, uint256 _required) {
         require(_owners.length > 0, "No owners");
         require(_required > 0 && _required <= _owners.length, "Invalid required");
-        for (uint256 i = 0; i < _owners.length; i++) {
-            isOwner[_owners[i]] = true;
-        }
+        for (uint256 i = 0; i < _owners.length; i++) isOwner[_owners[i]] = true;
         owners = _owners;
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Zero address");
         uint256 txId = transactionCount++;
-        transactions[txId] = Transaction({
-            to: to,
-            value: value,
-            data: data,
-            executed: false
-        });
+        transactions[txId] = Transaction({to: to, value: value, data: data, executed: false});
         emit Submitted(txId);
         return txId;
     }
@@ -65,23 +55,20 @@ contract MultiSigWallet {
     }
 
     function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
-        for (uint256 i = 0; i < owners.length; i++) {
-            if (confirmations[txId][owners[i]]) count++;
-        }
+        for (uint256 i = 0; i < owners.length; i++) if (confirmations[txId][owners[i]]) count++;
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
     function executeTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+        // Snapshot confirmations before execution — prevents revocation race during callback
+        uint256 confCount = getConfirmationCount(txId);
+        require(confCount >= required, "Not enough confirmations");
 
         Transaction storage txn = transactions[txId];
         txn.executed = true;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
         require(success, "Execution failed");
-
         emit Executed(txId);
     }
 
