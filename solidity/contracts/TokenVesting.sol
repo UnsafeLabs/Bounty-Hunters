@@ -8,71 +8,103 @@ contract TokenVesting {
     address public beneficiary;
     address public owner;
 
-    uint256 public totalAllocation;
     uint256 public start;
     uint256 public cliff;
     uint256 public duration;
-    uint256 public claimed;
+    uint256 public totalAllocation;
+    uint256 public released;
+    uint256 public vestedAtRevocation;
+
     bool public revoked;
 
-    event TokensClaimed(address indexed beneficiary, uint256 amount);
-    event VestingRevoked(address indexed beneficiary, uint256 unvested);
+    event TokensReleased(uint256 amount);
+    event VestingRevoked(uint256 unvestedAmount);
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
 
     constructor(
         address _token,
         address _beneficiary,
-        uint256 _totalAllocation,
         uint256 _start,
         uint256 _cliffDuration,
-        uint256 _vestingDuration
+        uint256 _duration,
+        uint256 _totalAllocation
     ) {
+        require(_beneficiary != address(0), "Invalid beneficiary");
+        require(_duration > 0, "Duration must be > 0");
+        require(_cliffDuration <= _duration, "Cliff longer than duration");
+
         token = IERC20(_token);
         beneficiary = _beneficiary;
         owner = msg.sender;
-        totalAllocation = _totalAllocation;
         start = _start;
         cliff = _start + _cliffDuration;
-        duration = _vestingDuration;
+        duration = _duration;
+        totalAllocation = _totalAllocation;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
     function vestedAmount() public view returns (uint256) {
-        if (block.timestamp < cliff) return 0;
-        if (block.timestamp >= start + duration) return totalAllocation;
+        if (block.timestamp < cliff) {
+            return 0;
+        }
+        if (revoked) {
+            return vestedAtRevocation;
+        }
+        if (block.timestamp >= start + duration) {
+            return totalAllocation;
+        }
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+
+        // Overflow-safe linear vesting: divide first, then handle remainder separately.
+        uint256 vestedBase = (totalAllocation / duration) * elapsed;
+        uint256 vestedRemainder = (totalAllocation % duration) * elapsed / duration;
+        return vestedBase + vestedRemainder;
     }
 
-    function claimable() public view returns (uint256) {
-        return vestedAmount() - claimed;
+    function releasableAmount() public view returns (uint256) {
+        return vestedAmount() - released;
     }
 
-    function claim() external {
-        require(msg.sender == beneficiary, "Not beneficiary");
-        uint256 amount = claimable();
-        require(amount > 0, "Nothing to claim");
-        claimed += amount;
-        token.transfer(beneficiary, amount);
-        emit TokensClaimed(beneficiary, amount);
+    function release() external {
+        uint256 unreleased = releasableAmount();
+        require(unreleased > 0, "No tokens to release");
+
+        released += unreleased;
+        token.transfer(beneficiary, unreleased);
+
+        emit TokensReleased(unreleased);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
-    function revoke() external {
-        require(msg.sender == owner, "Not owner");
+    function revoke() external onlyOwner {
         require(!revoked, "Already revoked");
-        revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
-
-        if (vested > claimed) {
-            token.transfer(beneficiary, vested - claimed);
+        uint256 unvested;
+        if (block.timestamp < cliff) {
+            unvested = totalAllocation - released;
+        } else {
+            unvested = totalAllocation - vested;
         }
+
+        vestedAtRevocation = vested;
+        revoked = true;
         token.transfer(owner, unvested);
-        emit VestingRevoked(beneficiary, unvested);
+
+        emit VestingRevoked(unvested);
+    }
+
+    function getVestingInfo() external view returns (
+        uint256 _start,
+        uint256 _cliff,
+        uint256 _duration,
+        uint256 _totalAllocation,
+        uint256 _released,
+        uint256 _vested
+    ) {
+        return (start, cliff, duration, totalAllocation, released, vestedAmount());
     }
 }
