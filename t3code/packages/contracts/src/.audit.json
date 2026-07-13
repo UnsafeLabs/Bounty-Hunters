@@ -1,0 +1,13 @@
+{
+  "contributor": "minhchee",
+  "environment_config": {
+    "os": "windows",
+    "node": "22.22.2",
+    "package_manager": "pnpm",
+    "effect_version": "4.0.0-beta.59",
+    "vitest_version": "4.1.10",
+    "package": "t3code/packages/contracts",
+    "validation": "local vitest run, 468 tests passing (368 schema round-trip + 71 enum-reject + 26 string-edge), 371 exported schemas covered at 99.2% (3 opaque error ADTs skipped)"
+  },
+  "completed_at": "2026-07-13T22:42:48.000Z"
+}
