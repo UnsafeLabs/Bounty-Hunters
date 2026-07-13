@@ -27,8 +27,15 @@ source .venv/bin/activate
 
 ### Step 3: Install Dependencies
 
+### Step 4: Set Up Environment Variables
+Copy `.env.example` to `.env` and configure environment variables.
 ```bash
-pip install bounty-hunter
+cp .env.example .env
+```
+
+
+```bash
+pip install bounty-hunters
 ```
 
 This will install the core package and all required dependencies.
