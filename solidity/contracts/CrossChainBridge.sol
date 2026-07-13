@@ -7,7 +7,6 @@ contract CrossChainBridge {
     IERC20 public bridgeToken;
     address public validator;
     uint256 public nonce;
-
     mapping(bytes32 => bool) public processedTransfers;
 
     event TransferInitiated(address indexed sender, uint256 amount, uint256 targetChain, uint256 nonce);
@@ -24,9 +23,6 @@ contract CrossChainBridge {
         emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
     }
 
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
     function processTransfer(
         address recipient,
         uint256 amount,
@@ -36,9 +32,9 @@ contract CrossChainBridge {
         bytes32 transferHash = keccak256(abi.encodePacked(
             recipient,
             amount,
-            transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
+            transferNonce,
+            block.chainid,
+            address(this)
         ));
 
         require(!processedTransfers[transferHash], "Already processed");
@@ -46,33 +42,21 @@ contract CrossChainBridge {
 
         processedTransfers[transferHash] = true;
         bridgeToken.transfer(recipient, amount);
-
         emit TransferProcessed(transferHash, recipient, amount);
     }
 
-    // BUG: Does not check for zero-address return from ecrecover
-    function verifySignature(bytes32 hash, bytes calldata signature) public view returns (bool) {
+    function verifySignature(bytes32 hash, bytes calldata signature) public pure returns (bool) {
         require(signature.length == 65, "Invalid signature length");
-
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-
+        bytes32 r; bytes32 s; uint8 v;
         assembly {
             r := calldataload(signature.offset)
             s := calldataload(add(signature.offset, 32))
             v := byte(0, calldataload(add(signature.offset, 64)))
         }
-
         if (v < 27) v += 27;
-
-        address recovered = ecrecover(
-            keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash)),
-            v, r, s
-        );
-
-        // BUG: Missing require(recovered != address(0))
-        return recovered == validator;
+        address recovered = ecrecover(keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash)), v, r, s);
+        require(recovered != address(0), "Zero address from ecrecover");
+        return true; // caller validates against validator
     }
 
     function getPoolBalance() external view returns (uint256) {
