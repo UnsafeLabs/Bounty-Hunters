@@ -3,7 +3,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -19,6 +19,15 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+import {
+  PROVIDER_MODEL_PICKER_STORAGE_KEY,
+  readPersistedSelection,
+  writePersistedSelection,
+  clearPersistedSelection,
+  isSelectionValid,
+  resolveDefaultSelection,
+  type KeyValueStorage,
+} from "./providerModelPickerStorage";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -86,9 +95,86 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
+  // --- localStorage persistence (issue #834) ---------------------------------
+  const didRestore = useRef(false);
+  const storage: KeyValueStorage | null =
+    typeof window !== "undefined" && window.localStorage
+      ? (window.localStorage as KeyValueStorage)
+      : null;
+
+  // On mount (once the instance list is available) restore the persisted
+  // selection. Invalid persisted values are cleared and the selection falls
+  // back to the first available provider/model.
+  useEffect(() => {
+    if (didRestore.current) return;
+    if (props.instanceEntries.length === 0) return; // wait for entries to load
+    didRestore.current = true;
+    if (!storage) return;
+    const deps = {
+      instanceEntries: props.instanceEntries,
+      modelOptionsByInstance: props.modelOptionsByInstance,
+    };
+    const persisted = readPersistedSelection(storage);
+    if (persisted && isSelectionValid(persisted, deps)) {
+      if (persisted.instanceId !== props.activeInstanceId || persisted.model !== props.model) {
+        props.onInstanceModelChange(persisted.instanceId as ProviderInstanceId, persisted.model);
+      }
+    } else if (persisted) {
+      clearPersistedSelection(storage);
+      const def = resolveDefaultSelection(deps);
+      if (def) {
+        props.onInstanceModelChange(def.instanceId as ProviderInstanceId, def.model);
+      }
+    }
+  }, [props.instanceEntries, props.modelOptionsByInstance]);
+
+  // Keep other browser tabs in sync: a storage event for our key restores the
+  // newly written selection (or falls back when it is invalid).
+  useEffect(() => {
+    if (!storage) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== PROVIDER_MODEL_PICKER_STORAGE_KEY) return;
+      const deps = {
+        instanceEntries: props.instanceEntries,
+        modelOptionsByInstance: props.modelOptionsByInstance,
+      };
+      const persisted = readPersistedSelection(storage);
+      if (persisted && isSelectionValid(persisted, deps)) {
+        props.onInstanceModelChange(persisted.instanceId as ProviderInstanceId, persisted.model);
+      } else if (persisted) {
+        clearPersistedSelection(storage);
+        const def = resolveDefaultSelection(deps);
+        if (def) {
+          props.onInstanceModelChange(def.instanceId as ProviderInstanceId, def.model);
+        }
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [props.instanceEntries, props.modelOptionsByInstance, props.onInstanceModelChange]);
+
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
+    setIsMenuOpen(false);
+    if (storage) {
+      writePersistedSelection(storage, { instanceId: String(instanceId), model });
+    }
+  };
+
+  const handleResetToDefault = () => {
+    if (props.disabled) return;
+    if (storage) {
+      clearPersistedSelection(storage);
+    }
+    const deps = {
+      instanceEntries: props.instanceEntries,
+      modelOptionsByInstance: props.modelOptionsByInstance,
+    };
+    const def = resolveDefaultSelection(deps);
+    if (def) {
+      props.onInstanceModelChange(def.instanceId as ProviderInstanceId, def.model);
+    }
     setIsMenuOpen(false);
   };
 
@@ -181,6 +267,17 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
         />
+        <div className="flex items-center justify-center border-t border-border/60 px-2 py-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleResetToDefault}
+            disabled={props.disabled}
+            className="text-muted-foreground/70 hover:text-foreground/80"
+          >
+            Reset to default
+          </Button>
+        </div>
       </PopoverPopup>
     </Popover>
   );
