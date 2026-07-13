@@ -148,6 +148,10 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         initialSnapshot: (settings) =>
           makePendingOpenCodeProvider(settings).pipe(Effect.map(stampIdentity)),
         checkProvider,
+        providerCacheOptions: {
+          modelListTtl: Duration.millis(serverConfig.providerModelCacheTtlMs),
+          capacity: serverConfig.providerApiCacheMaxEntries,
+        },
         enrichSnapshot: ({ snapshot, publishSnapshot }) =>
           enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities).pipe(
             Effect.provideService(HttpClient.HttpClient, httpClient),

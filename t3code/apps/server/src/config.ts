@@ -14,6 +14,12 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 
+import {
+  DEFAULT_PROVIDER_API_CACHE_MAX_ENTRIES,
+  DEFAULT_PROVIDER_CAPABILITY_CACHE_TTL_MS,
+  DEFAULT_PROVIDER_MODEL_CACHE_TTL_MS,
+} from "./provider/ProviderCache.ts";
+
 export const DEFAULT_PORT = 3773;
 
 export const RuntimeMode = Schema.Literals(["web", "desktop"]);
@@ -73,6 +79,9 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logWebSocketEvents: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
+  readonly providerModelCacheTtlMs: number;
+  readonly providerCapabilityCacheTtlMs: number;
+  readonly providerApiCacheMaxEntries: number;
 }
 
 export const deriveServerPaths = Effect.fn(function* (
@@ -168,6 +177,9 @@ export class ServerConfig extends Context.Service<ServerConfig, ServerConfigShap
           logWebSocketEvents: false,
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
+          providerModelCacheTtlMs: DEFAULT_PROVIDER_MODEL_CACHE_TTL_MS,
+          providerCapabilityCacheTtlMs: DEFAULT_PROVIDER_CAPABILITY_CACHE_TTL_MS,
+          providerApiCacheMaxEntries: DEFAULT_PROVIDER_API_CACHE_MAX_ENTRIES,
           port: 0,
           host: undefined,
           desktopBootstrapToken: undefined,

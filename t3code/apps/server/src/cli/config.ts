@@ -24,6 +24,11 @@ import {
   type StartupPresentation,
 } from "../config.ts";
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
+import {
+  DEFAULT_PROVIDER_API_CACHE_MAX_ENTRIES,
+  DEFAULT_PROVIDER_CAPABILITY_CACHE_TTL_MS,
+  DEFAULT_PROVIDER_MODEL_CACHE_TTL_MS,
+} from "../provider/ProviderCache.ts";
 
 export const modeFlag = Flag.choice("mode", RuntimeMode.literals).pipe(
   Flag.withDescription("Runtime mode. `desktop` keeps loopback defaults unless overridden."),
@@ -135,6 +140,15 @@ const EnvServerConfig = Config.all({
   tailscaleServePort: Config.port("T3CODE_TAILSCALE_SERVE_PORT").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
+  ),
+  providerModelCacheTtlMs: Config.int("T3CODE_PROVIDER_MODEL_CACHE_TTL_MS").pipe(
+    Config.withDefault(DEFAULT_PROVIDER_MODEL_CACHE_TTL_MS),
+  ),
+  providerCapabilityCacheTtlMs: Config.int("T3CODE_PROVIDER_CAPABILITY_CACHE_TTL_MS").pipe(
+    Config.withDefault(DEFAULT_PROVIDER_CAPABILITY_CACHE_TTL_MS),
+  ),
+  providerApiCacheMaxEntries: Config.int("T3CODE_PROVIDER_API_CACHE_MAX_ENTRIES").pipe(
+    Config.withDefault(DEFAULT_PROVIDER_API_CACHE_MAX_ENTRIES),
   ),
 });
 
@@ -374,6 +388,9 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      providerModelCacheTtlMs: env.providerModelCacheTtlMs,
+      providerCapabilityCacheTtlMs: env.providerCapabilityCacheTtlMs,
+      providerApiCacheMaxEntries: env.providerApiCacheMaxEntries,
     };
 
     return config;

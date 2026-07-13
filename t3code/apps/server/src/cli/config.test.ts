@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
 import NodeOS from "node:os";
 
 import { assert, expect, it } from "@effect/vitest";
@@ -46,14 +48,18 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     otlpExportIntervalMs: 10_000,
     otlpServiceName: "t3-server",
   } as const;
+  const defaultProviderApiCacheConfig = {
+    providerModelCacheTtlMs: 5 * 60 * 1000,
+    providerCapabilityCacheTtlMs: 15 * 60 * 1000,
+    providerApiCacheMaxEntries: 256,
+  } as const;
 
   const openBootstrapFd = Effect.fn(function* (payload: DesktopBackendBootstrapValue) {
     const fs = yield* FileSystem.FileSystem;
     const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-", suffix: ".ndjson" });
     const encoded = yield* encodeDesktopBootstrap(payload);
     yield* fs.writeFileString(filePath, `${encoded}\n`);
-    const { fd } = yield* fs.open(filePath, { flag: "r" });
-    return fd;
+    return NodeFS.openSync(filePath, "r");
   });
 
   it.effect("falls back to effect/config values when flags are omitted", () =>
@@ -103,6 +109,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Warn",
         ...defaultObservabilityConfig,
+        ...defaultProviderApiCacheConfig,
         mode: "desktop",
         port: 4001,
         cwd: process.cwd(),
@@ -169,6 +176,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Debug",
         ...defaultObservabilityConfig,
+        ...defaultProviderApiCacheConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -238,6 +246,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
+        ...defaultProviderApiCacheConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -260,7 +269,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   it.effect("uses bootstrap envelope values as fallbacks when flags and env are absent", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
-      const baseDir = "/tmp/t3-bootstrap-home";
+      const baseDir = join(NodeOS.tmpdir(), "t3-bootstrap-home");
       const fd = yield* openBootstrapFd(
         makeDesktopBootstrap({
           port: 4888,
@@ -312,6 +321,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         ...defaultObservabilityConfig,
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
+        ...defaultProviderApiCacheConfig,
         mode: "desktop",
         port: 4888,
         cwd: process.cwd(),
@@ -437,6 +447,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Debug",
         ...defaultObservabilityConfig,
+        ...defaultProviderApiCacheConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -506,6 +517,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         ...defaultObservabilityConfig,
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
+        ...defaultProviderApiCacheConfig,
         mode: "desktop",
         port: 4888,
         cwd: process.cwd(),
@@ -569,6 +581,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
+        ...defaultProviderApiCacheConfig,
         mode: "web",
         port: 3773,
         cwd: process.cwd(),

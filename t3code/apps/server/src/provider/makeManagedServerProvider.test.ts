@@ -7,6 +7,7 @@ import * as Fiber from "effect/Fiber";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import { makeManagedServerProvider } from "./makeManagedServerProvider.ts";
 
@@ -185,6 +186,56 @@ describe("makeManagedServerProvider", () => {
         assert.strictEqual(yield* Ref.get(checkCalls), 2);
       }),
     ),
+  );
+
+  it.effect("caches background provider checks until settings change invalidates the cache", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const settingsRef = yield* Ref.make<TestSettings>({ enabled: true });
+        const settingsChanges = yield* PubSub.unbounded<TestSettings>();
+        const checkCalls = yield* Ref.make(0);
+        const releaseInitialCheck = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Ref.get(settingsRef),
+          streamSettings: Stream.fromPubSub(settingsChanges),
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1
+                ? Deferred.await(releaseInitialCheck).pipe(Effect.as(refreshedSnapshot))
+                : Effect.succeed(refreshedSnapshotSecond),
+            ),
+          ),
+          providerCacheOptions: {
+            modelListTtl: "1 hour",
+            capacity: 4,
+          },
+          refreshInterval: "100 millis",
+        });
+        const initialUpdateFiber = yield* Stream.take(provider.streamChanges, 1).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+
+        yield* Deferred.succeed(releaseInitialCheck, undefined);
+        yield* Fiber.join(initialUpdateFiber);
+
+        yield* TestClock.adjust("100 millis");
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+
+        yield* Ref.set(settingsRef, { enabled: false });
+        yield* PubSub.publish(settingsChanges, { enabled: false });
+
+        assert.deepStrictEqual(yield* provider.getSnapshot, refreshedSnapshotSecond);
+        assert.strictEqual(yield* Ref.get(checkCalls), 2);
+      }),
+    ).pipe(Effect.provide(TestClock.layer())),
   );
 
   it.effect("streams supplemental snapshot updates after the base provider check completes", () =>

@@ -371,6 +371,9 @@ const buildAppUnderTest = (options?: {
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
+      providerModelCacheTtlMs: 5 * 60 * 1000,
+      providerCapabilityCacheTtlMs: 15 * 60 * 1000,
+      providerApiCacheMaxEntries: 256,
       ...options?.config,
     };
     const layerConfig = Layer.succeed(ServerConfig, config);

@@ -11,6 +11,11 @@ import * as Semaphore from "effect/Semaphore";
 
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 import { ServerSettingsError } from "@t3tools/contracts";
+import {
+  DEFAULT_PROVIDER_API_CACHE_MAX_ENTRIES,
+  DEFAULT_PROVIDER_MODEL_CACHE_TTL_MS,
+  makeProviderApiCache,
+} from "./ProviderCache.ts";
 
 interface ProviderSnapshotState {
   readonly snapshot: ServerProvider;
@@ -26,6 +31,10 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   readonly haveSettingsChanged: (previous: Settings, next: Settings) => boolean;
   readonly initialSnapshot: (settings: Settings) => Effect.Effect<ServerProvider>;
   readonly checkProvider: Effect.Effect<ServerProvider, ServerSettingsError>;
+  readonly providerCacheOptions?: {
+    readonly modelListTtl?: Duration.Input | undefined;
+    readonly capacity?: number | undefined;
+  };
   readonly enrichSnapshot?: (input: {
     readonly settings: Settings;
     readonly snapshot: ServerProvider;
@@ -41,6 +50,15 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   );
   const initialSettings = yield* input.getSettings;
   const initialSnapshot = yield* input.initialSnapshot(initialSettings);
+  const providerCache = yield* makeProviderApiCache<ServerProvider, ServerSettingsError>({
+    provider: String(initialSnapshot.driver),
+    instanceId: String(initialSnapshot.instanceId),
+    kind: "modelList",
+    ttl:
+      input.providerCacheOptions?.modelListTtl ??
+      Duration.millis(DEFAULT_PROVIDER_MODEL_CACHE_TTL_MS),
+    capacity: input.providerCacheOptions?.capacity ?? DEFAULT_PROVIDER_API_CACHE_MAX_ENTRIES,
+  });
   const snapshotStateRef = yield* Ref.make<ProviderSnapshotState>({
     snapshot: initialSnapshot,
     enrichmentGeneration: 0,
@@ -99,16 +117,27 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
 
   const applySnapshotBase = Effect.fn("applySnapshot")(function* (
     nextSettings: Settings,
-    options?: { readonly forceRefresh?: boolean },
+    options?: { readonly bypassProviderCache?: boolean; readonly forceRefresh?: boolean },
   ) {
     const forceRefresh = options?.forceRefresh === true;
     const previousSettings = yield* Ref.get(settingsRef);
-    if (!forceRefresh && !input.haveSettingsChanged(previousSettings, nextSettings)) {
+    const settingsChanged = input.haveSettingsChanged(previousSettings, nextSettings);
+    if (!forceRefresh && !settingsChanged) {
       yield* Ref.set(settingsRef, nextSettings);
       return yield* Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot));
     }
 
-    const nextSnapshot = yield* input.checkProvider;
+    if (settingsChanged) {
+      yield* providerCache.invalidate("snapshot");
+    }
+
+    const nextSnapshot =
+      options?.bypassProviderCache === true
+        ? yield* input.checkProvider
+        : yield* providerCache.get({
+            key: "snapshot",
+            lookup: input.checkProvider,
+          });
     const nextGeneration = yield* Ref.modify(snapshotStateRef, (state) => {
       const generation = input.enrichSnapshot
         ? state.enrichmentGeneration + 1
@@ -126,12 +155,21 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     yield* restartSnapshotEnrichment(nextSettings, nextSnapshot, nextGeneration);
     return nextSnapshot;
   });
-  const applySnapshot = (nextSettings: Settings, options?: { readonly forceRefresh?: boolean }) =>
-    refreshSemaphore.withPermits(1)(applySnapshotBase(nextSettings, options));
+  const applySnapshot = (
+    nextSettings: Settings,
+    options?: { readonly bypassProviderCache?: boolean; readonly forceRefresh?: boolean },
+  ) => refreshSemaphore.withPermits(1)(applySnapshotBase(nextSettings, options));
 
-  const refreshSnapshot = Effect.fn("refreshSnapshot")(function* () {
+  const refreshSnapshot = Effect.fn("refreshSnapshot")(function* (options?: {
+    readonly bypassProviderCache?: boolean;
+  }) {
     const nextSettings = yield* input.getSettings;
-    return yield* applySnapshot(nextSettings, { forceRefresh: true });
+    return yield* applySnapshot(
+      nextSettings,
+      options?.bypassProviderCache === true
+        ? { bypassProviderCache: true, forceRefresh: true }
+        : { forceRefresh: true },
+    );
   });
 
   yield* Stream.runForEach(input.streamSettings, (nextSettings) =>
@@ -157,7 +195,10 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       Effect.tapError(Effect.logError),
       Effect.orDie,
     ),
-    refresh: refreshSnapshot().pipe(Effect.tapError(Effect.logError), Effect.orDie),
+    refresh: refreshSnapshot({ bypassProviderCache: true }).pipe(
+      Effect.tapError(Effect.logError),
+      Effect.orDie,
+    ),
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);
     },

@@ -97,6 +97,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
+      const serverConfig = yield* ServerConfig;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
@@ -137,6 +138,10 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         initialSnapshot: (settings) =>
           buildInitialCursorProviderSnapshot(settings).pipe(Effect.map(stampIdentity)),
         checkProvider,
+        providerCacheOptions: {
+          modelListTtl: Duration.millis(serverConfig.providerModelCacheTtlMs),
+          capacity: serverConfig.providerApiCacheMaxEntries,
+        },
         // Preserve the background ACP model-capability probe that used to
         // live on `CursorProviderLive`. Only fires when the snapshot reports
         // an authenticated, enabled provider with at least one non-custom

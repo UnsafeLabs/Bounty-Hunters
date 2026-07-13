@@ -78,6 +78,9 @@ const makeCliTestServerConfig = (baseDir: string) =>
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
+      providerModelCacheTtlMs: 5 * 60 * 1000,
+      providerCapabilityCacheTtlMs: 15 * 60 * 1000,
+      providerApiCacheMaxEntries: 256,
     } satisfies ServerConfigShape;
   });
 
