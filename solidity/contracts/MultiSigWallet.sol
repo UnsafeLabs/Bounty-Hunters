@@ -13,9 +13,23 @@ contract MultiSigWallet {
         bool executed;
     }
 
+    struct Confirmation {
+        bool confirmed;
+        uint256 timestamp;
+    }
+
     mapping(uint256 => Transaction) public transactions;
-    mapping(uint256 => mapping(address => bool)) public confirmations;
+    mapping(uint256 => mapping(address => Confirmation)) public confirmations;
     mapping(address => bool) public isOwner;
+
+    uint256 private _executionLock;
+
+    modifier nonReentrant() {
+        require(_executionLock == 0, "Reentrant call");
+        _executionLock = 1;
+        _;
+        _executionLock = 0;
+    }
 
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
@@ -31,14 +45,15 @@ contract MultiSigWallet {
         require(_owners.length > 0, "No owners");
         require(_required > 0 && _required <= _owners.length, "Invalid required");
         for (uint256 i = 0; i < _owners.length; i++) {
+            require(_owners[i] != address(0), "Zero address owner");
             isOwner[_owners[i]] = true;
         }
         owners = _owners;
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Zero address target");
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -52,29 +67,50 @@ contract MultiSigWallet {
 
     function confirmTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(!confirmations[txId][msg.sender], "Already confirmed");
-        confirmations[txId][msg.sender] = true;
+        require(!confirmations[txId][msg.sender].confirmed, "Already confirmed");
+        confirmations[txId][msg.sender] = Confirmation({
+            confirmed: true,
+            timestamp: block.timestamp
+        });
         emit Confirmed(txId, msg.sender);
     }
 
     function revokeConfirmation(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
-        require(confirmations[txId][msg.sender], "Not confirmed");
-        confirmations[txId][msg.sender] = false;
+        require(confirmations[txId][msg.sender].confirmed, "Not confirmed");
+        confirmations[txId][msg.sender] = Confirmation({
+            confirmed: false,
+            timestamp: 0
+        });
         emit Revoked(txId, msg.sender);
     }
 
     function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
         for (uint256 i = 0; i < owners.length; i++) {
-            if (confirmations[txId][owners[i]]) count++;
+            if (confirmations[txId][owners[i]].confirmed) count++;
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
+    function isConfirmedAtBlock(uint256 txId, uint256 blockNumber) public view returns (bool) {
+        for (uint256 i = 0; i < owners.length; i++) {
+            address owner = owners[i];
+            Confirmation storage conf = confirmations[txId][owner];
+            if (conf.confirmed && conf.timestamp > 0 && conf.timestamp <= block.timestamp) {
+                // Confirmation exists and was made at or before the queried block
+                continue;
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+
+        // Snapshot confirmation count before execution
+        uint256 confirmationCount = getConfirmationCount(txId);
+        require(confirmationCount >= required, "Not enough confirmations");
 
         Transaction storage txn = transactions[txId];
         txn.executed = true;
