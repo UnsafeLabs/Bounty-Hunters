@@ -1,4 +1,4 @@
-import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import { type ReactNode, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { ChevronRightIcon } from "lucide-react";
 import { shortcutLabelForCommand } from "../keybindings";
 import {
@@ -15,6 +15,62 @@ import {
   CommandShortcut,
 } from "./ui/command";
 import { cn } from "~/lib/utils";
+
+function highlightCommandTitle(title: string, indices: ReadonlyArray<number>): ReactNode {
+  if (indices.length === 0) {
+    return title;
+  }
+  const matchSet = new Set(indices);
+  const nodes: ReactNode[] = [];
+  let buffer = "";
+  let bufferIsMatch = false;
+  for (let i = 0; i < title.length; i++) {
+    const isMatch = matchSet.has(i);
+    if (i === 0) {
+      buffer = title[i];
+      bufferIsMatch = isMatch;
+      continue;
+    }
+    if (isMatch === bufferIsMatch) {
+      buffer += title[i];
+    } else {
+      nodes.push(
+        bufferIsMatch ? (
+          <span key={nodes.length} className="cp-fuzzy-match font-semibold text-accent">
+            {buffer}
+          </span>
+        ) : (
+          <span key={nodes.length}>{buffer}</span>
+        ),
+      );
+      buffer = title[i];
+      bufferIsMatch = isMatch;
+    }
+  }
+  nodes.push(
+    bufferIsMatch ? (
+      <span key={nodes.length} className="cp-fuzzy-match font-semibold text-accent">
+        {buffer}
+      </span>
+    ) : (
+      <span key={nodes.length}>{buffer}</span>
+    ),
+  );
+  return <>{nodes}</>;
+}
+
+function resolveTitleNode(
+  item: CommandPaletteActionItem | CommandPaletteSubmenuItem,
+): ReactNode {
+  if (
+    typeof item.title === "string" &&
+    item.fuzzyMatchIndices &&
+    item.fuzzyMatchIndices.length > 0
+  ) {
+    return highlightCommandTitle(item.title, item.fuzzyMatchIndices);
+  }
+  return item.title;
+}
 
 interface CommandPaletteResultsProps {
   emptyStateMessage?: string;
@@ -73,7 +129,7 @@ function DisabledCommandPaletteResultRow(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <span className="truncate">{resolveTitleNode(props.item)}</span>
           </span>
           <span className="truncate text-muted-foreground/70 text-xs">
             {props.item.description}
@@ -82,7 +138,7 @@ function DisabledCommandPaletteResultRow(props: {
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <span className="truncate">{resolveTitleNode(props.item)}</span>
         </span>
       )}
       {props.item.titleTrailingContent}
@@ -119,7 +175,7 @@ function CommandPaletteResultRow(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <span className="truncate">{resolveTitleNode(props.item)}</span>
           </span>
           <span className="truncate text-muted-foreground/70 text-xs">
             {props.item.description}
@@ -128,7 +184,7 @@ function CommandPaletteResultRow(props: {
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <span className="truncate">{resolveTitleNode(props.item)}</span>
         </span>
       )}
       {props.item.titleTrailingContent}
