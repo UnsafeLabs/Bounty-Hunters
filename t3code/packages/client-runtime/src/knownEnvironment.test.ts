@@ -1,7 +1,14 @@
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { createKnownEnvironment, getKnownEnvironmentHttpBaseUrl } from "./knownEnvironment.ts";
+import {
+  createKnownEnvironment,
+  detectCIProvider,
+  detectContainer,
+  detectEnvironmentInfo,
+  detectWSL,
+  getKnownEnvironmentHttpBaseUrl,
+} from "./knownEnvironment.ts";
 import {
   parseScopedProjectKey,
   parseScopedThreadKey,
@@ -88,5 +95,48 @@ describe("scoped refs", () => {
     expect(parseScopedThreadKey("environment-test:thread-1")).toEqual(threadRef);
     expect(parseScopedProjectKey("bad-key")).toBeNull();
     expect(parseScopedThreadKey("bad-key")).toBeNull();
+  });
+});
+
+
+describe("environment detection", () => {
+  it("detects the CI provider from environment variables", () => {
+    expect(detectCIProvider({ CI: "true" })).toBe("ci");
+    expect(detectCIProvider({ GITHUB_ACTIONS: "true" })).toBe("github-actions");
+    expect(detectCIProvider({ GITLAB_CI: "1" })).toBe("gitlab-ci");
+    expect(detectCIProvider({ JENKINS_URL: "https://jenkins.example.com" })).toBe("jenkins");
+    expect(detectCIProvider({ CIRCLECI: "true" })).toBe("circleci");
+    expect(detectCIProvider({ TRAVIS: "true" })).toBe("travis");
+    expect(detectCIProvider({})).toBeNull();
+    expect(detectCIProvider({ CI: "" })).toBeNull();
+  });
+
+  it("identifies container environments from dockerenv and cgroups", () => {
+    expect(detectContainer(() => "")).toBe(true);
+    expect(detectContainer((p) => (p === "/proc/1/cgroup" ? "1:cpu:/docker/abc123" : null))).toBe(true);
+    expect(detectContainer((p) => (p === "/proc/1/cgroup" ? "1:cpu:/kubepods/xyz" : null))).toBe(true);
+    expect(detectContainer(() => null)).toBe(false);
+    expect(detectContainer((p) => (p === "/proc/1/cgroup" ? "1:cpu:/system.slice" : null))).toBe(false);
+  });
+
+  it("identifies WSL from /proc/version", () => {
+    expect(detectWSL(() => "Linux version 5.15.0-microsoft-standard-WSL2")).toBe(true);
+    expect(detectWSL(() => null)).toBe(false);
+    expect(detectWSL(() => "Linux version 5.15.0-generic")).toBe(false);
+  });
+
+  it("returns a structured EnvironmentInfo without throwing", () => {
+    const info = detectEnvironmentInfo();
+    expect(typeof info.runtime).toBe("string");
+    expect(typeof info.platform).toBe("string");
+    expect(typeof info.arch).toBe("string");
+    expect(typeof info.isContainer).toBe("boolean");
+    expect(typeof info.isCI).toBe("boolean");
+    expect(info.ciProvider === null || typeof info.ciProvider === "string").toBe(true);
+    expect(typeof info.isWSL).toBe("boolean");
+  });
+
+  it("marks the runtime as node when running under node", () => {
+    expect(detectEnvironmentInfo().runtime).toBe("node");
   });
 });
