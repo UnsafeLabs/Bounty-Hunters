@@ -86,6 +86,13 @@ import {
 import { useModelPickerOpen } from "../modelPickerOpenState";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { useGitStatus } from "../lib/gitStatusState";
+import {
+  clampSidebarWidth,
+  clearStoredSidebarWidth,
+  readStoredSidebarWidth,
+  SIDEBAR_DEFAULT_WIDTH,
+  writeStoredSidebarWidth,
+} from "./sidebarResize";
 import { readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -1977,7 +1984,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   );
 
   return (
-    <>
+    <div
+      className="relative flex h-full flex-col"
+      style={{ width: sidebarWidth }}
+    >
       <div className="group/project-header relative">
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
@@ -2225,7 +2235,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           </DialogFooter>
         </DialogPopup>
       </Dialog>
-    </>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        onMouseDown={startResize}
+        onDoubleClick={resetWidth}
+        className="absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize bg-transparent transition-colors hover:bg-accent/50"
+      />
+    </div>
   );
 });
 
@@ -2819,6 +2837,59 @@ export default function Sidebar() {
   const suppressProjectClickAfterDragRef = useRef(false);
   const suppressProjectClickForContextMenuRef = useRef(false);
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
+
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
+    readStoredSidebarWidth(typeof window !== "undefined" ? window.localStorage : undefined) ??
+    SIDEBAR_DEFAULT_WIDTH,
+  );
+  const resizingRef = useRef(false);
+  const sidebarWidthRef = useRef(sidebarWidth);
+  sidebarWidthRef.current = sidebarWidth;
+  const startResize = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    resizingRef.current = true;
+    if (typeof document !== "undefined") {
+      document.body.style.userSelect = "none";
+    }
+  }, []);
+  const resetWidth = useCallback(() => {
+    setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+    clearStoredSidebarWidth(typeof window !== "undefined" ? window.localStorage : undefined);
+  }, []);
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      if (!resizingRef.current) return;
+      setSidebarWidth(clampSidebarWidth(event.clientX));
+    };
+    const onMouseUp = () => {
+      if (!resizingRef.current) return;
+      resizingRef.current = false;
+      if (typeof document !== "undefined") {
+        document.body.style.userSelect = "";
+      }
+      writeStoredSidebarWidth(
+        typeof window !== "undefined" ? window.localStorage : undefined,
+        sidebarWidthRef.current,
+      );
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== "t3code:sidebar-width:v1" || event.newValue === null) return;
+      const next = Number(event.newValue);
+      if (Number.isFinite(next)) {
+        setSidebarWidth(clampSidebarWidth(next));
+      }
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+      window.addEventListener("storage", onStorage);
+      return () => {
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+        window.removeEventListener("storage", onStorage);
+      };
+    }
+  }, []);
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const platform = navigator.platform;
