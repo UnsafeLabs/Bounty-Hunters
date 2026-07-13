@@ -4,6 +4,7 @@ import type { Thread } from "../types";
 import {
   buildThreadActionItems,
   filterCommandPaletteGroups,
+  fuzzyMatch,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
 
@@ -162,5 +163,97 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+  });
+});
+
+
+describe("fuzzyMatch", () => {
+  it("matches across word boundaries (ofl -> Open File)", () => {
+    const r = fuzzyMatch("ofl", "Open File");
+    expect(r.matched).toBe(true);
+    expect(r.indices).toEqual([0, 3, 4]);
+  });
+
+  it("scores consecutive matches higher than scattered matches", () => {
+    const consecutive = fuzzyMatch("abc", "abc def");
+    const scattered = fuzzyMatch("abc", "a x b x c");
+    expect(consecutive.score).toBeGreaterThan(scattered.score);
+  });
+
+  it("scores word-boundary matches higher than mid-word matches", () => {
+    const boundary = fuzzyMatch("fi", "Fix it");
+    const mid = fuzzyMatch("fi", "office");
+    expect(boundary.score).toBeGreaterThan(mid.score);
+  });
+
+  it("returns no match when characters are missing", () => {
+    expect(fuzzyMatch("xyz", "Open File").matched).toBe(false);
+  });
+
+  it("empty query matches everything with no indices", () => {
+    const r = fuzzyMatch("", "anything");
+    expect(r.matched).toBe(true);
+    expect(r.indices).toEqual([]);
+  });
+});
+
+describe("filterCommandPaletteGroups fuzzy search", () => {
+  const group: CommandPaletteGroup = {
+    value: "actions",
+    label: "Actions",
+    items: [
+      {
+        kind: "action",
+        value: "open-file",
+        searchTerms: ["Open File"],
+        title: "Open File",
+        icon: null,
+        run: async () => undefined,
+      },
+      {
+        kind: "action",
+        value: "close-window",
+        searchTerms: ["Close Window"],
+        title: "Close Window",
+        icon: null,
+        run: async () => undefined,
+      },
+    ],
+  };
+
+  it("matches 'ofl' to 'Open File' and records highlight indices", () => {
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [group],
+      query: "ofl",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(["open-file"]);
+    expect(groups[0]?.items[0]?.fuzzyMatchIndices).toEqual([0, 3, 4]);
+  });
+
+  it("returns all items for an empty query", () => {
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [group],
+      query: "",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.items).toHaveLength(2);
+  });
+
+  it("filters by a single character", () => {
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [group],
+      query: "c",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+    expect(groups[0]?.items.map((item) => item.value)).toContain("close-window");
   });
 });
