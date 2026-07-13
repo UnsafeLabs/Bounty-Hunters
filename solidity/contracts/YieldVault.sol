@@ -6,17 +6,14 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract YieldVault {
     IERC20 public rewardToken;
     IERC20 public stakingToken;
-
     uint256 public rewardRate;
     uint256 public periodFinish;
     uint256 public lastUpdateTime;
     uint256 public rewardPerTokenStored;
     uint256 public totalSupply;
-
     mapping(address => uint256) public balanceOf;
     mapping(address => uint256) public userRewardPerTokenPaid;
     mapping(address => uint256) public rewards;
-
     address public rewardDistributor;
 
     event Deposited(address indexed user, uint256 amount);
@@ -29,22 +26,25 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    function _lastTimeRewardApplicable() internal view returns (uint256) {
+        uint256 now_ = block.timestamp;
+        return now_ < periodFinish ? now_ : periodFinish;
+    }
+
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (_lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        lastUpdateTime = _lastTimeRewardApplicable();
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -77,9 +77,9 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
     function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
+        require(msg.sender == rewardDistributor, "Not distributor");
+        require(duration > 0, "Zero duration");
         rewardRate = reward / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
