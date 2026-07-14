@@ -1,4 +1,5 @@
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import (
     Annotated,
     Any,
@@ -16,6 +17,20 @@ from starlette.datastructures import Headers as Headers  # noqa: F401
 from starlette.datastructures import QueryParams as QueryParams  # noqa: F401
 from starlette.datastructures import State as State  # noqa: F401
 from starlette.datastructures import UploadFile as StarletteUploadFile
+from starlette.exceptions import HTTPException
+from starlette.status import (
+    HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+)
+
+
+@dataclass
+class UploadValidationResult:
+    """Result of an UploadFile validation check."""
+    is_valid: bool
+    file_size: int = 0
+    content_type: str | None = None
+    errors: list[str] = field(default_factory=list)
 
 
 class UploadFile(StarletteUploadFile):
@@ -62,6 +77,20 @@ class UploadFile(StarletteUploadFile):
     content_type: Annotated[
         str | None, Doc("The content type of the request, from the headers.")
     ]
+
+    def __init__(
+        self,
+        file: BinaryIO,
+        *,
+        size: int | None = None,
+        filename: str | None = None,
+        headers: Headers | None = None,
+        max_size: int | None = None,
+        allowed_content_types: list[str] | None = None,
+    ) -> None:
+        super().__init__(file, size=size, filename=filename, headers=headers)
+        self.max_size = max_size
+        self.allowed_content_types = allowed_content_types
 
     async def write(
         self,
@@ -128,6 +157,36 @@ class UploadFile(StarletteUploadFile):
         To be awaitable, compatible with async, this is run in threadpool.
         """
         return await super().close()
+
+    async def validate(self) -> UploadValidationResult:
+        """Validate the uploaded file against size and content type constraints.
+
+        Returns:
+            UploadValidationResult with is_valid, file_size, content_type, and errors.
+        """
+        errors: list[str] = []
+        file_size = self.size or 0
+        content_type = self.content_type
+
+        if self.max_size is not None and file_size > self.max_size:
+            errors.append(
+                f"File size {file_size} exceeds maximum allowed size of {self.max_size} bytes"
+            )
+
+        if self.allowed_content_types is not None:
+            if content_type not in self.allowed_content_types:
+                errors.append(
+                    f"Content type '{content_type}' is not allowed. "
+                    f"Allowed types: {', '.join(self.allowed_content_types)}"
+                )
+
+        is_valid = len(errors) == 0
+        return UploadValidationResult(
+            is_valid=is_valid,
+            file_size=file_size,
+            content_type=content_type,
+            errors=errors,
+        )
 
     @classmethod
     def _validate(cls, __input_value: Any, _: Any) -> "UploadFile":
