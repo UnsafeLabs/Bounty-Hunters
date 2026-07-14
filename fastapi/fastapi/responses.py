@@ -1,4 +1,5 @@
 import importlib
+from collections.abc import AsyncGenerator
 from typing import Any, Protocol, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
@@ -95,4 +96,117 @@ class ORJSONResponse(JSONResponse):
         assert orjson is not None, "orjson must be installed to use ORJSONResponse"
         return orjson.dumps(
             content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
+        )
+
+
+class StreamingCSVResponse(StreamingResponse):
+    """
+    Streaming response for large CSV exports.
+
+    ## Example
+
+    ```python
+    from fastapi import FastAPI
+    from fastapi.responses import StreamingCSVResponse
+
+    app = FastAPI()
+
+    async def generate_rows():
+        yield {"name": "Alice", "age": 30}
+        yield {"name": "Bob", "age": 25}
+
+    @app.get("/export")
+    async def export_csv():
+        return StreamingCSVResponse(
+            generate_rows(),
+            headers=["name", "age"],
+            filename="export.csv",
+        )
+    ```
+    """
+
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        content: Any,
+        headers: list[str] | None = None,
+        filename: str = "export.csv",
+        status_code: int = 200,
+        **kwargs: Any,
+    ):
+        self._headers_row = headers
+        self._header_sent = False
+        super().__init__(
+            content=content,
+            status_code=status_code,
+            media_type=self.media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                **(kwargs.pop("headers", {})),
+            },
+            **kwargs,
+        )
+        self._generator = self._csv_generator(content)
+
+    @staticmethod
+    def _escape_csv_value(value: Any) -> str:
+        """Escape special characters in CSV values."""
+        s = str(value)
+        if "," in s or '"' in s or "\n" in s:
+            s = '"' + s.replace('"', '""') + '"'
+        return s
+
+    async def _csv_generator(self, content: Any) -> AsyncGenerator[bytes, None]:
+        import csv
+        import io
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        if self._headers_row:
+            writer.writerow(self._headers_row)
+            yield output.getvalue().encode("utf-8")
+            output.truncate(0)
+            output.seek(0)
+
+        async for row in content:
+            if isinstance(row, dict):
+                if not self._headers_row:
+                    writer.writerow(row.keys())
+                    yield output.getvalue().encode("utf-8")
+                    output.truncate(0)
+                    output.seek(0)
+                    self._headers_row = list(row.keys())
+                writer.writerow([self._escape_csv_value(v) for v in row.values()])
+            elif isinstance(row, (list, tuple)):
+                writer.writerow([self._escape_csv_value(v) for v in row])
+            else:
+                writer.writerow([self._escape_csv_value(row)])
+            yield output.getvalue().encode("utf-8")
+            output.truncate(0)
+            output.seek(0)
+
+    async def stream_response(self, send: Any) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": self.status_code,
+                "headers": self.raw_headers,
+            }
+        )
+        async for chunk in self._generator:
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": chunk,
+                    "more_body": True,
+                }
+            )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": b"",
+                "more_body": False,
+            }
         )
