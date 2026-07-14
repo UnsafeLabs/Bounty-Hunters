@@ -327,6 +327,48 @@ class OAuth2PasswordRequestFormStrict(OAuth2PasswordRequestForm):
         )
 
 
+class OAuth2RefreshRequestForm:
+    """Form for OAuth2 token refresh requests.
+
+    Collects grant_type (must be 'refresh_token') and refresh_token from form data.
+    """
+
+    def __init__(
+        self,
+        *,
+        grant_type: Annotated[
+            str,
+            Form(pattern="^refresh_token$"),
+            Doc("Must be 'refresh_token'."),
+        ],
+        refresh_token: Annotated[
+            str,
+            Form(),
+            Doc("The refresh token."),
+        ],
+        scope: Annotated[
+            str,
+            Form(),
+            Doc("Optional scopes."),
+        ] = "",
+        client_id: Annotated[
+            str | None,
+            Form(),
+            Doc("Optional client_id."),
+        ] = None,
+        client_secret: Annotated[
+            str | None,
+            Form(),
+            Doc("Optional client_secret."),
+        ] = None,
+    ):
+        self.grant_type = grant_type
+        self.refresh_token = refresh_token
+        self.scopes = scope.split()
+        self.client_id = client_id
+        self.client_secret = client_secret
+
+
 class OAuth2(SecurityBase):
     """
     This is the base class for OAuth2 authentication, an instance of it would be used
@@ -691,3 +733,30 @@ class SecurityScopes:
                 """
             ),
         ] = " ".join(self.scopes)
+
+
+class OAuth2PasswordBearerWithRefresh(OAuth2PasswordBearer):
+    """OAuth2PasswordBearer with explicit refresh token support.
+
+    Provides a dedicated refresh_url field in the OpenAPI schema for
+    token refresh flows. Drop-in replacement for OAuth2PasswordBearer.
+    """
+
+    def __init__(
+        self,
+        tokenUrl: str,
+        *,
+        refresh_url: str | None = None,
+        scheme_name: str | None = None,
+        scopes: dict[str, str] | None = None,
+        description: str | None = None,
+        auto_error: bool = True,
+    ):
+        super().__init__(
+            tokenUrl=tokenUrl,
+            refreshUrl=refresh_url,
+            scheme_name=scheme_name,
+            scopes=scopes,
+            description=description,
+            auto_error=auto_error,
+        )
