@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract CrossChainBridge {
     IERC20 public bridgeToken;
     address public validator;
-    uint256 public nonce;
+    mapping(address => uint256) public nonces;
 
     mapping(bytes32 => bool) public processedTransfers;
 
@@ -21,12 +21,10 @@ contract CrossChainBridge {
     function initiateTransfer(uint256 amount, uint256 targetChain) external {
         require(amount > 0, "Amount must be > 0");
         bridgeToken.transferFrom(msg.sender, address(this), amount);
-        emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
+        uint256 senderNonce = nonces[msg.sender]++;
+        emit TransferInitiated(msg.sender, amount, targetChain, senderNonce);
     }
 
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
     function processTransfer(
         address recipient,
         uint256 amount,
@@ -36,9 +34,9 @@ contract CrossChainBridge {
         bytes32 transferHash = keccak256(abi.encodePacked(
             recipient,
             amount,
-            transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
+            transferNonce,
+            block.chainid,
+            address(this)
         ));
 
         require(!processedTransfers[transferHash], "Already processed");
@@ -50,7 +48,6 @@ contract CrossChainBridge {
         emit TransferProcessed(transferHash, recipient, amount);
     }
 
-    // BUG: Does not check for zero-address return from ecrecover
     function verifySignature(bytes32 hash, bytes calldata signature) public view returns (bool) {
         require(signature.length == 65, "Invalid signature length");
 
@@ -71,7 +68,7 @@ contract CrossChainBridge {
             v, r, s
         );
 
-        // BUG: Missing require(recovered != address(0))
+        require(recovered != address(0), "Invalid signature: zero address recovered");
         return recovered == validator;
     }
 
