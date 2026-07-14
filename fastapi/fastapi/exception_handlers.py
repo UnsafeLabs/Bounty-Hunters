@@ -6,6 +6,7 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.status import WS_1008_POLICY_VIOLATION
+from typing import Any
 
 
 async def http_exception_handler(request: Request, exc: HTTPException) -> Response:
@@ -20,9 +21,21 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> Respon
 async def request_validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    content: dict[str, Any] = {
+        "detail": jsonable_encoder(exc.errors()),
+        "path": request.url.path,
+        "method": request.method,
+    }
+    # Include request body in debug mode for easier debugging
+    try:
+        body = await request.body()
+        if body:
+            content["body"] = body.decode("utf-8", errors="replace")
+    except Exception:
+        content["body"] = None
     return JSONResponse(
         status_code=422,
-        content={"detail": jsonable_encoder(exc.errors())},
+        content=content,
     )
 
 
