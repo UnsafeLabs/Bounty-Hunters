@@ -22,6 +22,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Fallback Session Driver
+    |--------------------------------------------------------------------------
+    |
+    | This option defines the fallback session driver to use when the primary
+    | driver (above) is unavailable. The 'file' driver is always available
+    | and serves as a reliable fallback.
+    |
+    */
+
+    'fallback' => env('SESSION_FALLBACK', 'file'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Session Lifetime
     |--------------------------------------------------------------------------
     |
