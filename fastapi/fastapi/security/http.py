@@ -219,6 +219,106 @@ class HTTPBasic(HTTPBase):
         return HTTPBasicCredentials(username=username, password=password)
 
 
+class HTTPBasicWithProtection(HTTPBasic):
+    """
+    HTTP Basic authentication with brute-force protection.
+
+    Tracks failed login attempts per IP address and returns 429 Too Many
+    Requests after exceeding the configurable limit within a time window.
+
+    ## Example
+
+    ```python
+    from fastapi import Depends, FastAPI
+    from fastapi.security import HTTPBasicWithProtection, HTTPBasicCredentials
+
+    app = FastAPI()
+
+    security = HTTPBasicWithProtection(max_attempts=5, window_seconds=300)
+
+    @app.get("/users/me")
+    def read_current_user(
+        credentials: HTTPBasicCredentials = Depends(security)
+    ):
+        return {"username": credentials.username}
+    ```
+    """
+
+    def __init__(
+        self,
+        *,
+        max_attempts: int = 5,
+        window_seconds: int = 300,
+        scheme_name: str | None = None,
+        realm: str | None = None,
+        description: str | None = None,
+        auto_error: bool = True,
+    ):
+        super().__init__(
+            scheme_name=scheme_name,
+            realm=realm,
+            description=description,
+            auto_error=auto_error,
+        )
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self._attempts: dict[str, list[float]] = {}
+
+    def _clean_old_attempts(self, ip: str, now: float) -> None:
+        if ip in self._attempts:
+            self._attempts[ip] = [
+                ts
+                for ts in self._attempts[ip]
+                if now - ts < self.window_seconds
+            ]
+
+    def _record_attempt(self, ip: str) -> None:
+        import time
+
+        now = time.time()
+        self._clean_old_attempts(ip, now)
+        if ip not in self._attempts:
+            self._attempts[ip] = []
+        self._attempts[ip].append(now)
+
+    def _is_rate_limited(self, ip: str) -> bool:
+        import time
+
+        now = time.time()
+        self._clean_old_attempts(ip, now)
+        return len(self._attempts.get(ip, [])) >= self.max_attempts
+
+    def _make_too_many_requests_error(self) -> HTTPException:
+        return HTTPException(
+            status_code=429,
+            detail=f"Too many login attempts. "
+            f"Try again in {self.window_seconds} seconds.",
+            headers={"Retry-After": str(self.window_seconds)},
+        )
+
+    async def __call__(  # type: ignore
+        self, request: Request
+    ) -> HTTPBasicCredentials | None:
+        ip = request.client.host if request.client else "unknown"
+
+        if self._is_rate_limited(ip):
+            if self.auto_error:
+                raise self._make_too_many_requests_error()
+            return None
+
+        try:
+            result = await super().__call__(request)
+        except HTTPException:
+            self._record_attempt(ip)
+            raise
+
+        # Clear attempts on successful auth
+        if ip in self._attempts:
+            del self._attempts[ip]
+
+        return result
+
+
 class HTTPBearer(HTTPBase):
     """
     HTTP Bearer token authentication.
