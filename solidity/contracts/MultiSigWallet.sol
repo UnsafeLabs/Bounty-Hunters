@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract MultiSigWallet {
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+contract MultiSigWallet is ReentrancyGuard {
     address[] public owners;
     uint256 public required;
     uint256 public transactionCount;
@@ -15,6 +17,7 @@ contract MultiSigWallet {
 
     mapping(uint256 => Transaction) public transactions;
     mapping(uint256 => mapping(address => bool)) public confirmations;
+    mapping(uint256 => uint256) public confirmedAtBlock; // block number when confirmed count reached required
     mapping(address => bool) public isOwner;
 
     event Submitted(uint256 indexed txId);
@@ -37,8 +40,9 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Zero address target");
+
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -54,6 +58,12 @@ contract MultiSigWallet {
         require(!transactions[txId].executed, "Already executed");
         require(!confirmations[txId][msg.sender], "Already confirmed");
         confirmations[txId][msg.sender] = true;
+
+        // Snapshot the confirmation at this block
+        if (getConfirmationCount(txId) >= required && confirmedAtBlock[txId] == 0) {
+            confirmedAtBlock[txId] = block.number;
+        }
+
         emit Confirmed(txId, msg.sender);
     }
 
@@ -61,6 +71,8 @@ contract MultiSigWallet {
         require(!transactions[txId].executed, "Already executed");
         require(confirmations[txId][msg.sender], "Not confirmed");
         confirmations[txId][msg.sender] = false;
+        // Reset snapshot since confirmations dropped below required
+        confirmedAtBlock[txId] = 0;
         emit Revoked(txId, msg.sender);
     }
 
@@ -70,11 +82,15 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
+    function isConfirmedAtBlock(uint256 txId) public view returns (bool) {
+        return confirmedAtBlock[txId] > 0;
+    }
+
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         require(!transactions[txId].executed, "Already executed");
         require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+        // Use block-level snapshot to prevent revocations during execution callback
+        require(isConfirmedAtBlock(txId), "Confirmations not finalized at this block");
 
         Transaction storage txn = transactions[txId];
         txn.executed = true;
