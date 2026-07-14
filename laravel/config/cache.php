@@ -120,6 +120,10 @@ return [
 
     'prefix' => env('CACHE_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')).'-cache-'),
 
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+
+    'health_check_interval' => env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
     /*
     |--------------------------------------------------------------------------
     | Serializable Classes
