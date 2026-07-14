@@ -24,11 +24,13 @@ class UserFactory extends Factory
      */
     public function definition(): array
     {
+        $rounds = config('hashing.bcrypt.rounds', 10);
+
         return [
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
-            'password' => static::$password ??= Hash::make('password'),
+            'password' => static::$password ??= Hash::make('password', ['rounds' => $rounds]),
             'remember_token' => Str::random(10),
         ];
     }
