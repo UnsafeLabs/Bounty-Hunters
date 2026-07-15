@@ -4,7 +4,10 @@ pragma solidity ^0.8.20;
 contract MultiSigWallet {
     address[] public owners;
     uint256 public required;
-    uint256 public transactionCount;
+    mapping(uint256 => mapping(address => bool)) public confirmations;
+    mapping(uint256 => mapping(address => uint256)) public confirmedAtBlock;
+    mapping(uint256 => bool) public executed;
+    bool private locked;
 
     struct Transaction {
         address to;
@@ -13,77 +16,155 @@ contract MultiSigWallet {
         bool executed;
     }
 
-    mapping(uint256 => Transaction) public transactions;
-    mapping(uint256 => mapping(address => bool)) public confirmations;
-    mapping(address => bool) public isOwner;
+    Transaction[] public transactions;
 
-    event Submitted(uint256 indexed txId);
-    event Confirmed(uint256 indexed txId, address indexed owner);
-    event Executed(uint256 indexed txId);
-    event Revoked(uint256 indexed txId, address indexed owner);
+    event Deposit(address indexed sender, uint256 value);
+    event Submission(uint256 indexed transactionId);
+    event Confirmation(address indexed owner, uint256 indexed transactionId);
+    event Revocation(address indexed owner, uint256 indexed transactionId);
+    event Execution(uint256 indexed transactionId);
+    event ExecutionFailure(uint256 indexed transactionId);
 
-    modifier onlyOwner() {
-        require(isOwner[msg.sender], "Not owner");
+    modifier ownerExists(address owner) {
+        bool exists = false;
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == owner) {
+                exists = true;
+                break;
+            }
+        }
+        require(exists, "Owner does not exist");
         _;
     }
 
+    modifier transactionExists(uint256 transactionId) {
+        require(transactionId < transactions.length, "Transaction does not exist");
+        _;
+    }
+
+    modifier notExecuted(uint256 transactionId) {
+        require(!transactions[transactionId].executed, "Transaction already executed");
+        _;
+    }
+
+    modifier notNullAddress(address _address) {
+        require(_address != address(0), "Zero address not allowed");
+        _;
+    }
+
+    modifier nonReentrant() {
+        require(!locked, "ReentrancyGuard: reentrant call");
+        locked = true;
+        _;
+        locked = false;
+    }
+
     constructor(address[] memory _owners, uint256 _required) {
-        require(_owners.length > 0, "No owners");
-        require(_required > 0 && _required <= _owners.length, "Invalid required");
-        for (uint256 i = 0; i < _owners.length; i++) {
-            isOwner[_owners[i]] = true;
-        }
+        require(_owners.length > 0, "Owners required");
+        require(_required > 0, "Required confirmations must be > 0");
+        require(_required <= _owners.length, "Required > owners");
         owners = _owners;
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
-    function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
-        uint256 txId = transactionCount++;
-        transactions[txId] = Transaction({
+    receive() external payable {
+        if (msg.value > 0) {
+            emit Deposit(msg.sender, msg.value);
+        }
+    }
+
+    function submitTransaction(address to, uint256 value, bytes memory data)
+        public
+        notNullAddress(to)
+        returns (uint256 transactionId)
+    {
+        require(to.code.length > 0 || data.length == 0, "Contract targets require call data");
+        transactionId = transactions.length;
+        transactions.push(Transaction({
             to: to,
             value: value,
             data: data,
             executed: false
-        });
-        emit Submitted(txId);
-        return txId;
+        }));
+        emit Submission(transactionId);
     }
 
-    function confirmTransaction(uint256 txId) external onlyOwner {
-        require(!transactions[txId].executed, "Already executed");
-        require(!confirmations[txId][msg.sender], "Already confirmed");
-        confirmations[txId][msg.sender] = true;
-        emit Confirmed(txId, msg.sender);
+    function confirmTransaction(uint256 transactionId)
+        public
+        ownerExists(msg.sender)
+        transactionExists(transactionId)
+        notExecuted(transactionId)
+    {
+        require(!confirmations[transactionId][msg.sender], "Already confirmed");
+        confirmations[transactionId][msg.sender] = true;
+        confirmedAtBlock[transactionId][msg.sender] = block.number;
+        emit Confirmation(msg.sender, transactionId);
+        executeTransaction(transactionId);
     }
 
-    function revokeConfirmation(uint256 txId) external onlyOwner {
-        require(!transactions[txId].executed, "Already executed");
-        require(confirmations[txId][msg.sender], "Not confirmed");
-        confirmations[txId][msg.sender] = false;
-        emit Revoked(txId, msg.sender);
+    function revokeConfirmation(uint256 transactionId)
+        public
+        ownerExists(msg.sender)
+        transactionExists(transactionId)
+        notExecuted(transactionId)
+    {
+        require(confirmations[transactionId][msg.sender], "Not confirmed");
+        confirmations[transactionId][msg.sender] = false;
+        delete confirmedAtBlock[transactionId][msg.sender];
+        emit Revocation(msg.sender, transactionId);
     }
 
-    function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
+    function isConfirmedAtBlock(uint256 transactionId, uint256 blockNumber)
+        public
+        view
+        returns (bool)
+    {
+        if (transactions[transactionId].executed) return false;
+        uint256 count = 0;
         for (uint256 i = 0; i < owners.length; i++) {
-            if (confirmations[txId][owners[i]]) count++;
+            if (confirmedAtBlock[transactionId][owners[i]] > 0 &&
+                confirmedAtBlock[transactionId][owners[i]] <= blockNumber) {
+                count++;
+            }
         }
+        return count >= required;
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
-        require(!transactions[txId].executed, "Already executed");
-        require(getConfirmationCount(txId) >= required, "Not enough confirmations");
+    function executeTransaction(uint256 transactionId)
+        public
+        ownerExists(msg.sender)
+        transactionExists(transactionId)
+        notExecuted(transactionId)
+        nonReentrant
+    {
+        require(isConfirmedAtBlock(transactionId, block.number), "Not enough confirmations");
 
-        Transaction storage txn = transactions[txId];
+        Transaction storage txn = transactions[transactionId];
         txn.executed = true;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
-        require(success, "Execution failed");
-
-        emit Executed(txId);
+        if (success) {
+            executed[transactionId] = true;
+            emit Execution(transactionId);
+        } else {
+            txn.executed = false;
+            emit ExecutionFailure(transactionId);
+        }
     }
 
-    receive() external payable {}
+    function getConfirmationCount(uint256 transactionId)
+        public
+        view
+        returns (uint256 count)
+    {
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (confirmations[transactionId][owners[i]]) {
+                count++;
+            }
+        }
+    }
+
+    function getTransactionCount() public view returns (uint256) {
+        return transactions.length;
+    }
 }
