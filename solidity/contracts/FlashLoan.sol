@@ -1,65 +1,98 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-interface IFlashLoanReceiver {
-    function onFlashLoan(address token, uint256 amount, uint256 fee, bytes calldata data) external;
-}
-
 contract FlashLoan {
-    IERC20 public loanToken;
-    uint256 public feeBPS; // fee in basis points
-    uint256 public totalFees;
     address public owner;
     bool public paused;
+    uint256 public totalFees;
+    uint256 public constant MAX_LOAN_RATIO = 50; // 50% of pool balance
+    uint256 public feeBPS = 1; // 0.01% default fee
+    bool private locked;
 
-    event FlashLoanExecuted(address indexed borrower, uint256 amount, uint256 fee);
+    event FlashLoan(address indexed borrower, uint256 amount, uint256 fee);
+    event FeeCollected(uint256 fee);
+    event Paused(address indexed by);
+    event Unpaused(address indexed by);
+    event FeeUpdated(uint256 oldFee, uint256 newFee);
 
-    constructor(address _loanToken, uint256 _feeBPS) {
-        loanToken = IERC20(_loanToken);
-        feeBPS = _feeBPS;
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+
+    modifier whenNotPaused() {
+        require(!paused, "Flash loans are paused");
+        _;
+    }
+
+    modifier nonReentrant() {
+        require(!locked, "ReentrancyGuard: reentrant call");
+        locked = true;
+        _;
+        locked = false;
+    }
+
+    constructor() {
         owner = msg.sender;
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
-    function flashLoan(uint256 amount, bytes calldata data) external {
-        require(!paused, "Paused");
+    receive() external payable {}
+
+    function setFeeBPS(uint256 _feeBPS) public onlyOwner {
+        require(_feeBPS <= 1000, "Fee too high"); // max 10%
+        emit FeeUpdated(feeBPS, _feeBPS);
+        feeBPS = _feeBPS;
+    }
+
+    function pause() public onlyOwner {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    function unpause() public onlyOwner {
+        paused = false;
+        emit Unpaused(msg.sender);
+    }
+
+    function flashLoan(uint256 amount, address callback, bytes calldata data)
+        public
+        whenNotPaused
+        nonReentrant
+    {
         require(amount > 0, "Amount must be > 0");
 
-        uint256 balanceBefore = loanToken.balanceOf(address(this));
-        require(balanceBefore >= amount, "Insufficient pool balance");
+        // Max loan cap: 50% of pool balance
+        uint256 maxLoan = (address(this).balance * MAX_LOAN_RATIO) / 100;
+        require(amount <= maxLoan, "Loan exceeds pool cap");
 
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
-        uint256 fee = amount * feeBPS / 10000;
+        // Fee: minimum 1 wei to prevent zero-fee exploit
+        uint256 fee = (amount * feeBPS) / 10000;
+        if (fee == 0) {
+            fee = 1;
+        }
 
-        loanToken.transfer(msg.sender, amount);
+        uint256 balanceBefore = address(this).balance;
 
-        IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
+        // Execute callback
+        IFlashLoanCallback(callback).onFlashLoan(msg.sender, amount, fee, data);
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
-        uint256 balanceAfter = loanToken.balanceOf(address(this));
-        require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
+        uint256 balanceAfter = address(this).balance;
+        require(balanceAfter >= balanceBefore + fee, "Flash loan not repaid");
 
         totalFees += fee;
-        emit FlashLoanExecuted(msg.sender, amount, fee);
+        emit FlashLoan(msg.sender, amount, fee);
+        emit FeeCollected(fee);
     }
 
-    function depositToPool(uint256 amount) external {
-        loanToken.transferFrom(msg.sender, address(this), amount);
+    function getMaxLoanAmount() public view returns (uint256) {
+        return (address(this).balance * MAX_LOAN_RATIO) / 100;
     }
 
-    function withdrawFees() external {
-        require(msg.sender == owner, "Not owner");
-        uint256 fees = totalFees;
-        totalFees = 0;
-        loanToken.transfer(owner, fees);
+    function getPoolBalance() public view returns (uint256) {
+        return address(this).balance;
     }
+}
 
-    // BUG: No emergency pause function
-    function getPoolBalance() external view returns (uint256) {
-        return loanToken.balanceOf(address(this));
-    }
+interface IFlashLoanCallback {
+    function onFlashLoan(address initiator, uint256 amount, uint256 fee, bytes calldata data) external;
 }
