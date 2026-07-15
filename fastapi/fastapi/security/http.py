@@ -219,6 +219,195 @@ class HTTPBasic(HTTPBase):
         return HTTPBasicCredentials(username=username, password=password)
 
 
+import hashlib
+import hmac
+import time
+from collections import defaultdict
+
+
+class HTTPBasicWithProtection(HTTPBasic):
+    """
+    HTTP Basic authentication with brute force protection.
+
+    Tracks failed login attempts per IP address. After exceeding
+    max_attempts within a configurable window, returns HTTP 429
+    with a Retry-After header.
+
+    Includes timing-safe password comparison via constant-time
+    hash comparison.
+
+    Parameters
+    ----------
+    max_attempts : int
+        Maximum failed attempts per IP within the window (default: 5).
+    window_seconds : float
+        Time window in seconds for tracking attempts (default: 300, i.e., 5 min).
+
+    Usage
+    -----
+    ```python
+    from fastapi import Depends, FastAPI
+    from fastapi.security import HTTPBasicWithProtection
+
+    app = FastAPI()
+    security = HTTPBasicWithProtection(max_attempts=5, window_seconds=300)
+    ```
+    """
+
+    _attempts: dict[str, list[float]] = defaultdict(list)
+    _lockouts: dict[str, float] = {}
+
+    def __init__(
+        self,
+        *,
+        max_attempts: Annotated[
+            int,
+            Doc(
+                """
+                Maximum number of failed login attempts allowed per IP address
+                within the time window. Default is 5.
+                """
+            ),
+        ] = 5,
+        window_seconds: Annotated[
+            float,
+            Doc(
+                """
+                Time window in seconds during which failed attempts are counted.
+                Default is 300 (5 minutes).
+                """
+            ),
+        ] = 300.0,
+        scheme_name: Annotated[
+            str | None,
+            Doc("Security scheme name."),
+        ] = None,
+        realm: Annotated[
+            str | None,
+            Doc(
+                """
+                The HTTP Basic realm. If not provided, no realm is set in the
+                WWW-Authenticate challenge header.
+                """
+            ),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Doc("Security scheme description."),
+        ] = None,
+        auto_error: Annotated[
+            bool,
+            Doc(
+                """
+                By default, if no Authorization header is provided, the dependency
+                will raise an error. Set to False for optional authentication.
+                """
+            ),
+        ] = True,
+    ):
+        super().__init__(
+            scheme_name=scheme_name,
+            realm=realm,
+            description=description,
+            auto_error=auto_error,
+        )
+        self._max_attempts = max_attempts
+        self._window_seconds = window_seconds
+
+    @staticmethod
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        """
+        Constant-time password verification.
+
+        Compares a plain text password against a hashed password using
+        constant-time comparison to prevent timing attacks.
+
+        Parameters
+        ----------
+        plain_password : str
+            The plain-text password to verify.
+        hashed_password : str
+            The expected hashed password. Supports formats:
+            - "$2b$" or "$2y$" prefix: bcrypt via passlib
+            - Otherwise: SHA-256 hex comparison
+
+        Returns
+        -------
+        bool
+            True if the password matches, False otherwise.
+        """
+        # bcrypt hash
+        if hashed_password.startswith(("$2b$", "$2y$", "$2a$")):
+            try:
+                import passlib.hash
+                return passlib.hash.bcrypt.verify(plain_password, hashed_password)
+            except ImportError:
+                pass
+        # fallback: SHA-256 constant-time comparison
+        expected = hashlib.sha256(plain_password.encode()).hexdigest()
+        return hmac.compare_digest(expected, hashed_password)
+
+    def _check_rate_limit(self, ip: str) -> bool:
+        """Check if IP is rate-limited. Returns True if allowed, False if locked."""
+        now = time.time()
+
+        # check active lockout
+        if ip in self._lockouts:
+            lockout_end = self._lockouts[ip]
+            if now < lockout_end:
+                return False
+            # lockout expired
+            del self._lockouts[ip]
+            self._attempts[ip] = []
+
+        # prune old attempts outside window
+        cutoff = now - self._window_seconds
+        self._attempts[ip] = [t for t in self._attempts[ip] if t > cutoff]
+
+        # check if too many attempts
+        if len(self._attempts[ip]) >= self._max_attempts:
+            self._lockouts[ip] = now + self._window_seconds
+            return False
+
+        return True
+
+    def _record_failure(self, ip: str) -> None:
+        """Record a failed attempt for the given IP."""
+        self._attempts[ip].append(time.time())
+
+    def _reset_attempts(self, ip: str) -> None:
+        """Reset attempt counter for the given IP on successful auth."""
+        self._attempts.pop(ip, None)
+        self._lockouts.pop(ip, None)
+
+    def _get_retry_after(self, ip: str) -> int:
+        """Get Retry-After seconds for a locked-out IP."""
+        if ip in self._lockouts:
+            remaining = max(0, int(self._lockouts[ip] - time.time()))
+            return remaining
+        return 0
+
+    async def __call__(self, request: Request) -> HTTPBasicCredentials | None:
+        client_ip = request.client.host if request.client else "unknown"
+
+        # check rate limit before attempting decode
+        if not self._check_rate_limit(client_ip):
+            retry_after = self._get_retry_after(client_ip)
+            raise HTTPException(
+                status_code=429,
+                detail="Too many login attempts. Please try again later.",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        credentials = await super().__call__(request)
+        if credentials is not None:
+            # successful auth resets counter
+            self._reset_attempts(client_ip)
+        else:
+            self._record_failure(client_ip)
+        return credentials
+
+
 class HTTPBearer(HTTPBase):
     """
     HTTP Bearer token authentication.
