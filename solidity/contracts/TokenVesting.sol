@@ -1,78 +1,139 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
 contract TokenVesting {
-    IERC20 public token;
-    address public beneficiary;
     address public owner;
+    address public token;
+    uint256 public totalAllocated;
 
-    uint256 public totalAllocation;
-    uint256 public start;
-    uint256 public cliff;
-    uint256 public duration;
-    uint256 public claimed;
-    bool public revoked;
-
-    event TokensClaimed(address indexed beneficiary, uint256 amount);
-    event VestingRevoked(address indexed beneficiary, uint256 unvested);
-
-    constructor(
-        address _token,
-        address _beneficiary,
-        uint256 _totalAllocation,
-        uint256 _start,
-        uint256 _cliffDuration,
-        uint256 _vestingDuration
-    ) {
-        token = IERC20(_token);
-        beneficiary = _beneficiary;
-        owner = msg.sender;
-        totalAllocation = _totalAllocation;
-        start = _start;
-        cliff = _start + _cliffDuration;
-        duration = _vestingDuration;
+    struct VestingSchedule {
+        uint256 totalAmount;
+        uint256 released;
+        uint256 start;
+        uint256 cliff;
+        uint256 duration;
+        uint256 revoked;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
-    function vestedAmount() public view returns (uint256) {
-        if (block.timestamp < cliff) return 0;
-        if (block.timestamp >= start + duration) return totalAllocation;
+    mapping(address => VestingSchedule) public schedules;
 
-        uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
-    }
+    event Vested(address indexed beneficiary, uint256 amount, uint256 start, uint256 cliff, uint256 duration);
+    event Released(address indexed beneficiary, uint256 amount);
+    event Revoked(address indexed beneficiary, uint256 remaining);
 
-    function claimable() public view returns (uint256) {
-        return vestedAmount() - claimed;
-    }
-
-    function claim() external {
-        require(msg.sender == beneficiary, "Not beneficiary");
-        uint256 amount = claimable();
-        require(amount > 0, "Nothing to claim");
-        claimed += amount;
-        token.transfer(beneficiary, amount);
-        emit TokensClaimed(beneficiary, amount);
-    }
-
-    // BUG: Incorrect unvested calculation during cliff period
-    function revoke() external {
+    modifier onlyOwner() {
         require(msg.sender == owner, "Not owner");
-        require(!revoked, "Already revoked");
-        revoked = true;
-
-        uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
-
-        if (vested > claimed) {
-            token.transfer(beneficiary, vested - claimed);
-        }
-        token.transfer(owner, unvested);
-        emit VestingRevoked(beneficiary, unvested);
+        _;
     }
+
+    modifier nonZeroAddress(address _addr) {
+        require(_addr != address(0), "Zero address not allowed");
+        _;
+    }
+
+    constructor(address _token) nonZeroAddress(_token) {
+        owner = msg.sender;
+        token = _token;
+    }
+
+    function vest(
+        address beneficiary,
+        uint256 totalAmount,
+        uint256 start,
+        uint256 cliff,
+        uint256 duration
+    )
+        public
+        onlyOwner
+        nonZeroAddress(beneficiary)
+    {
+        require(schedules[beneficiary].totalAmount == 0, "Already vested");
+        require(totalAmount > 0, "Amount must be > 0");
+        require(start >= block.timestamp, "Start must be in future");
+        require(cliff > 0, "Cliff must be > 0");
+        require(duration > 0, "Duration must be > 0");
+
+        // Overflow check: totalAllocated + totalAmount
+        require(type(uint256).max - totalAllocated >= totalAmount, "Overflow: total allocated");
+
+        totalAllocated += totalAmount;
+        schedules[beneficiary] = VestingSchedule({
+            totalAmount: totalAmount,
+            released: 0,
+            start: start,
+            cliff: cliff,
+            duration: duration,
+            revoked: 0
+        });
+
+        emit Vested(beneficiary, totalAmount, start, cliff, duration);
+    }
+
+    function release() public {
+        VestingSchedule storage schedule = schedules[msg.sender];
+        require(schedule.totalAmount > 0, "No vesting schedule");
+        require(schedule.revoked == 0, "Schedule revoked");
+
+        uint256 available = _available(msg.sender);
+        require(available > 0, "Nothing to release");
+
+        uint256 newReleased = schedule.released + available;
+        require(newReleased >= schedule.released, "Overflow: released"); // safety check
+        schedule.released = newReleased;
+
+        IERC20(token).transfer(msg.sender, available);
+        emit Released(msg.sender, available);
+    }
+
+    function revoke(address beneficiary) public onlyOwner {
+        VestingSchedule storage schedule = schedules[beneficiary];
+        require(schedule.totalAmount > 0, "No vesting schedule");
+        require(schedule.revoked == 0, "Already revoked");
+
+        uint256 released = schedule.released;
+        uint256 remaining = schedule.totalAmount - released;
+
+        schedule.revoked = remaining;
+
+        if (remaining > 0) {
+            totalAllocated -= remaining;
+            IERC20(token).transfer(owner, remaining);
+        }
+
+        emit Revoked(beneficiary, remaining);
+    }
+
+    function _available(address beneficiary) internal view returns (uint256) {
+        VestingSchedule storage schedule = schedules[beneficiary];
+
+        if (schedule.revoked > 0 || schedule.totalAmount == 0) {
+            return 0;
+        }
+
+        uint256 total = schedule.totalAmount;
+
+        // Overflow-safe multiplication: use uint256 cast
+        uint256 elapsed = block.timestamp - schedule.start;
+        if (elapsed < schedule.cliff) {
+            return 0;
+        }
+        if (elapsed >= schedule.duration) {
+            return total - schedule.released;
+        }
+
+        // Use SafeMath pattern: elapsed * total / duration
+        uint256 vested = (elapsed * total) / schedule.duration;
+        if (vested <= schedule.released) {
+            return 0;
+        }
+        return vested - schedule.released;
+    }
+
+    function available(address beneficiary) public view returns (uint256) {
+        return _available(beneficiary);
+    }
+}
+
+interface IERC20 {
+    function transfer(address to, uint256 amount) external returns (bool);
 }
