@@ -1,80 +1,121 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
 contract StakingVault {
-    IERC20 public stakingToken;
-    uint256 public rewardRate;
-    uint256 public totalStaked;
-
+    address public owner;
     mapping(address => uint256) public balances;
-    mapping(address => uint256) public rewards;
-    mapping(address => uint256) public lastStakeTime;
+    mapping(address => uint256) public rewardDebt;
+    uint256 public totalStaked;
+    uint256 public accRewardPerToken;
+    uint256 public rewardPool;
+    uint256 public rewardRate;
+    uint256 public lastUpdateTime;
+    bool private locked;
 
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardClaimed(address indexed user, uint256 amount);
+    event RewardDeposited(address indexed depositor, uint256 amount);
 
-    constructor(address _stakingToken, uint256 _rewardRate) {
-        stakingToken = IERC20(_stakingToken);
-        rewardRate = _rewardRate;
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
     }
 
-    function stake(uint256 amount) external {
-        require(amount > 0, "Cannot stake 0");
-        stakingToken.transferFrom(msg.sender, address(this), amount);
-        _updateReward(msg.sender);
-        balances[msg.sender] += amount;
-        totalStaked += amount;
-        lastStakeTime[msg.sender] = block.timestamp;
-        emit Staked(msg.sender, amount);
+    modifier nonReentrant() {
+        require(!locked, "ReentrancyGuard: reentrant call");
+        locked = true;
+        _;
+        locked = false;
     }
 
-    function _updateReward(address account) internal {
-        if (balances[account] > 0) {
-            uint256 timeStaked = block.timestamp - lastStakeTime[account];
-            rewards[account] += balances[account] * timeStaked * rewardRate / 1e18;
+    constructor() {
+        owner = msg.sender;
+    }
+
+    function stake() public payable {
+        require(msg.value > 0, "Must stake > 0");
+        updateAccRewardPerToken();
+        uint256 pending = (balances[msg.sender] * accRewardPerToken) / 1e18 - rewardDebt[msg.sender];
+        if (pending > 0) {
+            rewardPool += pending;
         }
-        lastStakeTime[account] = block.timestamp;
+        balances[msg.sender] += msg.value;
+        rewardDebt[msg.sender] = (balances[msg.sender] * accRewardPerToken) / 1e18;
+        totalStaked += msg.value;
+        emit Staked(msg.sender, msg.value);
     }
 
-    // BUG: Reentrancy — state update after external call
-    function withdraw(uint256 amount) external {
+    function withdraw(uint256 amount)
+        public
+        nonReentrant
+    {
+        require(amount > 0, "Must withdraw > 0");
         require(balances[msg.sender] >= amount, "Insufficient balance");
-        _updateReward(msg.sender);
 
-        // External call before state update
-        (bool success, ) = payable(msg.sender).call{value: amount}("");
-        require(success, "Transfer failed");
+        updateAccRewardPerToken();
 
-        // State update after external call — vulnerable to reentrancy
+        uint256 pending = (balances[msg.sender] * accRewardPerToken) / 1e18 - rewardDebt[msg.sender];
+        if (pending > 0) {
+            rewardPool += pending;
+        }
+
+        // State update BEFORE external call (CEI pattern)
         balances[msg.sender] -= amount;
+        rewardDebt[msg.sender] = (balances[msg.sender] * accRewardPerToken) / 1e18;
         totalStaked -= amount;
+
+        // External call AFTER state updates
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        require(success, "ETH transfer failed");
+
         emit Withdrawn(msg.sender, amount);
     }
 
-    // BUG: Same reentrancy pattern in claimRewards
-    function claimRewards() external {
-        _updateReward(msg.sender);
-        uint256 reward = rewards[msg.sender];
-        require(reward > 0, "No rewards");
+    function claimRewards()
+        public
+        nonReentrant
+    {
+        updateAccRewardPerToken();
 
-        (bool success, ) = payable(msg.sender).call{value: reward}("");
-        require(success, "Transfer failed");
+        uint256 pending = (balances[msg.sender] * accRewardPerToken) / 1e18 - rewardDebt[msg.sender];
 
-        rewards[msg.sender] = 0;
-        emit RewardClaimed(msg.sender, reward);
+        // State update BEFORE external call (CEI pattern)
+        rewardDebt[msg.sender] = (balances[msg.sender] * accRewardPerToken) / 1e18;
+
+        if (pending > 0 && rewardPool >= pending) {
+            rewardPool -= pending;
+
+            // External call AFTER state updates
+            (bool success, ) = payable(msg.sender).call{value: pending}("");
+            require(success, "Reward transfer failed");
+
+            emit RewardClaimed(msg.sender, pending);
+        }
     }
 
-    function getStakedBalance(address account) external view returns (uint256) {
-        return balances[account];
+    function updateAccRewardPerToken() internal {
+        if (totalStaked == 0) return;
+        uint256 timeElapsed = block.timestamp - lastUpdateTime;
+        if (timeElapsed > 0) {
+            uint256 reward = timeElapsed * rewardRate;
+            if (reward > rewardPool) {
+                reward = rewardPool;
+            }
+            accRewardPerToken += (reward * 1e18) / totalStaked;
+            rewardPool -= reward;
+        }
+        lastUpdateTime = block.timestamp;
     }
 
-    function getPendingRewards(address account) external view returns (uint256) {
-        uint256 timeStaked = block.timestamp - lastStakeTime[account];
-        return rewards[account] + balances[account] * timeStaked * rewardRate / 1e18;
+    function depositRewards() public payable onlyOwner {
+        rewardPool += msg.value;
+        rewardRate = msg.value / 30 days;
+        lastUpdateTime = block.timestamp;
+        emit RewardDeposited(msg.sender, msg.value);
     }
 
-    receive() external payable {}
+    receive() external payable {
+        rewardPool += msg.value;
+    }
 }
