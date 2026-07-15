@@ -12,6 +12,15 @@ contract StakingVault {
     mapping(address => uint256) public rewards;
     mapping(address => uint256) public lastStakeTime;
 
+    bool private _locked;
+
+    modifier nonReentrant() {
+        require(!_locked, "Reentrant call");
+        _locked = true;
+        _;
+        _locked = false;
+    }
+
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardClaimed(address indexed user, uint256 amount);
@@ -39,32 +48,34 @@ contract StakingVault {
         lastStakeTime[account] = block.timestamp;
     }
 
-    // BUG: Reentrancy — state update after external call
-    function withdraw(uint256 amount) external {
+    // CEI: state update before external call, nonReentrant guard
+    function withdraw(uint256 amount) external nonReentrant {
         require(balances[msg.sender] >= amount, "Insufficient balance");
         _updateReward(msg.sender);
 
-        // External call before state update
-        (bool success, ) = payable(msg.sender).call{value: amount}("");
-        require(success, "Transfer failed");
-
-        // State update after external call — vulnerable to reentrancy
+        // State update before external call — CEI pattern
         balances[msg.sender] -= amount;
         totalStaked -= amount;
         emit Withdrawn(msg.sender, amount);
+
+        // External call after state update
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        require(success, "Transfer failed");
     }
 
-    // BUG: Same reentrancy pattern in claimRewards
-    function claimRewards() external {
+    // CEI: state update before external call, nonReentrant guard
+    function claimRewards() external nonReentrant {
         _updateReward(msg.sender);
         uint256 reward = rewards[msg.sender];
         require(reward > 0, "No rewards");
 
-        (bool success, ) = payable(msg.sender).call{value: reward}("");
-        require(success, "Transfer failed");
-
+        // State update before external call — CEI pattern
         rewards[msg.sender] = 0;
         emit RewardClaimed(msg.sender, reward);
+
+        // External call after state update
+        (bool success, ) = payable(msg.sender).call{value: reward}("");
+        require(success, "Transfer failed");
     }
 
     function getStakedBalance(address account) external view returns (uint256) {
