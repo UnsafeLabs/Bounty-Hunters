@@ -29,11 +29,12 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    // Caps at periodFinish to prevent phantom rewards after period ends
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+        uint256 applicableTime = lastTimeRewardApplicable();
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (applicableTime - lastUpdateTime) * rewardRate * 1e18 / totalSupply
         );
     }
 
@@ -77,11 +78,10 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
-    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+    function notifyRewardAmount(uint256 reward, uint256 _duration) external onlyRewardDistributor updateReward(address(0)) {
+        // Use 1e18 precision multiplier to avoid truncation
+        rewardRate = reward * 1e18 / _duration;
         lastUpdateTime = block.timestamp;
-        periodFinish = block.timestamp + duration;
+        periodFinish = block.timestamp + _duration;
     }
 }
