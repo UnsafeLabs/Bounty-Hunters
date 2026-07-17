@@ -1,0 +1,5 @@
+{
+  "agent_name": "opencode",
+  "config_snapshot": "ARIA accessibility improvements: role=log + aria-live=polite on messages container, role=listitem on each message row, aria-label on all interactive buttons, skip links for keyboard navigation between sidebar/messages/composer, Escape key to return focus to composer.",
+  "created": "2026-07-17T21:45:00Z"
+}

@@ -728,6 +728,7 @@ export default function ChatView(props: ChatViewProps) {
     LastInvokedScriptByProjectSchema,
   );
   const legendListRef = useRef<LegendListRef | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const isAtEndRef = useRef(true);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
@@ -3540,6 +3541,21 @@ export default function ChatView(props: ChatViewProps) {
         />
       </header>
 
+      {/* Skip links for keyboard navigation */}
+      <div className="sr-only focus-within:not-sr-only focus-within:absolute focus-within:z-50 focus-within:px-4 focus-within:py-2">
+        <a href="#chat-messages" className="mr-4 text-sm underline">
+          Skip to messages
+        </a>
+        <a href="#chat-composer" className="mr-4 text-sm underline">
+          Skip to composer
+        </a>
+        {planSidebarOpen && (
+          <a href="#plan-sidebar" className="text-sm underline">
+            Skip to plan sidebar
+          </a>
+        )}
+      </div>
+
       {/* Error banner */}
       <ProviderStatusBanner status={activeProviderStatus} />
       <ThreadErrorBanner
@@ -3547,11 +3563,27 @@ export default function ChatView(props: ChatViewProps) {
         onDismiss={() => setThreadError(activeThread.id, null)}
       />
       {/* Main content area with optional plan sidebar */}
-      <div className="flex min-h-0 min-w-0 flex-1">
+      <div
+        className="flex min-h-0 min-w-0 flex-1"
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && document.activeElement?.closest('[id="chat-messages"]')) {
+            e.preventDefault();
+            (document.querySelector('[id="chat-composer"] button, [id="chat-composer"] textarea, [id="chat-composer"] input') as HTMLElement)?.focus();
+          }
+        }}
+      >
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div
+            ref={messagesContainerRef}
+            id="chat-messages"
+            className="relative flex min-h-0 flex-1 flex-col"
+            role="log"
+            aria-live="polite"
+            aria-label="Chat messages"
+            tabIndex={-1}
+          >
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}
@@ -3596,6 +3628,7 @@ export default function ChatView(props: ChatViewProps) {
 
           {/* Input bar */}
           <div
+            id="chat-composer"
             className={cn(
               "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
               isGitRepo

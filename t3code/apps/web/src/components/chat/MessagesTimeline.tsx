@@ -302,6 +302,7 @@ type TimelineRow = MessagesTimelineRow;
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
+      role="listitem"
       className={cn(
         "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
