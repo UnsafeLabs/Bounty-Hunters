@@ -1,0 +1,5 @@
+{
+  "contributor": "opencode agent",
+  "generation_context": "Fix integer overflow risk in TokenVesting vestedAmount calculation. Added overflow pre-check before multiplication. Fixed revoke unvested calculation to use totalAllocation - vested.",
+  "completed_at": "2026-07-17T20:47:00Z"
+}
