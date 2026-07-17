@@ -82,6 +82,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   terminalOpen: boolean;
   onRequestClose?: () => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  onResetDefault?: () => void;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -641,6 +642,20 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             <ComboboxEmpty className="not-empty:py-6 empty:h-0 text-xs font-normal leading-snug">
               No models found
             </ComboboxEmpty>
+            {props.onResetDefault && (
+              <div className="border-t px-2 py-2">
+                <button
+                  type="button"
+                  className="w-full rounded px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/60 hover:text-foreground text-left"
+                  onClick={() => {
+                    props.onResetDefault?.();
+                    props.onRequestClose?.();
+                  }}
+                >
+                  Reset to default
+                </button>
+              </div>
+            )}
           </div>
         </Combobox>
       </div>

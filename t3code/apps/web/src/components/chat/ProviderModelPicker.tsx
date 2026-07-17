@@ -3,7 +3,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -19,6 +19,9 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+
+const STORAGE_KEY_PROVIDER = "t3tools:selectedProviderId";
+const STORAGE_KEY_MODEL = "t3tools:selectedModel";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -88,9 +91,53 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(STORAGE_KEY_PROVIDER, instanceId);
+        localStorage.setItem(STORAGE_KEY_MODEL, model);
+      } catch {}
+    }
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
   };
+
+  const handleResetDefault = useCallback(() => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem(STORAGE_KEY_PROVIDER);
+        localStorage.removeItem(STORAGE_KEY_MODEL);
+      } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedProvider = localStorage.getItem(STORAGE_KEY_PROVIDER);
+    const savedModel = localStorage.getItem(STORAGE_KEY_MODEL);
+    if (!savedProvider || !savedModel) return;
+    const instanceExists = props.instanceEntries.some(
+      (entry) => entry.instanceId === savedProvider,
+    );
+    if (!instanceExists) return;
+    props.onInstanceModelChange(savedProvider as ProviderInstanceId, savedModel);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY_PROVIDER && e.newValue) {
+        const instanceExists = props.instanceEntries.some(
+          (entry) => entry.instanceId === e.newValue,
+        );
+        if (instanceExists && props.model) {
+          const savedModel = localStorage.getItem(STORAGE_KEY_MODEL);
+          props.onInstanceModelChange(e.newValue as ProviderInstanceId, savedModel ?? props.model);
+        }
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [props.model]);
 
   return (
     <Popover
@@ -180,6 +227,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           terminalOpen={props.terminalOpen ?? false}
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
+          onResetDefault={handleResetDefault}
         />
       </PopoverPopup>
     </Popover>
