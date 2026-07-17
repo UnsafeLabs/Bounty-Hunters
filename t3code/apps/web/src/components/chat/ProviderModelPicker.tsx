@@ -3,7 +3,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -19,9 +19,6 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
-
-const STORAGE_KEY_PROVIDER = "selectedProviderId";
-const STORAGE_KEY_MODEL = "selectedModel";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -91,36 +88,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem(STORAGE_KEY_PROVIDER, instanceId);
-        localStorage.setItem(STORAGE_KEY_MODEL, model);
-      } catch {}
-    }
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
   };
-
-  const handleResetDefault = useCallback(() => {
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.removeItem(STORAGE_KEY_PROVIDER);
-        localStorage.removeItem(STORAGE_KEY_MODEL);
-      } catch {}
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const savedProvider = localStorage.getItem(STORAGE_KEY_PROVIDER);
-    const savedModel = localStorage.getItem(STORAGE_KEY_MODEL);
-    if (!savedProvider || !savedModel) return;
-    const instanceExists = props.instanceEntries.some(
-      (entry) => entry.instanceId === savedProvider,
-    );
-    if (!instanceExists) return;
-    props.onInstanceModelChange(savedProvider as ProviderInstanceId, savedModel);
-  }, []);
 
   return (
     <Popover
