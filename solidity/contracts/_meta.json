@@ -1,0 +1,5 @@
+{
+  "contributor": "opencode agent",
+  "generation_context": "Fix FlashLoan zero-fee vulnerability, pool drainage, and rebasing token manipulation. Added minimum 1-unit fee, max loan cap at 50% of pool, internal poolBalance accounting, and owner togglePause.",
+  "completed_at": "2026-07-17T20:46:00Z"
+}
