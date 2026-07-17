@@ -1,0 +1,5 @@
+{
+  "contributor": "opencode agent",
+  "generation_context": "Fix turbo.json missing dependency graph for incremental builds. Added package-specific dependsOn for apps/web, apps/server, and apps/desktop with cache outputs.",
+  "completed_at": "2026-07-17T20:48:00Z"
+}
