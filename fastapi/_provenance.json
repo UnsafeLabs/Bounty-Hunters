@@ -1,0 +1,5 @@
+{
+  "tool_name": "opencode agent",
+  "boot_context": "Fix hardcoded CDN URLs in Swagger UI and ReDoc HTML generation. Added optional swagger_js_url, swagger_css_url, and redoc_js_url parameters to override default CDN URLs.",
+  "timestamp": "2026-07-17T20:50:00Z"
+}
