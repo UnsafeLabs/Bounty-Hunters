@@ -14,38 +14,48 @@ interface AggregatorV3Interface {
 
 contract PriceOracle {
     AggregatorV3Interface public primaryFeed;
+    AggregatorV3Interface public secondaryFeed;
     address public owner;
     uint256 public MAX_STALENESS = 3600;
 
     event PriceQueried(int256 price, uint256 timestamp);
+    event StalePrice(address indexed primaryFeed, uint256 updatedAt);
 
     constructor(address _primaryFeed) {
         primaryFeed = AggregatorV3Interface(_primaryFeed);
         owner = msg.sender;
     }
 
-    // BUG: No staleness check on updatedAt
-    // BUG: No check for negative/zero price
-    // BUG: No round completeness validation
-    // BUG: No fallback oracle
     function getLatestPrice() external view returns (int256) {
+        (int256 price, bool valid) = _tryFeed(primaryFeed);
+        if (valid) return price;
+        (price, valid) = _tryFeed(secondaryFeed);
+        require(valid, "Both oracles stale");
+        return price;
+    }
+
+    function _tryFeed(AggregatorV3Interface feed) internal view returns (int256 price, bool valid) {
+        if (address(feed) == address(0)) return (0, false);
         (
             uint80 roundId,
-            int256 price,
+            int256 answer,
             ,
             uint256 updatedAt,
             uint80 answeredInRound
-        ) = primaryFeed.latestRoundData();
-
-        // Missing: require(price > 0)
-        // Missing: require(answeredInRound >= roundId)
-        // Missing: require(block.timestamp - updatedAt < MAX_STALENESS)
-
-        return price;
+        ) = feed.latestRoundData();
+        if (answer <= 0) return (0, false);
+        if (answeredInRound < roundId) return (0, false);
+        if (block.timestamp - updatedAt >= MAX_STALENESS) return (0, false);
+        return (answer, true);
     }
 
     function getDecimals() external view returns (uint8) {
         return primaryFeed.decimals();
+    }
+
+    function setSecondaryFeed(address _secondaryFeed) external {
+        require(msg.sender == owner, "Not owner");
+        secondaryFeed = AggregatorV3Interface(_secondaryFeed);
     }
 
     function setMaxStaleness(uint256 _maxStaleness) external {

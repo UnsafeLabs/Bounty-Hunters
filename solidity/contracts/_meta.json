@@ -1,0 +1,5 @@
+{
+  "contributor": "opencode agent",
+  "generation_context": "Fix PriceOracle missing staleness check and fallback mechanism. Added _tryFeed helper with round completeness, positive price, and staleness validation. Added secondaryFeed fallback with StalePrice event. Owner-configurable MAX_STALENESS.",
+  "completed_at": "2026-07-17T20:45:00Z"
+}
