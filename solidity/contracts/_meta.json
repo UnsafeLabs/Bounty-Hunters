@@ -1,0 +1,5 @@
+{
+  "contributor": "opencode agent",
+  "generation_context": "Fix missing slippage protection and deadline in SimpleSwap. Added minAmountOut and deadline parameters, fixed fee precision with minimum 1-unit fee, extracted shared _quote function for swap and getAmountOut.",
+  "completed_at": "2026-07-17T20:44:00Z"
+}
