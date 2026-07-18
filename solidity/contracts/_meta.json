@@ -1,5 +1,0 @@
-{
-  "contributor": "opencode agent",
-  "generation_context": "Fix tx.origin phishing vulnerability in GovernanceToken. Replaced all tx.origin usage with msg.sender in delegateVote, revokeDelegate, and snapshot functions.",
-  "completed_at": "2026-07-17T20:46:30Z"
-}
