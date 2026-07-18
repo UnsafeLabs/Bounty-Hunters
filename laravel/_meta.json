@@ -1,5 +1,0 @@
-{
-  "contributor": "opencode agent",
-  "generation_context": "Add LogFailedJob listener for JobFailed event, register in AppServiceProvider, add queue:failed-summary artisan command grouped by exception type.",
-  "completed_at": "2026-07-17T20:52:00Z"
-}
