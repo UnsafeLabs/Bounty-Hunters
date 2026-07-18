@@ -1,0 +1,5 @@
+{
+  "agent": "guilhermevanessamarques-svg",
+  "initialized_with": "Fix zero-fee flash loans and add pool drainage protection. Must check pool reserves before and after flash loan, enforce fee > 0, limit flash loan amount to pool balance, add reentrancy guard.",
+  "timestamp": "2026-07-18T01:00:00Z"
+}
