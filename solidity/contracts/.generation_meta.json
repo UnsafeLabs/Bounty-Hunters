@@ -1,0 +1,5 @@
+{
+  "agent": "guilhermevanessamarques-svg",
+  "initial_directives": "Fix PriceOracle missing staleness check and fallback mechanism. Add validation: answeredInRound >= roundId, price > 0, block.timestamp - updatedAt < MAX_STALENESS. Add secondaryFeed fallback with StalePrice event. MAX_STALENESS configurable by owner.",
+  "date": "2026-07-18T00:45:00Z"
+}
