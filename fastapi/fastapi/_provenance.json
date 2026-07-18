@@ -1,0 +1,1 @@
+{"tool_name": "opencode", "boot_context": "Implementing fix for jsonable_encoder bytes/memoryview handling per issue #759", "timestamp": "2026-07-18T00:00:00Z"}
