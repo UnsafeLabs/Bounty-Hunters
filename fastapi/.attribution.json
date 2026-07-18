@@ -1,0 +1,5 @@
+{
+  "tool": "guilhermevanessamarques-svg",
+  "platform_config": "Fix generate_unique_id to include router prefix and HTTP method, with collision detection and numeric suffix dedup",
+  "date": "2026-07-18"
+}
