@@ -1,4 +1,7 @@
+import csv
 import importlib
+import io
+from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any, Protocol, cast
 
 from fastapi.exceptions import FastAPIDeprecationWarning
@@ -95,4 +98,50 @@ class ORJSONResponse(JSONResponse):
         assert orjson is not None, "orjson must be installed to use ORJSONResponse"
         return orjson.dumps(
             content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
+        )
+
+
+def _csv_escape(value: object, delimiter: str) -> str:
+    s = str(value) if value is not None else ""
+    if delimiter in s or "," in s or '"' in s or "\n" in s or "\r" in s:
+        s = s.replace('"', '""')
+        s = f'"{s}"'
+    return s
+
+
+async def _csv_stream(
+    rows: AsyncIterable[list[object]],
+    headers: list[str] | None,
+    delimiter: str,
+) -> AsyncGenerator[bytes, None]:
+    if headers:
+        yield delimiter.join(_csv_escape(h, delimiter) for h in headers).encode("utf-8") + b"\r\n"
+    async row_gen = rows.__aiter__()
+    while True:
+        try:
+            row = await row_gen.__anext__()
+            yield delimiter.join(_csv_escape(v, delimiter) for v in row).encode("utf-8") + b"\r\n"
+        except StopAsyncIteration:
+            break
+
+
+class StreamingCSVResponse(StreamingResponse):
+    media_type = "text/csv"
+
+    def __init__(
+        self,
+        rows: AsyncIterable[list[object]],
+        headers: list[str] | None = None,
+        delimiter: str = ",",
+        filename: str = "export.csv",
+        status_code: int = 200,
+    ) -> None:
+        self.csv_headers = headers
+        self.csv_delimiter = delimiter
+        content = _csv_stream(rows, headers, delimiter)
+        super().__init__(
+            content=content,
+            status_code=status_code,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
