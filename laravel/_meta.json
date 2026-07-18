@@ -1,5 +1,0 @@
-{
-  "contributor": "opencode agent",
-  "generation_context": "Add logs:clear artisan command to delete old log files and register daily schedule at midnight in console.php.",
-  "completed_at": "2026-07-17T20:49:00Z"
-}
