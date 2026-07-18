@@ -1,0 +1,1 @@
+{"identity": "opencode", "runtime_instructions": "Implementing concurrent task runner with semaphore limiting and timeout per issue #803", "timestamp": "2026-07-18T00:00:00Z"}
