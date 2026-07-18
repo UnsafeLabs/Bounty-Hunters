@@ -118,6 +118,22 @@ return [
             'replace_placeholders' => true,
         ],
 
+        'errors' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/error.log'),
+            'level' => env('LOG_ERROR_LEVEL', 'error'),
+            'days' => env('LOG_ERROR_DAYS', 30),
+            'replace_placeholders' => true,
+        ],
+
+        'json' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/json.log'),
+            'level' => env('LOG_JSON_LEVEL', 'debug'),
+            'formatter' => Monolog\Formatter\JsonFormatter::class,
+            'replace_placeholders' => true,
+        ],
+
         'null' => [
             'driver' => 'monolog',
             'handler' => NullHandler::class,
