@@ -59,3 +59,54 @@ class BackgroundTasks(StarletteBackgroundTasks):
         [FastAPI docs for Background Tasks](https://fastapi.tiangolo.com/tutorial/background-tasks/).
         """
         return super().add_task(func, *args, **kwargs)
+
+    def add_task_with_retry(
+        self,
+        func: Callable[P, Any],
+        *args: P.args,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+        **kwargs: P.kwargs,
+    ) -> None:
+        """
+        Add a function with automatic retry on failure.
+
+        Args:
+            func: The function to call.
+            max_retries: Maximum number of retry attempts.
+            retry_delay: Delay between retries in seconds (doubles each retry).
+        """
+        async def _wrapped() -> None:
+            import asyncio
+            import logging
+
+            logger = logging.getLogger("fastapi.background")
+            last_exc: Exception | None = None
+
+            for attempt in range(1, max_retries + 2):
+                try:
+                    result = func(*args, **kwargs)
+                    if hasattr(result, "__await__"):
+                        await result  # type: ignore
+                    return
+                except Exception as e:
+                    last_exc = e
+                    if attempt <= max_retries:
+                        logger.warning(
+                            "Background task failed (attempt %d/%d): %s",
+                            attempt,
+                            max_retries + 1,
+                            str(e),
+                        )
+                        await asyncio.sleep(retry_delay * (2 ** (attempt - 1)))
+                    else:
+                        logger.error(
+                            "Background task failed after %d attempts: %s",
+                            max_retries + 1,
+                            str(e),
+                        )
+
+            if last_exc:
+                raise last_exc
+
+        self.tasks.append(_wrapped())

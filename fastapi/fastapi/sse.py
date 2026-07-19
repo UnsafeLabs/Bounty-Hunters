@@ -220,3 +220,85 @@ KEEPALIVE_COMMENT = b": ping\n\n"
 # Seconds between keep-alive pings when a generator is idle.
 # Private but importable so tests can monkeypatch it.
 _PING_INTERVAL: float = 15.0
+
+
+class SSEEventFilter:
+    """Filter SSE events by event type for selective client consumption."""
+
+    def __init__(self, event_types: list[str] | None = None) -> None:
+        self.event_types = set(event_types) if event_types else None
+
+    def should_send(self, event: ServerSentEvent) -> bool:
+        if self.event_types is None:
+            return True
+        return event.event in self.event_types
+
+
+class SSEReconnectBuffer:
+    """Buffer recent events for reconnect replay using Last-Event-ID."""
+
+    def __init__(self, max_events: int = 100) -> None:
+        self._buffer: list[tuple[str, ServerSentEvent]] = []
+        self._max_events = max_events
+
+    def add(self, event: ServerSentEvent) -> None:
+        if event.id is not None:
+            self._buffer.append((event.id, event))
+            if len(self._buffer) > self._max_events:
+                self._buffer.pop(0)
+
+    def get_events_since(self, last_event_id: str) -> list[ServerSentEvent]:
+        events: list[ServerSentEvent] = []
+        found = False
+        for eid, event in self._buffer:
+            if found:
+                events.append(event)
+            if eid == last_event_id:
+                found = True
+        if not found:
+            events = [e for _, e in self._buffer]
+        return events
+
+
+async def sse_stream_with_disconnect_detection(
+    generator: Any,
+    ping_interval: float = _PING_INTERVAL,
+    on_disconnect: Any | None = None,
+) -> Any:
+    """Wrap an SSE generator with disconnect detection and keep-alive pings.
+
+    Yields SSE-formatted bytes. Detects client disconnects by catching
+    CancelledError or closed connection errors.
+    """
+    import asyncio
+
+    ping_task: asyncio.Task[None] | None = None
+
+    async def send_pings() -> None:
+        while True:
+            await asyncio.sleep(ping_interval)
+            yield KEEPALIVE_COMMENT
+
+    try:
+        async for event in generator:
+            if isinstance(event, ServerSentEvent):
+                yield format_sse_event(
+                    data_str=str(event.data) if event.data is not None else None,
+                    event=event.event,
+                    id=event.id,
+                    retry=event.retry,
+                    comment=event.comment,
+                )
+            elif isinstance(event, bytes):
+                yield event
+            else:
+                yield format_sse_event(data_str=str(event))
+    except (asyncio.CancelledError, ConnectionError, GeneratorExit):
+        if on_disconnect:
+            try:
+                result = on_disconnect()
+                if hasattr(result, "__await__"):
+                    await result
+            except Exception:
+                pass
+        raise

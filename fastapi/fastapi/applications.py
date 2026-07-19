@@ -1080,6 +1080,11 @@ class FastAPI(Starlette):
         [FastAPI docs for OpenAPI](https://fastapi.tiangolo.com/how-to/extending-openapi/).
         """
         if not self.openapi_schema:
+            servers = self.servers
+            if not servers and self.root_path_in_servers and self.root_path:
+                servers = [{"url": self.root_path, "description": "Root path"}]
+            elif not servers:
+                servers = [{"url": "/", "description": "Default server"}]
             self.openapi_schema = get_openapi(
                 title=self.title,
                 version=self.version,
@@ -1092,7 +1097,7 @@ class FastAPI(Starlette):
                 routes=self.routes,
                 webhooks=self.webhooks.routes,
                 tags=self.openapi_tags,
-                servers=self.servers,
+                servers=servers,
                 separate_input_output_schemas=self.separate_input_output_schemas,
                 external_docs=self.openapi_external_docs,
             )

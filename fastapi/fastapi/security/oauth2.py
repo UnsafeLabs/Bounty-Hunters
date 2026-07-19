@@ -691,3 +691,69 @@ class SecurityScopes:
                 """
             ),
         ] = " ".join(self.scopes)
+
+
+class OAuth2TokenRefreshForm:
+    """
+    Dependency class to collect the `refresh_token` as form data for an OAuth2
+    token refresh flow.
+
+    The OAuth2 specification dictates that for a refresh token grant, the data
+    should be collected using form data with the field `refresh_token`.
+
+    ## Example
+
+    ```python
+    from typing import Annotated
+
+    from fastapi import Depends, FastAPI
+    from fastapi.security import OAuth2TokenRefreshForm
+
+    app = FastAPI()
+
+
+    @app.post("/refresh")
+    async def refresh_token(
+        form_data: Annotated[OAuth2TokenRefreshForm, Depends()],
+    ):
+        return {"refresh_token": form_data.refresh_token}
+    ```
+    """
+
+    def __init__(
+        self,
+        *,
+        grant_type: Annotated[
+            str | None,
+            Form(pattern="^refresh_token$"),
+            Doc(
+                """
+                The OAuth2 spec says it is required and MUST be the fixed string
+                "refresh_token".
+                """
+            ),
+        ] = None,
+        refresh_token: Annotated[
+            str,
+            Form(),
+            Doc(
+                """
+                The refresh token issued to the client.
+                """
+            ),
+        ],
+        scope: Annotated[
+            str,
+            Form(),
+            Doc(
+                """
+                The requested scope. Must not include any scope not originally
+                granted by the resource owner.
+                """
+            ),
+        ] = "",
+    ):
+        self.grant_type = grant_type
+        self.refresh_token = refresh_token
+        self.scopes = scope.split()
+        self.scope_str = scope

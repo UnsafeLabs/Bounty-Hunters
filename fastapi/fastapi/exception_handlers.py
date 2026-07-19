@@ -20,9 +20,31 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> Respon
 async def request_validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    errors = exc.errors()
+    redacted_errors = []
+    for err in errors:
+        err_copy = dict(err)
+        ctx = err_copy.get("ctx")
+        if ctx:
+            redacted_ctx = {}
+            for k, v in ctx.items():
+                if isinstance(v, str) and len(v) > 100:
+                    redacted_ctx[k] = "[REDACTED]"
+                else:
+                    redacted_ctx[k] = v
+            err_copy["ctx"] = redacted_ctx
+        redacted_errors.append(err_copy)
+
     return JSONResponse(
         status_code=422,
-        content={"detail": jsonable_encoder(exc.errors())},
+        content={
+            "detail": jsonable_encoder(redacted_errors),
+            "request": {
+                "method": request.method,
+                "url": str(request.url),
+                "path": request.url.path,
+            },
+        },
     )
 
 

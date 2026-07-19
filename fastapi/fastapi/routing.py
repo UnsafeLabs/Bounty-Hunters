@@ -87,6 +87,7 @@ from starlette.routing import (
     get_name,
 )
 from starlette.routing import Mount as Mount  # noqa
+from starlette.middleware import Middleware
 from starlette.types import AppType, ASGIApp, Lifespan, Receive, Scope, Send
 from starlette.websockets import WebSocket
 from typing_extensions import deprecated
@@ -1266,6 +1267,19 @@ class APIRouter(routing.Router):
                 """
             ),
         ] = Default(True),
+        middleware: Annotated[
+            Sequence[Middleware] | None,
+            Doc(
+                """
+                Router-level middleware to be applied to all routes in this router.
+
+                Each middleware is a `Middleware` instance from `starlette.middleware`.
+
+                Read more about it in the
+                [FastAPI docs for Middleware](https://fastapi.tiangolo.com/tutorial/middleware/).
+                """
+            ),
+        ] = None,
     ) -> None:
         # Determine the lifespan context to use
         if lifespan is None:
@@ -1313,6 +1327,7 @@ class APIRouter(routing.Router):
         self.default_response_class = default_response_class
         self.generate_unique_id_function = generate_unique_id_function
         self.strict_content_type = strict_content_type
+        self.user_middleware: list[Middleware] = list(middleware or [])
 
     def route(
         self,

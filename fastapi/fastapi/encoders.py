@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import datetime
 from collections import defaultdict, deque
@@ -276,6 +277,10 @@ def jsonable_encoder(
         return str(obj)
     if isinstance(obj, (str, int, float, type(None))):
         return obj
+    if isinstance(obj, bytes):
+        return base64.b64encode(obj).decode("ascii")
+    if isinstance(obj, memoryview):
+        return base64.b64encode(bytes(obj)).decode("ascii")
     if isinstance(obj, PydanticUndefinedType):
         return None
     if isinstance(obj, dict):

@@ -318,3 +318,97 @@ class APIKeyCookie(APIKeyBase):
     async def __call__(self, request: Request) -> str | None:
         api_key = request.cookies.get(self.model.name)
         return self.check_api_key(api_key)
+
+
+class APIKeyManager:
+    """Manage API keys with rate limiting and key rotation support.
+
+    ## Example
+
+    ```python
+    from fastapi import Depends, FastAPI
+    from fastapi.security import APIKeyManager
+
+    app = FastAPI()
+    key_manager = APIKeyManager()
+
+    @app.get("/items/")
+    async def read_items(api_key: str = Depends(key_manager)):
+        return {"api_key": api_key[:8] + "..."}
+    ```
+    """
+
+    def __init__(
+        self,
+        *,
+        max_requests: int = 100,
+        window_seconds: float = 60.0,
+        rotation_interval: float = 86400.0,
+    ) -> None:
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.rotation_interval = rotation_interval
+        self._key_store: dict[str, dict] = {}
+        self._request_counts: dict[str, list[float]] = {}
+
+    def register_key(self, key: str, metadata: dict | None = None) -> None:
+        import time
+
+        self._key_store[key] = {
+            "metadata": metadata or {},
+            "created_at": time.time(),
+            "active": True,
+        }
+
+    def revoke_key(self, key: str) -> None:
+        if key in self._key_store:
+            self._key_store[key]["active"] = False
+
+    def rotate_key(self, old_key: str) -> str | None:
+        import secrets
+        import time
+
+        if old_key not in self._key_store or not self._key_store[old_key]["active"]:
+            return None
+
+        new_key = secrets.token_urlsafe(32)
+        self._key_store[old_key]["active"] = False
+        self.register_key(new_key, self._key_store[old_key].get("metadata", {}))
+        return new_key
+
+    def is_rate_limited(self, key: str) -> bool:
+        import time
+
+        now = time.time()
+        requests = [t for t in self._request_counts.get(key, []) if now - t < self.window_seconds]
+        self._request_counts[key] = requests
+        return len(requests) >= self.max_requests
+
+    def check_key(self, key: str | None) -> str | None:
+        import time
+
+        if not key:
+            return None
+        if key not in self._key_store or not self._key_store[key]["active"]:
+            return None
+        if self.is_rate_limited(key):
+            return None
+
+        now = time.time()
+        self._request_counts.setdefault(key, []).append(now)
+
+        if now - self._key_store[key]["created_at"] > self.rotation_interval:
+            return self.rotate_key(key)
+
+        return key
+
+    async def __call__(self, request: Request) -> str | None:
+        key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+        result = self.check_key(key)
+        if not result:
+            raise HTTPException(
+                status_code=HTTP_401_UNAUTHORIZED,
+                detail="Invalid or rate-limited API key",
+                headers={"WWW-Authenticate": "APIKey"},
+            )
+        return result
