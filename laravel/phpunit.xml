@@ -11,12 +11,28 @@
         <testsuite name="Feature">
             <directory>tests/Feature</directory>
         </testsuite>
+        <testsuite name="Routes">
+            <directory>tests/Feature/Routes</directory>
+        </testsuite>
+        <testsuite name="Models">
+            <directory>tests/Unit/Models</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>
             <directory>app</directory>
         </include>
+        <exclude>
+            <directory>app/Providers</directory>
+            <file>app/Http/Kernel.php</file>
+        </exclude>
     </source>
+    <coverage>
+        <report>
+            <html outputDirectory="coverage"/>
+            <clover outputFile="coverage/clover.xml"/>
+        </report>
+    </coverage>
     <php>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
