@@ -14,20 +14,19 @@ interface AggregatorV3Interface {
 
 contract PriceOracle {
     AggregatorV3Interface public primaryFeed;
+    AggregatorV3Interface public fallbackFeed;
     address public owner;
     uint256 public MAX_STALENESS = 3600;
 
     event PriceQueried(int256 price, uint256 timestamp);
+    event StalePrice(uint256 primaryUpdatedAt, int256 fallbackPrice, uint256 fallbackTimestamp);
 
-    constructor(address _primaryFeed) {
+    constructor(address _primaryFeed, address _fallbackFeed) {
         primaryFeed = AggregatorV3Interface(_primaryFeed);
+        fallbackFeed = AggregatorV3Interface(_fallbackFeed);
         owner = msg.sender;
     }
 
-    // BUG: No staleness check on updatedAt
-    // BUG: No check for negative/zero price
-    // BUG: No round completeness validation
-    // BUG: No fallback oracle
     function getLatestPrice() external view returns (int256) {
         (
             uint80 roundId,
@@ -37,11 +36,26 @@ contract PriceOracle {
             uint80 answeredInRound
         ) = primaryFeed.latestRoundData();
 
-        // Missing: require(price > 0)
-        // Missing: require(answeredInRound >= roundId)
-        // Missing: require(block.timestamp - updatedAt < MAX_STALENESS)
+        if (price > 0 && answeredInRound >= roundId && block.timestamp - updatedAt < MAX_STALENESS) {
+            return price;
+        }
 
-        return price;
+        // Primary oracle is stale/invalid, try fallback
+        (
+            uint80 fRoundId,
+            int256 fPrice,
+            ,
+            uint256 fUpdatedAt,
+            uint80 fAnsweredInRound
+        ) = fallbackFeed.latestRoundData();
+
+        emit StalePrice(updatedAt, fPrice, fUpdatedAt);
+
+        require(fPrice > 0, "Invalid fallback price");
+        require(fAnsweredInRound >= fRoundId, "Incomplete fallback round");
+        require(block.timestamp - fUpdatedAt < MAX_STALENESS, "Stale fallback price");
+
+        return fPrice;
     }
 
     function getDecimals() external view returns (uint8) {
@@ -51,5 +65,10 @@ contract PriceOracle {
     function setMaxStaleness(uint256 _maxStaleness) external {
         require(msg.sender == owner, "Not owner");
         MAX_STALENESS = _maxStaleness;
+    }
+
+    function setFallbackFeed(address _fallbackFeed) external {
+        require(msg.sender == owner, "Not owner");
+        fallbackFeed = AggregatorV3Interface(_fallbackFeed);
     }
 }

@@ -1,0 +1,5 @@
+{
+  "agent": "singularitycurse26-svg",
+  "initial_directives": "Fix all Solidity contract vulnerabilities and context.json typos in UnsafeLabs/Bounty-Hunters repo. Follow acceptance criteria from each issue. Create minimal, correct changes.",
+  "date": "2026-07-19T19:00:00Z"
+}
