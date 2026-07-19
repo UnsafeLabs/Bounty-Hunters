@@ -1,5 +1,6 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Schedule from "effect/Schedule";
 import * as Stdio from "effect/Stdio";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -26,6 +27,13 @@ export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  /**
+   * Optional callback invoked when the ACP session expires mid-conversation
+   * (detected via an authentication-required error from the agent).
+   * Should perform re-authentication and return successfully, or fail if
+   * re-authentication is not possible.
+   */
+  readonly onSessionExpired?: () => Effect.Effect<void, AcpError.AcpError>;
 }
 
 type AcpClientRaw = {
@@ -260,6 +268,15 @@ export interface AcpClientShape {
     payload: Schema.Codec<A, I>,
     handler: (payload: A) => Effect.Effect<void, AcpError.AcpError>,
   ) => Effect.Effect<void>;
+  /**
+   * Registers a callback that is invoked when the session expires
+   * mid-conversation (detected via an authentication-required error).
+   * The callback should re-authenticate and return Effect.void on success.
+   * After the callback succeeds, the failed operation is automatically retried.
+   */
+  readonly onSessionExpired: (
+    handler: () => Effect.Effect<void, AcpError.AcpError>,
+  ) => Effect.Effect<void>;
 }
 
 export class AcpClient extends Context.Service<AcpClient, AcpClientShape>()(
@@ -329,6 +346,9 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     | undefined;
   let unknownExtNotificationHandler:
     | ((method: string, params: unknown) => Effect.Effect<void, AcpError.AcpError>)
+    | undefined;
+  let sessionExpiredHandler:
+    | (() => Effect.Effect<void, AcpError.AcpError>)
     | undefined;
 
   const runNotificationHandlers = <A>(
@@ -408,6 +428,39 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     onExtRequest: dispatchExtRequest,
   });
 
+  // Initialize session expired handler from options
+  if (options.onSessionExpired) {
+    sessionExpiredHandler = options.onSessionExpired;
+  }
+
+  /**
+   * Wraps an agent RPC call with automatic token refresh.
+   * When an authentication-required error (-32000) is detected,
+   * it invokes the onSessionExpired handler to re-authenticate,
+   * then retries the original operation exactly once.
+   */
+  const withAutoRefresh = <A>(
+    rpcCall: Effect.Effect<A, AcpError.AcpError>,
+  ): Effect.Effect<A, AcpError.AcpError> =>
+    rpcCall.pipe(
+      Effect.catchIf(
+        (error): error is AcpError.AcpRequestError =>
+          AcpError.isAcpRequestError(error) && (error as AcpError.AcpRequestError).isAuthRequired,
+        (error) => {
+          if (!sessionExpiredHandler) {
+            return Effect.fail(error);
+          }
+          return sessionExpiredHandler().pipe(
+            Effect.catchIf(
+              () => true,
+              () => Effect.fail(error),
+            ),
+            Effect.flatMap(() => rpcCall),
+          );
+        },
+      ),
+    );
+
   const clientHandlerLayer = AcpRpcs.ClientRpcs.toLayer(
     AcpRpcs.ClientRpcs.of({
       [CLIENT_METHODS.session_request_permission]: (payload) =>
@@ -463,19 +516,19 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
       notify: transport.notify,
     },
     agent: {
-      initialize: (payload) => callRpc(rpc[AGENT_METHODS.initialize](payload)),
-      authenticate: (payload) => callRpc(rpc[AGENT_METHODS.authenticate](payload)),
-      logout: (payload) => callRpc(rpc[AGENT_METHODS.logout](payload)),
-      createSession: (payload) => callRpc(rpc[AGENT_METHODS.session_new](payload)),
-      loadSession: (payload) => callRpc(rpc[AGENT_METHODS.session_load](payload)),
-      listSessions: (payload) => callRpc(rpc[AGENT_METHODS.session_list](payload)),
-      forkSession: (payload) => callRpc(rpc[AGENT_METHODS.session_fork](payload)),
-      resumeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_resume](payload)),
-      closeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_close](payload)),
-      setSessionModel: (payload) => callRpc(rpc[AGENT_METHODS.session_set_model](payload)),
+      initialize: (payload) => withAutoRefresh(callRpc(rpc[AGENT_METHODS.initialize](payload))),
+      authenticate: (payload) => withAutoRefresh(callRpc(rpc[AGENT_METHODS.authenticate](payload))),
+      logout: (payload) => withAutoRefresh(callRpc(rpc[AGENT_METHODS.logout](payload))),
+      createSession: (payload) => withAutoRefresh(callRpc(rpc[AGENT_METHODS.session_new](payload))),
+      loadSession: (payload) => withAutoRefresh(callRpc(rpc[AGENT_METHODS.session_load](payload))),
+      listSessions: (payload) => withAutoRefresh(callRpc(rpc[AGENT_METHODS.session_list](payload))),
+      forkSession: (payload) => withAutoRefresh(callRpc(rpc[AGENT_METHODS.session_fork](payload))),
+      resumeSession: (payload) => withAutoRefresh(callRpc(rpc[AGENT_METHODS.session_resume](payload))),
+      closeSession: (payload) => withAutoRefresh(callRpc(rpc[AGENT_METHODS.session_close](payload))),
+      setSessionModel: (payload) => withAutoRefresh(callRpc(rpc[AGENT_METHODS.session_set_model](payload))),
       setSessionConfigOption: (payload) =>
-        callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)),
-      prompt: (payload) => callRpc(rpc[AGENT_METHODS.session_prompt](payload)),
+        withAutoRefresh(callRpc(rpc[AGENT_METHODS.session_set_config_option](payload))),
+      prompt: (payload) => withAutoRefresh(callRpc(rpc[AGENT_METHODS.session_prompt](payload))),
       cancel: (payload) => transport.notify(AGENT_METHODS.session_cancel, payload),
     },
     handleRequestPermission: (handler) =>
@@ -554,6 +607,11 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
           method,
           decodeExtNotificationRegistration(method, payload, handler),
         );
+        return Effect.void;
+      }),
+    onSessionExpired: (handler) =>
+      Effect.suspend(() => {
+        sessionExpiredHandler = handler;
         return Effect.void;
       }),
   });

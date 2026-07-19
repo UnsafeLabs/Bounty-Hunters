@@ -47,6 +47,8 @@ export class AcpTransportError extends Schema.TaggedErrorClass<AcpTransportError
   },
 ) {}
 
+export const AUTH_ERROR_CODE = -32000 as const;
+
 export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()("AcpRequestError", {
   code: AcpSchema.ErrorCode,
   errorMessage: Schema.String,
@@ -54,6 +56,10 @@ export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()(
 }) {
   override get message() {
     return this.errorMessage;
+  }
+
+  get isAuthRequired(): boolean {
+    return this.code === AUTH_ERROR_CODE;
   }
 
   static fromProtocolError(error: AcpSchema.Error) {
