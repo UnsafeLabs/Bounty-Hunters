@@ -14,7 +14,12 @@ contract FlashLoan {
     address public owner;
     bool public paused;
 
+    uint256 public maxLoanRatio = 50; // 50% of pool max
+    uint256 public constant MIN_FEE = 1;
+
     event FlashLoanExecuted(address indexed borrower, uint256 amount, uint256 fee);
+    event Paused(address indexed owner);
+    event Unpaused(address indexed owner);
 
     constructor(address _loanToken, uint256 _feeBPS) {
         loanToken = IERC20(_loanToken);
@@ -22,24 +27,21 @@ contract FlashLoan {
         owner = msg.sender;
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
     function flashLoan(uint256 amount, bytes calldata data) external {
         require(!paused, "Paused");
         require(amount > 0, "Amount must be > 0");
 
         uint256 balanceBefore = loanToken.balanceOf(address(this));
         require(balanceBefore >= amount, "Insufficient pool balance");
+        require(amount <= balanceBefore * maxLoanRatio / 100, "Exceeds max loan ratio");
 
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
         uint256 fee = amount * feeBPS / 10000;
+        if (fee < MIN_FEE) fee = MIN_FEE;
 
         loanToken.transfer(msg.sender, amount);
 
         IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
         uint256 balanceAfter = loanToken.balanceOf(address(this));
         require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
 
@@ -58,7 +60,19 @@ contract FlashLoan {
         loanToken.transfer(owner, fees);
     }
 
-    // BUG: No emergency pause function
+    function setPaused(bool _paused) external {
+        require(msg.sender == owner, "Not owner");
+        paused = _paused;
+        if (_paused) emit Paused(owner);
+        else emit Unpaused(owner);
+    }
+
+    function setMaxLoanRatio(uint256 _maxLoanRatio) external {
+        require(msg.sender == owner, "Not owner");
+        require(_maxLoanRatio <= 100, "Cannot exceed 100%");
+        maxLoanRatio = _maxLoanRatio;
+    }
+
     function getPoolBalance() external view returns (uint256) {
         return loanToken.balanceOf(address(this));
     }
