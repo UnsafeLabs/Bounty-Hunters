@@ -3,6 +3,18 @@
 use Illuminate\Support\Str;
 
 return [
+    /*
+    |--------------------------------------------------------------------------
+    | Cache Health Check
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, CacheHealthCheck and the /health/cache endpoint can probe
+    | the active cache store. Interval is advisory for callers that poll.
+    |
+    */
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+    'health_check_interval' => (int) env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
 
     /*
     |--------------------------------------------------------------------------
