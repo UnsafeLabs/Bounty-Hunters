@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+/// @notice Bridge with chainId + contract address in digest; ecrecover zero check (#920).
 contract CrossChainBridge {
     IERC20 public bridgeToken;
     address public validator;
@@ -20,37 +21,35 @@ contract CrossChainBridge {
 
     function initiateTransfer(uint256 amount, uint256 targetChain) external {
         require(amount > 0, "Amount must be > 0");
-        bridgeToken.transferFrom(msg.sender, address(this), amount);
+        require(bridgeToken.transferFrom(msg.sender, address(this), amount), "lock");
         emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
     }
 
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
     function processTransfer(
         address recipient,
         uint256 amount,
         uint256 transferNonce,
+        uint256 sourceChainId,
         bytes calldata signature
     ) external {
         bytes32 transferHash = keccak256(abi.encodePacked(
             recipient,
             amount,
-            transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
+            transferNonce,
+            sourceChainId,
+            block.chainid,
+            address(this)
         ));
 
         require(!processedTransfers[transferHash], "Already processed");
         require(verifySignature(transferHash, signature), "Invalid signature");
 
         processedTransfers[transferHash] = true;
-        bridgeToken.transfer(recipient, amount);
+        require(bridgeToken.transfer(recipient, amount), "release");
 
         emit TransferProcessed(transferHash, recipient, amount);
     }
 
-    // BUG: Does not check for zero-address return from ecrecover
     function verifySignature(bytes32 hash, bytes calldata signature) public view returns (bool) {
         require(signature.length == 65, "Invalid signature length");
 
@@ -71,7 +70,7 @@ contract CrossChainBridge {
             v, r, s
         );
 
-        // BUG: Missing require(recovered != address(0))
+        require(recovered != address(0), "Invalid signature");
         return recovered == validator;
     }
 
