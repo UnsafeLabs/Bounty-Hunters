@@ -415,3 +415,10 @@ class HTTPDigest(HTTPBase):
             else:
                 return None
         return HTTPAuthorizationCredentials(scheme=scheme, credentials=credentials)
+
+# Brute-force protection wrapper (issue #800). Existing HTTPBasic unchanged.
+try:
+    from fastapi.security.http_basic_protection import HTTPBasicWithProtection  # noqa: E402,F401
+except Exception:  # pragma: no cover
+    pass
+
