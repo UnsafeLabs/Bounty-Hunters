@@ -318,3 +318,15 @@ class APIKeyCookie(APIKeyBase):
     async def __call__(self, request: Request) -> str | None:
         api_key = request.cookies.get(self.model.name)
         return self.check_api_key(api_key)
+
+
+# Re-export rate-limited API key (issue #768) for `from fastapi.security.api_key import ...`
+try:
+    from fastapi.security.api_key_rate_limit import (  # noqa: E402
+        APIKeyWithRateLimit,
+        SlidingWindowCounter,
+        parse_rate_limit,
+    )
+except Exception:  # pragma: no cover
+    pass
+
