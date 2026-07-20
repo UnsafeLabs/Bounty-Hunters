@@ -32,6 +32,7 @@ from typing import (
 import anyio
 from annotated_doc import Doc
 from anyio.abc import ObjectReceiveStream
+from fastapi.router_middleware import RouterMiddlewareMixin, apply_middleware_stack, merge_router_middleware  # issue #796
 from fastapi import params
 from fastapi._compat import (
     ModelField,
@@ -4954,3 +4955,5 @@ class APIRouter(routing.Router):
             return func
 
         return decorator
+
+# Router-level middleware helpers (issue #796): see fastapi.router_middleware
