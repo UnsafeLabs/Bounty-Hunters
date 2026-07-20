@@ -38,6 +38,7 @@ def test_defaults_and_overrides():
     assert not hb.should_close_for_timeout()
     t[0] += 5
     hb.send_ping()
+    t[0] += 3  # exceed pong_timeout after ping without pong
     assert hb.should_close_for_timeout()
     hb.close(1001)
     assert hb.closed and hb.close_code == 1001
