@@ -1,3 +1,4 @@
+export * from "./httpCompression.ts";
 import Mime from "@effect/platform-node/Mime";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
