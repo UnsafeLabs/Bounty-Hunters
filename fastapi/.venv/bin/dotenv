@@ -1,0 +1,8 @@
+#!/home/kapookky123/bfos_jobs/auto_earn/UnsafeLabs__Bounty-Hunters__760/fastapi/.venv/bin/python3
+# -*- coding: utf-8 -*-
+import re
+import sys
+from dotenv.__main__ import cli
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    sys.exit(cli())
