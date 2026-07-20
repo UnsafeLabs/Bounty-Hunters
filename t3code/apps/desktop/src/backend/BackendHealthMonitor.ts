@@ -87,8 +87,12 @@ export class BackendHealthMonitor {
 
   /** Exposed for tests: run one health cycle. */
   async tick(): Promise<void> {
-    if (this.stopped || this.status === "restarting" || this.status === "failed") {
-      if (!this.stopped && this.status !== "failed") this.scheduleNext();
+    // Allow direct tick() for tests even when not started; skip only when terminal failed mid-cycle.
+    if (this.status === "restarting") {
+      if (!this.stopped) this.scheduleNext();
+      return;
+    }
+    if (this.status === "failed") {
       return;
     }
 
