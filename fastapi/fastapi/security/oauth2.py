@@ -691,3 +691,13 @@ class SecurityScopes:
                 """
             ),
         ] = " ".join(self.scopes)
+
+# Refresh token support (issue #758). Existing OAuth2PasswordBearer unchanged.
+try:
+    from fastapi.security.oauth2_refresh import (  # noqa: E402
+        OAuth2PasswordBearerWithRefresh,
+        OAuth2RefreshRequestForm,
+    )
+except Exception:  # pragma: no cover
+    pass
+
