@@ -7,16 +7,35 @@
     <testsuites>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
+            <groups>
+                <include>
+                    <group>unit</group>
+                </include>
+            </groups>
         </testsuite>
         <testsuite name="Feature">
             <directory>tests/Feature</directory>
+            <groups>
+                <include>
+                    <group>feature</group>
+                </include>
+            </groups>
         </testsuite>
     </testsuites>
     <source>
         <include>
             <directory>app</directory>
         </include>
+        <exclude>
+            <directory>app/Providers</directory>
+            <directory>app/Console</directory>
+        </exclude>
     </source>
+    <coverage>
+        <report>
+            <text outputFile="php://stdout" showOnlySummary="true"/>
+        </report>
+    </coverage>
     <php>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
