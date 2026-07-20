@@ -119,11 +119,10 @@ export class CredentialStore {
 
     const snapshot = this.list().map((e) => ({ ...e }));
     const newVersion = oldVersion + 1;
-    const newKey = this.generateKey();
-    this.keychain.set(newVersion, newKey);
-
     let reencrypted = 0;
     try {
+      const newKey = this.generateKey();
+      this.keychain.set(newVersion, newKey);
       for (const e of snapshot) {
         const k = this.keychain.get(e.keyVersion) ?? oldKey;
         const plain = decrypt(e.ciphertext, k);
