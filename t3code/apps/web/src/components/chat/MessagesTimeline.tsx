@@ -190,6 +190,50 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }
   }, [listRef, onIsAtEndChange]);
 
+  // Keyboard navigation between message listitems (ArrowUp/Down, Escape to composer)
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      const inComposer = Boolean(target.closest("#chat-composer-region"));
+      const items = Array.from(
+        document.querySelectorAll<HTMLElement>('[role="listitem"][data-message-id]'),
+      );
+      if (items.length === 0) return;
+
+      if (event.key === "Escape") {
+        const composer = document.querySelector<HTMLElement>(
+          "#chat-composer-region textarea, #chat-composer-region [contenteditable='true'], #chat-composer-region button",
+        );
+        composer?.focus();
+        return;
+      }
+
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      // Allow arrow keys in text fields for caret movement
+      if (
+        inComposer &&
+        (target.tagName === "TEXTAREA" ||
+          target.tagName === "INPUT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const active = document.activeElement as HTMLElement | null;
+      const idx = active ? items.indexOf(active) : -1;
+      let next = idx;
+      if (event.key === "ArrowDown") next = Math.min(items.length - 1, Math.max(0, idx) + 1);
+      if (event.key === "ArrowUp") next = Math.max(0, (idx < 0 ? items.length : idx) - 1);
+      if (next !== idx && items[next]) {
+        event.preventDefault();
+        items[next].focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {
     const previousRowCount = previousRowCountRef.current;
@@ -277,6 +321,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           maintainScrollAtEndThreshold={0.1}
           maintainVisibleContentPosition
           onScroll={handleScroll}
+          role="log"
+          aria-live="polite"
+          aria-label="Chat messages"
           className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
@@ -302,9 +349,12 @@ type TimelineRow = MessagesTimelineRow;
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
+      role={row.kind === "message" ? "listitem" : undefined}
+      tabIndex={row.kind === "message" ? 0 : undefined}
       className={cn(
         "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
+        row.kind === "message" ? "outline-none focus-visible:ring-2 focus-visible:ring-ring/60" : null,
       )}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}

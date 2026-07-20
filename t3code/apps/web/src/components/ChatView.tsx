@@ -3551,7 +3551,28 @@ export default function ChatView(props: ChatViewProps) {
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div className="relative flex min-h-0 flex-1 flex-col" id="chat-messages-region">
+            {/* Accessibility skip links (visually hidden until focused) */}
+            <nav aria-label="Chat regions" className="sr-only focus-within:not-sr-only">
+              <a
+                href="#chat-messages-region"
+                className="absolute left-2 top-2 z-50 rounded bg-background px-3 py-1.5 text-sm shadow focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                Skip to messages
+              </a>
+              <a
+                href="#chat-composer-region"
+                className="absolute left-2 top-10 z-50 rounded bg-background px-3 py-1.5 text-sm shadow focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                Skip to composer
+              </a>
+              <a
+                href="#app-sidebar"
+                className="absolute left-2 top-[4.5rem] z-50 rounded bg-background px-3 py-1.5 text-sm shadow focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                Skip to sidebar
+              </a>
+            </nav>
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}
@@ -3596,6 +3617,7 @@ export default function ChatView(props: ChatViewProps) {
 
           {/* Input bar */}
           <div
+            id="chat-composer-region"
             className={cn(
               "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
               isGitRepo
