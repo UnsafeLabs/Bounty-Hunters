@@ -124,6 +124,15 @@
        01  WS-VALIDATION-MSG           PIC X(128).
        01  WS-AUDIT-TIMESTAMP          PIC X(26).
        01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
+       01  WS-SIG-VERIFY-BUFFER        PIC X(64).
+      * USAGE DISPLAY native would EBCDIC-convert hex A-F on z/OS MOVE.
+      * Keep binary/byte-identical compare via FUNCTION ORD loop instead.
+       01  WS-FP-INDEX                 PIC 9(3).
+       01  WS-FP-MATCH                 PIC X(1)  VALUE 'Y'.
+           88  WS-FP-IS-MATCH          VALUE 'Y'.
+           88  WS-FP-NO-MATCH          VALUE 'N'.
+       01  WS-FP-ORD-A                 PIC 9(5).
+       01  WS-FP-ORD-B                 PIC 9(5).
        PROCEDURE DIVISION.
        0000-MAIN-CONTROL.
            PERFORM 1000-INITIALIZE
@@ -250,6 +259,29 @@
                SET WS-SIG-INVALID TO TRUE
                GO TO 4000-EXIT
            END-IF
+      * Code-page independent fingerprint compare (issue #515).
+      * Do NOT MOVE fingerprint into a NATIVE DISPLAY buffer that would
+      * EBCDIC-convert A-F. Compare ordinals of each character instead.
+           MOVE WS-CERT-FINGERPRINT TO WS-SIG-VERIFY-BUFFER
+           SET WS-FP-IS-MATCH TO TRUE
+           PERFORM VARYING WS-FP-INDEX FROM 1 BY 1
+               UNTIL WS-FP-INDEX > 64 OR WS-FP-NO-MATCH
+               COMPUTE WS-FP-ORD-A =
+                   FUNCTION ORD(WS-SIG-VERIFY-BUFFER(WS-FP-INDEX:1))
+               COMPUTE WS-FP-ORD-B =
+                   FUNCTION ORD(CS-FINGERPRINT(WS-FP-INDEX:1))
+               IF WS-FP-ORD-A NOT = WS-FP-ORD-B
+                   SET WS-FP-NO-MATCH TO TRUE
+               END-IF
+           END-PERFORM
+           IF WS-FP-NO-MATCH
+               SET WS-SIG-INVALID TO TRUE
+               DISPLAY 'TLSVAL-E040: FINGERPRINT MISMATCH '
+                   WS-CERT-FINGERPRINT
+               GO TO 4000-EXIT
+           END-IF
+           DISPLAY 'TLSVAL-I040: FINGERPRINT OK '
+               WS-CERT-FINGERPRINT
            SET WS-SIG-VALID TO TRUE
            .
        4000-EXIT.
