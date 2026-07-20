@@ -1,6 +1,9 @@
 <?php
 
 return [
+    /* Fallback mailer when primary transport fails (issue #756) */
+    'fallback_mailer' => env('MAIL_FALLBACK_MAILER', 'log'),
+
 
     /*
     |--------------------------------------------------------------------------
