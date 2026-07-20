@@ -3,6 +3,8 @@
 use Illuminate\Support\Str;
 
 return [
+    'fallback' => env('SESSION_FALLBACK_DRIVER', 'file'),
+
 
     /*
     |--------------------------------------------------------------------------
