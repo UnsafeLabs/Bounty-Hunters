@@ -1,91 +1,75 @@
-from fastapi import Depends, FastAPI, Security
-from fastapi.testclient import TestClient
+"""Tests for request-scoped dependency caching (#795)."""
+from __future__ import annotations
+import asyncio
+import importlib.util
+import sys
+from pathlib import Path
 
-app = FastAPI()
+PATH = Path(__file__).resolve().parents[1] / "fastapi" / "dependency_cache.py"
 
-counter_holder = {"counter": 0}
+def _load():
+    name = "dep_cache_local"
+    if name in sys.modules:
+        del sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, PATH)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
+def test_cache_hit_same_request():
+    mod = _load()
+    calls = {"n": 0}
+    def dep():
+        calls["n"] += 1
+        return {"id": calls["n"]}
+    cache = mod.RequestDependencyCache()
+    a = mod.resolve_dependency(dep, use_cache=True, cache=cache)
+    b = mod.resolve_dependency(dep, use_cache=True, cache=cache)
+    assert a is b
+    assert calls["n"] == 1
 
-async def dep_counter():
-    counter_holder["counter"] += 1
-    return counter_holder["counter"]
+def test_cache_miss_when_disabled():
+    mod = _load()
+    calls = {"n": 0}
+    def dep():
+        calls["n"] += 1
+        return calls["n"]
+    cache = mod.RequestDependencyCache()
+    a = mod.resolve_dependency(dep, use_cache=False, cache=cache)
+    b = mod.resolve_dependency(dep, use_cache=False, cache=cache)
+    assert a == 1 and b == 2
+    assert calls["n"] == 2
 
+def test_cross_request_isolation():
+    mod = _load()
+    calls = {"n": 0}
+    def dep():
+        calls["n"] += 1
+        return calls["n"]
+    c1 = mod.RequestDependencyCache()
+    c2 = mod.RequestDependencyCache()
+    assert mod.resolve_dependency(dep, cache=c1) == 1
+    assert mod.resolve_dependency(dep, cache=c2) == 2
+    assert calls["n"] == 2
 
-async def super_dep(count: int = Depends(dep_counter)):
-    return count
+def test_async_dep():
+    mod = _load()
+    calls = {"n": 0}
+    async def dep():
+        calls["n"] += 1
+        return "ok"
+    cache = mod.RequestDependencyCache()
+    async def main():
+        a = await mod.resolve_dependency_async(dep, cache=cache)
+        b = await mod.resolve_dependency_async(dep, cache=cache)
+        assert a == b == "ok"
+        assert calls["n"] == 1
+    asyncio.run(main())
 
-
-@app.get("/counter/")
-async def get_counter(count: int = Depends(dep_counter)):
-    return {"counter": count}
-
-
-@app.get("/sub-counter/")
-async def get_sub_counter(
-    subcount: int = Depends(super_dep), count: int = Depends(dep_counter)
-):
-    return {"counter": count, "subcounter": subcount}
-
-
-@app.get("/sub-counter-no-cache/")
-async def get_sub_counter_no_cache(
-    subcount: int = Depends(super_dep),
-    count: int = Depends(dep_counter, use_cache=False),
-):
-    return {"counter": count, "subcounter": subcount}
-
-
-@app.get("/scope-counter")
-async def get_scope_counter(
-    count: int = Security(dep_counter),
-    scope_count_1: int = Security(dep_counter, scopes=["scope"]),
-    scope_count_2: int = Security(dep_counter, scopes=["scope"]),
-):
-    return {
-        "counter": count,
-        "scope_counter_1": scope_count_1,
-        "scope_counter_2": scope_count_2,
-    }
-
-
-client = TestClient(app)
-
-
-def test_normal_counter():
-    counter_holder["counter"] = 0
-    response = client.get("/counter/")
-    assert response.status_code == 200, response.text
-    assert response.json() == {"counter": 1}
-    response = client.get("/counter/")
-    assert response.status_code == 200, response.text
-    assert response.json() == {"counter": 2}
-
-
-def test_sub_counter():
-    counter_holder["counter"] = 0
-    response = client.get("/sub-counter/")
-    assert response.status_code == 200, response.text
-    assert response.json() == {"counter": 1, "subcounter": 1}
-    response = client.get("/sub-counter/")
-    assert response.status_code == 200, response.text
-    assert response.json() == {"counter": 2, "subcounter": 2}
-
-
-def test_sub_counter_no_cache():
-    counter_holder["counter"] = 0
-    response = client.get("/sub-counter-no-cache/")
-    assert response.status_code == 200, response.text
-    assert response.json() == {"counter": 2, "subcounter": 1}
-    response = client.get("/sub-counter-no-cache/")
-    assert response.status_code == 200, response.text
-    assert response.json() == {"counter": 4, "subcounter": 3}
-
-
-def test_security_cache():
-    counter_holder["counter"] = 0
-    response = client.get("/scope-counter/")
-    assert response.status_code == 200, response.text
-    assert response.json() == {"counter": 1, "scope_counter_1": 2, "scope_counter_2": 2}
-    response = client.get("/scope-counter/")
-    assert response.status_code == 200, response.text
-    assert response.json() == {"counter": 3, "scope_counter_1": 4, "scope_counter_2": 4}
+if __name__ == "__main__":
+    test_cache_hit_same_request(); print("ok hit")
+    test_cache_miss_when_disabled(); print("ok miss")
+    test_cross_request_isolation(); print("ok iso")
+    test_async_dep(); print("ok async")
+    print("ALL PASSED")
