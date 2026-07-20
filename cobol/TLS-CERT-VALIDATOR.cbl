@@ -124,12 +124,27 @@
        01  WS-VALIDATION-MSG           PIC X(128).
        01  WS-AUDIT-TIMESTAMP          PIC X(26).
        01  WS-RETURN-CODE              PIC S9(4) COMP VALUE 0.
+       01  WS-PARSED-CN                PIC X(64).
+       01  WS-RDN-COUNT                PIC 9(3)  VALUE 0.
+       01  WS-RDN-TABLE.
+           05  WS-RDN-ENTRY            PIC X(128) OCCURS 20 TIMES.
+       01  WS-DN-WORK                  PIC X(512).
+       01  WS-DN-PLACEHOLDER           PIC X(512).
+       01  WS-DN-RESTORE               PIC X(512).
+       01  WS-ESC-COMMA-PH             PIC X(2)  VALUE X'01'.
+       01  WS-RDN-INDEX                PIC 9(3).
+       01  WS-CN-FOUND                 PIC X(1)  VALUE 'N'.
+           88  WS-CN-IS-FOUND          VALUE 'Y'.
+           88  WS-CN-NOT-FOUND         VALUE 'N'.
+       01  WS-RDN-PREFIX               PIC X(3).
+       01  WS-RDN-VALUE                PIC X(125).
        PROCEDURE DIVISION.
        0000-MAIN-CONTROL.
            PERFORM 1000-INITIALIZE
            PERFORM 2000-VALIDATE-CERT-CHAIN
            PERFORM 3000-CHECK-EXPIRY-DATE
            PERFORM 4000-VERIFY-SIGNATURE
+           PERFORM 3500-PARSE-SUBJECT-DN
            PERFORM 5000-MATCH-HOSTNAME
            PERFORM 6000-CHECK-REVOCATION-STATUS
            PERFORM 7000-DETERMINE-FINAL-RESULT
@@ -233,6 +248,64 @@
            .
        3000-EXIT.
            EXIT.
+       3500-PARSE-SUBJECT-DN.
+      *--------------------------------------------------------------------
+      * Parse Subject DN with escaped-comma support (issue #521).
+      * Pre-process: replace \, with a 1-byte placeholder, UNSTRING on ',',
+      * then restore commas in each RDN. Initialize table to avoid stale data.
+      *--------------------------------------------------------------------
+           MOVE SPACES TO WS-PARSED-CN
+           MOVE SPACES TO WS-RDN-TABLE
+           MOVE 0 TO WS-RDN-COUNT
+           SET WS-CN-NOT-FOUND TO TRUE
+           MOVE WS-SUBJECT-COMMON-NAME TO WS-DN-WORK
+      * If full DN available in subject field longer form, prefer it
+           IF CS-SUBJECT-DN NOT = SPACES
+               MOVE CS-SUBJECT-DN TO WS-DN-WORK
+           END-IF
+      * Replace escaped commas with placeholder (hex 01)
+           MOVE FUNCTION SUBSTITUTE(WS-DN-WORK, '\,', X'01')
+               TO WS-DN-PLACEHOLDER
+           UNSTRING WS-DN-PLACEHOLDER DELIMITED BY ','
+               INTO WS-RDN-ENTRY(1)
+                    WS-RDN-ENTRY(2)
+                    WS-RDN-ENTRY(3)
+                    WS-RDN-ENTRY(4)
+                    WS-RDN-ENTRY(5)
+                    WS-RDN-ENTRY(6)
+                    WS-RDN-ENTRY(7)
+                    WS-RDN-ENTRY(8)
+                    WS-RDN-ENTRY(9)
+                    WS-RDN-ENTRY(10)
+               TALLYING IN WS-RDN-COUNT
+           END-UNSTRING
+           PERFORM VARYING WS-RDN-INDEX FROM 1 BY 1
+               UNTIL WS-RDN-INDEX > WS-RDN-COUNT
+               MOVE FUNCTION SUBSTITUTE(
+                   WS-RDN-ENTRY(WS-RDN-INDEX), X'01', ',')
+                   TO WS-RDN-ENTRY(WS-RDN-INDEX)
+      * Detect CN= attribute (trim leading spaces in real impl)
+               IF WS-RDN-ENTRY(WS-RDN-INDEX)(1:3) = 'CN='
+                   OR WS-RDN-ENTRY(WS-RDN-INDEX)(1:4) = ' CN='
+                   MOVE WS-RDN-ENTRY(WS-RDN-INDEX)(4:)
+                       TO WS-PARSED-CN
+                   IF WS-RDN-ENTRY(WS-RDN-INDEX)(1:4) = ' CN='
+                       MOVE WS-RDN-ENTRY(WS-RDN-INDEX)(5:)
+                           TO WS-PARSED-CN
+                   END-IF
+      * Strip surrounding quotes if present
+                   IF WS-PARSED-CN(1:1) = '"'
+                       MOVE WS-PARSED-CN(2:) TO WS-PARSED-CN
+                   END-IF
+                   SET WS-CN-IS-FOUND TO TRUE
+               END-IF
+           END-PERFORM
+           IF WS-CN-NOT-FOUND
+               MOVE WS-SUBJECT-COMMON-NAME TO WS-PARSED-CN
+           END-IF
+           .
+       3500-EXIT.
+           EXIT.
        4000-VERIFY-SIGNATURE.
            IF WS-CERT-KEY-LENGTH < WS-MIN-KEY-LENGTH
                SET WS-SIG-INVALID TO TRUE
@@ -255,6 +328,10 @@
        4000-EXIT.
            EXIT.
        5000-MATCH-HOSTNAME.
+      * Prefer CN recovered by 3500-PARSE-SUBJECT-DN (handles escaped commas)
+           IF WS-PARSED-CN NOT = SPACES
+               MOVE WS-PARSED-CN TO WS-SUBJECT-COMMON-NAME
+           END-IF
            INSPECT WS-SUBJECT-COMMON-NAME
                TALLYING WS-HOSTNAME-TALLY FOR ALL '*'
            IF WS-HOSTNAME-TALLY > 0
