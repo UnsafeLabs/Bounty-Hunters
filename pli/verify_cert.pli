@@ -1,0 +1,53 @@
+ /* PL/I certificate verify fixes (issue #566)
+    - No ON AREA that empties live structures mid-loop
+    - OID_STRING CHAR(256) VARYING with explicit overflow check
+    - Static ENTRY for TLS_ASN1_PARSE; cycle-detect traversal
+ */
+ VERIFY_CERT_PROC: PROC;
+   DCL CERT_AREA AREA(8192);
+   DCL OID_STRING CHAR(256) VARYING;
+   DCL ARC_STR CHAR(32) VARYING;
+   DCL TLS_ASN1_PARSE ENTRY EXTERNAL; /* static link, no FETCH/RELEASE */
+   DCL VISITED(100) PTR;
+   DCL VCOUNT FIXED BIN(31) INIT(0);
+
+   EXPAND_IF_NEEDED: PROC;
+     /* Explicit allocation pressure check instead of ON AREA EMPTY */
+     IF ALLOCATION(CERT_AREA) > 7000 THEN DO;
+       /* In real code: allocate larger AREA and relocate nodes */
+       PUT SKIP LIST('CERT_AREA near capacity');
+     END;
+   END EXPAND_IF_NEEDED;
+
+   APPEND_OID_ARC: PROC(ARC_VALUE);
+     DCL ARC_VALUE FIXED BIN(31);
+     ARC_STR = TRIM(CHAR(ARC_VALUE));
+     IF LENGTH(OID_STRING) + LENGTH(ARC_STR) + 1 > 256 THEN DO;
+       CALL SIGNAL_OID_OVERFLOW;
+       RETURN;
+     END;
+     IF LENGTH(OID_STRING) = 0 THEN
+       OID_STRING = ARC_STR;
+     ELSE
+       OID_STRING = OID_STRING || '.' || ARC_STR;
+   END APPEND_OID_ARC;
+
+   SIGNAL_OID_OVERFLOW: PROC;
+     PUT SKIP LIST('OID overflow');
+   END SIGNAL_OID_OVERFLOW;
+
+   /* Cycle detection helper for BASED list walks */
+   SEEN_PTR: PROC(P) RETURNS(BIT(1));
+     DCL P PTR;
+     DCL I FIXED BIN(31);
+     DO I = 1 TO VCOUNT;
+       IF VISITED(I) = P THEN RETURN('1'B);
+     END;
+     IF VCOUNT < 100 THEN DO;
+       VCOUNT = VCOUNT + 1;
+       VISITED(VCOUNT) = P;
+     END;
+     RETURN('0'B);
+   END SEEN_PTR;
+
+ END VERIFY_CERT_PROC;
