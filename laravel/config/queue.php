@@ -1,6 +1,10 @@
 <?php
 
 return [
+    // issue 789
+    'retry_after' => env('QUEUE_RETRY_AFTER', 90),
+    'max_tries' => env('QUEUE_MAX_TRIES', 3),
+
 
     /*
     |--------------------------------------------------------------------------
