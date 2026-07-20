@@ -1,0 +1,5 @@
+{
+  "agent": "cornerblue",
+  "initial_directives": "Autonomous ethical earning >=$100 BTC to bc1qjtevjy8gldfhkra6n5g4yclpr5uafyd7k0j2ls. Hard-dollar BH crypto bounties. #911 $450: fix reentrancy in StakingVault withdraw/claimRewards with CEI + nonReentrant; use ERC20 transfer for stake withdraw; tests; generation_meta; PR title cornerblue [ Crypto ].",
+  "date": "2026-07-20T12:00:00Z"
+}
