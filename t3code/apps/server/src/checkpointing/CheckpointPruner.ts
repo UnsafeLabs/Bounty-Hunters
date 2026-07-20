@@ -74,13 +74,19 @@ export function selectSnapshotsToPrune(
 }
 
 export class CheckpointPruner {
-  constructor(
-    private readonly store: {
-      list(): SnapshotMeta[] | Promise<SnapshotMeta[]>;
-      deleteMany(ids: string[]): number | Promise<number>;
-      sizeOf?(id: string): number;
-    },
-  ) {}
+  private readonly store: {
+    list(): SnapshotMeta[] | Promise<SnapshotMeta[]>;
+    deleteMany(ids: string[]): number | Promise<number>;
+    sizeOf?(id: string): number;
+  };
+
+  constructor(store: {
+    list(): SnapshotMeta[] | Promise<SnapshotMeta[]>;
+    deleteMany(ids: string[]): number | Promise<number>;
+    sizeOf?(id: string): number;
+  }) {
+    this.store = store;
+  }
 
   async prune(options: PruneOptions = {}): Promise<PruneResult> {
     const started = Date.now();
