@@ -96,3 +96,10 @@ class ORJSONResponse(JSONResponse):
         return orjson.dumps(
             content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
         )
+
+# Streaming CSV export (issue #799)
+try:
+    from fastapi.streaming_csv import StreamingCSVResponse as StreamingCSVResponse  # noqa: F401
+except Exception:  # pragma: no cover
+    pass
+
