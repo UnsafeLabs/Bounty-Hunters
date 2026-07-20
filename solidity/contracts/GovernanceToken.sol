@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
+/// @notice Governance token using msg.sender (not tx.origin) (#912).
 contract GovernanceToken is ERC20 {
     mapping(address => address) public delegates;
     mapping(address => uint256) public delegatedPower;
@@ -28,30 +29,27 @@ contract GovernanceToken is ERC20 {
         admin = msg.sender;
     }
 
-    // BUG: Uses tx.origin instead of msg.sender — phishing vulnerability
     function delegateVote(address to) external {
-        require(tx.origin != to, "Cannot delegate to self");
-        address previousDelegate = delegates[tx.origin];
+        require(msg.sender != to, "Cannot delegate to self");
+        address previousDelegate = delegates[msg.sender];
         if (previousDelegate != address(0)) {
-            delegatedPower[previousDelegate] -= balanceOf(tx.origin);
+            delegatedPower[previousDelegate] -= balanceOf(msg.sender);
         }
-        delegates[tx.origin] = to;
-        delegatedPower[to] += balanceOf(tx.origin);
-        emit DelegateChanged(tx.origin, to);
+        delegates[msg.sender] = to;
+        delegatedPower[to] += balanceOf(msg.sender);
+        emit DelegateChanged(msg.sender, to);
     }
 
-    // BUG: Same tx.origin issue
     function revokeDelegate() external {
-        address currentDelegate = delegates[tx.origin];
+        address currentDelegate = delegates[msg.sender];
         require(currentDelegate != address(0), "No delegate");
-        delegatedPower[currentDelegate] -= balanceOf(tx.origin);
-        delegates[tx.origin] = address(0);
-        emit DelegateChanged(tx.origin, address(0));
+        delegatedPower[currentDelegate] -= balanceOf(msg.sender);
+        delegates[msg.sender] = address(0);
+        emit DelegateChanged(msg.sender, address(0));
     }
 
-    // BUG: tx.origin for admin check
     function snapshot() external {
-        require(tx.origin == admin, "Not admin");
+        require(msg.sender == admin, "Not admin");
         // snapshot logic placeholder
     }
 
