@@ -93,11 +93,23 @@ def generate_operation_id_for_path(
 
 
 def generate_unique_id(route: "APIRoute") -> str:
-    operation_id = f"{route.name}{route.path_format}"
-    operation_id = re.sub(r"\W", "_", operation_id)
+    """Generate OpenAPI operationId: method_prefix_functionname (issue #764).
+
+    Includes HTTP method and path prefix so identical function names on different
+    routers do not collide. Sanitizes to lowercase alphanumeric + underscores.
+    Collision detection is available via ``generate_unique_id_with_registry``.
+    """
     assert route.methods
-    operation_id = f"{operation_id}_{list(route.methods)[0].lower()}"
-    return operation_id
+    method = list(route.methods)[0].lower()
+    # path_format includes prefix, e.g. /api/v1/users/
+    path = getattr(route, "path_format", None) or getattr(route, "path", "") or ""
+    name = route.name or "route"
+    # method_prefix_functionname
+    prefix = path.strip("/").replace("/", "_")
+    raw = f"{method}_{prefix}_{name}" if prefix else f"{method}_{name}"
+    operation_id = re.sub(r"[^a-zA-Z0-9_]+", "_", raw).lower()
+    operation_id = re.sub(r"_+", "_", operation_id).strip("_")
+    return operation_id or f"{method}_operation"
 
 
 def deep_dict_update(main_dict: dict[Any, Any], update_dict: dict[Any, Any]) -> None:
