@@ -9,7 +9,7 @@ interface IFlashLoanReceiver {
 
 contract FlashLoan {
     IERC20 public loanToken;
-    uint256 public feeBPS; // fee in basis points
+    uint256 public feeBPS;
     uint256 public totalFees;
     address public owner;
     bool public paused;
@@ -17,14 +17,12 @@ contract FlashLoan {
     event FlashLoanExecuted(address indexed borrower, uint256 amount, uint256 fee);
 
     constructor(address _loanToken, uint256 _feeBPS) {
+        require(_loanToken != address(0), "Invalid token");
         loanToken = IERC20(_loanToken);
         feeBPS = _feeBPS;
         owner = msg.sender;
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
     function flashLoan(uint256 amount, bytes calldata data) external {
         require(!paused, "Paused");
         require(amount > 0, "Amount must be > 0");
@@ -32,14 +30,15 @@ contract FlashLoan {
         uint256 balanceBefore = loanToken.balanceOf(address(this));
         require(balanceBefore >= amount, "Insufficient pool balance");
 
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
         uint256 fee = amount * feeBPS / 10000;
+        if (fee == 0) fee = 1;
+
+        uint256 balanceAfterFee = balanceBefore - amount - fee;
 
         loanToken.transfer(msg.sender, amount);
 
         IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
         uint256 balanceAfter = loanToken.balanceOf(address(this));
         require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
 
@@ -58,7 +57,11 @@ contract FlashLoan {
         loanToken.transfer(owner, fees);
     }
 
-    // BUG: No emergency pause function
+    function togglePause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = !paused;
+    }
+
     function getPoolBalance() external view returns (uint256) {
         return loanToken.balanceOf(address(this));
     }
