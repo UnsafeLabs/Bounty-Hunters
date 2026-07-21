@@ -1,82 +1,89 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-contract LiquidityPool is ERC20 {
-    IERC20 public tokenA;
-    IERC20 public tokenB;
-
-    uint256 public reserveA;
-    uint256 public reserveB;
-
-    // BUG: No MINIMUM_LIQUIDITY lock — first depositor can manipulate LP price
-    uint256 public constant MINIMUM_LIQUIDITY = 1000;
-
-    event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
-    event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
-
-    constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") {
-        tokenA = IERC20(_tokenA);
-        tokenB = IERC20(_tokenB);
-    }
-
-    function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
-        tokenA.transferFrom(msg.sender, address(this), amountA);
-        tokenB.transferFrom(msg.sender, address(this), amountB);
-
-        if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
-            lpTokens = sqrt(amountA * amountB);
-        } else {
-            uint256 lpFromA = amountA * totalSupply() / reserveA;
-            uint256 lpFromB = amountB * totalSupply() / reserveB;
-            lpTokens = lpFromA < lpFromB ? lpFromA : lpFromB;
-        }
-
-        require(lpTokens > 0, "Insufficient liquidity");
-        _mint(msg.sender, lpTokens);
-
-        reserveA += amountA;
-        reserveB += amountB;
-
-        emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
-    }
-
-    // BUG: Uses balanceOf instead of internal reserves — manipulable via direct transfer
-    function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
-        require(lpTokens > 0, "Must burn > 0");
-        require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
-
-        // BUG: Should use reserveA/reserveB, not balanceOf
-        uint256 balA = tokenA.balanceOf(address(this));
-        uint256 balB = tokenB.balanceOf(address(this));
-
-        amountA = lpTokens * balA / totalSupply();
-        amountB = lpTokens * balB / totalSupply();
-
-        _burn(msg.sender, lpTokens);
-
-        tokenA.transfer(msg.sender, amountA);
-        tokenB.transfer(msg.sender, amountB);
-
-        reserveA -= amountA;
-        reserveB -= amountB;
-
-        emit LiquidityRemoved(msg.sender, amountA, amountB, lpTokens);
-    }
-
-    function sqrt(uint256 y) internal pure returns (uint256 z) {
-        if (y > 3) {
-            z = y;
-            uint256 x = y / 2 + 1;
-            while (x < z) {
-                z = x;
-                x = (y / x + x) / 2;
-            }
-        } else if (y != 0) {
-            z = 1;
-        }
-    }
-}
++ // SPDX-License-Identifier: MIT
++ pragma solidity ^0.8.0;
++ 
++ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
++ import "@openzeppelin/contracts/access/Ownable.sol";
++ 
++ contract LiquidityPool is ERC20, Ownable {
++     IERC20 public token0;
++     IERC20 public token1;
++ 
++     uint256 public reserve0;
++     uint256 public reserve1;
++ 
++     uint256 public constant MINIMUM_LIQUIDITY = 1000;
++ 
++     event Mint(address indexed sender, uint256 amount0, uint256 amount1);
++     event Burn(address indexed sender, uint256 amount0, uint256 amount1);
++     event Sync(uint256 reserve0, uint256 reserve1);
++ 
++     constructor(address _token0, address _token1) ERC20("LiquidityPool", "LP") {
++         token0 = IERC20(_token0);
++         token1 = IERC20(_token1);
++     }
++ 
++     function addLiquidity(uint256 amount0, uint256 amount1) external returns (uint256 liquidity) {
++         bool isFirstDeposit = totalSupply() == 0;
++ 
++-        if (isFirstDeposit) {
++-            liquidity = Math.sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY;
++-            _mint(address(0), MINIMUM_LIQUIDITY);
++-        } else {
++-            uint256 amount0Min = (amount1 * reserve0) / reserve1;
++-            uint256 amount1Min = (amount0 * reserve1) / reserve0;
++-            liquidity = Math.min(
++-                (amount0 * totalSupply()) / reserve0,
++-                (amount1 * totalSupply()) / reserve1
++-            );
++-        }
+++        if (isFirstDeposit) {
+++            liquidity = Math.sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY;
+++            _mint(address(0), MINIMUM_LIQUIDITY);
+++        } else {
+++            uint256 amount0Min = (amount1 * reserve0) / reserve1;
+++            uint256 amount1Min = (amount0 * reserve1) / reserve0;
+++            liquidity = Math.min(
+++                (amount0 * totalSupply()) / reserve0,
+++                (amount1 * totalSupply()) / reserve1
+++            );
+++        }
++ 
++         require(liquidity > 0, "INSUFFICIENT_LIQUIDITY_MINTED");
++ 
++         token0.transferFrom(msg.sender, address(this), amount0);
++         token1.transferFrom(msg.sender, address(this), amount1);
++ 
++         reserve0 = token0.balanceOf(address(this));
++         reserve1 = token1.balanceOf(address(this));
++ 
++         emit Mint(msg.sender, amount0, amount1);
++         emit Sync(reserve0, reserve1);
++     }
++ 
++     function removeLiquidity(uint256 liquidity) external returns (uint256 amount0, uint256 amount1) {
++         require(liquidity > 0, "INSUFFICIENT_LIQUIDITY");
++         require(balanceOf(msg.sender) >= liquidity, "INSUFFICIENT_BALANCE");
++ 
++-        amount0 = (liquidity * reserve0) / totalSupply();
++-        amount1 = (liquidity * reserve1) / totalSupply();
+++        amount0 = (liquidity * reserve0) / totalSupply();
+++        amount1 = (liquidity * reserve1) / totalSupply();
++ 
++         _burn(msg.sender, liquidity);
++ 
++         token0.transfer(msg.sender, amount0);
++         token1.transfer(msg.sender, amount1);
++ 
++         reserve0 = token0.balanceOf(address(this));
++         reserve1 = token1.balanceOf(address(this));
++ 
++         emit Burn(msg.sender, amount0, amount1);
++         emit Sync(reserve0, reserve1);
++     }
++ 
++     function sync() external {
++         reserve0 = token0.balanceOf(address(this));
++         reserve1 = token1.balanceOf(address(this));
++         emit Sync(reserve0, reserve1);
++     }
++ }
