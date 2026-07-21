@@ -28,7 +28,7 @@ source .venv/bin/activate
 ### Step 3: Install Dependencies
 
 ```bash
-pip install bounty-hunter
+pip install -r requirements.txt
 ```
 
 This will install the core package and all required dependencies.
