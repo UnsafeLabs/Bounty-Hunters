@@ -29,8 +29,8 @@ check_dependencies
 
 # Clean previous deployment artifacts
 log_message "Cleaning previous build artifacts..."
-rm -rf ${DEPLOY_DIR}/dist
-rm -rf ${DEPLOY_DIR}/node_modules/.cache
+rm -rf "${DEPLOY_DIR:?}/dist"
+rm -rf "${DEPLOY_DIR:?}/node_modules/.cache
 
 # Pull latest code
 if [ -d "${DEPLOY_DIR}/.git" ]; then
