@@ -15,7 +15,7 @@ Authorization: Bearer <your-api-key>
 ### List Bounties
 
 ```
-GET /bounties
+POST /bounties
 ```
 
 Returns a paginated list of all available bounties.
@@ -48,7 +48,7 @@ Returns a paginated list of all available bounties.
 ### Create Bounty
 
 ```
-GET /bounties
+POST /bounties
 ```
 
 Creates a new bounty listing.
