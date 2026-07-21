@@ -28,10 +28,20 @@ source .venv/bin/activate
 ### Step 3: Install Dependencies
 
 ```bash
-pip install bounty-hunter
+pip install -r requirements.txt
 ```
 
 This will install the core package and all required dependencies.
+
+### Step 4: Configure Environment
+
+Copy the example environment file and adjust settings:
+
+```bash
+cp .env.example .env
+```
+
+Edit the `.env` file with your database credentials and other configuration.
 
 ### Step 5: Configure the Database
 

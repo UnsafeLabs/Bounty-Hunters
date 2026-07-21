@@ -10,17 +10,6 @@ All notable changes to BountyHunters will be documented in this file.
 - Database schema migration required (see upgrade guide)
 
 ### Added
-- OAuth2 provider support
-- Real-time notifications via WebSocket
-- Bulk bounty operations API
-
-### Fixed
-- Memory leak in background worker process
-- Rate limiter not resetting correctly at midnight UTC
-
-## [v2.1.0] - 2025-08-15
-
-### Added
 - Team bounties with shared rewards
 - Export bounty data to CSV
 - Webhook support for bounty status changes
@@ -29,7 +18,7 @@ All notable changes to BountyHunters will be documented in this file.
 - Search not returning results for hyphenated terms
 - Pagination offset calculation error on filtered queries
 
-## [v2.0.0] - 2025-09-30
+## [v2.1.0] - 2025-08-15
 
 ### Breaking Changes
 - API response format changed to JSON:API specification
