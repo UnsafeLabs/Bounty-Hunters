@@ -8,11 +8,12 @@ contract SimpleSwap {
     IERC20 public tokenB;
     uint256 public reserveA;
     uint256 public reserveB;
-    uint256 public fee; // basis points, e.g. 30 = 0.3%
+    uint256 public fee;
 
     event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
 
     constructor(address _tokenA, address _tokenB, uint256 _fee) {
+        require(_tokenA != address(0) && _tokenB != address(0), "Invalid token");
         tokenA = IERC20(_tokenA);
         tokenB = IERC20(_tokenB);
         fee = _fee;
@@ -25,10 +26,8 @@ contract SimpleSwap {
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut, uint256 deadline) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
@@ -42,8 +41,8 @@ contract SimpleSwap {
         uint256 feeAmount = amountIn * fee / 10000;
         uint256 amountInAfterFee = amountIn - feeAmount;
 
-        // constant product formula: x * y = k
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
         outputToken.transfer(msg.sender, amountOut);
 
