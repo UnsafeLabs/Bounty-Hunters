@@ -17,6 +17,14 @@ contract MultiSigWallet {
     mapping(uint256 => mapping(address => bool)) public confirmations;
     mapping(address => bool) public isOwner;
 
+    // Reentrancy guard
+    uint256 private _status;
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+
+    // Track block number when each transaction was last confirmed
+    mapping(uint256 => uint256) public confirmationBlock;
+
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
     event Executed(uint256 indexed txId);
@@ -27,18 +35,36 @@ contract MultiSigWallet {
         _;
     }
 
+    modifier nonReentrant() {
+        require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
+        _status = _ENTERED;
+        _;
+        _status = _NOT_ENTERED;
+    }
+
     constructor(address[] memory _owners, uint256 _required) {
         require(_owners.length > 0, "No owners");
         require(_required > 0 && _required <= _owners.length, "Invalid required");
         for (uint256 i = 0; i < _owners.length; i++) {
+            require(_owners[i] != address(0), "Owner cannot be zero-address");
             isOwner[_owners[i]] = true;
         }
         owners = _owners;
         required = _required;
+        _status = _NOT_ENTERED;
     }
 
-    // BUG: No zero-address validation on `to`
+    // FIXED: Added zero-address and code-size validation
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Target cannot be zero-address");
+        uint256 size;
+        assembly {
+            size := extcodesize(to)
+        }
+        if (data.length > 0) {
+            require(size > 0, "Target with calldata must be a contract");
+        }
+
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -55,6 +81,10 @@ contract MultiSigWallet {
         require(!confirmations[txId][msg.sender], "Already confirmed");
         confirmations[txId][msg.sender] = true;
         emit Confirmed(txId, msg.sender);
+
+        if (getConfirmationCount(txId) >= required) {
+            confirmationBlock[txId] = block.number;
+        }
     }
 
     function revokeConfirmation(uint256 txId) external onlyOwner {
@@ -70,9 +100,15 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
-    function executeTransaction(uint256 txId) external onlyOwner {
+    function isConfirmedAtBlock(uint256 txId, uint256 blockNumber) public view returns (bool) {
+        if (blockNumber == 0 || confirmationBlock[txId] == 0) {
+            return false;
+        }
+        return confirmationBlock[txId] <= blockNumber;
+    }
+
+    // FIXED: Added nonReentrant modifier
+    function executeTransaction(uint256 txId) external onlyOwner nonReentrant {
         require(!transactions[txId].executed, "Already executed");
         require(getConfirmationCount(txId) >= required, "Not enough confirmations");
 
