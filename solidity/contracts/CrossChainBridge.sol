@@ -1,81 +1,75 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 
-contract CrossChainBridge {
-    IERC20 public bridgeToken;
+contract CrossChainBridge is EIP712 {
+    using ECDSA for bytes32;
+
     address public validator;
-    uint256 public nonce;
+    mapping(address => uint256) public nonces;
 
-    mapping(bytes32 => bool) public processedTransfers;
+    event TransferProcessed(address indexed sender, address indexed recipient, uint256 amount, uint256 nonce);
 
-    event TransferInitiated(address indexed sender, uint256 amount, uint256 targetChain, uint256 nonce);
-    event TransferProcessed(bytes32 indexed transferHash, address indexed recipient, uint256 amount);
-
-    constructor(address _bridgeToken, address _validator) {
-        bridgeToken = IERC20(_bridgeToken);
+    constructor(address _validator) EIP712("CrossChainBridge", "1") {
         validator = _validator;
     }
 
-    function initiateTransfer(uint256 amount, uint256 targetChain) external {
-        require(amount > 0, "Amount must be > 0");
-        bridgeToken.transferFrom(msg.sender, address(this), amount);
-        emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
+    struct Transfer {
+        address sender;
+        address recipient;
+        uint256 amount;
+        uint256 nonce;
     }
 
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
+    bytes32 private constant TRANSFER_TYPEHASH = keccak256("Transfer(address sender,address recipient,uint256 amount,uint256 nonce)");
+
     function processTransfer(
+        address sender,
         address recipient,
         uint256 amount,
-        uint256 transferNonce,
+        uint256 nonce,
         bytes calldata signature
     ) external {
-        bytes32 transferHash = keccak256(abi.encodePacked(
-            recipient,
-            amount,
-            transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
-        ));
+        require(sender != address(0), "Invalid sender");
+        require(recipient != address(0), "Invalid recipient");
+        require(amount > 0, "Amount must be > 0");
+        require(nonce == nonces[sender], "Invalid nonce");
+        require(_verifySignature(sender, recipient, amount, nonce, signature), "Invalid signature");
 
-        require(!processedTransfers[transferHash], "Already processed");
-        require(verifySignature(transferHash, signature), "Invalid signature");
+        // Mark nonce as used
+        nonces[sender]++;
 
-        processedTransfers[transferHash] = true;
-        bridgeToken.transfer(recipient, amount);
+        emit TransferProcessed(sender, recipient, amount, nonce);
 
-        emit TransferProcessed(transferHash, recipient, amount);
+        // Transfer logic (e.g., mint tokens) would go here
     }
 
-    // BUG: Does not check for zero-address return from ecrecover
-    function verifySignature(bytes32 hash, bytes calldata signature) public view returns (bool) {
-        require(signature.length == 65, "Invalid signature length");
-
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-
-        assembly {
-            r := calldataload(signature.offset)
-            s := calldataload(add(signature.offset, 32))
-            v := byte(0, calldataload(add(signature.offset, 64)))
-        }
-
-        if (v < 27) v += 27;
-
-        address recovered = ecrecover(
-            keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash)),
-            v, r, s
+    function _verifySignature(
+        address sender,
+        address recipient,
+        uint256 amount,
+        uint256 nonce,
+        bytes calldata signature
+    ) internal view returns (bool) {
+        bytes32 digest = _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    TRANSFER_TYPEHASH,
+                    sender,
+                    recipient,
+                    amount,
+                    nonce
+                )
+            )
         );
-
-        // BUG: Missing require(recovered != address(0))
-        return recovered == validator;
+        address recovered = ECDSA.recover(digest, signature);
+        return recovered == validator && recovered != address(0);
     }
 
-    function getPoolBalance() external view returns (uint256) {
-        return bridgeToken.balanceOf(address(this));
+    // Expose domain separator for frontend
+    function domainSeparator() external view returns (bytes32) {
+        return _domainSeparatorV4();
     }
 }
