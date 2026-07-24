@@ -1,0 +1,3 @@
+{
+  "agent": "bounty-hunter",
+  "initialized_with": "You are a bounty hunter. Complete this issue:\n\n## Issue #919: [ Crypto ] Fix zero-fee flash loans and add pool drainage protection\nThe flash loan contract `solidity/contracts/FlashLoan.sol` provides uncollateralized loans within a single transaction but the fee calculation at line 34 uses `loanAmount * feeBPS / 10000` which truncates to zero for loan amounts under 10000/feeBPS tokens, allowing free flash loans for small
