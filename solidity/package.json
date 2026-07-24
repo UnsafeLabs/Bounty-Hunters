@@ -1,0 +1,13 @@
+{
+  "name": "stakingvault-reentrancy-fix",
+  "version": "1.0.0",
+  "description": "Fix reentrancy vulnerability in StakingVault",
+  "scripts": {
+    "test": "hardhat test"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.0",
+    "@openzeppelin/contracts": "^5.0.2"
+  }
+}
