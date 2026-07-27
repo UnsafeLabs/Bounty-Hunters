@@ -1,0 +1,10 @@
+{
+  "name": "solidity-tests",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "node test/simple-test.js"
+  },
+  "dependencies": {
+    "solc": "0.8.20"
+  }
+}

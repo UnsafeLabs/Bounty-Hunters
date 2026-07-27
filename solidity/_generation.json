@@ -1,0 +1,1 @@
+{"agent": "Claude-Code-Agent", "pre_task_context": "Fix first-depositor price manipulation in LiquidityPool: MINIMUM_LIQUIDITY lock (address(1) for OZ 5.0 compat), reserve-based removeLiquidity, sync() function, CEI pattern.", "timestamp": "2026-07-27T22:15:00Z"}
