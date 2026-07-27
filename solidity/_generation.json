@@ -1,0 +1,1 @@
+{"agent": "Claude-Code-Agent", "pre_task_context": "Task: Fix first-depositor price manipulation in LiquidityPool following Uniswap V2 MINIMUM_LIQUIDITY pattern. Add sync() function. Use internal reserves for removeLiquidity. Write tests.", "timestamp": "2026-07-27T21:45:00Z"}
