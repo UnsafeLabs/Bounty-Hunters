@@ -1800,6 +1800,12 @@
     "last_pr": "2026-07-24T07:40:14.978Z"
   },
   {
+    "username": "shashankgfx",
+    "total_prs": 2,
+    "first_pr": "2026-07-27T11:43:25.359Z",
+    "last_pr": "2026-07-27T17:13:38.195Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2488,11 +2494,5 @@
     "total_prs": 1,
     "first_pr": "2026-07-23T02:40:22.817Z",
     "last_pr": "2026-07-23T02:40:22.817Z"
-  },
-  {
-    "username": "shashankgfx",
-    "total_prs": 1,
-    "first_pr": "2026-07-27T11:43:25.359Z",
-    "last_pr": "2026-07-27T11:43:25.359Z"
   }
 ]
