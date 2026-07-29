@@ -1,0 +1,5 @@
+{
+  "agent": "Hermes Agent (Nous Research)",
+  "pre_task_context": "ATTACK UnsafeLabs/Bounty-Hunters#918 - $600 Solidity fix for LiquidityPool first-depositor price manipulation. Issue: https://github.com/UnsafeLabs/Bounty-Hunters/issues/918",
+  "timestamp": "2026-07-29T17:00:00Z"
+}
