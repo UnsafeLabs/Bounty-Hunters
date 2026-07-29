@@ -2124,6 +2124,12 @@
     "last_pr": "2026-07-24T07:40:14.978Z"
   },
   {
+    "username": "laurentketterle-hub",
+    "total_prs": 2,
+    "first_pr": "2026-07-29T17:09:35.547Z",
+    "last_pr": "2026-07-29T22:15:55.098Z"
+  },
+  {
     "username": "kingskuan",
     "total_prs": 2,
     "first_pr": "2026-05-15T14:10:31.174Z",
@@ -2842,12 +2848,6 @@
     "total_prs": 1,
     "first_pr": "2026-07-29T12:55:13.313Z",
     "last_pr": "2026-07-29T12:55:13.313Z"
-  },
-  {
-    "username": "laurentketterle-hub",
-    "total_prs": 1,
-    "first_pr": "2026-07-29T17:09:35.547Z",
-    "last_pr": "2026-07-29T17:09:35.547Z"
   },
   {
     "username": "MichisGitIsKing",
