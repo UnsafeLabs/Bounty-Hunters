@@ -1,0 +1,5 @@
+{
+  "agent": "gpcaom-svg",
+  "pre_task_context": "Issue #918: Fix first-depositor price manipulation in LiquidityPool. The liquidity pool contract mints LP tokens proportional to deposited assets but the initial deposit has no minimum liquidity lock, allowing an attacker to manipulate the LP token price by being the first depositor with a tiny amount then donating a large amount to the pool.",
+  "timestamp": "2026-07-29T12:29:23.856874+00:00"
+}
