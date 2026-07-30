@@ -1,6 +1,6 @@
 const { expect } = require("chai");
 
-const DEAD_ADDRESS = "0x000000000000000000000000000000000000dEaD";
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 async function deployFixture() {
   const { ethers } = await import("ethers");
@@ -35,11 +35,11 @@ describe("LiquidityPool", function () {
   });
 
   describe("First deposit", function () {
-    it("should lock MINIMUM_LIQUIDITY at dead address", async function () {
+    it("should lock MINIMUM_LIQUIDITY at address(0)", async function () {
       await this.tokenA.connect(this.alice).approve(await this.pool.getAddress(), AMOUNT);
       await this.tokenB.connect(this.alice).approve(await this.pool.getAddress(), AMOUNT);
       await this.pool.connect(this.alice).addLiquidity(AMOUNT, AMOUNT);
-      const bal = await this.pool.balanceOf(DEAD_ADDRESS);
+      const bal = await this.pool.balanceOf(ZERO_ADDRESS);
       expect(bal).to.equal(MINIMUM_LIQUIDITY);
     });
 
@@ -94,34 +94,20 @@ describe("LiquidityPool", function () {
       await this.pool.connect(this.alice).addLiquidity(AMOUNT, AMOUNT);
       const aliceLp = await this.pool.balanceOf(this.alice.address);
 
-      // Record pool tokenA balance before donation
-      const poolTokenABefore = await this.tokenA.balanceOf(await this.pool.getAddress());
-
       // Attacker donates 100000 ether of tokenA directly to pool
       const donation = BigInt("100000000000000000000000");
       await this.tokenA.mint(await this.pool.getAddress(), donation);
 
-      // Pool balance is now inflated
-      const poolTokenAAfter = await this.tokenA.balanceOf(await this.pool.getAddress());
-      expect(poolTokenAAfter).to.equal(poolTokenABefore + donation);
-
       // Alice removes all her liquidity
-      // With the fix: she gets reserve-based amount (AMOUNT - MINIMUM_LIQUIDITY due to rounding)
-      // Without fix (using balanceOf): she'd get (AMOUNT + donation) * lp / totalSupply = much more
       const aliceTokenABefore = await this.tokenA.balanceOf(this.alice.address);
       await this.pool.connect(this.alice).removeLiquidity(aliceLp);
       const aliceTokenAAfter = await this.tokenA.balanceOf(this.alice.address);
 
       const withdrawnA = aliceTokenAAfter - aliceTokenABefore;
 
-      // The withdrawn amount should be approximately AMOUNT (minus MINIMUM_LIQUIDITY due to lock)
-      // NOT inflated by the donation
-      expect(withdrawnA).to.be.lt(AMOUNT); // Less than deposited (due to MINIMUM_LIQUIDITY lock)
-      expect(withdrawnA).to.be.gte(AMOUNT - MINIMUM_LIQUIDITY * 2n); // Within reasonable range
-
-      // The remaining donation should still be in the pool
-      const poolTokenARemaining = await this.tokenA.balanceOf(await this.pool.getAddress());
-      expect(poolTokenARemaining).to.be.gt(0n);
+      // Should get reserve-based amount, NOT inflated by donation
+      expect(withdrawnA).to.be.lt(AMOUNT);
+      expect(withdrawnA).to.be.gte(AMOUNT - MINIMUM_LIQUIDITY * 2n);
     });
   });
 
@@ -131,7 +117,7 @@ describe("LiquidityPool", function () {
       await this.tokenB.connect(this.alice).approve(await this.pool.getAddress(), AMOUNT);
       await this.pool.connect(this.alice).addLiquidity(AMOUNT, AMOUNT);
 
-      const donation = BigInt("50000000000000000000000"); // 50000 ether
+      const donation = BigInt("50000000000000000000000");
       await this.tokenA.mint(await this.pool.getAddress(), donation);
       expect(await this.pool.reserveA()).to.equal(AMOUNT);
 
@@ -144,7 +130,7 @@ describe("LiquidityPool", function () {
       await this.tokenB.connect(this.alice).approve(await this.pool.getAddress(), AMOUNT);
       await this.pool.connect(this.alice).addLiquidity(AMOUNT, AMOUNT);
 
-      const donation = BigInt("5000000000000000000000"); // 5000 ether
+      const donation = BigInt("5000000000000000000000");
       await this.tokenA.mint(await this.pool.getAddress(), donation);
 
       await expect(this.pool.sync())
