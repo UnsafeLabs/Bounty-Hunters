@@ -1812,6 +1812,12 @@
     "last_pr": "2026-07-29T22:15:55.098Z"
   },
   {
+    "username": "gpcaom-svg",
+    "total_prs": 2,
+    "first_pr": "2026-07-29T12:55:13.313Z",
+    "last_pr": "2026-07-30T00:46:02.454Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2500,11 +2506,5 @@
     "total_prs": 1,
     "first_pr": "2026-07-23T02:40:22.817Z",
     "last_pr": "2026-07-23T02:40:22.817Z"
-  },
-  {
-    "username": "gpcaom-svg",
-    "total_prs": 1,
-    "first_pr": "2026-07-29T12:55:13.313Z",
-    "last_pr": "2026-07-29T12:55:13.313Z"
   }
 ]
