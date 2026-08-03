@@ -1824,6 +1824,12 @@
     "last_pr": "2026-08-03T12:25:13.045Z"
   },
   {
+    "username": "hector-luis-lopez-dr",
+    "total_prs": 2,
+    "first_pr": "2026-08-02T15:37:46.359Z",
+    "last_pr": "2026-08-03T13:12:16.951Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2524,11 +2530,5 @@
     "total_prs": 1,
     "first_pr": "2026-08-01T14:52:42.647Z",
     "last_pr": "2026-08-01T14:52:42.647Z"
-  },
-  {
-    "username": "hector-luis-lopez-dr",
-    "total_prs": 1,
-    "first_pr": "2026-08-02T15:37:46.359Z",
-    "last_pr": "2026-08-02T15:37:46.359Z"
   }
 ]
