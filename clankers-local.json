@@ -1818,6 +1818,12 @@
     "last_pr": "2026-07-30T00:46:02.454Z"
   },
   {
+    "username": "Samarth1306w",
+    "total_prs": 2,
+    "first_pr": "2026-08-03T12:24:07.878Z",
+    "last_pr": "2026-08-03T12:25:13.045Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2524,11 +2530,5 @@
     "total_prs": 1,
     "first_pr": "2026-08-02T15:37:46.359Z",
     "last_pr": "2026-08-02T15:37:46.359Z"
-  },
-  {
-    "username": "Samarth1306w",
-    "total_prs": 1,
-    "first_pr": "2026-08-03T12:24:07.878Z",
-    "last_pr": "2026-08-03T12:24:07.878Z"
   }
 ]
