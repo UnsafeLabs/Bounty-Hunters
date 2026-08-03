@@ -66,7 +66,7 @@ static void log_cert_event(int level, const char *fmt, ...)
 static int compute_fingerprint(X509 *cert, unsigned char *out, size_t out_len)
 {
     unsigned int len = 0;
-    if (out_len < FINGERPRINT_LEN)
+    if (!cert || out_len < FINGERPRINT_LEN)
         return -1;
     if (!X509_digest(cert, EVP_sha256(), out, &len))
         return -1;
@@ -122,6 +122,8 @@ static int verify_signature(X509 *cert, X509 *issuer)
 
 static cert_entry_t *find_issuer(cert_store_t *store, X509 *cert)
 {
+    if (!store || !cert)
+        return NULL;
     X509_NAME *issuer_name = X509_get_issuer_name(cert);
     if (!issuer_name)
         return NULL;
@@ -143,12 +145,16 @@ static int validate_chain(chain_context_t *ctx)
     if (ctx->chain_len > MAX_CHAIN_DEPTH)
         return CERT_STATUS_INVALID;
 
-    for (i = 0; i < ctx->chain_len - 1; i++) {
+    /* Always validate validity dates for every certificate in chain including single leaf */
+    for (i = 0; i < ctx->chain_len; i++) {
         rc = check_expiry(ctx->chain[i]);
         if (rc != CERT_STATUS_OK) {
             log_cert_event(LOG_LEVEL_ERROR, "cert at depth %d failed expiry check", i);
             return rc;
         }
+    }
+
+    for (i = 0; i < ctx->chain_len - 1; i++) {
         rc = verify_signature(ctx->chain[i], ctx->chain[i + 1]);
         if (rc != CERT_STATUS_OK) {
             log_cert_event(LOG_LEVEL_ERROR, "signature invalid at depth %d", i);
@@ -189,9 +195,9 @@ static void cleanup_cert_store(cert_store_t *store)
     while (entry) {
         next = entry->next;
         X509_free(entry->cert);
+        log_cert_event(LOG_LEVEL_DEBUG, "freed cert store entry: %s", entry->issuer ? entry->issuer : "unknown");
         free(entry->subject);
         free(entry->issuer);
-        log_cert_event(LOG_LEVEL_DEBUG, "freed cert store entry: %s", entry->issuer);
         free(entry);
         entry = next;
     }
