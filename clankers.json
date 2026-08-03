@@ -1224,6 +1224,12 @@
     "last_pr": "2026-07-21T09:33:48.510Z"
   },
   {
+    "username": "Samarth1306w",
+    "total_prs": 6,
+    "first_pr": "2026-08-03T12:24:07.878Z",
+    "last_pr": "2026-08-03T15:58:15.122Z"
+  },
+  {
     "username": "soongyintong",
     "total_prs": 6,
     "first_pr": "2026-05-16T23:47:04.809Z",
@@ -1570,12 +1576,6 @@
     "total_prs": 4,
     "first_pr": "2026-07-05T00:49:46.997Z",
     "last_pr": "2026-07-06T02:32:59.576Z"
-  },
-  {
-    "username": "Samarth1306w",
-    "total_prs": 4,
-    "first_pr": "2026-08-03T12:24:07.878Z",
-    "last_pr": "2026-08-03T13:32:15.087Z"
   },
   {
     "username": "Aaloklovanshi",
@@ -2200,6 +2200,12 @@
     "total_prs": 2,
     "first_pr": "2026-07-02T12:14:44.426Z",
     "last_pr": "2026-07-02T14:15:13.295Z"
+  },
+  {
+    "username": "Noetic-Resonance",
+    "total_prs": 2,
+    "first_pr": "2026-08-03T13:19:38.319Z",
+    "last_pr": "2026-08-03T15:18:10.120Z"
   },
   {
     "username": "ErenCankutUYSAL",
@@ -3052,11 +3058,5 @@
     "total_prs": 1,
     "first_pr": "2026-07-30T10:29:17.601Z",
     "last_pr": "2026-07-30T10:29:17.601Z"
-  },
-  {
-    "username": "Noetic-Resonance",
-    "total_prs": 1,
-    "first_pr": "2026-08-03T13:19:38.319Z",
-    "last_pr": "2026-08-03T13:19:38.319Z"
   }
 ]
