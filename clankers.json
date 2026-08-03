@@ -1572,6 +1572,12 @@
     "last_pr": "2026-07-06T02:32:59.576Z"
   },
   {
+    "username": "Samarth1306w",
+    "total_prs": 4,
+    "first_pr": "2026-08-03T12:24:07.878Z",
+    "last_pr": "2026-08-03T13:32:15.087Z"
+  },
+  {
     "username": "Aaloklovanshi",
     "total_prs": 4,
     "first_pr": "2026-06-07T16:35:45.376Z",
@@ -2134,6 +2140,12 @@
     "total_prs": 2,
     "first_pr": "2026-07-29T12:55:13.313Z",
     "last_pr": "2026-07-30T00:46:02.454Z"
+  },
+  {
+    "username": "hector-luis-lopez-dr",
+    "total_prs": 2,
+    "first_pr": "2026-08-02T15:37:46.359Z",
+    "last_pr": "2026-08-03T13:12:16.951Z"
   },
   {
     "username": "kingskuan",
@@ -2862,12 +2874,6 @@
     "last_pr": "2026-08-01T14:52:42.647Z"
   },
   {
-    "username": "hector-luis-lopez-dr",
-    "total_prs": 1,
-    "first_pr": "2026-08-02T15:37:46.359Z",
-    "last_pr": "2026-08-02T15:37:46.359Z"
-  },
-  {
     "username": "MichisGitIsKing",
     "total_prs": 1,
     "first_pr": "2026-05-17T14:46:14.182Z",
@@ -3046,5 +3052,11 @@
     "total_prs": 1,
     "first_pr": "2026-07-30T10:29:17.601Z",
     "last_pr": "2026-07-30T10:29:17.601Z"
+  },
+  {
+    "username": "Noetic-Resonance",
+    "total_prs": 1,
+    "first_pr": "2026-08-03T13:19:38.319Z",
+    "last_pr": "2026-08-03T13:19:38.319Z"
   }
 ]
