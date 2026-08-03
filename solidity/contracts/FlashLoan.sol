@@ -22,9 +22,6 @@ contract FlashLoan {
         owner = msg.sender;
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
     function flashLoan(uint256 amount, bytes calldata data) external {
         require(!paused, "Paused");
         require(amount > 0, "Amount must be > 0");
@@ -32,14 +29,12 @@ contract FlashLoan {
         uint256 balanceBefore = loanToken.balanceOf(address(this));
         require(balanceBefore >= amount, "Insufficient pool balance");
 
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
-        uint256 fee = amount * feeBPS / 10000;
+        uint256 fee = (amount * feeBPS + 9999) / 10000;
 
-        loanToken.transfer(msg.sender, amount);
+        require(loanToken.transfer(msg.sender, amount), "Transfer failed");
 
         IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
         uint256 balanceAfter = loanToken.balanceOf(address(this));
         require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
 
@@ -47,18 +42,22 @@ contract FlashLoan {
         emit FlashLoanExecuted(msg.sender, amount, fee);
     }
 
+    function setPaused(bool _paused) external {
+        require(msg.sender == owner, "Not owner");
+        paused = _paused;
+    }
+
     function depositToPool(uint256 amount) external {
-        loanToken.transferFrom(msg.sender, address(this), amount);
+        require(loanToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
     }
 
     function withdrawFees() external {
         require(msg.sender == owner, "Not owner");
         uint256 fees = totalFees;
         totalFees = 0;
-        loanToken.transfer(owner, fees);
+        require(loanToken.transfer(owner, fees), "Transfer failed");
     }
 
-    // BUG: No emergency pause function
     function getPoolBalance() external view returns (uint256) {
         return loanToken.balanceOf(address(this));
     }

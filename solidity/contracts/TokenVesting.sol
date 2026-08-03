@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract TokenVesting {
+contract TokenVesting is ReentrancyGuard {
     IERC20 public token;
     address public beneficiary;
     address public owner;
@@ -26,6 +27,10 @@ contract TokenVesting {
         uint256 _cliffDuration,
         uint256 _vestingDuration
     ) {
+        require(_token != address(0), "Invalid token");
+        require(_beneficiary != address(0), "Invalid beneficiary");
+        require(_vestingDuration > 0, "Duration must be > 0");
+
         token = IERC20(_token);
         beneficiary = _beneficiary;
         owner = msg.sender;
@@ -35,44 +40,41 @@ contract TokenVesting {
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
     function vestedAmount() public view returns (uint256) {
         if (block.timestamp < cliff) return 0;
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
-        return totalAllocation * elapsed / duration;
+        return (totalAllocation / duration) * elapsed + ((totalAllocation % duration) * elapsed) / duration;
     }
 
     function claimable() public view returns (uint256) {
         return vestedAmount() - claimed;
     }
 
-    function claim() external {
+    function claim() external nonReentrant {
         require(msg.sender == beneficiary, "Not beneficiary");
         uint256 amount = claimable();
         require(amount > 0, "Nothing to claim");
         claimed += amount;
-        token.transfer(beneficiary, amount);
+        require(token.transfer(beneficiary, amount), "Transfer failed");
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
-    function revoke() external {
+    function revoke() external nonReentrant {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        uint256 unvested = totalAllocation - claimed;
 
         if (vested > claimed) {
-            token.transfer(beneficiary, vested - claimed);
+            uint256 toBeneficiary = vested - claimed;
+            unvested -= toBeneficiary;
+            require(token.transfer(beneficiary, toBeneficiary), "Transfer failed");
         }
-        token.transfer(owner, unvested);
+        require(token.transfer(owner, unvested), "Transfer failed");
         emit VestingRevoked(beneficiary, unvested);
     }
 }

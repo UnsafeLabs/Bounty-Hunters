@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract SimpleSwap {
+contract SimpleSwap is ReentrancyGuard {
     IERC20 public tokenA;
     IERC20 public tokenB;
     uint256 public reserveA;
@@ -18,17 +19,20 @@ contract SimpleSwap {
         fee = _fee;
     }
 
-    function addLiquidity(uint256 amountA, uint256 amountB) external {
-        tokenA.transferFrom(msg.sender, address(this), amountA);
-        tokenB.transferFrom(msg.sender, address(this), amountB);
+    function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant {
+        require(tokenA.transferFrom(msg.sender, address(this), amountA), "Transfer failed");
+        require(tokenB.transferFrom(msg.sender, address(this), amountB), "Transfer failed");
         reserveA += amountA;
         reserveB += amountB;
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external nonReentrant returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Transaction expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
 
@@ -37,15 +41,16 @@ contract SimpleSwap {
             ? (tokenA, tokenB, reserveA, reserveB)
             : (tokenB, tokenA, reserveB, reserveA);
 
-        inputToken.transferFrom(msg.sender, address(this), amountIn);
+        require(inputToken.transferFrom(msg.sender, address(this), amountIn), "Transfer failed");
 
-        uint256 feeAmount = amountIn * fee / 10000;
+        uint256 feeAmount = (amountIn * fee + 9999) / 10000;
+        require(amountIn > feeAmount, "Amount <= fee");
         uint256 amountInAfterFee = amountIn - feeAmount;
 
-        // constant product formula: x * y = k
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        require(amountOut >= minAmountOut, "Slippage tolerance exceeded");
 
-        outputToken.transfer(msg.sender, amountOut);
+        require(outputToken.transfer(msg.sender, amountOut), "Transfer failed");
 
         if (isTokenA) {
             reserveA += amountIn;
@@ -62,7 +67,8 @@ contract SimpleSwap {
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
+        uint256 feeAmount = (amountIn * fee + 9999) / 10000;
+        if (amountIn <= feeAmount) return 0;
         uint256 amountInAfterFee = amountIn - feeAmount;
         return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
     }
