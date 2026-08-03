@@ -33,6 +33,15 @@ export interface ProviderCacheService<M = unknown, C = unknown> {
 }
 
 export const makeProviderCache = Effect.gen(function* () {
+  // Track registered capability cache keys per provider for scoped invalidation
+  const providerCapabilityKeys = new Map<string, Set<string>>();
+
+  const encodeCapabilityKey = (providerId: string, modelId: string): string => {
+    const encodedProvider = encodeURIComponent(providerId);
+    const encodedModel = encodeURIComponent(modelId);
+    return `${encodedProvider}::${encodedModel}`;
+  };
+
   const modelListCache = yield* Cache.make({
     capacity: 100,
     timeToLive: MODEL_LIST_CACHE_TTL,
@@ -70,7 +79,7 @@ export const makeProviderCache = Effect.gen(function* () {
     fetcher: (providerId: string, modelId: string) => Effect.Effect<C, Error>,
   ): Effect.Effect<C, Error> =>
     Effect.gen(function* () {
-      const cacheKey = `${providerId}:${modelId}`;
+      const cacheKey = encodeCapabilityKey(providerId, modelId);
       const cached = yield* Cache.getOption(capabilityCache, cacheKey);
       if (Option.isSome(cached)) {
         yield* increment(providerCacheHitsTotal, { cache: "capability", providerId, modelId });
@@ -79,6 +88,13 @@ export const makeProviderCache = Effect.gen(function* () {
 
       yield* increment(providerCacheMissesTotal, { cache: "capability", providerId, modelId });
       const freshCapabilities = yield* fetcher(providerId, modelId);
+      
+      // Index key under provider for scoped invalidation
+      if (!providerCapabilityKeys.has(providerId)) {
+        providerCapabilityKeys.set(providerId, new Set());
+      }
+      providerCapabilityKeys.get(providerId)!.add(cacheKey);
+
       yield* Cache.set(capabilityCache, cacheKey, freshCapabilities as unknown);
       return freshCapabilities;
     });
@@ -86,13 +102,20 @@ export const makeProviderCache = Effect.gen(function* () {
   const invalidateProvider = (providerId: string) =>
     Effect.gen(function* () {
       yield* Cache.invalidate(modelListCache, providerId);
-      yield* Cache.invalidateAll(capabilityCache);
+      const keys = providerCapabilityKeys.get(providerId);
+      if (keys) {
+        for (const key of keys) {
+          yield* Cache.invalidate(capabilityCache, key);
+        }
+        providerCapabilityKeys.delete(providerId);
+      }
     });
 
   const invalidateAll = () =>
     Effect.gen(function* () {
       yield* Cache.invalidateAll(modelListCache);
       yield* Cache.invalidateAll(capabilityCache);
+      providerCapabilityKeys.clear();
     });
 
   return {
