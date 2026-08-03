@@ -74,6 +74,14 @@ export const terminalRestartsTotal = Metric.counter("t3_terminal_restarts_total"
   description: "Total terminal restart requests handled.",
 });
 
+export const providerCacheHitsTotal = Metric.counter("t3_provider_cache_hits_total", {
+  description: "Total provider cache hit lookups.",
+});
+
+export const providerCacheMissesTotal = Metric.counter("t3_provider_cache_misses_total", {
+  description: "Total provider cache miss lookups.",
+});
+
 export const metricAttributes = (
   attributes: Readonly<Record<string, unknown>>,
 ): ReadonlyArray<[string, string]> => Object.entries(compactMetricAttributes(attributes));
