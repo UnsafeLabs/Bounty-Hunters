@@ -2208,6 +2208,12 @@
     "last_pr": "2026-07-02T14:15:13.295Z"
   },
   {
+    "username": "chico10117",
+    "total_prs": 2,
+    "first_pr": "2026-08-04T23:41:47.339Z",
+    "last_pr": "2026-08-05T02:41:45.257Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -3058,11 +3064,5 @@
     "total_prs": 1,
     "first_pr": "2026-07-30T10:29:17.601Z",
     "last_pr": "2026-07-30T10:29:17.601Z"
-  },
-  {
-    "username": "chico10117",
-    "total_prs": 1,
-    "first_pr": "2026-08-04T23:41:47.339Z",
-    "last_pr": "2026-08-04T23:41:47.339Z"
   }
 ]
