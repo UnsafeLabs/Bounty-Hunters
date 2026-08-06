@@ -15,7 +15,7 @@ from ipaddress import (
 from pathlib import Path, PurePath
 from re import Pattern
 from types import GeneratorType
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from annotated_doc import Doc
@@ -215,6 +215,14 @@ def jsonable_encoder(
             """
         ),
     ] = True,
+    bytes_encoding: Annotated[
+        Literal["base64", "hex"],
+        Doc(
+            """
+            Encoding format for bytes objects. Defaults to 'base64', can also be 'hex'.
+            """
+        ),
+    ] = "base64",
 ) -> Any:
     """
     Convert any object to something that can be encoded in JSON.
@@ -228,6 +236,16 @@ def jsonable_encoder(
     Read more about it in the
     [FastAPI docs for JSON Compatible Encoder](https://fastapi.tiangolo.com/tutorial/encoder/).
     """
+    import base64
+
+    if isinstance(obj, memoryview):
+        obj = obj.tobytes()
+
+    if isinstance(obj, bytes):
+        if bytes_encoding == "hex":
+            return obj.hex()
+        return base64.b64encode(obj).decode("ascii")
+
     custom_encoder = custom_encoder or {}
     if custom_encoder:
         if type(obj) in custom_encoder:
@@ -255,6 +273,7 @@ def jsonable_encoder(
             exclude_none=exclude_none,
             exclude_defaults=exclude_defaults,
             sqlalchemy_safe=sqlalchemy_safe,
+            bytes_encoding=bytes_encoding,
         )
     if dataclasses.is_dataclass(obj):
         assert not isinstance(obj, type)
@@ -302,6 +321,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
                 encoded_value = jsonable_encoder(
                     value,
@@ -310,6 +330,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
                 encoded_dict[encoded_key] = encoded_value
         return encoded_dict
@@ -327,6 +348,7 @@ def jsonable_encoder(
                     exclude_none=exclude_none,
                     custom_encoder=custom_encoder,
                     sqlalchemy_safe=sqlalchemy_safe,
+                    bytes_encoding=bytes_encoding,
                 )
             )
         return encoded_list
