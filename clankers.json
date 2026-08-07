@@ -2220,6 +2220,12 @@
     "last_pr": "2026-07-02T14:15:13.295Z"
   },
   {
+    "username": "nwinkelman2",
+    "total_prs": 2,
+    "first_pr": "2026-08-07T00:35:32.246Z",
+    "last_pr": "2026-08-07T05:50:32.351Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -3070,11 +3076,5 @@
     "total_prs": 1,
     "first_pr": "2026-07-30T10:29:17.601Z",
     "last_pr": "2026-07-30T10:29:17.601Z"
-  },
-  {
-    "username": "nwinkelman2",
-    "total_prs": 1,
-    "first_pr": "2026-08-07T00:35:32.246Z",
-    "last_pr": "2026-08-07T00:35:32.246Z"
   }
 ]
