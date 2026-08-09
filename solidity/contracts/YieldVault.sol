@@ -29,15 +29,16 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    // FIXED: Cap at periodFinish to prevent phantom rewards after period ends
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
+        uint256 effectiveTimestamp = block.timestamp < periodFinish ? block.timestamp : periodFinish;
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (effectiveTimestamp - lastUpdateTime) * rewardRate / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
+    // FIXED: Correctly calculates earned rewards using capped rewardPerToken
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
@@ -77,10 +78,11 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
+    // FIXED: Added access control + precision-preserving reward rate
     function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+        require(msg.sender == rewardDistributor, "Only reward distributor");
+        require(duration > 0, "Duration must be positive");
+        rewardRate = reward * 1e18 / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
     }
