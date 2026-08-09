@@ -1836,6 +1836,12 @@
     "last_pr": "2026-08-03T13:12:16.951Z"
   },
   {
+    "username": "JamBeeOnGit",
+    "total_prs": 2,
+    "first_pr": "2026-08-09T10:40:03.514Z",
+    "last_pr": "2026-08-09T10:41:51.222Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2536,11 +2542,5 @@
     "total_prs": 1,
     "first_pr": "2026-08-01T14:52:42.647Z",
     "last_pr": "2026-08-01T14:52:42.647Z"
-  },
-  {
-    "username": "JamBeeOnGit",
-    "total_prs": 1,
-    "first_pr": "2026-08-09T10:40:03.514Z",
-    "last_pr": "2026-08-09T10:40:03.514Z"
   }
 ]
