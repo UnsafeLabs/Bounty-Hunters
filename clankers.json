@@ -1650,6 +1650,12 @@
     "last_pr": "2026-06-22T16:51:15.184Z"
   },
   {
+    "username": "rafaio1",
+    "total_prs": 4,
+    "first_pr": "2026-08-18T23:12:33.796Z",
+    "last_pr": "2026-08-19T00:41:50.583Z"
+  },
+  {
     "username": "AidenPeerce",
     "total_prs": 3,
     "first_pr": "2026-05-13T13:22:13Z",
@@ -3100,11 +3106,5 @@
     "total_prs": 1,
     "first_pr": "2026-07-30T10:29:17.601Z",
     "last_pr": "2026-07-30T10:29:17.601Z"
-  },
-  {
-    "username": "rafaio1",
-    "total_prs": 1,
-    "first_pr": "2026-08-18T23:12:33.796Z",
-    "last_pr": "2026-08-18T23:12:33.796Z"
   }
 ]
