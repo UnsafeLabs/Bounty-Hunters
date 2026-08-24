@@ -25,7 +25,7 @@ section .data
     err_invalid_type    db "Error: invalid content type in record header", 10, 0
     err_short_read      db "Error: incomplete record header (need 5 bytes)", 10, 0
     err_alert_fatal     db "FATAL ALERT received from peer", 10
-    err_alert_warning   db "WARNING: alert received from peer"
+    err_alert_warning   db "WARNING: alert received from peer", 10, 0
     err_truncated       db "Error: record payload truncated", 10, 0
 
     ; --- TLS content type bounds ---
@@ -201,7 +201,7 @@ parse_tls_record:
     cmp eax, 2
     je .alert_fatal
     ; Warning alert
-    lea rdi, [rel err_alert_warning]   ; BUG: missing null terminator,
+    lea rdi, [rel err_alert_warning]   ; warning string is NUL-terminated,
     call print_string                  ; will print into err_truncated
     jmp .parse_done
 
