@@ -43,7 +43,7 @@ cp .env.example .env
 
 Edit `.env` with your database credentials, Redis URL, and other configuration.
 
-### Step 6: Configure the Database
+### Step 5: Configure the Database
 
 Create a `config.yml` file in the project root:
 
