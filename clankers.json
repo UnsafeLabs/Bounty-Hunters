@@ -7,9 +7,9 @@
   },
   {
     "username": "rafaio1",
-    "total_prs": 383,
+    "total_prs": 413,
     "first_pr": "2026-08-18T23:12:33.796Z",
-    "last_pr": "2026-08-25T00:47:22.650Z"
+    "last_pr": "2026-08-25T02:08:20.987Z"
   },
   {
     "username": "ardha27",
@@ -2932,6 +2932,12 @@
     "total_prs": 1,
     "first_pr": "2026-08-24T17:58:10.622Z",
     "last_pr": "2026-08-24T17:58:10.622Z"
+  },
+  {
+    "username": "Hasned-spec",
+    "total_prs": 1,
+    "first_pr": "2026-08-25T01:37:57.731Z",
+    "last_pr": "2026-08-25T01:37:57.731Z"
   },
   {
     "username": "MichisGitIsKing",
