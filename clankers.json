@@ -1932,6 +1932,12 @@
     "last_pr": "2026-08-03T23:04:30.991Z"
   },
   {
+    "username": "hummern",
+    "total_prs": 3,
+    "first_pr": "2026-09-06T12:08:14.840Z",
+    "last_pr": "2026-09-06T17:41:06.413Z"
+  },
+  {
     "username": "Saumya-Verma123",
     "total_prs": 2,
     "first_pr": "2026-05-13T11:20:03Z",
@@ -3160,11 +3166,5 @@
     "total_prs": 1,
     "first_pr": "2026-09-02T14:20:20.507Z",
     "last_pr": "2026-09-02T14:20:20.507Z"
-  },
-  {
-    "username": "hummern",
-    "total_prs": 1,
-    "first_pr": "2026-09-06T12:08:14.840Z",
-    "last_pr": "2026-09-06T12:08:14.840Z"
   }
 ]
