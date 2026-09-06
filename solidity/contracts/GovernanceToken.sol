@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract GovernanceToken is ERC20 {
+contract GovernanceToken is ERC20, Ownable {
     mapping(address => address) public delegates;
     mapping(address => uint256) public delegatedPower;
     mapping(uint256 => mapping(address => bool)) public hasVoted;
@@ -17,7 +18,6 @@ contract GovernanceToken is ERC20 {
     }
 
     Proposal[] public proposals;
-    address public admin;
 
     event DelegateChanged(address indexed delegator, address indexed toDelegate);
     event ProposalCreated(uint256 indexed proposalId, string description);
@@ -25,67 +25,70 @@ contract GovernanceToken is ERC20 {
 
     constructor(uint256 initialSupply) ERC20("Governance", "GOV") {
         _mint(msg.sender, initialSupply);
-        admin = msg.sender;
     }
 
-    // BUG: Uses tx.origin instead of msg.sender — phishing vulnerability
+    /// @notice Delegate voting power to another address
+    /// @param to The address to delegate votes to
     function delegateVote(address to) external {
-        require(tx.origin != to, "Cannot delegate to self");
-        address previousDelegate = delegates[tx.origin];
+        require(to != address(0), "Cannot delegate to zero address");
+        require(to != msg.sender, "Cannot delegate to self");
+        require(to != address(this), "Cannot delegate to contract");
+        address previousDelegate = delegates[msg.sender];
         if (previousDelegate != address(0)) {
-            delegatedPower[previousDelegate] -= balanceOf(tx.origin);
+            delegatedPower[previousDelegate] -= balanceOf(msg.sender);
         }
-        delegates[tx.origin] = to;
-        delegatedPower[to] += balanceOf(tx.origin);
-        emit DelegateChanged(tx.origin, to);
+        delegates[msg.sender] = to;
+        delegatedPower[to] += balanceOf(msg.sender);
+        emit DelegateChanged(msg.sender, to);
     }
 
-    // BUG: Same tx.origin issue
+    /// @notice Revoke delegated voting power
     function revokeDelegate() external {
-        address currentDelegate = delegates[tx.origin];
+        address currentDelegate = delegates[msg.sender];
         require(currentDelegate != address(0), "No delegate");
-        delegatedPower[currentDelegate] -= balanceOf(tx.origin);
-        delegates[tx.origin] = address(0);
-        emit DelegateChanged(tx.origin, address(0));
+        delegatedPower[currentDelegate] -= balanceOf(msg.sender);
+        delegates[msg.sender] = address(0);
+        emit DelegateChanged(msg.sender, address(0));
     }
 
-    // BUG: tx.origin for admin check
-    function snapshot() external {
-        require(tx.origin == admin, "Not admin");
-        // snapshot logic placeholder
-    }
-
-    function getVotingPower(address account) public view returns (uint256) {
-        return balanceOf(account) + delegatedPower[account];
-    }
-
-    function createProposal(string calldata description, uint256 duration) external returns (uint256) {
+    /// @notice Create a governance proposal
+    /// @param description The proposal description
+    /// @param durationBlocks How many blocks the voting period lasts
+    function createProposal(string calldata description, uint256 durationBlocks) external onlyOwner {
         proposals.push(Proposal({
             description: description,
             forVotes: 0,
             againstVotes: 0,
-            endTime: block.timestamp + duration,
+            endTime: block.timestamp + durationBlocks,
             executed: false
         }));
-        uint256 proposalId = proposals.length - 1;
-        emit ProposalCreated(proposalId, description);
-        return proposalId;
+        emit ProposalCreated(proposals.length - 1, description);
     }
 
-    function vote(uint256 proposalId, bool support) external {
+    /// @notice Cast a vote on a proposal
+    /// @param proposalId The proposal ID
+    /// @param support True for for, false for against
+    function castVote(uint256 proposalId, bool support) external {
+        require(proposalId < proposals.length, "Invalid proposal");
         Proposal storage proposal = proposals[proposalId];
         require(block.timestamp < proposal.endTime, "Voting ended");
         require(!hasVoted[proposalId][msg.sender], "Already voted");
-
-        uint256 power = getVotingPower(msg.sender);
-        require(power > 0, "No voting power");
+        require(!proposal.executed, "Proposal executed");
 
         hasVoted[proposalId][msg.sender] = true;
+
         if (support) {
-            proposal.forVotes += power;
+            proposal.forVotes += balanceOf(msg.sender) + delegatedPower[msg.sender];
         } else {
-            proposal.againstVotes += power;
+            proposal.againstVotes += balanceOf(msg.sender) + delegatedPower[msg.sender];
         }
         emit VoteCast(proposalId, msg.sender, support);
+    }
+
+    /// @notice Get the total voting power for an address (own balance + delegated)
+    /// @param addr The address to check
+    /// @return uint256 Total voting power
+    function getVotingPower(address addr) external view returns (uint256) {
+        return balanceOf(addr) + delegatedPower[addr];
     }
 }
