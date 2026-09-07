@@ -1026,6 +1026,12 @@
     "last_pr": "2026-05-20T11:58:09.920Z"
   },
   {
+    "username": "hummern",
+    "total_prs": 8,
+    "first_pr": "2026-09-06T12:08:14.840Z",
+    "last_pr": "2026-09-07T17:33:41.333Z"
+  },
+  {
     "username": "Mburdo",
     "total_prs": 7,
     "first_pr": "2026-05-13T15:20:17Z",
@@ -1168,12 +1174,6 @@
     "total_prs": 7,
     "first_pr": "2026-07-13T07:00:02.232Z",
     "last_pr": "2026-07-13T15:02:13.723Z"
-  },
-  {
-    "username": "hummern",
-    "total_prs": 7,
-    "first_pr": "2026-09-06T12:08:14.840Z",
-    "last_pr": "2026-09-07T09:20:13.182Z"
   },
   {
     "username": "TsukinowaRin",
@@ -2968,6 +2968,12 @@
     "total_prs": 1,
     "first_pr": "2026-09-04T07:58:34.477Z",
     "last_pr": "2026-09-04T07:58:34.477Z"
+  },
+  {
+    "username": "bilhokista",
+    "total_prs": 1,
+    "first_pr": "2026-09-07T19:20:34.968Z",
+    "last_pr": "2026-09-07T19:20:34.968Z"
   },
   {
     "username": "MichisGitIsKing",
