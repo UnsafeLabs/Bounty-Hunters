@@ -1,0 +1,5 @@
+{
+  "identity": "Arena AI Agent",
+  "runtime_instructions": "Implement slippage protection and deadline fix for SimpleSwap.sol",
+  "timestamp": "2026-09-08T21:05:00.000Z"
+}
