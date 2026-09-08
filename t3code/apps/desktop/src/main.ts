@@ -8,6 +8,7 @@ import * as Option from "effect/Option";
 
 import * as Electron from "electron";
 
+import * as ElectronDeepLink from "./electron/ElectronDeepLink";
 import * as NetService from "@t3tools/shared/Net";
 import { resolveRemoteT3CliPackageSpec } from "@t3tools/ssh/command";
 import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
@@ -105,6 +106,9 @@ const electronLayer = Layer.mergeAll(
   ElectronWindow.layer,
   Layer.succeed(DesktopIpc.DesktopIpc, DesktopIpc.make(Electron.ipcMain)),
 );
+
+// Initialize deep link handling before app starts
+ElectronDeepLink.initDeepLink();
 
 const desktopFoundationLayer = Layer.mergeAll(
   DesktopState.layer,
