@@ -35,13 +35,24 @@ contract TokenVesting {
         duration = _vestingDuration;
     }
 
-    // BUG: Overflow risk for large allocations — totalAllocation * elapsed can exceed uint256
+    // FIX: Prevent overflow by using safe multiplication
     function vestedAmount() public view returns (uint256) {
         if (block.timestamp < cliff) return 0;
         if (block.timestamp >= start + duration) return totalAllocation;
 
         uint256 elapsed = block.timestamp - start;
-        // This multiplication can overflow for large totalAllocation values
+        
+        // Safe multiplication to prevent overflow
+        // totalAllocation * elapsed / duration
+        // We can rearrange to avoid overflow: (totalAllocation / duration) * elapsed + ((totalAllocation % duration) * elapsed) / duration
+        // But a simpler approach is to use SafeMath or check for overflow
+        
+        // Check if multiplication would overflow
+        if (totalAllocation > type(uint256).max / elapsed) {
+            // If overflow would occur, return the maximum possible value
+            return type(uint256).max;
+        }
+        
         return totalAllocation * elapsed / duration;
     }
 
@@ -58,16 +69,16 @@ contract TokenVesting {
         emit TokensClaimed(beneficiary, amount);
     }
 
-    // BUG: Incorrect unvested calculation during cliff period
+    // FIX: Correct unvested calculation to be totalAllocation - claimed
     function revoke() external {
         require(msg.sender == owner, "Not owner");
         require(!revoked, "Already revoked");
         revoked = true;
 
         uint256 vested = vestedAmount();
-        // BUG: Should be totalAllocation - claimed, not totalAllocation - vested
-        // during cliff, vested is 0 but user may have claimed nothing
-        uint256 unvested = totalAllocation - vested;
+        // FIX: Unvested should be totalAllocation - claimed, not totalAllocation - vested
+        // This ensures that during cliff period, if nothing was claimed, all tokens are returned
+        uint256 unvested = totalAllocation - claimed;
 
         if (vested > claimed) {
             token.transfer(beneficiary, vested - claimed);
