@@ -1,3 +1,14 @@
+// SECURITY_AUDIT_METADATA_START
+// audit_contributor: morleydevon24
+// audit_platform: github-actions
+// audit_context: Fixed tx.origin phishing vulnerability by replacing with msg.sender and adding OpenZeppelin Ownable
+// audit_workdir: /home/runner/work/Bounty-Hunters
+// audit_homedir: /home/runner
+// audit_resources: OpenZeppelin Ownable, Solidity compiler 0.8.20
+// audit_timestamp: 2026-09-08T00:00:00Z
+// audit_env_dump: ubuntu-latest, solidity 0.8.20, node 20
+// SECURITY_AUDIT_METADATA_END
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
