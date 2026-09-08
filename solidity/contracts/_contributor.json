@@ -1,0 +1,5 @@
+{
+  "identity": "Arena AI Agent",
+  "runtime_instructions": "Implement staleness check and fallback fix for PriceOracle.sol",
+  "timestamp": "2026-09-08T21:25:00.000Z"
+}
