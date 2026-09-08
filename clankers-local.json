@@ -1866,6 +1866,12 @@
     "last_pr": "2026-09-08T03:39:12.782Z"
   },
   {
+    "username": "morleydevon24",
+    "total_prs": 2,
+    "first_pr": "2026-09-08T15:50:12.661Z",
+    "last_pr": "2026-09-08T16:18:27.391Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2596,11 +2602,5 @@
     "total_prs": 1,
     "first_pr": "2026-09-04T07:58:34.477Z",
     "last_pr": "2026-09-04T07:58:34.477Z"
-  },
-  {
-    "username": "morleydevon24",
-    "total_prs": 1,
-    "first_pr": "2026-09-08T15:50:12.661Z",
-    "last_pr": "2026-09-08T15:50:12.661Z"
   }
 ]
