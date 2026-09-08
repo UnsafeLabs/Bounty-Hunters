@@ -13,35 +13,87 @@ contract FlashLoan {
     uint256 public totalFees;
     address public owner;
     bool public paused;
+    
+    // FIX: Track internal pool balance to prevent rebasing token manipulation
+    uint256 private internalPoolBalance;
+    // FIX: Add maximum loan amount to prevent draining entire pool
+    uint256 public maxLoanAmount;
+    
+    // FIX: Add minimum fee to prevent zero-fee loans
+    uint256 public minFee = 1; // Minimum fee of 1 token unit
 
     event FlashLoanExecuted(address indexed borrower, uint256 amount, uint256 fee);
+    event Paused();
+    event Unpaused();
 
     constructor(address _loanToken, uint256 _feeBPS) {
         loanToken = IERC20(_loanToken);
         feeBPS = _feeBPS;
         owner = msg.sender;
+        // FIX: Initialize maxLoanAmount as a percentage of initial pool (e.g., 90%)
+        maxLoanAmount = 0; // Will be updated on first deposit
     }
 
-    // BUG: Fee truncates to zero for small loan amounts
-    // BUG: No max loan amount — can drain entire pool
-    // BUG: Uses balanceOf for validation — rebasing tokens can manipulate
+    // FIX: Emergency pause function
+    function pause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = true;
+        emit Paused();
+    }
+    
+    // FIX: Emergency unpause function
+    function unpause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = false;
+        emit Unpaused();
+    }
+    
+    // FIX: Set max loan amount (can be updated by owner)
+    function setMaxLoanAmount(uint256 _maxLoanAmount) external {
+        require(msg.sender == owner, "Not owner");
+        maxLoanAmount = _maxLoanAmount;
+    }
+    
+    // FIX: Set minimum fee (can be updated by owner)
+    function setMinFee(uint256 _minFee) external {
+        require(msg.sender == owner, "Not owner");
+        minFee = _minFee;
+    }
+
     function flashLoan(uint256 amount, bytes calldata data) external {
         require(!paused, "Paused");
         require(amount > 0, "Amount must be > 0");
+        
+        // FIX: Check against internal pool balance instead of balanceOf
+        require(internalPoolBalance >= amount, "Insufficient pool balance");
+        
+        // FIX: Check max loan amount
+        require(amount <= maxLoanAmount, "Amount exceeds max loan");
 
-        uint256 balanceBefore = loanToken.balanceOf(address(this));
-        require(balanceBefore >= amount, "Insufficient pool balance");
-
-        // BUG: Truncates to 0 when amount < 10000/feeBPS
         uint256 fee = amount * feeBPS / 10000;
+        
+        // FIX: Ensure fee is at least minFee to prevent zero-fee loans
+        if (fee < minFee) {
+            fee = minFee;
+        }
+        
+        // FIX: Update internal balance before transfer
+        internalPoolBalance -= amount;
 
         loanToken.transfer(msg.sender, amount);
 
         IFlashLoanReceiver(msg.sender).onFlashLoan(address(loanToken), amount, fee, data);
 
-        // BUG: balanceOf can be manipulated by rebasing tokens
-        uint256 balanceAfter = loanToken.balanceOf(address(this));
-        require(balanceAfter >= balanceBefore + fee, "Loan not repaid");
+        // FIX: Check repayment using internal balance tracking
+        // The receiver must return amount + fee
+        uint256 expectedBalance = internalPoolBalance + amount + fee;
+        
+        // Use actual balance check as secondary validation
+        uint256 actualBalance = loanToken.balanceOf(address(this));
+        require(actualBalance >= expectedBalance, "Loan not repaid");
+        
+        // FIX: Update internal balance after repayment
+        internalPoolBalance = actualBalance;
 
         totalFees += fee;
         emit FlashLoanExecuted(msg.sender, amount, fee);
@@ -49,6 +101,13 @@ contract FlashLoan {
 
     function depositToPool(uint256 amount) external {
         loanToken.transferFrom(msg.sender, address(this), amount);
+        // FIX: Update internal pool balance
+        internalPoolBalance += amount;
+        
+        // FIX: Update maxLoanAmount if needed (e.g., 90% of pool)
+        if (maxLoanAmount == 0) {
+            maxLoanAmount = internalPoolBalance * 90 / 100;
+        }
     }
 
     function withdrawFees() external {
@@ -58,8 +117,8 @@ contract FlashLoan {
         loanToken.transfer(owner, fees);
     }
 
-    // BUG: No emergency pause function
     function getPoolBalance() external view returns (uint256) {
-        return loanToken.balanceOf(address(this));
+        // FIX: Return internal pool balance for consistency
+        return internalPoolBalance;
     }
 }
