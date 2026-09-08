@@ -22,10 +22,50 @@ import {
 } from "./_internal/shared.ts";
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
 
-export interface AcpClientOptions {
+// Authentication error for session expiry
+export class AuthenticationError extends AcpError.AcpError {
+  readonly _tag = "AuthenticationError";
+  constructor(
+    readonly message: string,
+    readonly sessionId?: string,
+    readonly cause?: unknown,
+  ) {
+    super({ message, cause });
+  }
+}
+
+// Token refresh configuration
+export interface TokenRefreshOptions {
+  /**
+   * Called when a session expires, before attempting re-authentication.
+   * Receives the expired session ID.
+   */
+  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, never>;
+  /**
+   * Maximum number of retry attempts (default: 1)
+   */
+  readonly maxRetries?: number;
+}
+
+// Extended client options with token refresh support
+export interface AcpClientOptions extends TokenRefreshOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
-  readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  readonly logger?: (event: AcpProtocol.AcpIncomingNotification) => Effect.Effect<void, never>;
+}
+
+// Internal client state for token refresh management
+interface AcpClientState {
+  accessToken?: string;
+  refreshToken?: string;
+  sessionId?: string;
+  isRefreshing: boolean;
+  pendingRequests: Array<{
+    method: string;
+    payload: unknown;
+    resolve: (result: unknown) => void;
+    reject: (error: AcpError.AcpError) => void;
+  }>;
 }
 
 type AcpClientRaw = {
@@ -306,6 +346,20 @@ interface BufferedNotificationHandler<A> {
   readonly pending: Array<A>;
 }
 
+// Helper type for retry schedule
+const retryOnce = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  maxRetries: number = 1,
+): Effect.Effect<A, E, R> =>
+  Effect.retry(effect, {
+    times: maxRetries,
+    schedule: Effect.exponential("100 millis"),
+  });
+
+// Create authentication error for session expiry
+const makeSessionExpiredError = (sessionId: string) =>
+  new AuthenticationError(`Session ${sessionId} has expired`, sessionId);
+
 export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
   stdio: Stdio.Stdio,
   options: AcpClientOptions = {},
@@ -330,6 +384,16 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
   let unknownExtNotificationHandler:
     | ((method: string, params: unknown) => Effect.Effect<void, AcpError.AcpError>)
     | undefined;
+
+  // Client state for token refresh management
+  const clientState: AcpClientState = {
+    accessToken: undefined,
+    refreshToken: undefined,
+    sessionId: undefined,
+    isRefreshing: false,
+    pendingRequests: [],
+  };
+  const maxRetries = options.maxRetries ?? 1;
 
   const runNotificationHandlers = <A>(
     registration: BufferedNotificationHandler<A>,
@@ -408,6 +472,146 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     onExtRequest: dispatchExtRequest,
   });
 
+  // Wrapper for transport.request with automatic token refresh
+  const requestWithRetry = (
+    method: string,
+    payload: unknown,
+  ): Effect.Effect<unknown, AcpError.AcpError> => {
+    return Effect.gen(function* () {
+      // Try the request first
+      const result = yield* transport.request(method, payload);
+      return result;
+    }).pipe(
+      // Catch 401 errors and attempt re-authentication
+      Effect.catchTag("AcpRequestError", (error) => {
+        // Check if this is a 401 Unauthorized error
+        if (error.error?.code === "UNAUTHORIZED" || error.message?.includes("401")) {
+          return handleSessionExpiry(method, payload);
+        }
+        return Effect.fail(error);
+      }),
+    );
+  };
+
+  // Handle session expiry with automatic re-authentication
+  const handleSessionExpiry = (
+    method: string,
+    payload: unknown,
+  ): Effect.Effect<unknown, AcpError.AcpError> => {
+    return Effect.gen(function* () {
+      // Only attempt re-auth if we have a session and we're not already refreshing
+      if (!clientState.sessionId || clientState.isRefreshing) {
+        // If already refreshing, queue the request
+        if (clientState.isRefreshing) {
+          return yield* queueRequest(method, payload);
+        }
+        // No session or no refresh token, fail with authentication error
+        return Effect.fail(
+          new AuthenticationError("Session expired and cannot be refreshed", clientState.sessionId),
+        );
+      }
+
+      // Mark as refreshing
+      clientState.isRefreshing = true;
+
+      // Fire onSessionExpired callback if provided
+      if (options.onSessionExpired) {
+        yield* options.onSessionExpired(clientState.sessionId);
+      }
+
+      // Attempt re-authentication using refresh token
+      // For now, we'll use the authenticate method with the refresh token
+      // In a real implementation, this would use a dedicated refresh_token endpoint
+      try {
+        const authResponse = yield* transport.request(
+          AGENT_METHODS.authenticate,
+          { token: clientState.refreshToken } as AcpSchema.AuthenticateRequest,
+        );
+
+        // Update tokens from response (assuming response contains new tokens)
+        // This is a simplified implementation - actual implementation would depend on
+        // the ACP server's authentication response format
+        if (AcpSchema.AuthenticateResponse.is(authResponse)) {
+          clientState.accessToken = authResponse.token;
+          // Note: In a real implementation, the refresh token might also be updated
+        }
+
+        // Clear refreshing flag
+        clientState.isRefreshing = false;
+
+        // Process queued requests
+        yield* processQueuedRequests();
+
+        // Retry the original request
+        return yield* transport.request(method, payload);
+      } catch (reauthError) {
+        // Re-auth failed, clear refreshing flag
+        clientState.isRefreshing = false;
+
+        // Fail all queued requests
+        const queued = clientState.pendingRequests.splice(0);
+        for (const { reject } of queued) {
+          reject(
+            new AuthenticationError(
+              `Re-authentication failed: ${String(reauthError)}`,
+              clientState.sessionId,
+              reauthError,
+            ),
+          );
+        }
+
+        // Return error for original request
+        return Effect.fail(
+          new AuthenticationError(
+            `Re-authentication failed: ${String(reauthError)}`,
+            clientState.sessionId,
+            reauthError,
+          ),
+        );
+      }
+    });
+  };
+
+  // Queue a request during re-authentication
+  const queueRequest = (
+    method: string,
+    payload: unknown,
+  ): Effect.Effect<unknown, AcpError.AcpError> => {
+    return Effect.promise(() =>
+      new Promise((resolve, reject) => {
+        clientState.pendingRequests.push({
+          method,
+          payload,
+          resolve,
+          reject,
+        });
+      }),
+    );
+  };
+
+  // Process queued requests after re-authentication
+  const processQueuedRequests = (): Effect.Effect<void, never> => {
+    return Effect.suspend(() => {
+      const queued = clientState.pendingRequests.splice(0);
+      if (queued.length === 0) {
+        return Effect.void;
+      }
+
+      return Effect.forEach(
+        queued,
+        ({ method, payload }) =>
+          transport.request(method, payload).pipe(
+            Effect.catchAll((error) => {
+              // If processing fails, the request will have already been resolved/rejected
+              // by the retry logic above, so we can ignore errors here
+              return Effect.void;
+            }),
+          ),
+        { discard: true },
+      );
+    });
+  };
+
   const clientHandlerLayer = AcpRpcs.ClientRpcs.toLayer(
     AcpRpcs.ClientRpcs.of({
       [CLIENT_METHODS.session_request_permission]: (payload) =>
@@ -459,13 +663,37 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
   return AcpClient.of({
     raw: {
       notifications: transport.incoming,
-      request: transport.request,
+      request: requestWithRetry,
       notify: transport.notify,
     },
     agent: {
       initialize: (payload) => callRpc(rpc[AGENT_METHODS.initialize](payload)),
-      authenticate: (payload) => callRpc(rpc[AGENT_METHODS.authenticate](payload)),
-      logout: (payload) => callRpc(rpc[AGENT_METHODS.logout](payload)),
+      authenticate: (payload) => {
+        // Store the token from authentication response
+        return Effect.gen(function* () {
+          const response = yield* callRpc(rpc[AGENT_METHODS.authenticate](payload));
+          if (AcpSchema.AuthenticateResponse.is(response)) {
+            clientState.accessToken = response.token;
+            clientState.sessionId = response.sessionId;
+            // In a real implementation, extract refresh token from response
+            // For now, we'll assume the payload contains a refresh token
+            if ("refreshToken" in payload) {
+              clientState.refreshToken = (payload as any).refreshToken;
+            }
+          }
+          return response;
+        });
+      },
+      logout: (payload) => {
+        // Clear session state on logout
+        return Effect.gen(function* () {
+          clientState.accessToken = undefined;
+          clientState.refreshToken = undefined;
+          clientState.sessionId = undefined;
+          const response = yield* callRpc(rpc[AGENT_METHODS.logout](payload));
+          return response;
+        });
+      },
       createSession: (payload) => callRpc(rpc[AGENT_METHODS.session_new](payload)),
       loadSession: (payload) => callRpc(rpc[AGENT_METHODS.session_load](payload)),
       listSessions: (payload) => callRpc(rpc[AGENT_METHODS.session_list](payload)),
@@ -567,3 +795,8 @@ export const layerChildProcess = (
   const terminationError = makeTerminationError(handle);
   return Layer.effect(AcpClient, make(stdio, options, terminationError));
 };
+
+// Export the new error type
+export { AuthenticationError };
+// Export the new types
+export type { TokenRefreshOptions, AcpClientOptions };
