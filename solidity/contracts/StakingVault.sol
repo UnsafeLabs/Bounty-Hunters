@@ -7,6 +7,9 @@ contract StakingVault {
     IERC20 public stakingToken;
     uint256 public rewardRate;
     uint256 public totalStaked;
+    
+    // Reentrancy guard
+    bool private locked;
 
     mapping(address => uint256) public balances;
     mapping(address => uint256) public rewards;
@@ -15,6 +18,13 @@ contract StakingVault {
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardClaimed(address indexed user, uint256 amount);
+
+    modifier nonReentrant() {
+        require(!locked, "Reentrant call");
+        locked = true;
+        _;
+        locked = false;
+    }
 
     constructor(address _stakingToken, uint256 _rewardRate) {
         stakingToken = IERC20(_stakingToken);
@@ -39,31 +49,35 @@ contract StakingVault {
         lastStakeTime[account] = block.timestamp;
     }
 
-    // BUG: Reentrancy — state update after external call
-    function withdraw(uint256 amount) external {
+    // FIX: Apply Checks-Effects-Interactions pattern with reentrancy guard
+    function withdraw(uint256 amount) external nonReentrant {
         require(balances[msg.sender] >= amount, "Insufficient balance");
         _updateReward(msg.sender);
 
-        // External call before state update
+        // Effects: Update state BEFORE external call
+        balances[msg.sender] -= amount;
+        totalStaked -= amount;
+
+        // Interactions: External call AFTER state update
         (bool success, ) = payable(msg.sender).call{value: amount}("");
         require(success, "Transfer failed");
 
-        // State update after external call — vulnerable to reentrancy
-        balances[msg.sender] -= amount;
-        totalStaked -= amount;
         emit Withdrawn(msg.sender, amount);
     }
 
-    // BUG: Same reentrancy pattern in claimRewards
-    function claimRewards() external {
+    // FIX: Apply Checks-Effects-Interactions pattern with reentrancy guard
+    function claimRewards() external nonReentrant {
         _updateReward(msg.sender);
         uint256 reward = rewards[msg.sender];
         require(reward > 0, "No rewards");
 
+        // Effects: Update state BEFORE external call
+        rewards[msg.sender] = 0;
+
+        // Interactions: External call AFTER state update
         (bool success, ) = payable(msg.sender).call{value: reward}("");
         require(success, "Transfer failed");
 
-        rewards[msg.sender] = 0;
         emit RewardClaimed(msg.sender, reward);
     }
 
