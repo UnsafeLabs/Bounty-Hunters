@@ -13,6 +13,38 @@ import * as Electron from "electron";
 import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/DesktopEnvironment.ts";
 
 export const DESKTOP_SCHEME = "t3";
+export const T3CODE_SCHEME = "t3code";
+
+// Types for deep link actions
+export interface DeepLinkAction {
+  readonly type: "open-project" | "chat-thread" | "settings";
+  readonly path?: string;
+  readonly id?: string;
+}
+
+// Error for invalid deep links
+export class ElectronDeepLinkValidationError extends Data.TaggedError(
+  "ElectronDeepLinkValidationError",
+)<{
+  readonly url: string;
+  readonly reason: string;
+}> {
+  override get message() {
+    return `Invalid deep link URL ${this.url}: ${this.reason}`;
+  }
+}
+
+// Error for deep link protocol registration
+export class ElectronDeepLinkRegistrationError extends Data.TaggedError(
+  "ElectronDeepLinkRegistrationError",
+)<{
+  readonly scheme: string;
+  readonly cause: unknown;
+}> {
+  override get message() {
+    return `Failed to register ${this.scheme} deep link protocol.`;
+  }
+}
 
 export class ElectronProtocolRegistrationError extends Data.TaggedError(
   "ElectronProtocolRegistrationError",
@@ -49,6 +81,14 @@ export interface ElectronProtocolShape {
     ElectronProtocolRegistrationError | ElectronProtocolStaticBundleMissingError,
     FileSystem.FileSystem | DesktopEnvironment | Scope.Scope
   >;
+  readonly registerDeepLinkProtocol: Effect.Effect<
+    void,
+    ElectronDeepLinkRegistrationError,
+    Scope.Scope
+  >;
+  readonly parseDeepLinkUrl: (
+    url: string,
+  ) => Effect.Effect<DeepLinkAction, ElectronDeepLinkValidationError, never>;
 }
 
 export class ElectronProtocol extends Context.Service<ElectronProtocol, ElectronProtocolShape>()(
@@ -69,6 +109,103 @@ export function normalizeDesktopProtocolPathname(rawPath: string): Option.Option
   return Option.some(segments.join("/"));
 }
 
+// Validate project path to prevent path traversal attacks
+export function validateProjectPath(path: string): Option.Option<string> {
+  if (!path) {
+    return Option.none();
+  }
+  
+  // Decode URI components
+  const decodedPath = decodeURIComponent(path);
+  
+  // Check for path traversal patterns
+  if (decodedPath.includes("..") || decodedPath.includes("//")) {
+    return Option.none();
+  }
+  
+  // Check if path starts with a slash (absolute path)
+  if (decodedPath.startsWith("/")) {
+    return Option.some(decodedPath);
+  }
+  
+  return Option.some("/" + decodedPath);
+}
+
+// Parse t3code:// deep link URL
+export function parseT3CodeUrl(url: string): Effect.Effect<DeepLinkAction, ElectronDeepLinkValidationError> {
+  return Effect.gen(function* () {
+    try {
+      const parsedUrl = new URL(url);
+      
+      // Check scheme
+      if (parsedUrl.protocol !== "t3code:") {
+        return yield* new ElectronDeepLinkValidationError({
+          url,
+          reason: `Invalid scheme: expected t3code://`,
+        });
+      }
+      
+      const pathname = parsedUrl.pathname;
+      const searchParams = parsedUrl.searchParams;
+      
+      // Parse based on path pattern
+      if (pathname.startsWith("/open/project")) {
+        const path = searchParams.get("path");
+        if (!path) {
+          return yield* new ElectronDeepLinkValidationError({
+            url,
+            reason: "Missing 'path' parameter for project deep link",
+          });
+        }
+        
+        const validatedPath = validateProjectPath(path);
+        if (Option.isNone(validatedPath)) {
+          return yield* new ElectronDeepLinkValidationError({
+            url,
+            reason: "Invalid project path: path traversal detected",
+          });
+        }
+        
+        return {
+          type: "open-project",
+          path: validatedPath.value,
+        } as DeepLinkAction;
+      }
+      
+      if (pathname.startsWith("/chat/thread")) {
+        const id = searchParams.get("id");
+        if (!id) {
+          return yield* new ElectronDeepLinkValidationError({
+            url,
+            reason: "Missing 'id' parameter for chat thread deep link",
+          });
+        }
+        
+        return {
+          type: "chat-thread",
+          id,
+        } as DeepLinkAction;
+      }
+      
+      if (pathname === "/settings" || pathname === "/settings/") {
+        return {
+          type: "settings",
+        } as DeepLinkAction;
+      }
+      
+      return yield* new ElectronDeepLinkValidationError({
+        url,
+        reason: `Unknown deep link path: ${pathname}`,
+      });
+    } catch (error) {
+      return yield* new ElectronDeepLinkValidationError({
+        url,
+        reason: `Failed to parse URL: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  });
+}
+
 const registerDesktopSchemePrivileges = Effect.sync(() => {
   Electron.protocol.registerSchemesAsPrivileged([
     {
@@ -78,6 +215,13 @@ const registerDesktopSchemePrivileges = Effect.sync(() => {
         secure: true,
         supportFetchAPI: true,
         corsEnabled: true,
+      },
+    },
+    {
+      scheme: T3CODE_SCHEME,
+      privileges: {
+        standard: true,
+        secure: true,
       },
     },
   ]);
@@ -263,9 +407,44 @@ const make = Effect.gen(function* () {
     });
   }).pipe(Effect.withSpan("desktop.electron.protocol.registerDesktopFileProtocol"));
 
+  const registerDeepLinkProtocol = Effect.gen(function* () {
+    yield* Effect.annotateCurrentSpan({ scheme: T3CODE_SCHEME });
+    
+    const alreadyRegistered = yield* Ref.get(registeredProtocols).pipe(
+      Effect.map((protocols) => protocols.has(T3CODE_SCHEME)),
+    );
+    
+    if (alreadyRegistered) {
+      return;
+    }
+
+    // Set as default protocol client for the t3code scheme
+    const success = Electron.app.setAsDefaultProtocolClient(
+      T3CODE_SCHEME,
+      process.execPath,
+      ["--protocol", T3CODE_SCHEME],
+    );
+    
+    if (!success) {
+      return yield* new ElectronDeepLinkRegistrationError({
+        scheme: T3CODE_SCHEME,
+        cause: "setAsDefaultProtocolClient returned false",
+      });
+    }
+
+    // Track registration
+    yield* Ref.update(registeredProtocols, (protocols) => new Set(protocols).add(T3CODE_SCHEME));
+  }).pipe(Effect.withSpan("desktop.electron.protocol.registerDeepLinkProtocol"));
+
+  const parseDeepLinkUrl = (url: string): Effect.Effect<DeepLinkAction, ElectronDeepLinkValidationError> => {
+    return parseT3CodeUrl(url);
+  };
+
   return ElectronProtocol.of({
     registerFileProtocol,
     registerDesktopFileProtocol,
+    registerDeepLinkProtocol,
+    parseDeepLinkUrl,
   });
 });
 
