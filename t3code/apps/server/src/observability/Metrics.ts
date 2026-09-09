@@ -42,6 +42,18 @@ export const orchestrationEventsProcessedTotal = Metric.counter(
   },
 );
 
+export const providerCacheHits = Metric.counter("t3_provider_cache_hits", {
+  description: "Total provider cache hits.",
+});
+
+export const providerCacheMisses = Metric.counter("t3_provider_cache_misses", {
+  description: "Total provider cache misses.",
+});
+
+export const providerCacheInvalidations = Metric.counter("t3_provider_cache_invalidations", {
+  description: "Total provider cache invalidations.",
+});
+
 export const providerSessionsTotal = Metric.counter("t3_provider_sessions_total", {
   description: "Total provider session lifecycle operations.",
 });
