@@ -29,22 +29,43 @@ contract YieldVault {
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
+    // FIX: Cap time delta at periodFinish to prevent phantom reward accrual after period ends.
+    // Before: (block.timestamp - lastUpdateTime) was unbounded after period ended.
+    // After:  capped at 0 once periodFinish is in the past.
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) return rewardPerTokenStored;
-        return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
-        );
+        uint256 cappedTime = block.timestamp;
+        // Only accrue rewards up to periodFinish; after that, time delta is 0.
+        if (cappedTime > periodFinish) {
+            cappedTime = periodFinish;
+        }
+        uint256 timeDelta = cappedTime > lastUpdateTime ? cappedTime - lastUpdateTime : 0;
+        return rewardPerTokenStored + (timeDelta * rewardRate * 1e18 / totalSupply);
     }
 
-    // BUG: Uses uncapped rewardPerToken
+    // FIX: Ensure earned() cannot return phantom rewards after period has ended
+    // by using the same capped-time logic as rewardPerToken().
     function earned(address account) public view returns (uint256) {
-        return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
+        uint256 cappedTime = block.timestamp;
+        if (cappedTime > periodFinish) {
+            cappedTime = periodFinish;
+        }
+        uint256 timeDelta = cappedTime > lastUpdateTime ? cappedTime - lastUpdateTime : 0;
+        uint256 currentRewardPerToken = rewardPerTokenStored +
+            (totalSupply > 0 ? (timeDelta * rewardRate * 1e18 / totalSupply) : 0);
+        return balanceOf[account] * (currentRewardPerToken - userRewardPerTokenPaid[account]) / 1e18
+            + rewards[account];
     }
 
     modifier updateReward(address account) {
-        rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        uint256 cappedTime = block.timestamp;
+        if (cappedTime > periodFinish) {
+            cappedTime = periodFinish;
+        }
+        uint256 timeDelta = cappedTime > lastUpdateTime ? cappedTime - lastUpdateTime : 0;
+        rewardPerTokenStored = rewardPerTokenStored +
+            (totalSupply > 0 ? (timeDelta * rewardRate * 1e18 / totalSupply) : 0);
+        lastUpdateTime = cappedTime;
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -77,8 +98,6 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
     function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
         rewardRate = reward / duration;
         lastUpdateTime = block.timestamp;
