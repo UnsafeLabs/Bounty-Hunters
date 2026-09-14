@@ -17,6 +17,7 @@ import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -42,6 +43,7 @@ import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   OrchestrationEngineService,
+  type InterruptedCommandCheckpoint,
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
 const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
@@ -87,6 +89,53 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+
+  // In-memory registry of partial-state checkpoints captured when a command
+  // fiber is interrupted (client disconnect or timeout). Reconnecting clients
+  // query it via list/getInterruptedCheckpoint to resume from the last
+  // checkpoint. Entries are cleared when the command later completes.
+  const interruptedCheckpointsRef = yield* Ref.make(
+    new Map<string, InterruptedCommandCheckpoint>(),
+  );
+
+  const recordInterruptedCommandCheckpoint = (input: {
+    readonly command: OrchestrationCommand;
+    readonly aggregateKind: "project" | "thread";
+    readonly aggregateId: string;
+    readonly snapshotSequence: number;
+    readonly dispatchStartSequence: number;
+    readonly reason: string;
+  }): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const fiberId = yield* Effect.fiberId;
+      const interruptedAt = yield* nowIso;
+      const checkpoint: InterruptedCommandCheckpoint = {
+        commandId: String(input.command.commandId),
+        commandType: input.command.type,
+        aggregateKind: input.aggregateKind,
+        aggregateId: input.aggregateId,
+        snapshotSequence: input.snapshotSequence,
+        dispatchStartSequence: input.dispatchStartSequence,
+        interruptedAt,
+        fiberId: String(fiberId),
+        reason: input.reason,
+      };
+      yield* Ref.update(interruptedCheckpointsRef, (previous) =>
+        new Map(previous).set(checkpoint.commandId, checkpoint),
+      );
+      yield* Effect.logWarning(
+        "orchestration command interrupted, partial state checkpointed",
+      ).pipe(
+        Effect.annotateLogs({
+          commandId: checkpoint.commandId,
+          commandType: checkpoint.commandType,
+          fiberId: checkpoint.fiberId,
+          interruptedAt: checkpoint.interruptedAt,
+          snapshotSequence: checkpoint.snapshotSequence,
+          reason: checkpoint.reason,
+        }),
+      );
+    });
 
   const projectEventsOntoReadModel = (
     baseReadModel: OrchestrationReadModel,
@@ -216,7 +265,21 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           }
         }
         return { sequence: committedCommand.lastSequence };
-      }).pipe(Effect.withSpan(`orchestration.command.${envelope.command.type}`)),
+      }).pipe(
+        Effect.withSpan(`orchestration.command.${envelope.command.type}`),
+        // Checkpoint partial state when the processing fiber is interrupted
+        // (client disconnect or timeout) before fiber cleanup runs.
+        Effect.onInterrupt(() =>
+          recordInterruptedCommandCheckpoint({
+            command: envelope.command,
+            aggregateKind: aggregateRef.aggregateKind,
+            aggregateId: String(aggregateRef.aggregateId),
+            snapshotSequence: commandReadModel.snapshotSequence,
+            dispatchStartSequence,
+            reason: "processing-interrupted",
+          }).pipe(Effect.uninterruptible, Effect.catch(() => Effect.void)),
+        ),
+      ),
     ).pipe(
       Effect.flatMap((exit) =>
         Effect.gen(function* () {
@@ -244,6 +307,14 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
           if (Exit.isSuccess(exit)) {
+            yield* Ref.update(interruptedCheckpointsRef, (previous) => {
+              if (!previous.has(String(envelope.command.commandId))) {
+                return previous;
+              }
+              const next = new Map(previous);
+              next.delete(String(envelope.command.commandId));
+              return next;
+            });
             yield* Deferred.succeed(envelope.result, exit.value);
             return;
           }
@@ -305,11 +376,42 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         startedAtMs: yield* Clock.currentTimeMillis,
       });
       return yield* Deferred.await(result);
-    });
+    }).pipe(
+      // Client-initiated disconnects and timeouts interrupt the dispatch
+      // fiber while it awaits the worker. Checkpoint the command ID and
+      // best-effort partial state so reconnects can resume.
+      Effect.onInterrupt(() =>
+        Effect.gen(function* () {
+          const aggregateRef = commandToAggregateRef(command);
+          yield* recordInterruptedCommandCheckpoint({
+            command,
+            aggregateKind: aggregateRef.aggregateKind,
+            aggregateId: String(aggregateRef.aggregateId),
+            snapshotSequence: commandReadModel.snapshotSequence,
+            dispatchStartSequence: commandReadModel.snapshotSequence,
+            reason: "dispatch-interrupted",
+          });
+        }).pipe(Effect.uninterruptible, Effect.catch(() => Effect.void)),
+      ),
+    );
+
+  const listInterruptedCheckpoints: OrchestrationEngineShape["listInterruptedCheckpoints"] = () =>
+    Ref.get(interruptedCheckpointsRef).pipe(
+      Effect.map((entries) => Array.from(entries.values())),
+    );
+
+  const getInterruptedCheckpoint: OrchestrationEngineShape["getInterruptedCheckpoint"] = (
+    commandId,
+  ) =>
+    Ref.get(interruptedCheckpointsRef).pipe(
+      Effect.map((entries) => Option.fromNullable(entries.get(commandId))),
+    );
 
   return {
     readEvents,
     dispatch,
+    listInterruptedCheckpoints,
+    getInterruptedCheckpoint,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
     // each independently receive all domain events.

@@ -13,10 +13,30 @@
 import type { OrchestrationCommand, OrchestrationEvent } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
 import type * as Stream from "effect/Stream";
 
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
+
+/**
+ * InterruptedCommandCheckpoint - Partial orchestration state captured when a
+ * command fiber is interrupted (client disconnect or timeout) before cleanup.
+ *
+ * Stored in-memory by the orchestration engine so reconnecting clients can
+ * query interrupted commands and resume from the last checkpoint.
+ */
+export interface InterruptedCommandCheckpoint {
+  readonly commandId: string;
+  readonly commandType: string;
+  readonly aggregateKind: "project" | "thread";
+  readonly aggregateId: string;
+  readonly snapshotSequence: number;
+  readonly dispatchStartSequence: number;
+  readonly interruptedAt: string;
+  readonly fiberId: string;
+  readonly reason: string;
+}
 
 /**
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
@@ -51,6 +71,23 @@ export interface OrchestrationEngineShape {
    * This is a hot runtime stream (new events only), not a historical replay.
    */
   readonly streamDomainEvents: Stream.Stream<OrchestrationEvent>;
+
+  /**
+   * List checkpoints captured for interrupted commands.
+   *
+   * Used by reconnecting clients to discover commands that were interrupted
+   * mid-execution and resume from the last checkpoint.
+   */
+  readonly listInterruptedCheckpoints: () => Effect.Effect<
+    ReadonlyArray<InterruptedCommandCheckpoint>
+  >;
+
+  /**
+   * Fetch the checkpoint for a single interrupted command, if present.
+   */
+  readonly getInterruptedCheckpoint: (
+    commandId: string,
+  ) => Effect.Effect<Option.Option<InterruptedCommandCheckpoint>>;
 }
 
 /**

@@ -10,13 +10,16 @@ import {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it } from "vitest";
 
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
@@ -1078,5 +1081,241 @@ describe("OrchestrationEngine", () => {
     ).rejects.toThrow("already exists");
 
     await system.dispose();
+  });
+
+  it("checkpoints partial state when the dispatch fiber is interrupted", async () => {
+    const gate = await Effect.runPromise(Deferred.make<void>());
+    const appendStarted = await Effect.runPromise(Deferred.make<void>());
+    const targetCommandId = CommandId.make("cmd-interrupt-1");
+    type StoredEvent =
+      ReturnType<OrchestrationEventStoreShape["append"]> extends Effect.Effect<infer A, any, any>
+        ? A
+        : never;
+    const events: StoredEvent[] = [];
+    let nextSequence = 1;
+    const saveEvent = (event: Parameters<OrchestrationEventStoreShape["append"]>[0]) =>
+      Effect.sync(() => {
+        const savedEvent = {
+          ...event,
+          sequence: nextSequence,
+        } as StoredEvent;
+        nextSequence += 1;
+        events.push(savedEvent);
+        return savedEvent;
+      });
+    const blockingStore: OrchestrationEventStoreShape = {
+      append(event) {
+        if (String(event.commandId) === String(targetCommandId)) {
+          return Deferred.succeed(appendStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(gate)),
+            Effect.andThen(saveEvent(event)),
+          );
+        }
+        return saveEvent(event);
+      },
+      readFromSequence(sequenceExclusive) {
+        return Stream.fromIterable(events.filter((event) => event.sequence > sequenceExclusive));
+      },
+      readAll() {
+        return Stream.fromIterable(events);
+      },
+    };
+
+    const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
+      prefix: "t3-orchestration-engine-interrupt-test-",
+    });
+    const runtime = ManagedRuntime.make(
+      OrchestrationEngineLive.pipe(
+        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+        Layer.provide(OrchestrationProjectionPipelineLive),
+        Layer.provide(Layer.succeed(OrchestrationEventStore, blockingStore)),
+        Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+        Layer.provide(RepositoryIdentityResolverLive),
+        Layer.provide(SqlitePersistenceMemory),
+        Layer.provideMerge(ServerConfigLayer),
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    );
+    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const createdAt = now();
+
+    await runtime.runPromise(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-interrupt-project"),
+        projectId: asProjectId("project-interrupt"),
+        title: "Interrupt Project",
+        workspaceRoot: "/tmp/project-interrupt",
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      }),
+    );
+
+    const dispatchFiber = await runtime.runPromise(
+      Effect.fork(
+        engine.dispatch({
+          type: "thread.create",
+          commandId: targetCommandId,
+          threadId: ThreadId.make("thread-interrupt"),
+          projectId: asProjectId("project-interrupt"),
+          title: "interrupt-me",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        }),
+      ),
+    );
+    await runtime.runPromise(Deferred.await(appendStarted));
+    await runtime.runPromise(Fiber.interrupt(dispatchFiber));
+
+    const checkpoints = await runtime.runPromise(engine.listInterruptedCheckpoints());
+    const matching = checkpoints.filter(
+      (entry) => entry.commandId === String(targetCommandId),
+    );
+    expect(matching).toHaveLength(1);
+    expect(matching[0]?.commandType).toBe("thread.create");
+    expect(typeof matching[0]?.snapshotSequence).toBe("number");
+    expect(matching[0]?.fiberId.length).toBeGreaterThan(0);
+    expect(matching[0]?.interruptedAt.length).toBeGreaterThan(0);
+
+    const single = await runtime.runPromise(
+      engine.getInterruptedCheckpoint(String(targetCommandId)),
+    );
+    expect(Option.isSome(single)).toBe(true);
+
+    await runtime.runPromise(Deferred.succeed(gate, undefined));
+    const ok = await runtime.runPromise(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-interrupt-ok"),
+        threadId: ThreadId.make("thread-interrupt-ok"),
+        projectId: asProjectId("project-interrupt"),
+        title: "interrupt-ok",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+    expect(ok.sequence).toBeGreaterThan(0);
+    await runtime.dispose();
+  });
+
+  it("checkpoints interrupted commands on timeout via TestClock", async () => {
+    const gate = await Effect.runPromise(Deferred.make<void>());
+    const appendStarted = await Effect.runPromise(Deferred.make<void>());
+    const targetCommandId = CommandId.make("cmd-timeout-1");
+    type StoredEvent =
+      ReturnType<OrchestrationEventStoreShape["append"]> extends Effect.Effect<infer A, any, any>
+        ? A
+        : never;
+    const events: StoredEvent[] = [];
+    let nextSequence = 1;
+    const saveEvent = (event: Parameters<OrchestrationEventStoreShape["append"]>[0]) =>
+      Effect.sync(() => {
+        const savedEvent = {
+          ...event,
+          sequence: nextSequence,
+        } as StoredEvent;
+        nextSequence += 1;
+        events.push(savedEvent);
+        return savedEvent;
+      });
+    const blockingStore: OrchestrationEventStoreShape = {
+      append(event) {
+        if (String(event.commandId) === String(targetCommandId)) {
+          return Deferred.succeed(appendStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(gate)),
+            Effect.andThen(saveEvent(event)),
+          );
+        }
+        return saveEvent(event);
+      },
+      readFromSequence(sequenceExclusive) {
+        return Stream.fromIterable(events.filter((event) => event.sequence > sequenceExclusive));
+      },
+      readAll() {
+        return Stream.fromIterable(events);
+      },
+    };
+
+    const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
+      prefix: "t3-orchestration-engine-timeout-test-",
+    });
+    const runtime = ManagedRuntime.make(
+      OrchestrationEngineLive.pipe(
+        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+        Layer.provide(OrchestrationProjectionPipelineLive),
+        Layer.provide(Layer.succeed(OrchestrationEventStore, blockingStore)),
+        Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+        Layer.provide(RepositoryIdentityResolverLive),
+        Layer.provide(SqlitePersistenceMemory),
+        Layer.provideMerge(ServerConfigLayer),
+        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(TestClock.layer()),
+      ),
+    );
+    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const createdAt = now();
+
+    await runtime.runPromise(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-timeout-project"),
+        projectId: asProjectId("project-timeout"),
+        title: "Timeout Project",
+        workspaceRoot: "/tmp/project-timeout",
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      }),
+    );
+
+    const timedFiber = await runtime.runPromise(
+      Effect.fork(
+        engine.dispatch({
+          type: "thread.create",
+          commandId: targetCommandId,
+          threadId: ThreadId.make("thread-timeout"),
+          projectId: asProjectId("project-timeout"),
+          title: "timeout-me",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        }).pipe(Effect.timeout("100 millis")),
+      ),
+    );
+    await runtime.runPromise(Deferred.await(appendStarted));
+    await runtime.runPromise(TestClock.adjust("200 millis"));
+    const outcome = await runtime.runPromise(Fiber.join(timedFiber));
+    expect(Option.isNone(outcome)).toBe(true);
+
+    const checkpoints = await runtime.runPromise(engine.listInterruptedCheckpoints());
+    expect(checkpoints.map((entry) => entry.commandId)).toContain(String(targetCommandId));
+
+    await runtime.runPromise(Deferred.succeed(gate, undefined));
+    await runtime.dispose();
   });
 });
