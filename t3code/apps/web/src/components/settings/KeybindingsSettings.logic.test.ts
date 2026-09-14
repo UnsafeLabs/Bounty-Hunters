@@ -6,10 +6,13 @@ import {
   buildKeybindingCommandOptions,
   buildWhenVariableOptions,
   commandLabel,
+  compareKeybindingRows,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
+  nextSortDirectionForKey,
   parseWhenExpressionDraft,
   shortcutToKeybindingInput,
+  sortKeybindingRows,
   unknownWhenVariables,
   whenAstToExpression,
 } from "./KeybindingsSettings.logic";
@@ -244,5 +247,60 @@ describe("KeybindingsSettings.logic", () => {
         when: "",
       }),
     ).toEqual(["Chat: New Local"]);
+  });
+
+  it("sorts rows by every column in both directions", () => {
+    const rows = buildKeybindingRows(
+      [
+        {
+          command: "terminal.toggle",
+          shortcut: {
+            key: "j",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+        },
+        {
+          command: "chat.new",
+          shortcut: {
+            key: "n",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+          whenAst: {
+            type: "not",
+            node: { type: "identifier", name: "terminalFocus" },
+          },
+        },
+      ] satisfies ResolvedKeybindingsConfig,
+      "",
+    );
+
+    expect(sortKeybindingRows(rows, "command", "asc").map((row) => row.command)).toEqual([
+      "chat.new",
+      "terminal.toggle",
+    ]);
+    expect(sortKeybindingRows(rows, "command", "desc").map((row) => row.command)).toEqual([
+      "terminal.toggle",
+      "chat.new",
+    ]);
+    expect(sortKeybindingRows(rows, "shortcut", "asc").map((row) => row.key)).toEqual([
+      "mod+j",
+      "mod+n",
+    ]);
+    expect(sortKeybindingRows(rows, "source", "asc").map((row) => row.source)).toEqual([
+      "Custom",
+      "Custom",
+    ]);
+    expect(compareKeybindingRows(rows[0]!, rows[1]!, "when")).not.toBe(0);
+    expect(nextSortDirectionForKey("command", "asc", "command")).toBe("desc");
+    expect(nextSortDirectionForKey("command", "desc", "command")).toBe("asc");
+    expect(nextSortDirectionForKey("command", "desc", "shortcut")).toBe("asc");
   });
 });

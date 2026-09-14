@@ -6,6 +6,7 @@ import {
   InfoIcon,
   MinusIcon,
   PlusIcon,
+  RefreshCwIcon,
   SearchIcon,
   TriangleAlertIcon,
   XIcon,
@@ -48,6 +49,7 @@ import {
   buildKeybindingCommandOptions,
   buildWhenVariableOptions,
   commandLabel,
+  compareKeybindingRows,
   DEFAULT_WHEN_VARIABLE,
   isKnownWhenVariable,
   keybindingConflictLabels,
@@ -55,6 +57,8 @@ import {
   parseWhenExpressionDraft,
   type KeybindingCommandOption,
   type KeybindingRow,
+  type KeybindingSortDirection,
+  type KeybindingSortKey,
   type WhenVariableOption,
   unknownWhenVariables,
   whenAstToExpression,
@@ -802,7 +806,7 @@ function KeybindingTableRow({
   };
 
   return (
-    <div className="grid grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_60px] items-center px-4 py-1.5 text-sm even:bg-muted/15 hover:bg-accent/40">
+    <div className="grid grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_minmax(132px,0.55fr)] items-center px-4 py-1.5 text-sm even:bg-muted/15 hover:bg-accent/40">
       <div className="min-w-0 pr-4">
         <div className="flex min-w-0 items-center gap-1.5">
           <div className="truncate text-[13px] font-medium text-foreground" title={row.command}>
@@ -873,7 +877,34 @@ function KeybindingTableRow({
         </Popover>
       </div>
       <div className="flex items-center justify-end gap-1">
+        <span
+          aria-label={`Source: ${row.source}`}
+          title={row.source === "Default" ? "Default keybinding" : "Custom override"}
+          className="mr-1 inline-flex h-5 shrink-0 items-center rounded-sm border border-border/70 bg-muted/40 px-1.5 text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground"
+        >
+          {row.source === "Default" ? "Default" : row.source === "Project" ? "Project" : "User"}
+        </span>
         <KeybindingConflictWarning labels={conflictLabels} />
+        {canReset ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 text-muted-foreground hover:text-foreground sm:size-7"
+                  disabled={isSaving}
+                  aria-label={`Reset ${commandLabel(row.command)} to default`}
+                  onClick={() => onReset(row)}
+                />
+              }
+            >
+              <RefreshCwIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">Reset to default</TooltipPopup>
+          </Tooltip>
+        ) : null}
         {hasRowActions ? (
           <Menu>
             <MenuTrigger
@@ -963,7 +994,10 @@ function NewKeybindingTableRow({
   };
 
   return (
-    <div className="grid grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_60px] items-center px-4 py-1.5 text-sm even:bg-muted/15 hover:bg-accent/40">
+    <div
+      role="row"
+      className="grid grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_minmax(132px,0.55fr)] items-center px-4 py-1.5 text-sm even:bg-muted/15 hover:bg-accent/40"
+    >
       <div className="min-w-0 pr-4">
         <Select
           value={commandDraft}
@@ -1066,7 +1100,14 @@ export function KeybindingsSettingsPanel() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [savingCommand, setSavingCommand] = useState<KeybindingCommand | null>(null);
   const [isAddingBinding, setIsAddingBinding] = useState(false);
-  const rows = useMemo(() => buildKeybindingRows(keybindings, query), [keybindings, query]);
+  const [sortKey, setSortKey] = useState<KeybindingSortKey>("command");
+  const [sortDirection, setSortDirection] = useState<KeybindingSortDirection>("asc");
+  const tableBodyRef = useRef<HTMLDivElement>(null);
+  const rows = useMemo(() => {
+    const filtered = buildKeybindingRows(keybindings, query);
+    const sorted = [...filtered].sort((left, right) => compareKeybindingRows(left, right, sortKey));
+    return sortDirection === "desc" ? sorted.reverse() : sorted;
+  }, [keybindings, query, sortKey, sortDirection]);
   const commandOptions = useMemo(() => buildKeybindingCommandOptions(keybindings), [keybindings]);
   const whenVariables = useMemo(() => buildWhenVariableOptions(), []);
 
@@ -1165,6 +1206,45 @@ export function KeybindingsSettingsPanel() {
     [saveKeybinding],
   );
 
+  const toggleSort = useCallback(
+    (nextKey: KeybindingSortKey) => {
+      if (nextKey === sortKey) {
+        setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      } else {
+        setSortKey(nextKey);
+        setSortDirection("asc");
+      }
+    },
+    [sortKey],
+  );
+
+  const handleTableKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") {
+      return;
+    }
+    const container = tableBodyRef.current;
+    if (!container || !(event.target instanceof HTMLElement)) return;
+    if (event.target.tagName === "SELECT" || event.target.getAttribute("role") === "combobox") return;
+    const focusable = [...container.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), [tabindex="0"]',
+    )].filter((element) => element.offsetParent !== null || element === document.activeElement);
+    if (focusable.length === 0) return;
+    const currentIndex = focusable.indexOf(event.target as HTMLElement);
+    if (currentIndex === -1) return;
+    event.preventDefault();
+    if (event.key === "Home") {
+      focusable[0]?.focus();
+      return;
+    }
+    if (event.key === "End") {
+      focusable[focusable.length - 1]?.focus();
+      return;
+    }
+    const delta = event.key === "ArrowDown" ? 1 : -1;
+    const next = focusable[(currentIndex + delta + focusable.length) % focusable.length];
+    next?.focus();
+  }, []);
+
   const bindingsCount = (
     <span className="text-[11px] text-muted-foreground">
       {rows.length + (isAddingBinding ? 1 : 0)}{" "}
@@ -1240,13 +1320,51 @@ export function KeybindingsSettingsPanel() {
           hideScrollbars
           className="w-full max-w-full rounded-none"
         >
-          <div className="grid min-w-[680px] grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_60px] border-b border-border/70 bg-muted/25 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
-            <div>Command</div>
-            <div>Keybinding</div>
-            <div>When</div>
-            <div>Status</div>
+          <div role="grid" aria-label="Keybindings editor" aria-rowcount={rows.length + 1}>
+          <div
+            role="row"
+            className="grid min-w-[720px] grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_minmax(132px,0.55fr)] border-b border-border/70 bg-muted/25 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground"
+          >
+            {(
+              [
+                { key: "command", label: "Command" },
+                { key: "shortcut", label: "Keybinding" },
+                { key: "when", label: "When" },
+                { key: "source", label: "Source" },
+              ] as const
+            ).map((column) => (
+              <div
+                key={column.key}
+                role="columnheader"
+                aria-sort={
+                  sortKey === column.key
+                    ? sortDirection === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleSort(column.key)}
+                  aria-label={`Sort by ${column.label.toLowerCase()}${sortKey === column.key ? ` (${sortDirection === "asc" ? "ascending" : "descending"})` : ""}`}
+                  className="inline-flex items-center gap-1 rounded-sm uppercase outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/24"
+                >
+                  {column.label}
+                  <span aria-hidden className="text-[9px]">
+                    {sortKey === column.key ? (sortDirection === "asc" ? "▲" : "▼") : ""}
+                  </span>
+                </button>
+              </div>
+            ))}
           </div>
-          <div className="min-w-[680px] divide-y divide-border/60">
+          <div
+            ref={tableBodyRef}
+            role="rowgroup"
+            aria-label="Keybindings"
+            onKeyDown={handleTableKeyDown}
+            className="min-w-[720px] divide-y divide-border/60"
+          >
             {isAddingBinding ? (
               <NewKeybindingTableRow
                 commandOptions={commandOptions}
@@ -1274,6 +1392,7 @@ export function KeybindingsSettingsPanel() {
                 No keybindings match your search.
               </div>
             ) : null}
+          </div>
           </div>
         </ScrollArea>
       </SettingsSection>

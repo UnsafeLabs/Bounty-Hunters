@@ -29,6 +29,60 @@ export interface KeybindingRow {
 export type WhenVariableOption = string;
 export type KeybindingCommandOption = KeybindingCommand;
 
+export type KeybindingSortKey = "command" | "shortcut" | "source" | "when";
+export type KeybindingSortDirection = "asc" | "desc";
+
+export function compareKeybindingRows(
+  left: KeybindingRow,
+  right: KeybindingRow,
+  sortKey: KeybindingSortKey,
+): number {
+  switch (sortKey) {
+    case "command":
+      return (
+        commandLabel(left.command).localeCompare(commandLabel(right.command)) ||
+        left.key.localeCompare(right.key) ||
+        left.when.localeCompare(right.when)
+      );
+    case "shortcut":
+      return (
+        left.key.localeCompare(right.key) ||
+        commandLabel(left.command).localeCompare(commandLabel(right.command)) ||
+        left.when.localeCompare(right.when)
+      );
+    case "source":
+      return (
+        left.source.localeCompare(right.source) ||
+        commandLabel(left.command).localeCompare(commandLabel(right.command)) ||
+        left.key.localeCompare(right.key)
+      );
+    case "when":
+      return (
+        left.when.localeCompare(right.when) ||
+        commandLabel(left.command).localeCompare(commandLabel(right.command)) ||
+        left.key.localeCompare(right.key)
+      );
+  }
+}
+
+export function sortKeybindingRows(
+  rows: ReadonlyArray<KeybindingRow>,
+  sortKey: KeybindingSortKey,
+  direction: KeybindingSortDirection,
+): KeybindingRow[] {
+  const sorted = [...rows].sort((left, right) => compareKeybindingRows(left, right, sortKey));
+  return direction === "desc" ? sorted.reverse() : sorted;
+}
+
+export function nextSortDirectionForKey(
+  currentKey: KeybindingSortKey,
+  currentDirection: KeybindingSortDirection,
+  nextKey: KeybindingSortKey,
+): KeybindingSortDirection {
+  if (nextKey !== currentKey) return "asc";
+  return currentDirection === "asc" ? "desc" : "asc";
+}
+
 const CORE_WHEN_VARIABLES = ["terminalFocus", "terminalOpen", "true", "false"] as const;
 
 const DEFAULT_WHEN_VARIABLES = new Set<string>(CORE_WHEN_VARIABLES);
