@@ -19,7 +19,9 @@ import {
   useState,
 } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
+import { toastManager } from "~/components/ui/toast";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
+import { isMacPlatform } from "~/lib/utils";
 import { openInPreferredEditor } from "../editorPreferences";
 import {
   collectWrappedTerminalLinkLine,
@@ -247,6 +249,45 @@ export function shouldHandleTerminalSelectionMouseUp(
   return selectionGestureActive && button === 0;
 }
 
+let cachedTerminalPlatform: string | null = null;
+
+export function resolveTerminalPlatform(
+  platform?: string | undefined,
+): string {
+  if (typeof platform === "string" && platform.length > 0) return platform;
+  if (typeof navigator === "undefined") return "";
+  // navigator.platform is static for the lifetime of the page; cache it so
+  // every keystroke doesn't re-read the property.
+  if (cachedTerminalPlatform === null) {
+    cachedTerminalPlatform = navigator.platform ?? "";
+  }
+  return cachedTerminalPlatform;
+}
+
+export function isTerminalCopyShortcut(
+  event: { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean },
+  platform?: string | undefined,
+): boolean {
+  if (event.altKey) return false;
+  if (event.key.toLowerCase() !== "c") return false;
+  if (isMacPlatform(resolveTerminalPlatform(platform))) {
+    return event.metaKey && !event.ctrlKey && !event.shiftKey;
+  }
+  return event.ctrlKey && !event.metaKey && event.shiftKey;
+}
+
+export function isTerminalPasteShortcut(
+  event: { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean },
+  platform?: string | undefined,
+): boolean {
+  if (event.altKey) return false;
+  if (event.key.toLowerCase() !== "v") return false;
+  if (isMacPlatform(resolveTerminalPlatform(platform))) {
+    return event.metaKey && !event.ctrlKey && !event.shiftKey;
+  }
+  return event.ctrlKey && !event.metaKey && event.shiftKey;
+}
+
 interface TerminalViewportProps {
   threadRef: ScopedThreadRef;
   threadId: ThreadId;
@@ -433,6 +474,59 @@ export function TerminalViewport({
         event.preventDefault();
         event.stopPropagation();
         void sendTerminalInput(navigationData, "Failed to move cursor");
+        return false;
+      }
+
+      if (isTerminalPasteShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof navigator === "undefined" || !navigator.clipboard?.readText) {
+          writeSystemMessage(terminal, "Clipboard API unavailable.");
+          return false;
+        }
+        void navigator.clipboard.readText().then(
+          (text) => {
+            if (text.length > 0) {
+              void sendTerminalInput(text, "Failed to paste into terminal");
+            }
+          },
+          (error: unknown) => {
+            writeSystemMessage(
+              terminal,
+              error instanceof Error ? error.message : "Failed to read clipboard",
+            );
+          },
+        );
+        return false;
+      }
+
+      if (isTerminalCopyShortcut(event)) {
+        // Only hijack copy when there is an active selection.
+        // Otherwise let Ctrl+C pass through as SIGINT and Cmd+C pass through.
+        if (!terminal.hasSelection()) return true;
+        const selectionText = terminal.getSelection();
+        const normalizedText = selectionText.replace(/\r\n/g, "\n");
+        if (normalizedText.length === 0) return true;
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+          writeSystemMessage(terminal, "Clipboard API unavailable.");
+          return false;
+        }
+        void navigator.clipboard.writeText(normalizedText).then(
+          () => {
+            toastManager.add({
+              type: "success",
+              title: "Copied to clipboard",
+            });
+          },
+          (error: unknown) => {
+            writeSystemMessage(
+              terminal,
+              error instanceof Error ? error.message : "Failed to copy selection",
+            );
+          },
+        );
         return false;
       }
 

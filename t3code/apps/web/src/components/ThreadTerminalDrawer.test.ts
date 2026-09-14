@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isTerminalCopyShortcut,
+  isTerminalPasteShortcut,
   resolveTerminalSelectionActionPosition,
   selectPendingTerminalEventEntries,
   selectTerminalEventEntriesAfterSnapshot,
@@ -133,5 +135,55 @@ describe("resolveTerminalSelectionActionPosition", () => {
         1,
       ).map((entry) => entry.id),
     ).toEqual([2]);
+  });
+});
+
+describe("terminal copy/paste shortcuts", () => {
+  it("matches Ctrl+Shift+C / Ctrl+Shift+V on Linux/Windows", () => {
+    expect(
+      isTerminalCopyShortcut(
+        { key: "c", ctrlKey: true, metaKey: false, shiftKey: true, altKey: false },
+        "Linux x86_64",
+      ),
+    ).toBe(true);
+    expect(
+      isTerminalPasteShortcut(
+        { key: "v", ctrlKey: true, metaKey: false, shiftKey: true, altKey: false },
+        "Win32",
+      ),
+    ).toBe(true);
+  });
+
+  it("matches Cmd+C / Cmd+V on macOS", () => {
+    expect(
+      isTerminalCopyShortcut(
+        { key: "c", ctrlKey: false, metaKey: true, shiftKey: false, altKey: false },
+        "MacIntel",
+      ),
+    ).toBe(true);
+    expect(
+      isTerminalPasteShortcut(
+        { key: "V", ctrlKey: false, metaKey: true, shiftKey: false, altKey: false },
+        "MacIntel",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not match plain Ctrl+C so SIGINT still passes through", () => {
+    expect(
+      isTerminalCopyShortcut(
+        { key: "c", ctrlKey: true, metaKey: false, shiftKey: false, altKey: false },
+        "Linux x86_64",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not match when Alt is held", () => {
+    expect(
+      isTerminalCopyShortcut(
+        { key: "c", ctrlKey: true, metaKey: false, shiftKey: true, altKey: true },
+        "Linux x86_64",
+      ),
+    ).toBe(false);
   });
 });
