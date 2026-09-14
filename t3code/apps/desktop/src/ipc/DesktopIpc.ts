@@ -3,6 +3,21 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
+import {
+  IpcMessageQueue,
+  type IpcConnectionState,
+  type IpcMessageQueueOptions,
+  type IpcTimeoutError,
+} from "./IpcMessageQueue.ts";
+
+export {
+  IpcMessageQueue,
+  IpcTimeoutError,
+  DEFAULT_IPC_MESSAGE_QUEUE_MAX_SIZE,
+  DEFAULT_IPC_MESSAGE_TTL,
+} from "./IpcMessageQueue.ts";
+export type { IpcConnectionState, IpcMessageQueueOptions } from "./IpcMessageQueue.ts";
+
 export interface DesktopIpcInvokeEvent {}
 
 export interface DesktopIpcSyncEvent {
@@ -40,12 +55,34 @@ export interface DesktopIpcShape {
   readonly handleSync: <E, R>(
     input: DesktopSyncIpcMethod<E, R>,
   ) => Effect.Effect<void, never, R | Scope.Scope>;
+  /**
+   * Bounded FIFO queue buffering outgoing backend RPC calls while the
+   * backend connection is lost. See `IpcMessageQueue.ts`.
+   */
+  readonly messageQueue: IpcMessageQueue;
+  /** Current backend connection state (`connected` by default). */
+  readonly connectionState: Effect.Effect<IpcConnectionState>;
+  readonly setConnectionState: (state: IpcConnectionState) => Effect.Effect<void>;
+  /**
+   * Send a backend RPC call, queueing it when the connection is down and
+   * replaying it in FIFO order on `flushMessageQueue`.
+   */
+  readonly queueRpc: <A, E>(
+    channel: string,
+    send: Effect.Effect<A, E>,
+  ) => Effect.Effect<A, E | IpcTimeoutError>;
+  /** Drain buffered messages in FIFO order. Returns the replayed count. */
+  readonly flushMessageQueue: Effect.Effect<number>;
 }
 
 export class DesktopIpc extends Context.Service<DesktopIpc, DesktopIpcShape>()("t3/desktop/Ipc") {}
 
-export const make = (ipcMain: DesktopIpcMain): DesktopIpcShape =>
-  DesktopIpc.of({
+export const make = (
+  ipcMain: DesktopIpcMain,
+  queueOptions?: IpcMessageQueueOptions,
+): DesktopIpcShape => {
+  const messageQueue = new IpcMessageQueue(queueOptions);
+  return DesktopIpc.of({
     handle: Effect.fn("desktop.ipc.registerInvoke")(function* <E, R>({
       channel,
       handler,
@@ -93,7 +130,15 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpcShape =>
         () => Effect.sync(() => ipcMain.removeAllListeners(channel)),
       );
     }),
+
+    messageQueue,
+    connectionState: messageQueue.connectionState,
+    setConnectionState: (state) => messageQueue.setConnectionState(state),
+    queueRpc: <A, E>(channel: string, send: Effect.Effect<A, E>) =>
+      messageQueue.call(channel, send),
+    flushMessageQueue: messageQueue.flush(),
   });
+};
 
 /**
  * Convenience helpers for creating IPC methods
