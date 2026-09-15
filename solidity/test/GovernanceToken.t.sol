@@ -4,94 +4,116 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../contracts/GovernanceToken.sol";
 
-contract PhishingForwarder is Test {
-    GovernanceToken public target;
-    address public victim;
+/// @notice Simulates the #912 attack: a victim is lured into calling this
+/// contract, which forwards a delegation to the token. Pre-fix the token
+/// recorded tx.origin (the victim) and stole their votes; post-fix only the
+/// forwarder's own (zero) balance is delegated.
+contract PhishingForwarder {
+    GovernanceToken public token;
+    address public attacker;
 
-    constructor(address _target, address _victim) {
-        target = GovernanceToken(_target);
-        victim = _victim;
+    constructor(GovernanceToken _token, address _attacker) {
+        token = _token;
+        attacker = _attacker;
+    }
+
+    function lure() external {
+        token.delegateVote(attacker);
+    }
+}
+
+/// @notice A legitimate contract wallet holding its own tokens. It calls the
+/// token directly, so msg.sender == the wallet and delegation must succeed —
+/// the fix blocks spoofed delegation, not contracts acting for themselves.
+contract ContractWallet {
+    GovernanceToken public token;
+
+    constructor(GovernanceToken _token) {
+        token = _token;
     }
 
     function delegate(address to) external {
-        target.delegateVote(to);
+        token.delegateVote(to);
     }
 }
 
 contract GovernanceTokenTest is Test {
-    GovernanceToken public gov;
-    address public user1;
-    address public user2;
-    address public admin;
+    GovernanceToken public token;
+    address public victim = address(0xBEEF);
+    address public userA = address(0xA11CE);
+    address public delegateeB = address(0xB0B);
+    address public attacker = address(0xBAD);
 
     function setUp() public {
-        user1 = makeAddr("user1");
-        user2 = makeAddr("user2");
-        admin = makeAddr("admin");
-        
-        gov = new GovernanceToken(1000 * 10**18);
-        // The deployer (msg.sender) gets the initial supply
-        // Transfer tokens to user1 and user2 for testing
-        gov.transfer(user1, 500 * 10**18);
-        gov.transfer(user2, 300 * 10**18);
-        
-        // Transfer ownership to admin
-        gov.transferOwnership(admin);
-        // Also give admin some tokens for voting power test
-        gov.transfer(admin, 100 * 10**18);
+        token = new GovernanceToken();
+        token.transfer(victim, 1_000);
+        token.transfer(userA, 1_000);
+        token.transfer(delegateeB, 500);
     }
 
-    function test_NormalDelegation() public {
-        // user1 delegates to user2
-        vm.prank(user1);
-        gov.delegateVote(user2);
+    function testDirectDelegationWorks() public {
+        vm.prank(userA);
+        token.delegateVote(delegateeB);
 
-        assertEq(gov.delegates(user1), user2, "Delegate should be user2");
-        // user2 voting power = their own 300 + user1's delegated 500 = 800
-        assertEq(gov.getVotingPower(user2), 800 * 10**18, "user2 should have own balance + delegated power");
+        assertEq(token.delegates(userA), delegateeB);
+        assertEq(token.delegatedPower(delegateeB), 1_000);
+        // Delegator gave its power away: no double count.
+        assertEq(token.getVotingPower(userA), 0);
+        assertEq(token.getVotingPower(delegateeB), 1_500);
     }
 
-    function test_RevokeDelegation() public {
-        vm.prank(user1);
-        gov.delegateVote(user2);
+    function testPhishingContractCannotStealVictimVotes() public {
+        PhishingForwarder forwarder = new PhishingForwarder(token, attacker);
 
-        vm.prank(user1);
-        gov.revokeDelegate();
+        // Victim is tricked into calling the malicious contract.
+        vm.prank(victim);
+        forwarder.lure();
 
-        assertEq(gov.delegates(user1), address(0), "Delegate should be revoked");
+        // Victim's delegation slot untouched; attacker gained nothing.
+        assertEq(token.delegates(victim), address(0));
+        assertEq(token.delegatedPower(attacker), 0);
+        assertEq(token.getVotingPower(victim), 1_000);
+        assertEq(token.getVotingPower(attacker), 0);
     }
 
-    function test_PhishingContractCannotStealVictimVotes() public {
-        // Deploy phishing forwarder
-        PhishingForwarder forwarder = new PhishingForwarder(address(gov), user1);
+    function testLegitimateContractWalletCanDelegate() public {
+        ContractWallet wallet = new ContractWallet(token);
+        token.transfer(address(wallet), 300);
 
-        // Give some tokens to the forwarder to test
-        gov.transfer(address(forwarder), 100 * 10**18);
+        wallet.delegate(delegateeB);
 
-        // The phishing forwarder tries to delegate using victim's identity via tx.origin
-        // But since we use msg.sender, it can only delegate its own tokens
-        vm.prank(address(forwarder));
-        forwarder.delegate(user2);
-
-        // The forwarder can only delegate its own tokens, not victim's
-        // This proves that tx.origin phishing is no longer possible
-        assertEq(gov.getVotingPower(address(forwarder)), 100 * 10**18, "Forwarder should only have its own power");
-        assertEq(gov.getVotingPower(user1), 500 * 10**18, "Victim should retain original power");
+        assertEq(token.delegates(address(wallet)), delegateeB);
+        assertEq(token.delegatedPower(delegateeB), 300);
+        assertEq(token.getVotingPower(address(wallet)), 0);
     }
 
-    function test_OnlyOwnerCanSnapshot() public {
-        // Admin should be able to snapshot
-        vm.prank(admin);
-        gov.snapshot();
+    function testTransferSyncsDelegatedPower() public {
+        vm.prank(userA);
+        token.delegateVote(delegateeB);
 
-        // Non-admin should not be able to snapshot
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user1));
-        vm.prank(user1);
-        gov.snapshot();
+        vm.prank(userA);
+        token.transfer(victim, 400);
+
+        assertEq(token.delegatedPower(delegateeB), 600);
+        assertEq(token.getVotingPower(delegateeB), 1_100);
     }
 
-    function test_AdminHasGovernancePower() public {
-        // Admin gets voting power through ownership (minting in constructor)
-        assertGt(gov.getVotingPower(admin), 0, "Admin should have voting power");
+    function testSnapshotOnlyOwner() public {
+        vm.prank(attacker);
+        vm.expectRevert();
+        token.snapshot();
+
+        // Owner (deployer) still works.
+        assertEq(token.snapshot(), token.totalSupply());
+    }
+
+    function testCannotDelegateToSelfOrZero() public {
+        vm.prank(userA);
+        vm.expectRevert("Cannot delegate to self");
+        token.delegateVote(userA);
+
+        vm.prank(userA);
+        vm.expectRevert("Cannot delegate to zero address");
+        token.delegateVote(address(0));
     }
 }

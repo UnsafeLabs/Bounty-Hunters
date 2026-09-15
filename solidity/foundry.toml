@@ -2,13 +2,13 @@
 src = "contracts"
 out = "out"
 libs = ["lib"]
-fuzz_runs = 256
-verbosity = 2
 
-[dependencies]
-forge-std = "https://github.com/foundry-rs/forge-std"
-openzeppelin-contracts = "https://github.com/OpenZeppelin/openzeppelin-contracts"
+test = "test"
+solc = "0.8.20"
+optimizer = true
+optimizer_runs = 200
 
-[remappings]
-"@openzeppelin/" = "lib/openzeppelin-contracts/contracts/"
-"forge-std/" = "lib/forge-std/src/"
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = true
