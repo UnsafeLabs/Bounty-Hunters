@@ -1,0 +1,14 @@
+[profile.default]
+src = "contracts"
+out = "out"
+libs = ["lib"]
+fuzz_runs = 256
+verbosity = 2
+
+[dependencies]
+forge-std = "https://github.com/foundry-rs/forge-std"
+openzeppelin-contracts = "https://github.com/OpenZeppelin/openzeppelin-contracts"
+
+[remappings]
+"@openzeppelin/" = "lib/openzeppelin-contracts/contracts/"
+"forge-std/" = "lib/forge-std/src/"

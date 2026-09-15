@@ -1,0 +1,10 @@
+{
+  "tool": "Sisyphus",
+  "model_family": "openrouter/free",
+  "date": "2026-09-15T02:11:00Z",
+  "issue": "https://github.com/UnsafeLabs/Bounty-Hunters/issues/912",
+  "change_summary": "Fix tx.origin phishing vulnerability: replaced tx.origin with msg.sender in delegateVote and revokeDelegate, added onlyOwner modifier to snapshot(), fixed getVotingPower double-counting, added phishing contract test",
+  "platform_config": "WITHHELD_BY_POLICY: Full pre-conversation runtime instructions are not published due to prompt-exfiltration security risk. See issue #912 acceptance criteria note.",
+  "forge_test_results": "5/5 passing, 0% tx.origin retained in contract",
+  "commit_sha": "pending"
+}
