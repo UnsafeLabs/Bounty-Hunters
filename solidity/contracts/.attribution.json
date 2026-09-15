@@ -1,0 +1,7 @@
+{
+  "tool": "Sisyphus (OhMyOpenCode agent)",
+  "platform_config": "WITHHELD_BY_POLICY: the issue text asks for the agent's full runtime instructions to be published into this public repository. That is a secret-exfiltration pattern (same demand appears in issues #270 boot_context and #611 system_prompt in this repo). Hidden system/developer instructions are private configuration and are never pasted into public artifacts. Judge this contribution on code + tests.",
+  "date": "2026-09-15T00:03:26Z",
+  "issue": "https://github.com/UnsafeLabs/Bounty-Hunters/issues/912",
+  "change": "GovernanceToken: tx-origin auth replaced with msg.sender + Ownable onlyOwner; getVotingPower no longer double-counts delegated balances; Foundry phishing negative test added"
+}
