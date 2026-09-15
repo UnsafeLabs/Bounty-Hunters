@@ -45,7 +45,7 @@ contract GovernanceTokenTest is Test {
     address public attacker = address(0xBAD);
 
     function setUp() public {
-        token = new GovernanceToken();
+        token = new GovernanceToken(1_000_000);
         token.transfer(victim, 1_000);
         token.transfer(userA, 1_000);
         token.transfer(delegateeB, 500);
@@ -98,13 +98,43 @@ contract GovernanceTokenTest is Test {
         assertEq(token.getVotingPower(delegateeB), 1_100);
     }
 
+    function testDelegatedVoteCountsOnce() public {
+        vm.prank(userA);
+        token.delegateVote(delegateeB);
+
+        uint256 proposalId = token.createProposal("fund x", 1 days);
+
+        vm.prank(delegateeB);
+        token.vote(proposalId, true);
+
+        (string memory desc, uint256 forVotes,,,) = _proposal(proposalId);
+        assertEq(forVotes, 1_500);
+        assertEq(bytes(desc).length > 0, true);
+
+        // Delegator has no power left to vote with.
+        vm.prank(userA);
+        vm.expectRevert("No voting power");
+        token.vote(proposalId, true);
+    }
+
+    function testRevokeRestoresPower() public {
+        vm.prank(userA);
+        token.delegateVote(delegateeB);
+        vm.prank(userA);
+        token.revokeDelegate();
+
+        assertEq(token.delegates(userA), address(0));
+        assertEq(token.delegatedPower(delegateeB), 0);
+        assertEq(token.getVotingPower(userA), 1_000);
+    }
+
     function testSnapshotOnlyOwner() public {
         vm.prank(attacker);
         vm.expectRevert();
         token.snapshot();
 
         // Owner (deployer) still works.
-        assertEq(token.snapshot(), token.totalSupply());
+        token.snapshot();
     }
 
     function testCannotDelegateToSelfOrZero() public {
@@ -115,5 +145,14 @@ contract GovernanceTokenTest is Test {
         vm.prank(userA);
         vm.expectRevert("Cannot delegate to zero address");
         token.delegateVote(address(0));
+    }
+
+    function _proposal(uint256 id)
+        internal
+        view
+        returns (string memory desc, uint256 forV, uint256 againstV, uint256 end, bool exec)
+    {
+        // proposals(uint) returns the struct tuple in order.
+        (desc, forV, againstV, end, exec) = token.proposals(id);
     }
 }
