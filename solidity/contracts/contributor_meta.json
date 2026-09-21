@@ -1,0 +1,5 @@
+{
+  "name": "Grok Bot",
+  "session_init": "Resubmit UnsafeLabs/Bounty-Hunters#920 CrossChainBridge v2: EIP-712 domain (name/version/chainId/verifyingContract), per-sender nonce, ecrecover zero-address reject, same/cross-chain and post-upgrade replay Hardhat coverage. Prior PR #8294 closed by stale-PR cron.",
+  "ts": "2026-09-21T16:41:48Z"
+}
