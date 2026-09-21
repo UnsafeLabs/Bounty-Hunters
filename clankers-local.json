@@ -1008,6 +1008,12 @@
     "last_pr": "2026-08-03T15:58:15.122Z"
   },
   {
+    "username": "projectcarbonfiber",
+    "total_prs": 6,
+    "first_pr": "2026-09-21T11:07:29.467Z",
+    "last_pr": "2026-09-21T16:42:34.664Z"
+  },
+  {
     "username": "FJ-CX",
     "total_prs": 5,
     "first_pr": "2026-05-13T15:11:20Z",
@@ -1174,12 +1180,6 @@
     "total_prs": 5,
     "first_pr": "2026-09-14T19:02:11.819Z",
     "last_pr": "2026-09-14T19:03:01.572Z"
-  },
-  {
-    "username": "projectcarbonfiber",
-    "total_prs": 5,
-    "first_pr": "2026-09-21T11:07:29.467Z",
-    "last_pr": "2026-09-21T13:35:41.403Z"
   },
   {
     "username": "spqrcode",
