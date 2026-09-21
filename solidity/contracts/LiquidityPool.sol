@@ -4,70 +4,155 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+/**
+ * @title LiquidityPool
+ * @dev A minimal Uniswap‑V2‑style liquidity pool that mints LP tokens.
+ *      The contract follows the Uniswap V2 pattern to lock a minimum
+ *      amount of liquidity on the first deposit, preventing price
+ *      manipulation attacks.
+ */
 contract LiquidityPool is ERC20 {
-    IERC20 public tokenA;
-    IERC20 public tokenB;
+    // Tokens that make up the pair
+    IERC20 public immutable token0;
+    IERC20 public immutable token1;
 
-    uint256 public reserveA;
-    uint256 public reserveB;
-
-    // BUG: No MINIMUM_LIQUIDITY lock — first depositor can manipulate LP price
+    // Minimum liquidity that is permanently locked
     uint256 public constant MINIMUM_LIQUIDITY = 1000;
 
-    event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
-    event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
+    // Reserves are stored as uint112 to match Uniswap V2 implementation
+    uint112 private reserve0; // token0 reserve
+    uint112 private reserve1; // token1 reserve
 
-    constructor(address _tokenA, address _tokenB) ERC20("LP Token", "LP") {
-        tokenA = IERC20(_tokenA);
-        tokenB = IERC20(_tokenB);
+    // Events
+    event Mint(address indexed sender, uint256 amount0, uint256 amount1);
+    event Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to);
+    event Sync(uint112 reserve0, uint112 reserve1);
+
+    /**
+     * @dev Constructor sets the two ERC20 tokens that form the pool.
+     * @param _token0 address of the first token
+     * @param _token1 address of the second token
+     */
+    constructor(address _token0, address _token1) ERC20("Liquidity Pool Token", "LPT") {
+        require(_token0 != _token1, "Identical token addresses");
+        token0 = IERC20(_token0);
+        token1 = IERC20(_token1);
     }
 
-    function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
-        tokenA.transferFrom(msg.sender, address(this), amountA);
-        tokenB.transferFrom(msg.sender, address(this), amountB);
+    // ------------------------------------------------------------------------
+    // Internal helpers
+    // ------------------------------------------------------------------------
 
-        if (totalSupply() == 0) {
-            // BUG: No minimum liquidity lock to address(0)
-            lpTokens = sqrt(amountA * amountB);
+    /**
+     * @dev Updates the stored reserves to match the actual token balances.
+     * Emits a {Sync} event.
+     */
+    function _update(uint256 balance0, uint256 balance1) internal {
+        reserve0 = uint112(balance0);
+        reserve1 = uint112(balance1);
+        emit Sync(reserve0, reserve1);
+    }
+
+    /**
+     * @dev Returns the current reserves.
+     */
+    function getReserves() external view returns (uint112 _reserve0, uint112 _reserve1) {
+        _reserve0 = reserve0;
+        _reserve1 = reserve1;
+    }
+
+    // ------------------------------------------------------------------------
+    // Public API
+    // ------------------------------------------------------------------------
+
+    /**
+     * @dev Adds liquidity to the pool.
+     * @param amount0 Desired amount of token0 to deposit.
+     * @param amount1 Desired amount of token1 to deposit.
+     * @return liquidity Amount of LP tokens minted to the caller.
+     *
+     * The function pulls the tokens from `msg.sender`. The caller must have
+     * approved the pool to transfer the specified amounts.
+     */
+    function addLiquidity(uint256 amount0, uint256 amount1) external returns (uint256 liquidity) {
+        require(amount0 > 0 && amount1 > 0, "Amounts must be > 0");
+
+        // Transfer tokens from the sender
+        token0.transferFrom(msg.sender, address(this), amount0);
+        token1.transferFrom(msg.sender, address(this), amount1);
+
+        uint256 _totalSupply = totalSupply();
+
+        if (_totalSupply == 0) {
+            // First liquidity provision – lock MINIMUM_LIQUIDITY forever
+            liquidity = _sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY;
+            _mint(address(0), MINIMUM_LIQUIDITY); // lock
+            _mint(msg.sender, liquidity);
         } else {
-            uint256 lpFromA = amountA * totalSupply() / reserveA;
-            uint256 lpFromB = amountB * totalSupply() / reserveB;
-            lpTokens = lpFromA < lpFromB ? lpFromA : lpFromB;
+            // Subsequent deposits – mint proportionally
+            uint256 liquidity0 = (amount0 * _totalSupply) / reserve0;
+            uint256 liquidity1 = (amount1 * _totalSupply) / reserve1;
+            liquidity = liquidity0 < liquidity1 ? liquidity0 : liquidity1;
+            require(liquidity > 0, "Insufficient liquidity minted");
+            _mint(msg.sender, liquidity);
         }
 
-        require(lpTokens > 0, "Insufficient liquidity");
-        _mint(msg.sender, lpTokens);
+        emit Mint(msg.sender, amount0, amount1);
 
-        reserveA += amountA;
-        reserveB += amountB;
-
-        emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+        // Update reserves to the new balances
+        _update(token0.balanceOf(address(this)), token1.balanceOf(address(this)));
     }
 
-    // BUG: Uses balanceOf instead of internal reserves — manipulable via direct transfer
-    function removeLiquidity(uint256 lpTokens) external returns (uint256 amountA, uint256 amountB) {
-        require(lpTokens > 0, "Must burn > 0");
-        require(balanceOf(msg.sender) >= lpTokens, "Insufficient LP tokens");
+    /**
+     * @dev Removes liquidity from the pool.
+     * @param liquidity Amount of LP tokens to burn.
+     * @return amount0 Amount of token0 returned to the caller.
+     * @return amount1 Amount of token1 returned to the caller.
+     *
+     * The function burns the caller's LP tokens and transfers the proportional
+     * share of the underlying assets.
+     */
+    function removeLiquidity(uint256 liquidity) external returns (uint256 amount0, uint256 amount1) {
+        require(liquidity > 0, "Liquidity must be > 0");
+        uint256 _totalSupply = totalSupply();
 
-        // BUG: Should use reserveA/reserveB, not balanceOf
-        uint256 balA = tokenA.balanceOf(address(this));
-        uint256 balB = tokenB.balanceOf(address(this));
+        // Use internal reserves for calculation – they cannot be manipulated
+        amount0 = (liquidity * reserve0) / _totalSupply;
+        amount1 = (liquidity * reserve1) / _totalSupply;
 
-        amountA = lpTokens * balA / totalSupply();
-        amountB = lpTokens * balB / totalSupply();
+        require(amount0 > 0 && amount1 > 0, "Insufficient amount withdrawn");
 
-        _burn(msg.sender, lpTokens);
+        // Burn LP tokens
+        _burn(msg.sender, liquidity);
+        emit Burn(msg.sender, amount0, amount1, msg.sender);
 
-        tokenA.transfer(msg.sender, amountA);
-        tokenB.transfer(msg.sender, amountB);
+        // Transfer underlying tokens
+        token0.transfer(msg.sender, amount0);
+        token1.transfer(msg.sender, amount1);
 
-        reserveA -= amountA;
-        reserveB -= amountB;
-
-        emit LiquidityRemoved(msg.sender, amountA, amountB, lpTokens);
+        // Update reserves after the transfer
+        _update(token0.balanceOf(address(this)), token1.balanceOf(address(this)));
     }
 
-    function sqrt(uint256 y) internal pure returns (uint256 z) {
+    /**
+     * @dev Syncs the internal reserves with the actual token balances.
+     *
+     * This function can be called by anyone and is useful after a direct
+     * token transfer (donation) to the pool that would otherwise corrupt the
+     * price calculation.
+     */
+    function sync() external {
+        _update(token0.balanceOf(address(this)), token1.balanceOf(address(this)));
+    }
+
+    // ------------------------------------------------------------------------
+    // Math helpers
+    // ------------------------------------------------------------------------
+
+    /**
+     * @dev Returns the integer square root of a number. Reverts on overflow.
+     */
+    function _sqrt(uint256 y) internal pure returns (uint256 z) {
         if (y > 3) {
             z = y;
             uint256 x = y / 2 + 1;
