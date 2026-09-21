@@ -2,14 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-/**
- * @title StakingVault
- * @notice Staking vault with CEI + ReentrancyGuard on withdraw/claimRewards.
- * @dev Withdraw/claim pay ETH (bounty fixture semantics). Stake uses ERC20.
- */
-contract StakingVault is ReentrancyGuard {
+/// @dev Intentionally vulnerable copy of pre-fix StakingVault for gas delta checks only.
+contract VulnerableStakingVault {
     IERC20 public stakingToken;
     uint256 public rewardRate;
     uint256 public totalStaked;
@@ -17,10 +12,6 @@ contract StakingVault is ReentrancyGuard {
     mapping(address => uint256) public balances;
     mapping(address => uint256) public rewards;
     mapping(address => uint256) public lastStakeTime;
-
-    event Staked(address indexed user, uint256 amount);
-    event Withdrawn(address indexed user, uint256 amount);
-    event RewardClaimed(address indexed user, uint256 amount);
 
     constructor(address _stakingToken, uint256 _rewardRate) {
         stakingToken = IERC20(_stakingToken);
@@ -34,7 +25,6 @@ contract StakingVault is ReentrancyGuard {
         balances[msg.sender] += amount;
         totalStaked += amount;
         lastStakeTime[msg.sender] = block.timestamp;
-        emit Staked(msg.sender, amount);
     }
 
     function _updateReward(address account) internal {
@@ -45,41 +35,22 @@ contract StakingVault is ReentrancyGuard {
         lastStakeTime[account] = block.timestamp;
     }
 
-    /// @notice Withdraw staked amount as ETH. CEI + nonReentrant.
-    function withdraw(uint256 amount) external nonReentrant {
+    function withdraw(uint256 amount) external {
         require(balances[msg.sender] >= amount, "Insufficient balance");
         _updateReward(msg.sender);
-
-        // Effects before interactions
-        balances[msg.sender] -= amount;
-        totalStaked -= amount;
-        emit Withdrawn(msg.sender, amount);
-
         (bool success, ) = payable(msg.sender).call{value: amount}("");
         require(success, "Transfer failed");
+        balances[msg.sender] -= amount;
+        totalStaked -= amount;
     }
 
-    /// @notice Claim accrued rewards as ETH. CEI + nonReentrant.
-    function claimRewards() external nonReentrant {
+    function claimRewards() external {
         _updateReward(msg.sender);
         uint256 reward = rewards[msg.sender];
         require(reward > 0, "No rewards");
-
-        // Effects before interactions
-        rewards[msg.sender] = 0;
-        emit RewardClaimed(msg.sender, reward);
-
         (bool success, ) = payable(msg.sender).call{value: reward}("");
         require(success, "Transfer failed");
-    }
-
-    function getStakedBalance(address account) external view returns (uint256) {
-        return balances[account];
-    }
-
-    function getPendingRewards(address account) external view returns (uint256) {
-        uint256 timeStaked = block.timestamp - lastStakeTime[account];
-        return rewards[account] + balances[account] * timeStaked * rewardRate / 1e18;
+        rewards[msg.sender] = 0;
     }
 
     receive() external payable {}
