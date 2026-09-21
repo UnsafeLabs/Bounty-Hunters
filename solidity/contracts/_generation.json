@@ -1,0 +1,5 @@
+{
+  "agent": "Grok Bot",
+  "pre_task_context": "Resubmit UnsafeLabs/Bounty-Hunters#918 LiquidityPool v2: MINIMUM_LIQUIDITY=1000 locked at address(0) (OZ-safe accounting), reserve-based removeLiquidity, sync()+Sync event, donation-attack Hardhat coverage. Prior PR #8293 closed by stale-PR cron.",
+  "timestamp": "2026-09-21T16:41:48Z"
+}
