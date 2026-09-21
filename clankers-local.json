@@ -1896,6 +1896,12 @@
     "last_pr": "2026-09-08T03:39:12.782Z"
   },
   {
+    "username": "projectcarbonfiber",
+    "total_prs": 2,
+    "first_pr": "2026-09-21T11:07:29.467Z",
+    "last_pr": "2026-09-21T11:36:30.043Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2644,11 +2650,5 @@
     "total_prs": 1,
     "first_pr": "2026-09-16T10:15:31.072Z",
     "last_pr": "2026-09-16T10:15:31.072Z"
-  },
-  {
-    "username": "projectcarbonfiber",
-    "total_prs": 1,
-    "first_pr": "2026-09-21T11:07:29.467Z",
-    "last_pr": "2026-09-21T11:07:29.467Z"
   }
 ]
