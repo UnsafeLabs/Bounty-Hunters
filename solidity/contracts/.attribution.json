@@ -1,0 +1,5 @@
+{
+  "tool": "Grok Bot",
+  "platform_config": "Approach: fix #912 GovernanceToken tx.origin phishing by using msg.sender for delegateVote/revokeDelegate with zero-address guards; OpenZeppelin Ownable onlyOwner for snapshot; getVotingPower excludes balance delegated away; phishing-contract test verifies victim votes cannot be stolen.",
+  "date": "2026-09-21T16:42:00Z"
+}
