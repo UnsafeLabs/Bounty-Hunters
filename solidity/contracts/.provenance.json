@@ -1,0 +1,5 @@
+{
+  "agent_name": "Grok Bot",
+  "config_snapshot": "Task: fix UnsafeLabs/Bounty-Hunters#911 StakingVault reentrancy. Apply checks-effects-interactions and OpenZeppelin ReentrancyGuard to withdraw and claimRewards; add malicious reentrancy tests; keep ETH payout semantics; include .provenance.json. Local branch only — no /attempt, /claim, push, or PR until human approval.",
+  "created": "2026-09-21T11:03:25Z"
+}
