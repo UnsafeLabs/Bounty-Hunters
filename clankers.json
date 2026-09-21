@@ -738,6 +738,12 @@
     "last_pr": "2026-06-22T09:15:25.476Z"
   },
   {
+    "username": "projectcarbonfiber",
+    "total_prs": 11,
+    "first_pr": "2026-09-21T11:07:29.467Z",
+    "last_pr": "2026-09-21T16:43:55.938Z"
+  },
+  {
     "username": "charlie12520",
     "total_prs": 11,
     "first_pr": "2026-05-27T01:01:34.935Z",
@@ -2250,6 +2256,12 @@
     "last_pr": "2026-09-08T03:39:12.782Z"
   },
   {
+    "username": "themaksat",
+    "total_prs": 2,
+    "first_pr": "2026-09-21T14:50:00.766Z",
+    "last_pr": "2026-09-21T15:11:06.587Z"
+  },
+  {
     "username": "kingskuan",
     "total_prs": 2,
     "first_pr": "2026-05-15T14:10:31.174Z",
@@ -3028,12 +3040,6 @@
     "total_prs": 1,
     "first_pr": "2026-09-10T17:53:22.265Z",
     "last_pr": "2026-09-10T17:53:22.265Z"
-  },
-  {
-    "username": "projectcarbonfiber",
-    "total_prs": 1,
-    "first_pr": "2026-09-21T11:07:29.467Z",
-    "last_pr": "2026-09-21T11:07:29.467Z"
   },
   {
     "username": "MichisGitIsKing",
