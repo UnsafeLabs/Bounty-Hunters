@@ -1,0 +1,5 @@
+{
+  "agent": "Grok Bot",
+  "pre_task_context": "Fix UnsafeLabs/Bounty-Hunters#918 LiquidityPool first-depositor manipulation: MINIMUM_LIQUIDITY lock observable at address(0) without OZ zero-mint, internal reserve-based removeLiquidity, sync() recovery, Hardhat regression tests. Submit via projectcarbonfiber fork with /attempt + /claim.",
+  "timestamp": "2026-09-21T13:34:19Z"
+}
