@@ -1014,6 +1014,12 @@
     "last_pr": "2026-08-03T15:58:15.122Z"
   },
   {
+    "username": "themaksat",
+    "total_prs": 6,
+    "first_pr": "2026-09-21T14:50:00.766Z",
+    "last_pr": "2026-09-22T06:52:45.456Z"
+  },
+  {
     "username": "FJ-CX",
     "total_prs": 5,
     "first_pr": "2026-05-13T15:11:20Z",
@@ -1186,12 +1192,6 @@
     "total_prs": 5,
     "first_pr": "2026-09-22T04:28:26.480Z",
     "last_pr": "2026-09-22T04:51:17.193Z"
-  },
-  {
-    "username": "themaksat",
-    "total_prs": 5,
-    "first_pr": "2026-09-21T14:50:00.766Z",
-    "last_pr": "2026-09-22T06:52:33.712Z"
   },
   {
     "username": "spqrcode",
