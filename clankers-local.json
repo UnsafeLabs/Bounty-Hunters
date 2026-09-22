@@ -1188,6 +1188,12 @@
     "last_pr": "2026-09-22T04:51:17.193Z"
   },
   {
+    "username": "themaksat",
+    "total_prs": 5,
+    "first_pr": "2026-09-21T14:50:00.766Z",
+    "last_pr": "2026-09-22T06:52:33.712Z"
+  },
+  {
     "username": "spqrcode",
     "total_prs": 4,
     "first_pr": "2026-05-14T12:12:04.319Z",
@@ -1348,12 +1354,6 @@
     "total_prs": 4,
     "first_pr": "2026-09-15T02:33:08.706Z",
     "last_pr": "2026-09-15T17:33:18.438Z"
-  },
-  {
-    "username": "themaksat",
-    "total_prs": 4,
-    "first_pr": "2026-09-21T14:50:00.766Z",
-    "last_pr": "2026-09-21T21:31:43.994Z"
   },
   {
     "username": "AidenPeerce",
