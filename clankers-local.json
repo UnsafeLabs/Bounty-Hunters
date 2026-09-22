@@ -1914,6 +1914,12 @@
     "last_pr": "2026-09-22T02:25:08.158Z"
   },
   {
+    "username": "lamkyo",
+    "total_prs": 2,
+    "first_pr": "2026-09-22T04:28:26.480Z",
+    "last_pr": "2026-09-22T04:31:35.876Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2662,11 +2668,5 @@
     "total_prs": 1,
     "first_pr": "2026-09-16T10:15:31.072Z",
     "last_pr": "2026-09-16T10:15:31.072Z"
-  },
-  {
-    "username": "lamkyo",
-    "total_prs": 1,
-    "first_pr": "2026-09-22T04:28:26.480Z",
-    "last_pr": "2026-09-22T04:28:26.480Z"
   }
 ]
