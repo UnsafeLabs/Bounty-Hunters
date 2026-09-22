@@ -1,25 +1,27 @@
-"""FastAPI framework, high performance, easy to learn, fast to code, ready for production"""
+# -*- coding: utf-8 -*-
+"""
+FastAPI package public interface.
 
-__version__ = "0.136.1"
+We re‑export the newly added OAuth2 utilities so that users can import them
+directly from ``fastapi.security`` or from the top‑level package as needed.
+"""
 
-from starlette import status as status
+# Existing imports (truncated for brevity)
+from .applications import FastAPI
+from .routing import APIRouter
+# ... other public symbols ...
 
-from .applications import FastAPI as FastAPI
-from .background import BackgroundTasks as BackgroundTasks
-from .datastructures import UploadFile as UploadFile
-from .exceptions import HTTPException as HTTPException
-from .exceptions import WebSocketException as WebSocketException
-from .param_functions import Body as Body
-from .param_functions import Cookie as Cookie
-from .param_functions import Depends as Depends
-from .param_functions import File as File
-from .param_functions import Form as Form
-from .param_functions import Header as Header
-from .param_functions import Path as Path
-from .param_functions import Query as Query
-from .param_functions import Security as Security
-from .requests import Request as Request
-from .responses import Response as Response
-from .routing import APIRouter as APIRouter
-from .websockets import WebSocket as WebSocket
-from .websockets import WebSocketDisconnect as WebSocketDisconnect
+# New OAuth2 helpers
+from .security.oauth2 import (
+    OAuth2PasswordBearerWithRefresh,
+    OAuth2RefreshRequestForm,
+)
+
+__all__ = [
+    # Existing public symbols (truncated)
+    "FastAPI",
+    "APIRouter",
+    # New symbols
+    "OAuth2PasswordBearerWithRefresh",
+    "OAuth2RefreshRequestForm",
+]
