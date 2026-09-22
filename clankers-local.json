@@ -1182,6 +1182,12 @@
     "last_pr": "2026-09-14T19:03:01.572Z"
   },
   {
+    "username": "lamkyo",
+    "total_prs": 5,
+    "first_pr": "2026-09-22T04:28:26.480Z",
+    "last_pr": "2026-09-22T04:51:17.193Z"
+  },
+  {
     "username": "spqrcode",
     "total_prs": 4,
     "first_pr": "2026-05-14T12:12:04.319Z",
@@ -1348,12 +1354,6 @@
     "total_prs": 4,
     "first_pr": "2026-09-21T14:50:00.766Z",
     "last_pr": "2026-09-21T21:31:43.994Z"
-  },
-  {
-    "username": "lamkyo",
-    "total_prs": 4,
-    "first_pr": "2026-09-22T04:28:26.480Z",
-    "last_pr": "2026-09-22T04:37:09.925Z"
   },
   {
     "username": "AidenPeerce",
