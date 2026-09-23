@@ -1194,6 +1194,12 @@
     "last_pr": "2026-09-22T04:51:17.193Z"
   },
   {
+    "username": "book051193-hash",
+    "total_prs": 5,
+    "first_pr": "2026-09-22T02:24:54.836Z",
+    "last_pr": "2026-09-23T13:58:51.374Z"
+  },
+  {
     "username": "spqrcode",
     "total_prs": 4,
     "first_pr": "2026-05-14T12:12:04.319Z",
@@ -1354,12 +1360,6 @@
     "total_prs": 4,
     "first_pr": "2026-09-15T02:33:08.706Z",
     "last_pr": "2026-09-15T17:33:18.438Z"
-  },
-  {
-    "username": "book051193-hash",
-    "total_prs": 4,
-    "first_pr": "2026-09-22T02:24:54.836Z",
-    "last_pr": "2026-09-22T15:03:28.064Z"
   },
   {
     "username": "AidenPeerce",
