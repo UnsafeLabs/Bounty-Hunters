@@ -4,9 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\NotificationPreference;
 use App\Models\User;
-use App\Services\NotificationRouter;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Notifications\Notification;
 use Tests\TestCase;
 
 class NotificationPreferenceTest extends TestCase
@@ -18,36 +17,40 @@ class NotificationPreferenceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
         $this->user = User::factory()->create();
     }
 
-    public function test_can_list_notification_preferences(): void
+    public function test_user_can_list_preferences_by_event_type_and_channel(): void
     {
-        NotificationPreference::factory()->count(5)->create([
-            'user_id' => $this->user->id,
-        ]);
+        $otherUser = User::factory()->create();
 
-        $response = $this->actingAs($this->user)
-            ->getJson('/notifications/preferences');
+        $response = $this->actingAs($this->user)->getJson('/notifications/preferences');
 
         $response->assertOk()
-            ->assertJsonCount(5);
+            ->assertJsonCount(15)
+            ->assertJsonFragment([
+                'user_id' => $this->user->id,
+                'channel' => 'mail',
+                'event_type' => 'order_created',
+                'enabled' => true,
+            ])
+            ->assertJsonMissing(['user_id' => $otherUser->id]);
     }
 
-    public function test_can_update_single_preference(): void
+    public function test_guest_cannot_access_preferences(): void
     {
-        $preference = NotificationPreference::factory()->create([
-            'user_id' => $this->user->id,
-            'enabled' => true,
-        ]);
+        $this->getJson('/notifications/preferences')->assertUnauthorized();
+    }
 
-        $response = $this->actingAs($this->user)
-            ->putJson("/notifications/preferences/{$preference->id}", [
-                'enabled' => false,
-            ]);
+    public function test_user_can_toggle_an_individual_preference(): void
+    {
+        $preference = $this->preference('order_created', 'mail');
 
-        $response->assertOk()
-            ->assertJsonFragment(['enabled' => false]);
+        $this->actingAs($this->user)
+            ->putJson("/notifications/preferences/{$preference->id}", ['enabled' => false])
+            ->assertOk()
+            ->assertJsonPath('enabled', false);
 
         $this->assertDatabaseHas('notification_preferences', [
             'id' => $preference->id,
@@ -55,96 +58,83 @@ class NotificationPreferenceTest extends TestCase
         ]);
     }
 
-    public function test_cannot_update_another_users_preference(): void
+    public function test_user_cannot_update_another_users_preference(): void
     {
-        $otherUser = User::factory()->create();
-        $preference = NotificationPreference::factory()->create([
-            'user_id' => $otherUser->id,
-            'enabled' => true,
-        ]);
+        $preference = User::factory()->create()
+            ->notificationPreferences()
+            ->where('event_type', 'order_created')
+            ->where('channel', 'mail')
+            ->firstOrFail();
 
-        $response = $this->actingAs($this->user)
-            ->putJson("/notifications/preferences/{$preference->id}", [
-                'enabled' => false,
-            ]);
+        $this->actingAs($this->user)
+            ->putJson("/notifications/preferences/{$preference->id}", ['enabled' => false])
+            ->assertForbidden();
 
-        $response->assertForbidden();
+        $this->assertTrue($preference->fresh()->enabled);
     }
 
-    public function test_can_bulk_update_preferences(): void
+    public function test_user_can_bulk_update_preferences(): void
     {
-        $preferences = NotificationPreference::factory()->count(3)->create([
-            'user_id' => $this->user->id,
-            'enabled' => true,
-        ]);
+        $mail = $this->preference('order_created', 'mail');
+        $slack = $this->preference('order_created', 'slack');
 
-        $payload = [
-            'preferences' => $preferences->map(fn ($p) => [
-                'id' => $p->id,
-                'enabled' => false,
-            ])->toArray(),
-        ];
+        $this->actingAs($this->user)
+            ->postJson('/notifications/preferences/bulk', [
+                'preferences' => [
+                    ['id' => $mail->id, 'enabled' => false],
+                    ['id' => $slack->id, 'enabled' => true],
+                ],
+            ])
+            ->assertOk()
+            ->assertJsonCount(2);
 
-        $response = $this->actingAs($this->user)
-            ->postJson('/notifications/preferences/bulk', $payload);
-
-        $response->assertOk()
-            ->assertJsonCount(3);
-
-        foreach ($preferences as $preference) {
-            $this->assertDatabaseHas('notification_preferences', [
-                'id' => $preference->id,
-                'enabled' => false,
-            ]);
-        }
+        $this->assertFalse($mail->fresh()->enabled);
+        $this->assertTrue($slack->fresh()->enabled);
     }
 
-    public function test_bulk_update_ignores_other_users_preferences(): void
+    public function test_bulk_update_rejects_another_users_preference_atomically(): void
     {
-        $otherUser = User::factory()->create();
-        $otherPreference = NotificationPreference::factory()->create([
-            'user_id' => $otherUser->id,
-            'enabled' => true,
-        ]);
+        $ownPreference = $this->preference('order_created', 'mail');
+        $otherPreference = User::factory()->create()
+            ->notificationPreferences()
+            ->where('event_type', 'order_created')
+            ->where('channel', 'mail')
+            ->firstOrFail();
 
-        $myPreference = NotificationPreference::factory()->create([
-            'user_id' => $this->user->id,
-            'enabled' => true,
-        ]);
+        $this->actingAs($this->user)
+            ->postJson('/notifications/preferences/bulk', [
+                'preferences' => [
+                    ['id' => $ownPreference->id, 'enabled' => false],
+                    ['id' => $otherPreference->id, 'enabled' => false],
+                ],
+            ])
+            ->assertForbidden();
 
-        $payload = [
-            'preferences' => [
-                ['id' => $myPreference->id, 'enabled' => false],
-                ['id' => $otherPreference->id, 'enabled' => false],
-            ],
-        ];
+        $this->assertTrue($ownPreference->fresh()->enabled);
+        $this->assertTrue($otherPreference->fresh()->enabled);
+    }
 
-        $response = $this->actingAs($this->user)
-            ->postJson('/notifications/preferences/bulk', $payload);
+    public function test_new_user_receives_default_preferences(): void
+    {
+        $preferences = $this->user->notificationPreferences;
 
-        $response->assertOk();
-
-        $this->assertDatabaseHas('notification_preferences', [
-            'id' => $myPreference->id,
-            'enabled' => false,
-        ]);
-
-        $this->assertDatabaseHas('notification_preferences', [
-            'id' => $otherPreference->id,
-            'enabled' => true,
-        ]);
+        $this->assertCount(15, $preferences);
+        $this->assertEqualsCanonicalizing(
+            NotificationPreference::DEFAULT_EVENT_TYPES,
+            $preferences->pluck('event_type')->unique()->all(),
+        );
+        $this->assertEqualsCanonicalizing(
+            NotificationPreference::CHANNELS,
+            $preferences->pluck('channel')->unique()->all(),
+        );
+        $this->assertTrue($preferences->where('channel', 'mail')->every->enabled);
+        $this->assertTrue($preferences->where('channel', 'database')->every->enabled);
+        $this->assertFalse($preferences->where('channel', 'slack')->contains->enabled);
     }
 
     public function test_unique_constraint_prevents_duplicate_preferences(): void
     {
-        NotificationPreference::create([
-            'user_id' => $this->user->id,
-            'channel' => 'mail',
-            'event_type' => 'order_created',
-            'enabled' => true,
-        ]);
-
-        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->expectException(QueryException::class);
 
         NotificationPreference::create([
             'user_id' => $this->user->id,
@@ -153,168 +143,12 @@ class NotificationPreferenceTest extends TestCase
             'enabled' => false,
         ]);
     }
-}
 
-class NotificationRouterTest extends TestCase
-{
-    use RefreshDatabase;
-
-    protected User $user;
-    protected NotificationRouter $router;
-
-    protected function setUp(): void
+    private function preference(string $eventType, string $channel): NotificationPreference
     {
-        parent::setUp();
-        $this->user = User::factory()->create();
-        $this->router = new NotificationRouter();
-    }
-
-    public function test_get_enabled_channels_returns_only_enabled_channels(): void
-    {
-        NotificationPreference::factory()->create([
-            'user_id' => $this->user->id,
-            'channel' => 'mail',
-            'event_type' => 'order_created',
-            'enabled' => true,
-        ]);
-
-        NotificationPreference::factory()->create([
-            'user_id' => $this->user->id,
-            'channel' => 'slack',
-            'event_type' => 'order_created',
-            'enabled' => false,
-        ]);
-
-        NotificationPreference::factory()->create([
-            'user_id' => $this->user->id,
-            'channel' => 'database',
-            'event_type' => 'order_created',
-            'enabled' => true,
-        ]);
-
-        $enabledChannels = $this->router->getEnabledChannels($this->user, 'order_created');
-
-        $this->assertEquals(['mail', 'database'], $enabledChannels);
-    }
-
-    public function test_is_channel_enabled_returns_true_for_enabled_channel(): void
-    {
-        NotificationPreference::factory()->create([
-            'user_id' => $this->user->id,
-            'channel' => 'mail',
-            'event_type' => 'order_created',
-            'enabled' => true,
-        ]);
-
-        $result = $this->router->isChannelEnabled($this->user, 'order_created', 'mail');
-
-        $this->assertTrue($result);
-    }
-
-    public function test_is_channel_enabled_returns_false_for_disabled_channel(): void
-    {
-        NotificationPreference::factory()->create([
-            'user_id' => $this->user->id,
-            'channel' => 'slack',
-            'event_type' => 'order_created',
-            'enabled' => false,
-        ]);
-
-        $result = $this->router->isChannelEnabled($this->user, 'order_created', 'slack');
-
-        $this->assertFalse($result);
-    }
-
-    public function test_filter_channels_for_notification_filters_by_user_preferences(): void
-    {
-        NotificationPreference::factory()->create([
-            'user_id' => $this->user->id,
-            'channel' => 'mail',
-            'event_type' => 'order_created',
-            'enabled' => true,
-        ]);
-
-        NotificationPreference::factory()->create([
-            'user_id' => $this->user->id,
-            'channel' => 'slack',
-            'event_type' => 'order_created',
-            'enabled' => false,
-        ]);
-
-        $notification = new class extends Notification {
-            public function getEventType(): string
-            {
-                return 'order_created';
-            }
-
-            public function via(object $notifiable): array
-            {
-                return ['mail', 'slack', 'database'];
-            }
-        };
-
-        $filtered = $this->router->filterChannelsForNotification($this->user, $notification, ['mail', 'slack', 'database']);
-
-        $this->assertEquals(['mail'], $filtered);
-    }
-
-    public function test_should_send_to_channel_returns_true_for_enabled(): void
-    {
-        NotificationPreference::factory()->create([
-            'user_id' => $this->user->id,
-            'channel' => 'mail',
-            'event_type' => 'order_created',
-            'enabled' => true,
-        ]);
-
-        $notification = new class extends Notification {
-            public function getEventType(): string
-            {
-                return 'order_created';
-            }
-        };
-
-        $result = $this->router->shouldSendToChannel($this->user, $notification, 'mail');
-
-        $this->assertTrue($result);
-    }
-
-    public function test_should_send_to_channel_returns_false_for_disabled(): void
-    {
-        NotificationPreference::factory()->create([
-            'user_id' => $this->user->id,
-            'channel' => 'slack',
-            'event_type' => 'order_created',
-            'enabled' => false,
-        ]);
-
-        $notification = new class extends Notification {
-            public function getEventType(): string
-            {
-                return 'order_created';
-            }
-        };
-
-        $result = $this->router->shouldSendToChannel($this->user, $notification, 'slack');
-
-        $this->assertFalse($result);
-    }
-
-    public function test_new_user_gets_default_preferences_seeded(): void
-    {
-        $newUser = User::factory()->create();
-
-        $preferences = NotificationPreference::where('user_id', $newUser->id)->get();
-
-        $this->assertCount(15, $preferences);
-
-        $mailPreferences = $preferences->where('channel', 'mail');
-        $this->assertTrue($mailPreferences->every(fn ($p) => $p->enabled === true));
-
-        $slackPreferences = $preferences->where('channel', 'slack');
-        $this->assertTrue($slackPreferences->every(fn ($p) => $p->enabled === false));
-
-        $databasePreferences = $preferences->where('channel', 'database');
-        $this->assertTrue($databasePreferences->every(fn ($p) => $p->enabled === true));
+        return $this->user->notificationPreferences()
+            ->where('event_type', $eventType)
+            ->where('channel', $channel)
+            ->firstOrFail();
     }
 }

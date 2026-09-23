@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\NotificationPreference;
 use App\Models\User;
 use Illuminate\Notifications\Notification;
+use Illuminate\Support\Facades\Notification as NotificationFacade;
 
 class NotificationRouter
 {
@@ -26,44 +27,19 @@ class NotificationRouter
             ->exists();
     }
 
-    public function filterChannelsForNotification(User $user, Notification $notification, array $channels): array
+    public function filterChannels(User $user, string $eventType, array $channels): array
     {
-        $eventType = $this->getEventTypeFromNotification($notification);
-        
-        if (empty($eventType)) {
-            return $channels;
-        }
-
         $enabledChannels = $this->getEnabledChannels($user, $eventType);
-        
-        if (empty($enabledChannels)) {
-            return [];
-        }
 
         return array_values(array_intersect($channels, $enabledChannels));
     }
 
-    public function shouldSendToChannel(User $user, Notification $notification, string $channel): bool
+    public function send(User $user, Notification $notification, string $eventType): void
     {
-        $eventType = $this->getEventTypeFromNotification($notification);
-        
-        if (empty($eventType)) {
-            return true;
+        $channels = $this->filterChannels($user, $eventType, $notification->via($user));
+
+        if ($channels !== []) {
+            NotificationFacade::sendNow($user, $notification, $channels);
         }
-
-        return $this->isChannelEnabled($user, $eventType, $channel);
-    }
-
-    protected function getEventTypeFromNotification(Notification $notification): ?string
-    {
-        if (method_exists($notification, 'getEventType')) {
-            return $notification->getEventType();
-        }
-
-        if (property_exists($notification, 'eventType')) {
-            return $notification->eventType;
-        }
-
-        return class_basename($notification);
     }
 }

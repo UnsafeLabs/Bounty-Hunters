@@ -3,14 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\NotificationPreference;
-use Illuminate\Http\Request;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class NotificationPreferenceController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $preferences = NotificationPreference::where('user_id', $request->user()->id)
+        $preferences = $request->user()->notificationPreferences()
             ->orderBy('event_type')
             ->orderBy('channel')
             ->get();
@@ -20,9 +22,7 @@ class NotificationPreferenceController extends Controller
 
     public function update(Request $request, NotificationPreference $notificationPreference): JsonResponse
     {
-        if ($notificationPreference->user_id !== $request->user()->id) {
-            return response()->json(['message' => 'Unauthorized'], 403);
-        }
+        abort_unless($notificationPreference->user_id === $request->user()->id, 403);
 
         $validated = $request->validate([
             'enabled' => 'required|boolean',
@@ -36,24 +36,25 @@ class NotificationPreferenceController extends Controller
     public function bulkUpdate(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'preferences' => 'required|array',
-            'preferences.*.id' => 'required|integer|exists:notification_preferences,id',
+            'preferences' => 'required|array|min:1',
+            'preferences.*.id' => 'required|integer|distinct|exists:notification_preferences,id',
             'preferences.*.enabled' => 'required|boolean',
         ]);
 
-        $userId = $request->user()->id;
-        $updatedPreferences = [];
+        $preferences = $request->user()->notificationPreferences()
+            ->whereIn('id', collect($validated['preferences'])->pluck('id'))
+            ->get()
+            ->keyBy('id');
 
-        foreach ($validated['preferences'] as $pref) {
-            $preference = NotificationPreference::where('id', $pref['id'])
-                ->where('user_id', $userId)
-                ->first();
+        abort_unless($preferences->count() === count($validated['preferences']), 403);
 
-            if ($preference) {
-                $preference->update(['enabled' => $pref['enabled']]);
-                $updatedPreferences[] = $preference;
+        $updatedPreferences = DB::transaction(function () use ($preferences, $validated): Collection {
+            foreach ($validated['preferences'] as $data) {
+                $preferences->get($data['id'])->update(['enabled' => $data['enabled']]);
             }
-        }
+
+            return $preferences->values();
+        });
 
         return response()->json($updatedPreferences);
     }
