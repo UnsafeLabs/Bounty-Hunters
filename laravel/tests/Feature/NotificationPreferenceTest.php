@@ -125,7 +125,7 @@ class NotificationPreferenceTest extends TestCase
         );
         $this->assertEqualsCanonicalizing(
             NotificationPreference::CHANNELS,
-            $preferences->pluck('channel')->unique()->all(),
+            $preferences->pluck('channel')->unique()->values()->all(),
         );
         $this->assertTrue($preferences->where('channel', 'mail')->every->enabled);
         $this->assertTrue($preferences->where('channel', 'database')->every->enabled);
