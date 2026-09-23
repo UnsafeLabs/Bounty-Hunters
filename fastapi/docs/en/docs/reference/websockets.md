@@ -71,3 +71,38 @@ Read more about it in the [FastAPI docs for WebSockets](https://fastapi.tiangolo
 ::: fastapi.websockets.WebSocketState
 
 `WebSocketState` is an enumeration of the possible states of a WebSocket connection.
+
+## WebSocket heartbeat
+
+`WebSocketWithHeartbeat` is an opt-in wrapper that sends configurable heartbeat
+messages, closes stale connections, and records connection metrics. Existing
+`WebSocket` connections are unchanged.
+
+ASGI doesn't expose protocol-level ping and pong control frames to applications.
+The wrapper therefore sends `b"ping"` as a binary application message. The client
+must reply with the binary message `b"pong"` before `pong_timeout` expires.
+
+```python
+from fastapi import FastAPI, WebSocket, WebSocketWithHeartbeat
+
+app = FastAPI()
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    heartbeat = WebSocketWithHeartbeat(
+        websocket,
+        ping_interval=30,
+        pong_timeout=10,
+    )
+    await heartbeat.accept()
+    message = await heartbeat.receive_text()
+    await heartbeat.send_text(message)
+```
+
+The optional `on_disconnect` callback receives the close code and connection
+duration in seconds. It can be synchronous or asynchronous. The
+`connection_duration` property reports elapsed connected time, while
+`message_count` reports non-heartbeat messages received from the client.
+
+::: fastapi.websockets.WebSocketWithHeartbeat

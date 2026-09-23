@@ -1,448 +1,199 @@
 import asyncio
-import time
+from typing import Any, cast
 
 import pytest
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketWithHeartbeat
 from fastapi.testclient import TestClient
-from fastapi.websockets import WebSocketState, WebSocketWithHeartbeat
+from fastapi.websockets import WebSocketDisconnect, WebSocketState
 
 
-def test_websocket_with_heartbeat_basic():
-    app = FastAPI()
-    disconnect_called = []
-    disconnect_code = []
-    disconnect_duration = []
-
-    async def on_disconnect(code: int, duration: float):
-        disconnect_called.append(True)
-        disconnect_code.append(code)
-        disconnect_duration.append(duration)
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=0.1,
-            pong_timeout=0.5,
-            on_disconnect=on_disconnect,
-        )
-        await ws.accept()
-        await ws.send_text("connected")
-        await asyncio.sleep(0.3)
-        await ws.close()
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        data = ws.receive_text()
-        assert data == "connected"
-        time.sleep(0.4)
-
-    assert disconnect_called == [True]
-    assert disconnect_code[0] == 1000
-    assert disconnect_duration[0] > 0.3
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
-def test_websocket_with_heartbeat_pong_timeout():
-    """Test that connection is closed when pong timeout is exceeded.
+class FakeWebSocket:
+    def __init__(self) -> None:
+        self.application_state = WebSocketState.CONNECTING
+        self.messages: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.sent_bytes: list[bytes] = []
+        self.close_calls: list[tuple[int, str | None]] = []
 
-    Note: This test simulates a pong timeout by not sending pong responses.
-    In TestClient, we can't easily test the actual ping/pong mechanism,
-    so we test the close behavior directly.
-    """
-    app = FastAPI()
-    disconnect_called = []
-    disconnect_code = []
+    async def accept(
+        self,
+        subprotocol: str | None = None,
+        headers: list[tuple[bytes, bytes]] | None = None,
+    ) -> None:
+        self.application_state = WebSocketState.CONNECTED
 
-    async def on_disconnect(code: int, duration: float):
-        disconnect_called.append(True)
-        disconnect_code.append(code)
+    async def receive(self) -> dict[str, Any]:
+        return await self.messages.get()
 
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=0.05,
-            pong_timeout=0.1,
-            on_disconnect=on_disconnect,
-        )
-        await ws.accept()
-        await ws.send_text("connected")
-        # Manually trigger close with timeout code
-        await asyncio.sleep(0.3)
-        await ws.close(code=1001, reason="Pong timeout")
+    async def send_bytes(self, data: bytes) -> None:
+        self.sent_bytes.append(data)
 
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        data = ws.receive_text()
-        assert data == "connected"
-        time.sleep(0.4)
-
-    assert disconnect_called == [True]
-    assert disconnect_code[0] == 1001
+    async def close(self, code: int, reason: str | None = None) -> None:
+        self.application_state = WebSocketState.DISCONNECTED
+        self.close_calls.append((code, reason))
 
 
-def test_websocket_with_heartbeat_message_count():
-    app = FastAPI()
-    received_counts = []
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=10.0,
-            pong_timeout=10.0,
-        )
-        await ws.accept()
-        # Receive 5 messages from client
-        for _ in range(5):
-            await ws.receive_text()
-        received_counts.append(ws.message_count)
-        await ws.close()
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        for i in range(5):
-            ws.send_text(f"message {i}")
-
-    assert received_counts == [5]
+def make_heartbeat(**kwargs: Any) -> tuple[FakeWebSocket, WebSocketWithHeartbeat]:
+    websocket = FakeWebSocket()
+    heartbeat = WebSocketWithHeartbeat(cast(WebSocket, websocket), **kwargs)
+    return websocket, heartbeat
 
 
-def test_websocket_with_heartbeat_connection_duration():
-    app = FastAPI()
-    durations = []
+def test_websocket_export_remains_unchanged() -> None:
+    from starlette.websockets import WebSocket as StarletteWebSocket
 
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=10.0,
-            pong_timeout=10.0,
-        )
-        await ws.accept()
-        await asyncio.sleep(0.2)
-        durations.append(ws.connection_duration)
-        await ws.close()
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as _:
-        time.sleep(0.3)
-
-    assert durations[0] >= 0.2
-    assert durations[0] < 1.0
+    assert WebSocket is StarletteWebSocket
 
 
-def test_websocket_with_heartbeat_custom_intervals():
-    app = FastAPI()
-    ping_intervals = []
-    pong_timeouts = []
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=5.0,
-            pong_timeout=2.0,
-        )
-        await ws.accept()
-        ping_intervals.append(ws.ping_interval)
-        pong_timeouts.append(ws.pong_timeout)
-        await ws.send_text("done")
-        await ws.close()
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        data = ws.receive_text()
-        assert data == "done"
-
-    assert ping_intervals == [5.0]
-    assert pong_timeouts == [2.0]
-
-
-def test_websocket_without_heartbeat_still_works():
+def test_plain_websocket_still_works() -> None:
     app = FastAPI()
 
     @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
+    async def websocket_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
-        await websocket.send_text("hello")
+        await websocket.send_text(await websocket.receive_text())
         await websocket.close()
 
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        data = ws.receive_text()
-        assert data == "hello"
+    with TestClient(app).websocket_connect("/ws") as websocket:
+        websocket.send_text("hello")
+        assert websocket.receive_text() == "hello"
 
 
-def test_websocket_with_heartbeat_receive_text():
+def test_heartbeat_defaults_and_overrides() -> None:
+    _, heartbeat = make_heartbeat()
+    assert heartbeat.ping_interval == 30.0
+    assert heartbeat.pong_timeout == 10.0
+
+    _, heartbeat = make_heartbeat(ping_interval=5.0, pong_timeout=2.0)
+    assert heartbeat.ping_interval == 5.0
+    assert heartbeat.pong_timeout == 2.0
+
+
+@pytest.mark.parametrize("name", ["ping_interval", "pong_timeout"])
+def test_heartbeat_intervals_must_be_positive(name: str) -> None:
+    with pytest.raises(ValueError, match=f"{name} must be greater than 0"):
+        make_heartbeat(**{name: 0})
+
+
+@pytest.mark.anyio
+async def test_heartbeat_sends_ping_at_configured_interval_and_accepts_pong() -> None:
+    websocket, heartbeat = make_heartbeat(ping_interval=0.01, pong_timeout=0.05)
+    await heartbeat.accept()
+
+    await asyncio.sleep(0.02)
+    assert websocket.sent_bytes == [b"ping"]
+
+    await websocket.messages.put({"type": "websocket.receive", "bytes": b"pong"})
+    await websocket.messages.put({"type": "websocket.receive", "text": "payload"})
+    assert await heartbeat.receive_text() == "payload"
+    assert heartbeat.message_count == 1
+
+    await asyncio.sleep(0.02)
+    assert websocket.close_calls == []
+    await heartbeat.close()
+
+
+def test_heartbeat_messages_work_through_asgi() -> None:
     app = FastAPI()
-    received = []
+    counts: list[int] = []
 
     @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=10.0,
-            pong_timeout=10.0,
+    async def websocket_endpoint(websocket: WebSocket) -> None:
+        heartbeat = WebSocketWithHeartbeat(
+            websocket, ping_interval=0.01, pong_timeout=0.2
         )
-        await ws.accept()
-        text = await ws.receive_text()
-        received.append(text)
-        await ws.send_text(f"echo: {text}")
-        await ws.close()
+        await heartbeat.accept()
+        message = await heartbeat.receive_text()
+        counts.append(heartbeat.message_count)
+        await heartbeat.send_text(message)
+        await heartbeat.close()
 
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        ws.send_text("test message")
-        data = ws.receive_text()
-        assert data == "echo: test message"
+    with TestClient(app).websocket_connect("/ws") as websocket:
+        assert websocket.receive_bytes() == b"ping"
+        websocket.send_bytes(b"pong")
+        websocket.send_text("hello")
+        assert websocket.receive_text() == "hello"
 
-    assert received == ["test message"]
-
-
-def test_websocket_with_heartbeat_receive_bytes():
-    app = FastAPI()
-    received = []
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=10.0,
-            pong_timeout=10.0,
-        )
-        await ws.accept()
-        data = await ws.receive_bytes()
-        received.append(data)
-        await ws.send_bytes(b"echo: " + data)
-        await ws.close()
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        ws.send_bytes(b"binary data")
-        data = ws.receive_bytes()
-        assert data == b"echo: binary data"
-
-    assert received == [b"binary data"]
+    assert counts == [1]
 
 
-def test_websocket_with_heartbeat_receive_json():
-    app = FastAPI()
-    received = []
+@pytest.mark.anyio
+async def test_pong_timeout_closes_with_1001_and_invokes_async_callback() -> None:
+    disconnected: list[tuple[int, float]] = []
 
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=10.0,
-            pong_timeout=10.0,
-        )
-        await ws.accept()
-        data = await ws.receive_json()
-        received.append(data)
-        await ws.send_json({"echo": data})
-        await ws.close()
+    async def on_disconnect(code: int, duration: float) -> None:
+        await asyncio.sleep(0)
+        disconnected.append((code, duration))
 
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        ws.send_json({"key": "value"})
-        data = ws.receive_json()
-        assert data == {"echo": {"key": "value"}}
+    websocket, heartbeat = make_heartbeat(
+        ping_interval=0.01,
+        pong_timeout=0.01,
+        on_disconnect=on_disconnect,
+    )
+    await heartbeat.accept()
+    await asyncio.sleep(0.04)
 
-    assert received == [{"key": "value"}]
+    assert websocket.sent_bytes == [b"ping"]
+    assert websocket.close_calls == [(1001, "Pong timeout")]
+    assert len(disconnected) == 1
+    assert disconnected[0][0] == 1001
+    assert disconnected[0][1] > 0
 
-
-def test_websocket_with_heartbeat_iter_text():
-    app = FastAPI()
-    received = []
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=10.0,
-            pong_timeout=10.0,
-        )
-        await ws.accept()
-        async for text in ws.iter_text():
-            received.append(text)
-            if text == "stop":
-                break
-        await ws.close()
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        ws.send_text("message 1")
-        ws.send_text("message 2")
-        ws.send_text("stop")
-
-    assert received == ["message 1", "message 2", "stop"]
+    duration = heartbeat.connection_duration
+    await asyncio.sleep(0.01)
+    assert heartbeat.connection_duration == duration
 
 
-def test_websocket_with_heartbeat_on_disconnect_async():
-    app = FastAPI()
-    disconnect_data = []
+@pytest.mark.anyio
+async def test_remote_disconnect_invokes_sync_callback_once() -> None:
+    disconnected: list[tuple[int, float]] = []
+    websocket, heartbeat = make_heartbeat(
+        ping_interval=1,
+        on_disconnect=lambda code, duration: disconnected.append((code, duration)),
+    )
+    await heartbeat.accept()
+    await websocket.messages.put(
+        {"type": "websocket.disconnect", "code": 1006, "reason": "lost"}
+    )
 
-    async def on_disconnect(code: int, duration: float):
-        disconnect_data.append((code, duration))
-        await asyncio.sleep(0.01)
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        await heartbeat.receive_text()
 
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=10.0,
-            pong_timeout=10.0,
-            on_disconnect=on_disconnect,
-        )
-        await ws.accept()
-        await ws.send_text("hello")
-        await ws.close(code=1001, reason="going away")
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        data = ws.receive_text()
-        assert data == "hello"
-
-    assert len(disconnect_data) == 1
-    assert disconnect_data[0][0] == 1001
-    assert disconnect_data[0][1] > 0
+    assert exc_info.value.code == 1006
+    assert len(disconnected) == 1
+    assert disconnected[0][0] == 1006
+    assert disconnected[0][1] >= 0
+    await heartbeat.close()
+    assert len(disconnected) == 1
 
 
-def test_websocket_with_heartbeat_properties():
-    app = FastAPI()
-    props = {}
+@pytest.mark.anyio
+async def test_message_count_tracks_all_non_heartbeat_receive_methods() -> None:
+    websocket, heartbeat = make_heartbeat(ping_interval=1)
+    await heartbeat.accept()
+    await websocket.messages.put({"type": "websocket.receive", "text": "one"})
+    await websocket.messages.put({"type": "websocket.receive", "bytes": b"two"})
+    await websocket.messages.put({"type": "websocket.receive", "text": '{"value": 3}'})
 
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=10.0,
-            pong_timeout=10.0,
-        )
-        await ws.accept()
-        props["client_state"] = ws.client_state
-        props["application_state"] = ws.application_state
-        props["url"] = str(ws.url)
-        await ws.send_text("done")
-        await ws.close()
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        data = ws.receive_text()
-        assert data == "done"
-
-    assert props["client_state"] == WebSocketState.CONNECTED
-    assert props["application_state"] == WebSocketState.CONNECTED
-    assert "ws://testserver/ws" in props["url"]
+    assert await heartbeat.receive_text() == "one"
+    assert await heartbeat.receive_bytes() == b"two"
+    assert await heartbeat.receive_json() == {"value": 3}
+    assert heartbeat.message_count == 3
+    await heartbeat.close()
 
 
-def test_websocket_with_heartbeat_send_json_binary():
-    app = FastAPI()
+@pytest.mark.anyio
+async def test_connection_duration_starts_when_accepted() -> None:
+    _, heartbeat = make_heartbeat(ping_interval=1)
+    await asyncio.sleep(0.01)
+    await heartbeat.accept()
+    started_duration = heartbeat.connection_duration
+    await asyncio.sleep(0.01)
 
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=10.0,
-            pong_timeout=10.0,
-        )
-        await ws.accept()
-        await ws.send_json({"binary": True}, mode="binary")
-        await ws.close()
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        data = ws.receive_bytes()
-        import json
-        assert json.loads(data.decode("utf-8")) == {"binary": True}
-
-
-def test_websocket_with_heartbeat_message_count_receive():
-    """Test that message_count tracks received messages correctly."""
-    app = FastAPI()
-    counts = []
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=10.0,
-            pong_timeout=10.0,
-        )
-        await ws.accept()
-        # Receive 3 messages
-        for _ in range(3):
-            await ws.receive_text()
-        counts.append(ws.message_count)
-        await ws.close()
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        ws.send_text("msg1")
-        ws.send_text("msg2")
-        ws.send_text("msg3")
-
-    assert counts == [3]
-
-
-def test_websocket_with_heartbeat_on_disconnect_sync():
-    """Test that sync on_disconnect callback works."""
-    app = FastAPI()
-    disconnect_data = []
-
-    def on_disconnect(code: int, duration: float):
-        disconnect_data.append((code, duration))
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        ws = WebSocketWithHeartbeat(
-            websocket.scope,
-            websocket._receive,
-            websocket._send,
-            ping_interval=10.0,
-            pong_timeout=10.0,
-            on_disconnect=on_disconnect,
-        )
-        await ws.accept()
-        await ws.send_text("hello")
-        await ws.close(code=1000, reason="normal")
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws") as ws:
-        data = ws.receive_text()
-        assert data == "hello"
-
-    assert len(disconnect_data) == 1
-    assert disconnect_data[0][0] == 1000
-    assert disconnect_data[0][1] > 0
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
-
+    assert started_duration < 0.005
+    assert heartbeat.connection_duration >= 0.01
+    await heartbeat.close()
