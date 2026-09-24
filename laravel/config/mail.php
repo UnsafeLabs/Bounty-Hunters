@@ -18,6 +18,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Fallback Mailer
+    |--------------------------------------------------------------------------
+    |
+    | When the primary mailer is unavailable (for example the SMTP server is
+    | down or refuses the connection), the mailer named here is used instead
+    | so that transactional email is not silently lost. The "failover" mailer
+    | below wires this value into Laravel's built-in failover transport.
+    |
+    */
+
+    'fallback_mailer' => env('MAIL_FALLBACK_MAILER', 'log'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Mailer Configurations
     |--------------------------------------------------------------------------
     |
@@ -36,6 +50,14 @@ return [
     */
 
     'mailers' => [
+
+        'failover' => [
+            'transport' => 'failover',
+            'mailers' => [
+                env('MAIL_MAILER', 'smtp'),
+                env('MAIL_FALLBACK_MAILER', 'log'),
+            ],
+        ],
 
         'smtp' => [
             'transport' => 'smtp',
