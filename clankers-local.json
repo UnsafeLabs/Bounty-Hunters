@@ -804,6 +804,12 @@
     "last_pr": "2026-07-21T15:42:17.249Z"
   },
   {
+    "username": "book051193-hash",
+    "total_prs": 8,
+    "first_pr": "2026-09-22T02:24:54.836Z",
+    "last_pr": "2026-09-24T10:42:10.318Z"
+  },
+  {
     "username": "Mburdo",
     "total_prs": 7,
     "first_pr": "2026-05-13T15:20:17Z",
@@ -946,12 +952,6 @@
     "total_prs": 7,
     "first_pr": "2026-09-21T14:50:00.766Z",
     "last_pr": "2026-09-22T07:03:21.355Z"
-  },
-  {
-    "username": "book051193-hash",
-    "total_prs": 7,
-    "first_pr": "2026-09-22T02:24:54.836Z",
-    "last_pr": "2026-09-24T00:37:18.004Z"
   },
   {
     "username": "TsukinowaRin",
