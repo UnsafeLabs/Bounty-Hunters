@@ -109,6 +109,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cache Health Checks
+    |--------------------------------------------------------------------------
+    |
+    | These options control the cache health monitoring used by the
+    | `cache:status` command and the GET /health/cache endpoint. When enabled,
+    | the active store is probed with a short-lived sentinel key. Probes are
+    | memoized for `health_check_interval` seconds so repeated calls within a
+    | request do not hammer the store.
+    |
+    */
+
+    'health_check_enabled' => env('CACHE_HEALTH_CHECK_ENABLED', true),
+
+    'health_check_interval' => env('CACHE_HEALTH_CHECK_INTERVAL', 300),
+
+    /*
+    |--------------------------------------------------------------------------
     | Cache Key Prefix
     |--------------------------------------------------------------------------
     |
