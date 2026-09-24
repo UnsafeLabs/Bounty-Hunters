@@ -56,6 +56,10 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
+import {
+  MetricsAggregator,
+  type MetricsAggregatorShape,
+} from "./observability/MetricsAggregator.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
   CheckpointDiffQuery,
@@ -333,6 +337,7 @@ const buildAppUnderTest = (options?: {
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
     browserTraceCollector?: Partial<BrowserTraceCollectorShape>;
+    metricsAggregator?: Partial<MetricsAggregatorShape>;
     serverLifecycleEvents?: Partial<ServerLifecycleEventsShape>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
     serverEnvironment?: Partial<ServerEnvironmentShape>;
@@ -687,6 +692,15 @@ const buildAppUnderTest = (options?: {
     );
 
     const appLayer = servedRoutesLayer.pipe(
+      Layer.provide(
+        Layer.mock(MetricsAggregator)({
+          record: () => Effect.void,
+          flush: Effect.void,
+          windows: Effect.succeed([]),
+          latest: Effect.as(Effect.void, undefined),
+          ...options?.layers?.metricsAggregator,
+        }),
+      ),
       Layer.provide(
         Layer.mock(BrowserTraceCollector)({
           record: () => Effect.void,

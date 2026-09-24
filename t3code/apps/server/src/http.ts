@@ -23,6 +23,7 @@ import {
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
+import { MetricsAggregator } from "./observability/MetricsAggregator.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
@@ -319,6 +320,23 @@ export const staticAndDevRouteLayer = HttpRouter.add(
     return HttpServerResponse.uint8Array(data, {
       status: 200,
       contentType,
+    });
+  }),
+);
+
+/**
+ * Aggregated RPC metrics as a JSON array of 1-minute windows (oldest first).
+ */
+export const metricsAggregatedRouteLayer = HttpRouter.add(
+  "GET",
+  "/metrics/aggregated",
+  Effect.gen(function* () {
+    const aggregator = yield* MetricsAggregator;
+    const windows = yield* aggregator.windows;
+
+    return HttpServerResponse.jsonUnsafe(windows, {
+      status: 200,
+      headers: browserApiCorsHeaders,
     });
   }),
 );

@@ -4,11 +4,13 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Metric from "effect/Metric";
+import * as Option from "effect/Option";
 import * as References from "effect/References";
 import * as Stream from "effect/Stream";
 
 import { outcomeFromExit } from "./Attributes.ts";
 import { metricAttributes, rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
+import { MetricsAggregator } from "./MetricsAggregator.ts";
 
 const RPC_SPAN_PREFIX = "ws.rpc";
 const DEFAULT_RPC_SPAN_ATTRIBUTES = {
@@ -61,6 +63,48 @@ const withRpcStreamTracing = <A, E, R>(
       )
     : stream.pipe(Stream.provideService(References.TracerEnabled, false));
 
+/**
+ * Feeds a finished RPC call into the sliding-window aggregator when one is
+ * available. `Effect.serviceOption` keeps the requirement out of the caller's
+ * context, so instrumented call sites do not have to provide the aggregator.
+ */
+const recordAggregateSample = <E>(
+  method: string,
+  elapsedNanos: bigint,
+  exit: Exit.Exit<unknown, E>,
+): Effect.Effect<void, never, never> =>
+  Effect.serviceOption(MetricsAggregator).pipe(
+    Effect.flatMap((aggregator) =>
+      Option.match(aggregator, {
+        onNone: () => Effect.void,
+        onSome: (service) =>
+          service.record({
+            method,
+            durationMs: Number(elapsedNanos) / 1_000_000,
+            error: outcomeFromExit(exit) !== "success",
+          }),
+      }),
+    ),
+  );
+
+const withAggregateSample = <A, E, R>(
+  method: string,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.gen(function* () {
+    const startedAt = yield* Clock.currentTimeNanos;
+    const exit = yield* Effect.exit(effect);
+    const endedAt = yield* Clock.currentTimeNanos;
+
+    yield* recordAggregateSample(method, endedAt > startedAt ? endedAt - startedAt : 0n, exit);
+
+    if (Exit.isFailure(exit)) {
+      return yield* Effect.failCause(exit.cause);
+    }
+
+    return exit.value;
+  });
+
 const recordRpcStreamMetrics = <E>(
   method: string,
   startedAt: bigint,
@@ -84,6 +128,8 @@ const recordRpcStreamMetrics = <E>(
       ),
       1,
     );
+
+    yield* recordAggregateSample(method, elapsedNanos, exit);
   });
 
 export const observeRpcEffect = <A, E, R>(
@@ -101,7 +147,7 @@ export const observeRpcEffect = <A, E, R>(
     }),
   );
 
-  return withRpcEffectTracing(method, instrumented, traceAttributes);
+  return withRpcEffectTracing(method, withAggregateSample(method, instrumented), traceAttributes);
 };
 
 export const observeRpcStream = <A, E, R>(
