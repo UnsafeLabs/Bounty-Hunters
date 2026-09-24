@@ -22,6 +22,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Session Driver Fallback
+    |--------------------------------------------------------------------------
+    |
+    | When the primary session driver is unavailable (e.g. its connection
+    | fails), the application falls back to this driver so requests keep
+    | working instead of failing. Defaults to "file", which only needs
+    | writable local disk storage.
+    |
+    */
+
+    'fallback' => env('SESSION_FALLBACK_DRIVER', 'file'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Session Lifetime
     |--------------------------------------------------------------------------
     |
