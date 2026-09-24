@@ -233,6 +233,9 @@ filterwarnings = [
     "error",
 ]
 timeout = "20"
+markers = [
+    "xdist_group: mark test to run in a specific xdist group",
+]
 
 [tool.coverage.run]
 parallel = true

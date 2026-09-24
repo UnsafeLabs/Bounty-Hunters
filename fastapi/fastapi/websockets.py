@@ -166,8 +166,14 @@ class WebSocketWithHeartbeat:
                 await asyncio.sleep(self.ping_interval)
                 if self._closed:
                     return
+                if self.websocket.application_state != WebSocketState.CONNECTED:
+                    continue
                 self._pong_received.clear()
-                await self.websocket.send_bytes(self.ping_message)
+                try:
+                    await self.websocket.send_bytes(self.ping_message)
+                except Exception as exc:
+                    await self._handle_send_error(exc)
+                    return
                 try:
                     await asyncio.wait_for(
                         self._pong_received.wait(), timeout=self.pong_timeout
@@ -179,6 +185,13 @@ class WebSocketWithHeartbeat:
             raise
         except WebSocketDisconnect as exc:
             await self._handle_disconnect(exc.code)
+
+    async def _handle_send_error(self, exc: Exception) -> None:
+        self._mark_closed()
+        try:
+            await self.websocket.close(code=1001, reason="Heartbeat send failed")
+        finally:
+            await self._notify_disconnect(1001)
 
     async def _close_for_timeout(self) -> None:
         self._mark_closed()
