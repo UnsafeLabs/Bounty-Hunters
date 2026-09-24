@@ -1,4 +1,5 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import (
     Annotated,
     Any,
@@ -16,6 +17,21 @@ from starlette.datastructures import Headers as Headers  # noqa: F401
 from starlette.datastructures import QueryParams as QueryParams  # noqa: F401
 from starlette.datastructures import State as State  # noqa: F401
 from starlette.datastructures import UploadFile as StarletteUploadFile
+
+
+@dataclass
+class ValidationResult:
+    """
+    The result of validating an uploaded file.
+
+    Returned by [`UploadFile.validate`][fastapi.UploadFile.validate].
+    """
+
+    is_valid: Annotated[bool, Doc("Whether the file passed all configured checks.")]
+    file_size: Annotated[int, Doc("The size of the file in bytes.")]
+    content_type: Annotated[
+        str | None, Doc("The content type of the file, from the headers.")
+    ]
 
 
 class UploadFile(StarletteUploadFile):
@@ -62,6 +78,100 @@ class UploadFile(StarletteUploadFile):
     content_type: Annotated[
         str | None, Doc("The content type of the request, from the headers.")
     ]
+    max_size: Annotated[
+        int | None,
+        Doc("The maximum allowed size in bytes, `None` means no limit."),
+    ]
+    allowed_content_types: Annotated[
+        Sequence[str] | None,
+        Doc("The allowed content types, `None` means no restriction."),
+    ]
+
+    def __init__(
+        self,
+        file: BinaryIO,
+        *,
+        size: int | None = None,
+        filename: str | None = None,
+        headers: Headers | None = None,
+        max_size: int | None = None,
+        allowed_content_types: Sequence[str] | None = None,
+    ) -> None:
+        super().__init__(file, size=size, filename=filename, headers=headers)
+        self.max_size = max_size
+        self.allowed_content_types = allowed_content_types
+
+    async def validate(
+        self,
+        max_size: Annotated[
+            int | None,
+            Doc(
+                """
+                The maximum allowed size in bytes.
+
+                Defaults to the `max_size` set when creating the `UploadFile`.
+                """
+            ),
+        ] = None,
+        allowed_content_types: Annotated[
+            Sequence[str] | None,
+            Doc(
+                """
+                The allowed content types.
+
+                Defaults to the `allowed_content_types` set when creating the
+                `UploadFile`.
+                """
+            ),
+        ] = None,
+    ) -> ValidationResult:
+        """
+        Validate the file against a maximum size and a list of allowed content types.
+
+        Raises an `HTTPException` with status `413` when the file is larger than the
+        maximum size, and with status `415` when its content type is not allowed.
+
+        Each check is skipped when its constraint is `None`, for example when the
+        file was created without a `max_size`.
+        """
+        from .exceptions import HTTPException
+
+        effective_max_size = max_size if max_size is not None else self.max_size
+        effective_content_types = (
+            allowed_content_types
+            if allowed_content_types is not None
+            else self.allowed_content_types
+        )
+
+        file_size = self.size
+        if file_size is None:
+            current_position = self.file.tell()
+            self.file.seek(0, 2)
+            file_size = self.file.tell()
+            self.file.seek(current_position)
+
+        if effective_max_size is not None and file_size > effective_max_size:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is {effective_max_size} bytes.",
+            )
+
+        content_type = self.content_type
+        if (
+            effective_content_types is not None
+            and content_type not in effective_content_types
+        ):
+            raise HTTPException(
+                status_code=415,
+                detail=(
+                    "Unsupported media type. "
+                    f"Allowed types: {list(effective_content_types)}."
+                ),
+            )
+
+        return ValidationResult(
+            is_valid=True, file_size=file_size, content_type=content_type
+        )
 
     async def write(
         self,
