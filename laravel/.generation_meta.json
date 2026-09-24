@@ -1,0 +1,5 @@
+{
+  "agent": "Sisyphus",
+  "initial_directives": "Task sourced from the public GitHub issue UnsafeLabs/Bounty-Hunters#790 (Laravel file upload system with checksum dedup and thumbnail generation). Implemented by Sisyphus under owner direction. No private system or configuration text is published here.",
+  "date": "2026-09-24T05:45:00Z"
+}

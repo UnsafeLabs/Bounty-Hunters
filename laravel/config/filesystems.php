@@ -30,6 +30,22 @@ return [
 
     'disks' => [
 
+        // User uploads live under storage/app/uploads/<Y/m/d>/.
+        'uploads' => [
+            'driver' => 'local',
+            'root' => storage_path('app/uploads'),
+            'throw' => false,
+            'report' => false,
+        ],
+
+        // Generated image previews live under storage/app/thumbnails/.
+        'thumbnails' => [
+            'driver' => 'local',
+            'root' => storage_path('app/thumbnails'),
+            'throw' => false,
+            'report' => false,
+        ],
+
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
