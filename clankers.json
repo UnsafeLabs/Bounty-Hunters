@@ -678,6 +678,12 @@
     "last_pr": "2026-05-20T02:56:12.502Z"
   },
   {
+    "username": "book051193-hash",
+    "total_prs": 12,
+    "first_pr": "2026-09-22T02:24:54.836Z",
+    "last_pr": "2026-09-25T05:18:43.395Z"
+  },
+  {
     "username": "dacdoyx",
     "total_prs": 12,
     "first_pr": "2026-06-25T21:09:06.264Z",
@@ -892,12 +898,6 @@
     "total_prs": 9,
     "first_pr": "2026-07-20T04:47:08.492Z",
     "last_pr": "2026-07-24T10:04:58.415Z"
-  },
-  {
-    "username": "book051193-hash",
-    "total_prs": 9,
-    "first_pr": "2026-09-22T02:24:54.836Z",
-    "last_pr": "2026-09-24T19:04:49.409Z"
   },
   {
     "username": "maojianian25-png",
