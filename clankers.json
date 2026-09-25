@@ -546,6 +546,12 @@
     "last_pr": "2026-09-24T05:12:46.967Z"
   },
   {
+    "username": "book051193-hash",
+    "total_prs": 15,
+    "first_pr": "2026-09-22T02:24:54.836Z",
+    "last_pr": "2026-09-25T16:47:14.978Z"
+  },
+  {
     "username": "callmekidz",
     "total_prs": 14,
     "first_pr": "2026-05-13T19:54:10Z",
@@ -640,12 +646,6 @@
     "total_prs": 13,
     "first_pr": "2026-05-16T17:07:47.940Z",
     "last_pr": "2026-05-29T15:00:40.798Z"
-  },
-  {
-    "username": "book051193-hash",
-    "total_prs": 13,
-    "first_pr": "2026-09-22T02:24:54.836Z",
-    "last_pr": "2026-09-25T08:33:34.856Z"
   },
   {
     "username": "dicnunz",
@@ -898,6 +898,12 @@
     "total_prs": 9,
     "first_pr": "2026-07-20T04:47:08.492Z",
     "last_pr": "2026-07-24T10:04:58.415Z"
+  },
+  {
+    "username": "themaksat",
+    "total_prs": 9,
+    "first_pr": "2026-09-21T14:50:00.766Z",
+    "last_pr": "2026-09-25T13:56:42.314Z"
   },
   {
     "username": "maojianian25-png",
@@ -1180,12 +1186,6 @@
     "total_prs": 7,
     "first_pr": "2026-09-10T01:20:58.780Z",
     "last_pr": "2026-09-10T01:34:49.668Z"
-  },
-  {
-    "username": "themaksat",
-    "total_prs": 7,
-    "first_pr": "2026-09-21T14:50:00.766Z",
-    "last_pr": "2026-09-22T07:03:21.355Z"
   },
   {
     "username": "freeediting35-png",
