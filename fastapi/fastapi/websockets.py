@@ -85,11 +85,13 @@ class _BackgroundTask:
 
 
 class WebSocketWithHeartbeat:
-    """Add an application-level heartbeat and connection metrics to a WebSocket.
+    """Add an application heartbeat and connection metrics to a WebSocket.
 
-    ASGI does not expose protocol-level ping and pong control frames. This wrapper
-    therefore sends ``ping_message`` as a binary WebSocket message and consumes a
-    matching ``pong_message`` received from the client.
+    RFC 6455 PING/PONG control frames are intentionally handled by the ASGI
+    protocol server and are not exposed as application events by core ASGI.
+    Configure the server's WebSocket ping interval/timeout when protocol-level
+    heartbeats are required. This wrapper provides an application-level
+    binary heartbeat for per-connection liveness plus disconnect metrics.
     """
 
     def __init__(
