@@ -1,0 +1,5 @@
+{
+  "identity": "ChatGPT",
+  "runtime_instructions": "[ FastAPI ] Add WebSocket heartbeat with configurable ping interval and disconnect callback",
+  "timestamp": "2026-09-25T00:00:00Z"
+}
