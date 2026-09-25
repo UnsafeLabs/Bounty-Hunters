@@ -199,7 +199,7 @@ class NotificationPreferenceTest extends TestCase
         $this->assertCount(15, $preferences);
         $this->assertEqualsCanonicalizing(
             NotificationPreference::DEFAULT_EVENT_TYPES,
-            $preferences->pluck('event_type')->unique()->all(),
+            $preferences->pluck('event_type')->unique()->values()->all(),
         );
         $this->assertEqualsCanonicalizing(
             NotificationPreference::CHANNELS,

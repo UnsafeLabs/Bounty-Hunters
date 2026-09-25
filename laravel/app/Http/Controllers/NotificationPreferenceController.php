@@ -17,7 +17,24 @@ class NotificationPreferenceController extends Controller
             ->orderBy('channel')
             ->paginate(50);
 
-        return response()->json($preferences);
+        return response()->json([
+            'data' => $preferences->items(),
+            'links' => [
+                'first' => $preferences->url(1),
+                'last' => $preferences->url($preferences->lastPage()),
+                'prev' => $preferences->previousPageUrl(),
+                'next' => $preferences->nextPageUrl(),
+            ],
+            'meta' => [
+                'current_page' => $preferences->currentPage(),
+                'from' => $preferences->firstItem(),
+                'last_page' => $preferences->lastPage(),
+                'path' => $preferences->path(),
+                'per_page' => $preferences->perPage(),
+                'to' => $preferences->lastItem(),
+                'total' => $preferences->total(),
+            ],
+        ]);
     }
 
     public function update(Request $request, NotificationPreference $notificationPreference): JsonResponse
