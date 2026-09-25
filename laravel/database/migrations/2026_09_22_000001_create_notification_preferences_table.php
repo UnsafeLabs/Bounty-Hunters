@@ -15,11 +15,12 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
             $table->enum('channel', ['mail', 'slack', 'database']);
-            $table->string('event_type');
+            $table->string('event_type', 100);
             $table->boolean('enabled')->default(true);
             $table->timestamps();
 
             $table->unique(['user_id', 'channel', 'event_type']);
+            $table->index(['user_id', 'event_type']);
         });
     }
 

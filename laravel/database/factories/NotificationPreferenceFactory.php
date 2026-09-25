@@ -14,8 +14,8 @@ class NotificationPreferenceFactory extends Factory
     {
         return [
             'user_id' => User::factory(),
-            'channel' => fake()->randomElement(['mail', 'slack', 'database']),
-            'event_type' => fake()->unique()->uuid(),
+            'channel' => fake()->randomElement(NotificationPreference::CHANNELS),
+            'event_type' => fake()->randomElement(NotificationPreference::DEFAULT_EVENT_TYPES),
             'enabled' => fake()->boolean(),
         ];
     }
