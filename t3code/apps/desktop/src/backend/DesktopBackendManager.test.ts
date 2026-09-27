@@ -137,6 +137,8 @@ function makeManagerLayer(input: {
           handleBackendReady: Effect.void,
           dispatchMenuAction: () => Effect.void,
           syncAppearance: Effect.void,
+          notifyBackendRestarting: () => Effect.void,
+          promptBackendFailure: () => Effect.succeed("retry" as const),
           ...input.desktopWindow,
         } satisfies DesktopWindow.DesktopWindowShape),
       ),
@@ -487,6 +489,194 @@ describe("DesktopBackendManager", () => {
         yield* TestClock.adjust(Duration.millis(500));
 
         assert.equal(yield* Queue.size(starts), 0);
+        assert.equal((yield* manager.snapshot).desiredRunning, false);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("restarts the backend after three consecutive failed health checks", () =>
+    Effect.gen(function* () {
+      const spawnCount = yield* Ref.make(0);
+      const notifyCalls = yield* Ref.make(0);
+      const ready = yield* Deferred.make<void>();
+      let failProbes = false;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            yield* Ref.update(spawnCount, (count) => count + 1);
+            const exited = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+            yield* Scope.addFinalizer(
+              scope,
+              Deferred.succeed(exited, ChildProcessSpawner.ExitCode(0)),
+            );
+            return makeProcess({ exitCode: Deferred.await(exited) });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer((request) =>
+          Effect.succeed(responseForRequest(request, failProbes ? 500 : 200)),
+        ),
+        desktopWindow: {
+          handleBackendReady: Deferred.succeed(ready, void 0).pipe(Effect.asVoid),
+          notifyBackendRestarting: () =>
+            Ref.update(notifyCalls, (count) => count + 1).pipe(Effect.asVoid),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        yield* Deferred.await(ready);
+
+        failProbes = true;
+        for (let i = 0; i < 40; i += 1) {
+          if ((yield* Ref.get(spawnCount)) >= 2) {
+            break;
+          }
+          yield* TestClock.adjust(Duration.seconds(5));
+        }
+
+        assert.equal(yield* Ref.get(spawnCount), 2);
+        for (let i = 0; i < 40; i += 1) {
+          if ((yield* Ref.get(notifyCalls)) >= 1) {
+            break;
+          }
+          yield* TestClock.adjust(Duration.seconds(5));
+        }
+        assert.equal(yield* Ref.get(notifyCalls), 1);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("does not restart while health checks keep succeeding", () =>
+    Effect.gen(function* () {
+      const spawnCount = yield* Ref.make(0);
+      const notifyCalls = yield* Ref.make(0);
+      const ready = yield* Deferred.make<void>();
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            yield* Ref.update(spawnCount, (count) => count + 1);
+            const exited = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+            yield* Scope.addFinalizer(
+              scope,
+              Deferred.succeed(exited, ChildProcessSpawner.ExitCode(0)),
+            );
+            return makeProcess({ exitCode: Deferred.await(exited) });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        desktopWindow: {
+          handleBackendReady: Deferred.succeed(ready, void 0).pipe(Effect.asVoid),
+          notifyBackendRestarting: () =>
+            Ref.update(notifyCalls, (count) => count + 1).pipe(Effect.asVoid),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        yield* Deferred.await(ready);
+
+        for (let i = 0; i < 6; i += 1) {
+          yield* TestClock.adjust(Duration.seconds(15));
+        }
+
+        assert.equal(yield* Ref.get(spawnCount), 1);
+        assert.equal(yield* Ref.get(notifyCalls), 0);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("prompts to quit after three unrestored health-triggered restarts", () =>
+    Effect.gen(function* () {
+      const spawnCount = yield* Ref.make(0);
+      const readyCount = yield* Ref.make(0);
+      const promptCalls = yield* Ref.make(0);
+      const promptInput = yield* Ref.make({ restartAttempts: 0 });
+      let failBudget = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            yield* Ref.update(spawnCount, (count) => count + 1);
+            const exited = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+            yield* Scope.addFinalizer(
+              scope,
+              Deferred.succeed(exited, ChildProcessSpawner.ExitCode(0)),
+            );
+            return makeProcess({ exitCode: Deferred.await(exited) });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer((request) => {
+          if (failBudget > 0) {
+            failBudget -= 1;
+            return Effect.succeed(responseForRequest(request, 500));
+          }
+          return Effect.succeed(responseForRequest(request, 200));
+        }),
+        desktopWindow: {
+          handleBackendReady: Ref.update(readyCount, (count) => count + 1).pipe(Effect.asVoid),
+          promptBackendFailure: (input) =>
+            Ref.update(promptCalls, (count) => count + 1).pipe(
+              Effect.andThen(Ref.set(promptInput, input)),
+              Effect.as("quit" as const),
+            ),
+        },
+      });
+
+      const waitFor = (label: string, check: Effect.Effect<boolean>) =>
+        Effect.gen(function* () {
+          for (let i = 0; i < 60; i += 1) {
+            if (yield* check) {
+              return;
+            }
+            yield* TestClock.adjust(Duration.seconds(5));
+          }
+          assert.fail(`timed out waiting for ${label}`);
+        });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+
+        for (let cycle = 0; cycle < 2; cycle += 1) {
+          yield* waitFor(
+            `readiness ${cycle + 1}`,
+            Ref.get(readyCount).pipe(Effect.map((n) => n >= cycle + 1)),
+          );
+          failBudget = 3;
+          yield* waitFor(
+            `restart ${cycle + 1}`,
+            Ref.get(spawnCount).pipe(Effect.map((n) => n >= cycle + 2)),
+          );
+        }
+
+        yield* waitFor("readiness 3", Ref.get(readyCount).pipe(Effect.map((n) => n >= 3)));
+        failBudget = 3;
+
+        yield* waitFor("failure prompt", Ref.get(promptCalls).pipe(Effect.map((n) => n >= 1)));
+
+        assert.equal(yield* Ref.get(spawnCount), 3);
+        assert.deepEqual(yield* Ref.get(promptInput), { restartAttempts: 3 });
         assert.equal((yield* manager.snapshot).desiredRunning, false);
       }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
     }),

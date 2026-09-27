@@ -11,6 +11,7 @@ import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
@@ -33,6 +34,7 @@ type DesktopWindowRuntimeServices =
   | DesktopAssets.DesktopAssets
   | DesktopServerExposure.DesktopServerExposure
   | DesktopState.DesktopState
+  | ElectronDialog.ElectronDialog
   | ElectronMenu.ElectronMenu
   | ElectronShell.ElectronShell
   | ElectronTheme.ElectronTheme
@@ -59,6 +61,10 @@ export interface DesktopWindowShape {
   readonly handleBackendReady: Effect.Effect<void, DesktopWindowError>;
   readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
   readonly syncAppearance: Effect.Effect<void>;
+  readonly notifyBackendRestarting: (input: { readonly attempt: number }) => Effect.Effect<void>;
+  readonly promptBackendFailure: (input: {
+    readonly restartAttempts: number;
+  }) => Effect.Effect<"retry" | "quit">;
 }
 
 export class DesktopWindow extends Context.Service<DesktopWindow, DesktopWindowShape>()(
@@ -147,6 +153,7 @@ function bindFirstRevealTrigger(
 const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const assets = yield* DesktopAssets.DesktopAssets;
+  const electronDialog = yield* ElectronDialog.ElectronDialog;
   const electronMenu = yield* ElectronMenu.ElectronMenu;
   const electronShell = yield* ElectronShell.ElectronShell;
   const electronTheme = yield* ElectronTheme.ElectronTheme;
@@ -362,6 +369,41 @@ const make = Effect.gen(function* () {
         syncWindowAppearance(window, shouldUseDarkColors),
       );
     }).pipe(Effect.withSpan("desktop.window.syncAppearance")),
+    notifyBackendRestarting: Effect.fn("desktop.window.notifyBackendRestarting")(function* (input: {
+      readonly attempt: number;
+    }): Effect.fn.Return<void> {
+      yield* logWindowWarning("backend restarting after failed health checks", {
+        attempt: input.attempt,
+      });
+      yield* electronDialog
+        .showMessageBox({
+          type: "info",
+          buttons: ["OK"],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+          message: "Backend is restarting",
+          detail: `The backend stopped responding and is being restarted (attempt ${input.attempt}).`,
+        })
+        .pipe(Effect.asVoid);
+    }),
+    promptBackendFailure: Effect.fn("desktop.window.promptBackendFailure")(function* (input: {
+      readonly restartAttempts: number;
+    }): Effect.fn.Return<"retry" | "quit"> {
+      yield* logWindowWarning("backend restarts keep failing, prompting user", {
+        restartAttempts: input.restartAttempts,
+      });
+      const result = yield* electronDialog.showMessageBox({
+        type: "error",
+        buttons: ["Retry Backend", "Quit"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        message: "Backend failed to recover",
+        detail: `The backend did not recover after ${input.restartAttempts} restarts. Retry the backend or quit the app.`,
+      });
+      return result.response === 0 ? ("retry" as const) : ("quit" as const);
+    }),
   });
 });
 

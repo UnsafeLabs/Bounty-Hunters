@@ -36,6 +36,11 @@ const DEFAULT_BACKEND_READINESS_INTERVAL = Duration.millis(100);
 const DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT = Duration.seconds(1);
 const DEFAULT_BACKEND_TERMINATE_GRACE = Duration.seconds(2);
 const BACKEND_READINESS_PATH = "/.well-known/t3/environment";
+const BACKEND_HEALTH_CHECK_INTERVAL = Duration.seconds(15);
+const BACKEND_HEALTH_CHECK_REQUEST_TIMEOUT = Duration.seconds(5);
+const BACKEND_HEALTH_CONSECUTIVE_FAILURES = 3;
+const BACKEND_HEALTH_MAX_RESTARTS = 3;
+const BACKEND_HEALTHY_PROBES_TO_RESET_STREAK = 4;
 
 type BackendProcessLayerServices = ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient;
 
@@ -82,6 +87,14 @@ class BackendProcessSpawnError extends Data.TaggedError("BackendProcessSpawnErro
 }> {
   override get message() {
     return `Failed to spawn desktop backend process: ${this.cause.message}`;
+  }
+}
+
+class BackendHealthMonitorStopped extends Data.TaggedError("BackendHealthMonitorStopped")<{
+  readonly reason: string;
+}> {
+  override get message() {
+    return `Backend health monitor stopped: ${this.reason}.`;
   }
 }
 
@@ -287,6 +300,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
   const state = yield* Ref.make(initialState);
+  const healthRestartStreak = yield* Ref.make(0);
   const mutex = yield* Semaphore.make(1);
 
   const updateActiveRun = (runId: number, f: (run: ActiveBackendRun) => ActiveBackendRun) =>
@@ -318,6 +332,80 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
       onNone: () => Effect.void,
       onSome: (fiber) => Fiber.interrupt(fiber).pipe(Effect.asVoid),
     });
+  });
+
+  const monitorBackendHealth = Effect.fn("desktop.backendManager.monitorBackendHealth")(function* (
+    runId: number,
+    runScope: Scope.Closeable,
+    baseUrl: URL,
+  ): Effect.fn.Return<void> {
+    const readinessUrl = new URL(BACKEND_READINESS_PATH, baseUrl);
+    const probingClient = httpClient.pipe(
+      HttpClient.filterStatusOk,
+      HttpClient.transformResponse(Effect.timeout(BACKEND_HEALTH_CHECK_REQUEST_TIMEOUT)),
+    );
+    const probe = probingClient.get(readinessUrl).pipe(Effect.asVoid);
+    let consecutiveFailures = 0;
+    let consecutiveHealthy = 0;
+
+    const stopMonitor = (reason: string) =>
+      Effect.fail(new BackendHealthMonitorStopped({ reason }));
+
+    const step = Effect.gen(function* () {
+      const current = yield* Ref.get(state);
+      const activeRun = Option.getOrUndefined(current.active);
+      if (!current.desiredRunning || activeRun?.id !== runId) {
+        return yield* stopMonitor("backend run superseded or stopped");
+      }
+
+      const probeExit = yield* Effect.exit(probe);
+      if (Exit.isSuccess(probeExit)) {
+        consecutiveFailures = 0;
+        consecutiveHealthy += 1;
+        if (consecutiveHealthy >= BACKEND_HEALTHY_PROBES_TO_RESET_STREAK) {
+          yield* Ref.set(healthRestartStreak, 0);
+        }
+        return;
+      }
+
+      consecutiveHealthy = 0;
+      consecutiveFailures += 1;
+      yield* logBackendManagerWarning("backend health check failed", {
+        consecutiveFailures,
+        url: readinessUrl.href,
+      });
+      if (consecutiveFailures < BACKEND_HEALTH_CONSECUTIVE_FAILURES) {
+        return;
+      }
+      consecutiveFailures = 0;
+
+      const restarts = yield* Ref.updateAndGet(healthRestartStreak, (count) => count + 1);
+      if (restarts >= BACKEND_HEALTH_MAX_RESTARTS) {
+        const choice = yield* desktopWindow.promptBackendFailure({ restartAttempts: restarts });
+        if (choice === "quit") {
+          yield* stop();
+          return yield* stopMonitor("user chose to quit after repeated restart failures");
+        }
+        yield* Ref.set(healthRestartStreak, 0);
+      }
+
+      yield* logBackendManagerError("backend unhealthy; restarting backend process", {
+        consecutiveFailures: BACKEND_HEALTH_CONSECUTIVE_FAILURES,
+        healthRestart: restarts,
+      });
+      // Non-blocking user notification: the restart proceeds without waiting for dismissal.
+      yield* desktopWindow.notifyBackendRestarting({ attempt: restarts }).pipe(Effect.forkDetach);
+      // Closing the run scope ends the backend program, which flows through the
+      // existing finalizeRun -> scheduleRestart path, so startup semantics are unchanged
+      // and a successful restart re-establishes the web view connection via handleBackendReady.
+      yield* Scope.close(runScope, Exit.void).pipe(Effect.ignore);
+      return yield* stopMonitor("health-triggered restart initiated");
+    });
+
+    yield* step.pipe(
+      Effect.repeat(Schedule.spaced(BACKEND_HEALTH_CHECK_INTERVAL).pipe(Schedule.jittered)),
+      Effect.ignore,
+    );
   });
 
   const start: Effect.Effect<void> = Effect.suspend(() =>
@@ -464,6 +552,13 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                 }),
               ),
             );
+            // Start post-readiness health monitoring for this run. The monitor is forked
+            // into the manager scope (not the run scope) and terminates itself when the
+            // run is superseded or stopped.
+            yield* Effect.forkIn(
+              monitorBackendHealth(runId, runScope, config.httpBaseUrl),
+              parentScope,
+            ).pipe(Effect.asVoid);
           }),
           onReadinessFailure: (error) =>
             logBackendManagerWarning("backend readiness check failed during bootstrap", {

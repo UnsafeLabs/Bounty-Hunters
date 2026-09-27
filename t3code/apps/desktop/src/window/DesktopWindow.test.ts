@@ -12,6 +12,7 @@ import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
@@ -101,6 +102,13 @@ const electronShellLayer = Layer.succeed(ElectronShell.ElectronShell, {
   copyText: () => Effect.void,
 } satisfies ElectronShell.ElectronShellShape);
 
+const electronDialogLayer = Layer.succeed(ElectronDialog.ElectronDialog, {
+  pickFolder: () => Effect.succeed(Option.none<string>()),
+  confirm: () => Effect.succeed(false),
+  showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
+  showErrorBox: () => Effect.void,
+} satisfies ElectronDialog.ElectronDialogShape);
+
 const electronThemeLayer = Layer.succeed(ElectronTheme.ElectronTheme, {
   shouldUseDarkColors: Effect.succeed(false),
   setSource: () => Effect.void,
@@ -144,6 +152,7 @@ function makeTestLayer(input: {
         desktopEnvironmentLayer,
         desktopServerExposureLayer,
         DesktopState.layer,
+        electronDialogLayer,
         electronMenuLayer,
         electronShellLayer,
         electronThemeLayer,
@@ -174,6 +183,72 @@ describe("DesktopWindow", () => {
         assert.equal(yield* Ref.get(createCount), 1);
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["http://127.0.0.1:5733/"]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("notifies a non-blocking backend restart and maps failure choices", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const dialogCalls = yield* Ref.make<Array<string>>([]);
+      const dialogResponse = yield* Ref.make(0);
+
+      const recordingDialogLayer = Layer.succeed(ElectronDialog.ElectronDialog, {
+        pickFolder: () => Effect.succeed(Option.none<string>()),
+        confirm: () => Effect.succeed(false),
+        showMessageBox: (options) =>
+          Ref.update(dialogCalls, (calls) => [...calls, options.message]).pipe(
+            Effect.as({ response: 0, checkboxChecked: false }),
+            Effect.flatMap((result) =>
+              Ref.get(dialogResponse).pipe(Effect.map((response) => ({ ...result, response }))),
+            ),
+          ),
+        showErrorBox: () => Effect.void,
+      } satisfies ElectronDialog.ElectronDialogShape);
+
+      const electronWindowLayer = Layer.succeed(ElectronWindow.ElectronWindow, {
+        create: () =>
+          Ref.update(createCount, (count) => count + 1).pipe(Effect.as(fakeWindow.window)),
+        main: Ref.get(mainWindow),
+        currentMainOrFirst: Ref.get(mainWindow),
+        focusedMainOrFirst: Ref.get(mainWindow),
+        setMain: (window) => Ref.set(mainWindow, Option.some(window)),
+        clearMain: () => Ref.set(mainWindow, Option.none()),
+        reveal: () => Effect.void,
+        sendAll: () => Effect.void,
+        destroyAll: Effect.void,
+        syncAllAppearance: (sync) => sync(fakeWindow.window),
+      } satisfies ElectronWindow.ElectronWindowShape);
+
+      const layer = DesktopWindow.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            desktopAssetsLayer,
+            desktopEnvironmentLayer,
+            desktopServerExposureLayer,
+            DesktopState.layer,
+            recordingDialogLayer,
+            electronMenuLayer,
+            electronShellLayer,
+            electronThemeLayer,
+            electronWindowLayer,
+          ),
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+
+        yield* desktopWindow.notifyBackendRestarting({ attempt: 2 });
+        assert.deepEqual(yield* Ref.get(dialogCalls), ["Backend is restarting"]);
+
+        yield* Ref.set(dialogResponse, 0);
+        assert.equal(yield* desktopWindow.promptBackendFailure({ restartAttempts: 3 }), "retry");
+
+        yield* Ref.set(dialogResponse, 1);
+        assert.equal(yield* desktopWindow.promptBackendFailure({ restartAttempts: 3 }), "quit");
       }).pipe(Effect.provide(layer));
     }),
   );

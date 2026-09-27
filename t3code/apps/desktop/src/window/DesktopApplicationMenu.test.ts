@@ -73,6 +73,8 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     handleBackendReady: Effect.void,
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),
     syncAppearance: Effect.void,
+    notifyBackendRestarting: () => Effect.void,
+    promptBackendFailure: () => Effect.succeed("retry" as const),
   } satisfies DesktopWindow.DesktopWindowShape);
 
 const makeElectronMenuLayer = (
