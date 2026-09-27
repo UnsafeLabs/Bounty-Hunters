@@ -13,6 +13,7 @@ import * as AcpError from "./errors.ts";
 import * as AcpProtocol from "./protocol.ts";
 import * as AcpRpcs from "./rpc.ts";
 import * as AcpSchema from "./_generated/schema.gen.ts";
+import * as SessionAuth from "./sessionAuth.ts";
 import { AGENT_METHODS, CLIENT_METHODS } from "./_generated/meta.gen.ts";
 import {
   callRpc,
@@ -26,6 +27,13 @@ export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  /**
+   * Enables automatic session re-authentication: agent requests that fail
+   * with a session authentication failure are re-authenticated once and
+   * replayed. Re-authentication failures surface as typed
+   * `AuthenticationError`s. When omitted, agent requests behave exactly as before.
+   */
+  readonly sessionAuth?: SessionAuth.SessionAuthConfig;
 }
 
 type AcpClientRaw = {
@@ -456,6 +464,24 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     generateRequestId: () => nextRpcRequestId++ as never,
   }).pipe(Effect.provideService(RpcClient.Protocol, transport.clientProtocol));
 
+  const sessionRefresher =
+    options.sessionAuth !== undefined
+      ? yield* SessionAuth.makeSessionRefresher(
+          {
+            authenticate: options.sessionAuth.authenticate,
+            ...(options.sessionAuth.closeSession !== undefined
+              ? { closeSession: options.sessionAuth.closeSession }
+              : {}),
+            ...(options.sessionAuth.onSessionExpired !== undefined
+              ? { onSessionExpired: options.sessionAuth.onSessionExpired }
+              : {}),
+          },
+          options.sessionAuth.initialTokens ?? {},
+        )
+      : undefined;
+  const withSessionAuth = <A, E extends AcpError.AcpError>(effect: Effect.Effect<A, E>) =>
+    sessionRefresher !== undefined ? sessionRefresher.run(effect) : effect;
+
   return AcpClient.of({
     raw: {
       notifications: transport.incoming,
@@ -463,20 +489,23 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
       notify: transport.notify,
     },
     agent: {
-      initialize: (payload) => callRpc(rpc[AGENT_METHODS.initialize](payload)),
-      authenticate: (payload) => callRpc(rpc[AGENT_METHODS.authenticate](payload)),
-      logout: (payload) => callRpc(rpc[AGENT_METHODS.logout](payload)),
-      createSession: (payload) => callRpc(rpc[AGENT_METHODS.session_new](payload)),
-      loadSession: (payload) => callRpc(rpc[AGENT_METHODS.session_load](payload)),
-      listSessions: (payload) => callRpc(rpc[AGENT_METHODS.session_list](payload)),
-      forkSession: (payload) => callRpc(rpc[AGENT_METHODS.session_fork](payload)),
-      resumeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_resume](payload)),
-      closeSession: (payload) => callRpc(rpc[AGENT_METHODS.session_close](payload)),
-      setSessionModel: (payload) => callRpc(rpc[AGENT_METHODS.session_set_model](payload)),
+      initialize: (payload) => withSessionAuth(callRpc(rpc[AGENT_METHODS.initialize](payload))),
+      authenticate: (payload) => withSessionAuth(callRpc(rpc[AGENT_METHODS.authenticate](payload))),
+      logout: (payload) => withSessionAuth(callRpc(rpc[AGENT_METHODS.logout](payload))),
+      createSession: (payload) => withSessionAuth(callRpc(rpc[AGENT_METHODS.session_new](payload))),
+      loadSession: (payload) => withSessionAuth(callRpc(rpc[AGENT_METHODS.session_load](payload))),
+      listSessions: (payload) => withSessionAuth(callRpc(rpc[AGENT_METHODS.session_list](payload))),
+      forkSession: (payload) => withSessionAuth(callRpc(rpc[AGENT_METHODS.session_fork](payload))),
+      resumeSession: (payload) =>
+        withSessionAuth(callRpc(rpc[AGENT_METHODS.session_resume](payload))),
+      closeSession: (payload) =>
+        withSessionAuth(callRpc(rpc[AGENT_METHODS.session_close](payload))),
+      setSessionModel: (payload) =>
+        withSessionAuth(callRpc(rpc[AGENT_METHODS.session_set_model](payload))),
       setSessionConfigOption: (payload) =>
-        callRpc(rpc[AGENT_METHODS.session_set_config_option](payload)),
-      prompt: (payload) => callRpc(rpc[AGENT_METHODS.session_prompt](payload)),
-      cancel: (payload) => transport.notify(AGENT_METHODS.session_cancel, payload),
+        withSessionAuth(callRpc(rpc[AGENT_METHODS.session_set_config_option](payload))),
+      prompt: (payload) => withSessionAuth(callRpc(rpc[AGENT_METHODS.session_prompt](payload))),
+      cancel: (payload) => withSessionAuth(transport.notify(AGENT_METHODS.session_cancel, payload)),
     },
     handleRequestPermission: (handler) =>
       Effect.suspend(() => {
