@@ -107,9 +107,16 @@ test("a positive rebase during the callback cannot substitute for repayment", as
   assert.equal(await pool.totalFees(), 0n);
 });
 
+<<<<<<< HEAD
 test("a preexisting surplus cannot increase the loan cap or fee accounting", async () => {
   const { token, pool, borrower } = await setup();
   await (await token.setReportedBonus(await pool.getAddress(), 1)).wait();
+=======
+test("a direct token donation cannot increase the loan cap or fee accounting", async () => {
+  const { owner, token, pool, borrower } = await setup();
+  await (await token.mint(await owner.getAddress(), 1)).wait();
+  await (await token.transfer(await pool.getAddress(), 1)).wait();
+>>>>>>> codex/flashloan-919
   assert.equal(await pool.maxLoanAmount(), 500n);
   await (await borrower.borrow(1, 0)).wait();
   assert.equal(await pool.accountedPoolBalance(), 1001n);
