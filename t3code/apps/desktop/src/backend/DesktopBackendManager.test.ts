@@ -24,6 +24,9 @@ import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
+import * as ElectronNotification from "../electron/ElectronNotification.ts";
 
 const decodeDesktopBackendBootstrap = Schema.decodeEffect(
   Schema.fromJsonString(DesktopBackendBootstrap),
@@ -108,6 +111,9 @@ function makeManagerLayer(input: {
   readonly desktopState?: DesktopState.DesktopStateShape;
   readonly desktopWindow?: Partial<DesktopWindow.DesktopWindowShape>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
+  readonly electronApp?: Partial<ElectronApp.ElectronAppShape>;
+  readonly electronDialog?: Partial<ElectronDialog.ElectronDialogShape>;
+  readonly electronNotification?: Partial<ElectronNotification.ElectronNotificationShape>;
 }) {
   return DesktopBackendManager.layer.pipe(
     Layer.provide(
@@ -139,6 +145,34 @@ function makeManagerLayer(input: {
           syncAppearance: Effect.void,
           ...input.desktopWindow,
         } satisfies DesktopWindow.DesktopWindowShape),
+        Layer.succeed(ElectronApp.ElectronApp, {
+          metadata: Effect.die("unexpected metadata"),
+          name: Effect.succeed("T3 Code"),
+          whenReady: Effect.void,
+          quit: Effect.void,
+          exit: () => Effect.void,
+          relaunch: () => Effect.void,
+          setPath: () => Effect.void,
+          setName: () => Effect.void,
+          setAboutPanelOptions: () => Effect.void,
+          setAppUserModelId: () => Effect.void,
+          setDesktopName: () => Effect.void,
+          setDockIcon: () => Effect.void,
+          appendCommandLineSwitch: () => Effect.void,
+          on: () => Effect.void,
+          ...input.electronApp,
+        } satisfies ElectronApp.ElectronAppShape),
+        Layer.succeed(ElectronDialog.ElectronDialog, {
+          pickFolder: () => Effect.succeed(Option.none()),
+          confirm: () => Effect.succeed(true),
+          showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
+          showErrorBox: () => Effect.void,
+          ...input.electronDialog,
+        } satisfies ElectronDialog.ElectronDialogShape),
+        Layer.succeed(ElectronNotification.ElectronNotification, {
+          show: () => Effect.void,
+          ...input.electronNotification,
+        } satisfies ElectronNotification.ElectronNotificationShape),
       ),
     ),
   );
@@ -488,6 +522,310 @@ describe("DesktopBackendManager", () => {
 
         assert.equal(yield* Queue.size(starts), 0);
         assert.equal((yield* manager.snapshot).desiredRunning, false);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("does not restart when periodic health checks remain healthy", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      let startCount = 0;
+      let healthProbeCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            startCount += 1;
+            yield* Queue.offer(starts, startCount);
+            const closed = yield* Deferred.make<void>();
+            yield* Scope.addFinalizer(scope, Deferred.succeed(closed, void 0).pipe(Effect.asVoid));
+            return makeProcess({
+              exitCode: Deferred.await(closed).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer((request) => {
+          healthProbeCount += 1;
+          return Effect.succeed(responseForRequest(request, 200));
+        }),
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        assert.equal(yield* Queue.take(starts), 1);
+
+        yield* TestClock.adjust(Duration.seconds(65));
+
+        assert.isTrue(healthProbeCount >= 3);
+        assert.equal(yield* Queue.size(starts), 0);
+        const snapshot = yield* manager.snapshot;
+        assert.isTrue(snapshot.ready);
+        assert.equal(snapshot.restartAttempt, 0);
+
+        yield* manager.stop();
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("resets consecutive failure count when a health check succeeds after failures", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      let startCount = 0;
+      let probeIndex = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            startCount += 1;
+            yield* Queue.offer(starts, startCount);
+            const closed = yield* Deferred.make<void>();
+            yield* Scope.addFinalizer(scope, Deferred.succeed(closed, void 0).pipe(Effect.asVoid));
+            return makeProcess({
+              exitCode: Deferred.await(closed).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer((request) => {
+          probeIndex += 1;
+          if (probeIndex === 1) {
+            return Effect.succeed(responseForRequest(request, 200));
+          }
+          if (probeIndex === 2 || probeIndex === 3) {
+            return Effect.succeed(responseForRequest(request, 500));
+          }
+          if (probeIndex === 4) {
+            return Effect.succeed(responseForRequest(request, 200));
+          }
+          return Effect.succeed(responseForRequest(request, 500));
+        }),
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        assert.equal(yield* Queue.take(starts), 1);
+
+        yield* TestClock.adjust(Duration.seconds(80));
+
+        assert.equal(yield* Queue.size(starts), 0);
+
+        yield* manager.stop();
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("triggers automatic restart and shows notification after three consecutive health check failures", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      const notifications = yield* Queue.unbounded<string>();
+      let startCount = 0;
+      let probeIndex = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            startCount += 1;
+            yield* Queue.offer(starts, startCount);
+            const closed = yield* Deferred.make<void>();
+            yield* Scope.addFinalizer(scope, Deferred.succeed(closed, void 0).pipe(Effect.asVoid));
+            return makeProcess({
+              exitCode: Deferred.await(closed).pipe(Effect.as(ChildProcessSpawner.ExitCode(1))),
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer((request) => {
+          probeIndex += 1;
+          if (probeIndex === 1) {
+            return Effect.succeed(responseForRequest(request, 200));
+          }
+          return Effect.succeed(responseForRequest(request, 500));
+        }),
+        electronNotification: {
+          show: (opts) => Queue.offer(notifications, opts.body).pipe(Effect.asVoid),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        assert.equal(yield* Queue.take(starts), 1);
+
+        yield* TestClock.adjust(Duration.seconds(50));
+
+        const notificationBody = yield* Queue.take(notifications);
+        assert.include(notificationBody, "Restarting");
+
+        yield* TestClock.adjust(Duration.seconds(2));
+        assert.equal(yield* Queue.take(starts), 2);
+
+        yield* manager.stop();
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("shows recovery dialog after three failed automatic restart attempts and handles Retry", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      const dialogShown = yield* Deferred.make<void>();
+      let startCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.sync(() => {
+            startCount += 1;
+            return makeProcess({
+              exitCode: Queue.offer(starts, startCount).pipe(
+                Effect.as(ChildProcessSpawner.ExitCode(1)),
+              ),
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer(() => Effect.never),
+        electronDialog: {
+          showMessageBox: () =>
+            Deferred.succeed(dialogShown, void 0).pipe(
+              Effect.as({ response: 0, checkboxChecked: false }),
+            ),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+
+        assert.equal(yield* Queue.take(starts), 1);
+
+        yield* TestClock.adjust(Duration.millis(500));
+        assert.equal(yield* Queue.take(starts), 2);
+
+        yield* TestClock.adjust(Duration.millis(1000));
+        assert.equal(yield* Queue.take(starts), 3);
+
+        yield* TestClock.adjust(Duration.millis(2000));
+        assert.equal(yield* Queue.take(starts), 4);
+
+        yield* Deferred.await(dialogShown);
+
+        assert.equal(yield* Queue.take(starts), 5);
+
+        yield* manager.stop();
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("shows recovery dialog after three failed automatic restart attempts and handles Quit", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      const quitCalled = yield* Deferred.make<void>();
+      let startCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.sync(() => {
+            startCount += 1;
+            return makeProcess({
+              exitCode: Queue.offer(starts, startCount).pipe(
+                Effect.as(ChildProcessSpawner.ExitCode(1)),
+              ),
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer(() => Effect.never),
+        electronDialog: {
+          showMessageBox: () => Effect.succeed({ response: 1, checkboxChecked: false }),
+        },
+        electronApp: {
+          quit: Deferred.succeed(quitCalled, void 0).pipe(Effect.asVoid),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+
+        assert.equal(yield* Queue.take(starts), 1);
+        yield* TestClock.adjust(Duration.millis(500));
+        assert.equal(yield* Queue.take(starts), 2);
+        yield* TestClock.adjust(Duration.millis(1000));
+        assert.equal(yield* Queue.take(starts), 3);
+        yield* TestClock.adjust(Duration.millis(2000));
+        assert.equal(yield* Queue.take(starts), 4);
+
+        yield* Deferred.await(quitCalled);
+
+        yield* manager.stop();
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("cancels health monitoring when stop() is called", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      let probeCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            yield* Queue.offer(starts, 1);
+            const closed = yield* Deferred.make<void>();
+            yield* Scope.addFinalizer(scope, Deferred.succeed(closed, void 0).pipe(Effect.asVoid));
+            return makeProcess({
+              exitCode: Deferred.await(closed).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer((request) => {
+          probeCount += 1;
+          return Effect.succeed(responseForRequest(request, 200));
+        }),
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        assert.equal(yield* Queue.take(starts), 1);
+
+        yield* manager.stop();
+        const probeCountAtStop = probeCount;
+
+        yield* TestClock.adjust(Duration.seconds(60));
+
+        assert.equal(probeCount, probeCountAtStop);
       }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
     }),
   );
