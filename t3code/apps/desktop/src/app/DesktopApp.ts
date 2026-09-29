@@ -9,6 +9,8 @@ import * as NetService from "@t3tools/shared/Net";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import { deepLinkProtocol } from "../electron/protocol.ts";
+import * as DesktopWindow from "../window/DesktopWindow.ts";
 import { installDesktopIpcHandlers } from "../ipc/DesktopIpcHandlers.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
@@ -197,6 +199,24 @@ const startup = Effect.gen(function* () {
   yield* shellEnvironment.installIntoProcess;
   const userDataPath = yield* appIdentity.resolveUserDataPath;
   yield* electronApp.setPath("userData", userDataPath);
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
+  const runPromise = Effect.runPromiseWith(yield* Effect.context<DesktopWindow.DesktopWindow>());
+  const primaryInstance = yield* Effect.sync(
+    () =>
+      deepLinkProtocol?.start(() => {
+        void runPromise(
+          desktopWindow.activate.pipe(
+            Effect.catchCause((cause) =>
+              logStartupError("deep link activation failed", { cause: Cause.pretty(cause) }),
+            ),
+          ),
+        );
+      }) ?? true,
+  );
+  if (!primaryInstance) {
+    yield* electronApp.exit(0);
+    return;
+  }
   yield* logStartupInfo("runtime logging configured", { logDir: environment.logDir });
   yield* desktopSettings.load;
 

@@ -1062,6 +1062,12 @@
     "last_pr": "2026-09-07T17:33:41.333Z"
   },
   {
+    "username": "spiritwanghs",
+    "total_prs": 8,
+    "first_pr": "2026-09-28T18:53:29.839Z",
+    "last_pr": "2026-09-29T06:25:20.574Z"
+  },
+  {
     "username": "Mburdo",
     "total_prs": 7,
     "first_pr": "2026-05-13T15:20:17Z",
@@ -1510,6 +1516,12 @@
     "total_prs": 5,
     "first_pr": "2026-06-06T15:03:25.618Z",
     "last_pr": "2026-09-16T07:53:30.215Z"
+  },
+  {
+    "username": "101xnikhil",
+    "total_prs": 5,
+    "first_pr": "2026-09-28T18:08:24.640Z",
+    "last_pr": "2026-09-29T06:09:49.801Z"
   },
   {
     "username": "PappaV",
@@ -2286,6 +2298,12 @@
     "last_pr": "2026-09-27T18:13:31.275Z"
   },
   {
+    "username": "Priyaanshuuu",
+    "total_prs": 2,
+    "first_pr": "2026-09-28T15:11:35.613Z",
+    "last_pr": "2026-09-28T19:06:48.747Z"
+  },
+  {
     "username": "kingskuan",
     "total_prs": 2,
     "first_pr": "2026-05-15T14:10:31.174Z",
@@ -2296,6 +2314,12 @@
     "total_prs": 2,
     "first_pr": "2026-05-17T03:48:32.458Z",
     "last_pr": "2026-05-17T08:16:30.474Z"
+  },
+  {
+    "username": "KonstantinPythonLab",
+    "total_prs": 2,
+    "first_pr": "2026-09-28T04:31:14.324Z",
+    "last_pr": "2026-09-29T01:39:52.959Z"
   },
   {
     "username": "misakaAron",
@@ -3076,12 +3100,6 @@
     "total_prs": 1,
     "first_pr": "2026-09-26T08:36:39.686Z",
     "last_pr": "2026-09-26T08:36:39.686Z"
-  },
-  {
-    "username": "KonstantinPythonLab",
-    "total_prs": 1,
-    "first_pr": "2026-09-28T04:31:14.324Z",
-    "last_pr": "2026-09-28T04:31:14.324Z"
   },
   {
     "username": "MichisGitIsKing",

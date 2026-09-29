@@ -6,6 +6,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import type * as Electron from "electron";
+import { deepLinkProtocol } from "../electron/protocol.ts";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -180,6 +181,8 @@ const make = Effect.gen(function* () {
         sandbox: true,
       },
     });
+
+    deepLinkProtocol?.attachWindow(window);
 
     window.webContents.on("context-menu", (event, params) => {
       event.preventDefault();

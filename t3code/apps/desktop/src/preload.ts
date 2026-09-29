@@ -20,6 +20,18 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
 }
 
 contextBridge.exposeInMainWorld("desktopBridge", {
+  onDeepLink: (listener) => {
+    const wrappedListener = (
+      _event: Electron.IpcRendererEvent,
+      link: Parameters<typeof listener>[0],
+    ) => listener(link);
+    ipcRenderer.on(IpcChannels.DEEP_LINK_CHANNEL, wrappedListener);
+    ipcRenderer.send(IpcChannels.DEEP_LINK_READY_CHANNEL, true);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.DEEP_LINK_CHANNEL, wrappedListener);
+      ipcRenderer.send(IpcChannels.DEEP_LINK_READY_CHANNEL, false);
+    };
+  },
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_APP_BRANDING_CHANNEL);
     if (typeof result !== "object" || result === null) {
