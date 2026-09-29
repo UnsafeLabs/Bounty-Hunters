@@ -7,6 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import * as Electron from "electron";
+import { registerProtocol } from "./electron/protocol.ts";
 
 import * as NetService from "@t3tools/shared/Net";
 import { resolveRemoteT3CliPackageSpec } from "@t3tools/ssh/command";
@@ -44,6 +45,8 @@ import * as DesktopSshRemoteApi from "./ssh/DesktopSshRemoteApi.ts";
 import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./window/DesktopWindow.ts";
+
+registerProtocol();
 
 const desktopEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
