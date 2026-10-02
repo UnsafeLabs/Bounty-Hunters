@@ -1206,6 +1206,12 @@
     "last_pr": "2026-09-22T04:51:17.193Z"
   },
   {
+    "username": "Krusheek",
+    "total_prs": 5,
+    "first_pr": "2026-10-02T09:39:10.243Z",
+    "last_pr": "2026-10-02T09:45:13.109Z"
+  },
+  {
     "username": "spqrcode",
     "total_prs": 4,
     "first_pr": "2026-05-14T12:12:04.319Z",
@@ -1366,12 +1372,6 @@
     "total_prs": 4,
     "first_pr": "2026-09-15T02:33:08.706Z",
     "last_pr": "2026-09-15T17:33:18.438Z"
-  },
-  {
-    "username": "Krusheek",
-    "total_prs": 4,
-    "first_pr": "2026-10-02T09:39:10.243Z",
-    "last_pr": "2026-10-02T09:45:00.904Z"
   },
   {
     "username": "AidenPeerce",
