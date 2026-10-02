@@ -1950,6 +1950,12 @@
     "last_pr": "2026-10-01T00:09:20.102Z"
   },
   {
+    "username": "Krusheek",
+    "total_prs": 2,
+    "first_pr": "2026-10-02T09:39:10.243Z",
+    "last_pr": "2026-10-02T09:41:05.047Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2710,11 +2716,5 @@
     "total_prs": 1,
     "first_pr": "2026-09-26T08:36:39.686Z",
     "last_pr": "2026-09-26T08:36:39.686Z"
-  },
-  {
-    "username": "Krusheek",
-    "total_prs": 1,
-    "first_pr": "2026-10-02T09:39:10.243Z",
-    "last_pr": "2026-10-02T09:39:10.243Z"
   }
 ]
