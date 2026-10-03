@@ -1,0 +1,1 @@
+Ensure `apps/desktop` depends on `apps/web` and `apps/server` in this file.

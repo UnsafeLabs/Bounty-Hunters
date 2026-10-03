@@ -1,0 +1,1 @@
+Ensure `apps/server` depends on `packages/contracts`, `packages/shared`, `packages/effect-acp`, and `packages/effect-codex-app-server` in this file.

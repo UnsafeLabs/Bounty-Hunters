@@ -1,0 +1,1 @@
+Ensure that `apps/web` depends on `packages/contracts` in this file.
