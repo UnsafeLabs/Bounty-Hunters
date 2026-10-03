@@ -1512,6 +1512,12 @@
     "last_pr": "2026-05-19T01:16:01.294Z"
   },
   {
+    "username": "KonstantinPythonLab",
+    "total_prs": 5,
+    "first_pr": "2026-09-28T04:31:14.324Z",
+    "last_pr": "2026-10-03T01:40:18.969Z"
+  },
+  {
     "username": "bounty-bot-beep",
     "total_prs": 5,
     "first_pr": "2026-05-16T01:02:07.509Z",
@@ -1708,12 +1714,6 @@
     "total_prs": 4,
     "first_pr": "2026-06-07T16:35:45.376Z",
     "last_pr": "2026-06-09T08:16:15.174Z"
-  },
-  {
-    "username": "KonstantinPythonLab",
-    "total_prs": 4,
-    "first_pr": "2026-09-28T04:31:14.324Z",
-    "last_pr": "2026-10-03T00:14:07.535Z"
   },
   {
     "username": "partyplatter08-lab",
