@@ -1068,6 +1068,12 @@
     "last_pr": "2026-09-07T17:33:41.333Z"
   },
   {
+    "username": "kaleidoscopeAI",
+    "total_prs": 8,
+    "first_pr": "2026-10-03T21:44:14.108Z",
+    "last_pr": "2026-10-03T23:36:39.450Z"
+  },
+  {
     "username": "Mburdo",
     "total_prs": 7,
     "first_pr": "2026-05-13T15:20:17Z",
@@ -3328,11 +3334,5 @@
     "total_prs": 1,
     "first_pr": "2026-10-02T05:14:57.619Z",
     "last_pr": "2026-10-02T05:14:57.619Z"
-  },
-  {
-    "username": "kaleidoscopeAI",
-    "total_prs": 1,
-    "first_pr": "2026-10-03T21:44:14.108Z",
-    "last_pr": "2026-10-03T21:44:14.108Z"
   }
 ]
