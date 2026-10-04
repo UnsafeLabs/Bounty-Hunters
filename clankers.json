@@ -540,6 +540,12 @@
     "last_pr": "2026-06-03T13:50:13.670Z"
   },
   {
+    "username": "book051193-hash",
+    "total_prs": 16,
+    "first_pr": "2026-09-22T02:24:54.836Z",
+    "last_pr": "2026-10-04T15:50:57.526Z"
+  },
+  {
     "username": "ahmedabdelkarim504-commits",
     "total_prs": 16,
     "first_pr": "2026-07-17T11:35:35.081Z",
@@ -550,12 +556,6 @@
     "total_prs": 15,
     "first_pr": "2026-07-19T19:27:11.473Z",
     "last_pr": "2026-07-20T01:04:43.809Z"
-  },
-  {
-    "username": "book051193-hash",
-    "total_prs": 15,
-    "first_pr": "2026-09-22T02:24:54.836Z",
-    "last_pr": "2026-09-25T16:47:14.978Z"
   },
   {
     "username": "callmekidz",
@@ -2394,6 +2394,12 @@
     "last_pr": "2026-08-07T05:50:32.351Z"
   },
   {
+    "username": "RanuK12",
+    "total_prs": 2,
+    "first_pr": "2026-10-02T05:14:57.619Z",
+    "last_pr": "2026-10-04T16:49:55.550Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -3328,11 +3334,5 @@
     "total_prs": 1,
     "first_pr": "2026-10-01T15:01:57.650Z",
     "last_pr": "2026-10-01T15:01:57.650Z"
-  },
-  {
-    "username": "RanuK12",
-    "total_prs": 1,
-    "first_pr": "2026-10-02T05:14:57.619Z",
-    "last_pr": "2026-10-02T05:14:57.619Z"
   }
 ]
