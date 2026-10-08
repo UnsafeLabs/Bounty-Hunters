@@ -1,0 +1,1 @@
+Please modify the NotificationPreference model to include necessary checks for user input, such as sanitizing the event_type and enabling values. Additionally, modify the NotificationRouter to properly filter the channels based on the user's enabled preferences.
