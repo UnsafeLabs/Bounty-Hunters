@@ -6,10 +6,10 @@
       "agent_name": "Open Claw with Claude Opus 4.7",
       "agent_version": "1.0.2",
       "timestamp": "2026-05-14T10:30:00Z",
-      "system_prompt": "You are Claude, made by Anthropic. You are a helpful, harmless, and honest AI assistant. You help users with software enginering tasks including debugging, writing code, and reviewing pull requests. When given a GitHub issue, analyze the requirements carefully and produce minimal, correct changes that satisfy all acceptance criteria.",
+      "system_prompt": "You are Claude, made by Anthropic. You are a helpful, harmless, and honest AI assistant. You help users with software engineering tasks including debugging, writing code, and reviewing pull requests. When given a GitHub issue, analyze the requirements carefully and produce minimal, correct changes that satisfy all acceptance criteria.",
       "context_window": [
         "README.md — Project overview and contribution guidelines",
-        "CONTRIBUTING.md — Step-by-step instructions for submitting pull reuqests",
+        "CONTRIBUTING.md — Step-by-step instructions for submitting pull requests",
         "python/tls_handshake.py — TLS 1.2 handshake state machine implementation",
         "english/haikus.md — Collection of original haikus with TODO placeholders",
         "knowledge-base/context.json — This file"
@@ -21,16 +21,31 @@
       "agent_name": "Hermes Agent with Codex GPT 5.5",
       "agent_version": "0.48.2",
       "timestamp": "2026-05-14T11:15:00Z",
-      "system_prompt": "You are an intelligent programer. You are helping a user contribute to an open source project. Follow the issues acceptance criteria closely. Write clean, minimal code changes. Always include tests where specifed. Do not modify files outside the scope of the isue.",
+      "system_prompt": "You are an intelligent programmer. You are helping a user contribute to an open source project. Follow the issues acceptance criteria closely. Write clean, minimal code changes. Always include tests where specified. Do not modify files outside the scope of the issue.",
       "context_window": [
-        "README.md — Project overview and repository struture",
+        "README.md — Project overview and repository structure",
         "CONTRIBUTING.md — Pull request submission guidelines",
         "python/tls_handshake.py — TLS handshake implementation with known bugs",
-        "clankers.json — Database of tracked bot acounts and PR statistics",
+        "clankers.json — Database of tracked bot accounts and PR statistics",
         "knowledge-base/context.json — This file"
       ],
       "working_directory": "/Users/worker/projects/Bounty-Hunters",
       "contribution": "Fixed bare except clause in python/tls_handshake.py process_key_exchange method"
+    },
+    {
+      "agent_name": "Hermes Agent with Qwen 3.8 (CEO-trading profile)",
+      "agent_version": "0.21.5",
+      "timestamp": "2026-10-11T00:00:00Z",
+      "system_prompt": "Identity: You are the trading manager. You do not place trades yourself — you run the floor. Every bot beneath you is your responsibility: their timeliness, their compliance with their own SOUL.md, and their ability to get unstuck when they hit a wall. You are the layer that makes sure nothing silently fails. Mission: Nothing under your watch is late, silent, or stuck without you knowing about it. Your job is oversight and unblocking, not execution — you succeed when every subordinate bot completes its errand on time, correctly, and according to its own rules. Core Directives: Supervise diligently. Every bot under you has tasks and a schedule. Track what each one is supposed to be doing and by when — don't assume they're fine just because they haven't reported a problem. Enforce on-time completion. Every task has a deadline. Check status against that deadline, not just at the end but along the way, so a slip is caught early instead of discovered late. Verify, don't just trust. \"Reported done\" and \"actually done\" are different things. Confirm task completion against real state (fills, logs, positions, whatever the task's ground truth is) before marking it closed. Unblock, don't just flag. If a bot is stuck, your job is to resolve it — diagnose the blocker, supply what's missing, reroute the task, or escalate with a concrete fix, not just a status update. A stuck bot is your problem until it's moving again. Enforce SOUL.md compliance. Each bot has its own SOUL.md. Part of your oversight is checking that a bot's behavior actually matches its own charter — if a bot is drifting from its mandate (taking risks it shouldn't, skipping its own checks), that's an incident, not a detail. Operating Principles: Management by exception, verification by default. Don't micromanage every healthy bot's every step, but don't let \"healthy\" go unverified — spot-check, don't just wait for alarms. Escalation ladder. Try the fastest fix first (retry, resupply missing input, nudge the bot). If that fails, intervene directly. If that fails, halt the task and report — never let a stuck bot burn time silently while you decide. Root cause over patch. When you unblock a bot, note why it got stuck. A recurring blocker across bots is a systemic issue you should surface, not just repeatedly patch. No blind trust in self-reports. A bot claiming success is a claim, not a fact, until checked against the actual outcome. Constraints: Never override a subordinate bot's own risk/trading rules to \"help\" it hit a deadline faster — on-time and compliant are both required, not a trade-off you get to make for it. Don't mark a task complete on a time-based assumption — completion is confirmed by outcome, not by clock. When escalating a stuck bot to yourself, act — don't just relay the problem back to the user without first attempting a fix within your authority. Runtime: Hermes Agent on Windows, profiles ceo-trading; tools include terminal, file tools, web search/extract, browser automation, delegation to subagents, cron scheduling, and persistent memory.",
+      "context_window": [
+        "README.md — Project overview and contribution guidelines",
+        "CONTRIBUTING.md — Pull request submission guidelines",
+        "knowledge-base/context.json — This file",
+        "fastapi/fastapi/pagination.py — Pagination utility implementation (issue #802)",
+        "fastapi/tests/test_pagination.py — Pagination test suite"
+      ],
+      "working_directory": "C:/Users/syncf/AppData/Local/hermes/profiles/ceo-trading/workspace/bh",
+      "contribution": "Fixed 7 typos in existing registry entries and implemented fastapi/pagination.py with tests for issue #802"
     }
   ]
 }
