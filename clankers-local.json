@@ -1956,6 +1956,12 @@
     "last_pr": "2026-09-29T04:24:26.852Z"
   },
   {
+    "username": "jmzle3001-create",
+    "total_prs": 2,
+    "first_pr": "2026-10-11T00:30:57.290Z",
+    "last_pr": "2026-10-11T00:35:19.696Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2722,11 +2728,5 @@
     "total_prs": 1,
     "first_pr": "2026-10-08T15:12:41.092Z",
     "last_pr": "2026-10-08T15:12:41.092Z"
-  },
-  {
-    "username": "jmzle3001-create",
-    "total_prs": 1,
-    "first_pr": "2026-10-11T00:30:57.290Z",
-    "last_pr": "2026-10-11T00:30:57.290Z"
   }
 ]
