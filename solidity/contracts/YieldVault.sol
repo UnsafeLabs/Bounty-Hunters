@@ -78,10 +78,11 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
+    // FIXED: Added access control and precision-safe reward rate calculation
     function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+        require(msg.sender == rewardDistributor, "Not reward distributor");
+        require(duration > 0, "Duration must be > 0");
+        rewardRate = reward * 1e18 / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
     }
