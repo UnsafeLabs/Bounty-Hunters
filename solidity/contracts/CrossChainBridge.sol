@@ -24,21 +24,20 @@ contract CrossChainBridge {
         emit TransferInitiated(msg.sender, amount, targetChain, nonce++);
     }
 
-    // BUG: No chain ID in hash — cross-chain replay possible
-    // BUG: No nonce per sender — same-chain replay possible
-    // BUG: No contract address in hash — replay after upgrade possible
+    // FIXED: Include chainid and contract address in hash to prevent cross-chain and post-upgrade replay
     function processTransfer(
         address recipient,
         uint256 amount,
         uint256 transferNonce,
         bytes calldata signature
     ) external {
+        require(recipient != address(0), "Invalid recipient");
         bytes32 transferHash = keccak256(abi.encodePacked(
+            block.chainid,
+            address(this),
             recipient,
             amount,
             transferNonce
-            // Missing: block.chainid
-            // Missing: address(this)
         ));
 
         require(!processedTransfers[transferHash], "Already processed");
