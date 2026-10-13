@@ -118,7 +118,10 @@ export type ProviderModelPickerStorageChange =
  * the picker's keys. Both keys present → a selection to apply; both absent
  * → another tab reset to default; exactly one present → the transient
  * half-state between the two `setItem`/`removeItem` calls, which the second
- * event resolves — ignore it.
+ * event resolves — ignore it. Note that "both present" can also be a
+ * transient mixed pair (new provider + still-old model) between the two
+ * `setItem` calls of a selection write; it self-corrects when the second
+ * event lands, so callers apply it as-is rather than waiting.
  */
 export function readProviderModelPickerStorageChange(
   storage: ProviderModelPickerStorage,
