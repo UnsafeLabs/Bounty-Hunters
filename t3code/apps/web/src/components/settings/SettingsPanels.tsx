@@ -842,6 +842,11 @@ export function GeneralSettingsPanel() {
                 modelOptionsByInstance={gitModelOptionsByInstance}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                // This selection is already persisted through unified
+                // settings (`textGenerationModelSelection`); opting out
+                // keeps it from being overwritten by the composer picker's
+                // localStorage preference on mount.
+                persistSelection={false}
                 onInstanceModelChange={(instanceId, model) => {
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(

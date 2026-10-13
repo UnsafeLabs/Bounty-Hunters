@@ -3,7 +3,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -19,6 +19,14 @@ import {
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+import {
+  clearPersistedProviderModelSelection,
+  getProviderModelPickerStorage,
+  isProviderModelPickerStorageKey,
+  readPersistedProviderModelSelection,
+  resolveRestoredProviderModelSelection,
+  writePersistedProviderModelSelection,
+} from "./providerModelPickerPersistence";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -40,11 +48,21 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   open?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  /**
+   * Persist the picked provider/model to the namespaced localStorage keys
+   * (`t3code.provider` / `t3code.model`), restore them on mount, keep other
+   * tabs in sync via the `storage` event, and offer a "Reset to default"
+   * rail action. Consumers that own their selection persistence themselves
+   * (e.g. the settings panel storing into unified settings) can opt out.
+   * @default true
+   */
+  persistSelection?: boolean;
   onOpenChange?: (open: boolean) => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+  const persistSelection = props.persistSelection ?? true;
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -86,9 +104,126 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
+  // ── Selection persistence (UnsafeLabs/Bounty-Hunters#834) ─────────────
+  //
+  // The component stays controlled: restoring simply pushes the persisted
+  // pick back up through `onInstanceModelChange`, and only user selections
+  // (or a cross-tab `storage` event) write to localStorage. Restore is a
+  // one-shot — it waits for provider data, then yields permanently to
+  // whatever the owner (or the user) selected afterwards.
+
+  const restoreAttemptedRef = useRef(false);
+  const lockedContinuationGroupKey = props.lockedContinuationGroupKey ?? null;
+  // Alias for the exhaustive-deps rule: effects below call it, so the
+  // dependency array needs a stable local name rather than `props`.
+  const onInstanceModelChange = props.onInstanceModelChange;
+
+  useEffect(() => {
+    if (!persistSelection || restoreAttemptedRef.current) return;
+    // A locked picker edits an already-sent turn; the owner pins the
+    // instance, so persisted preferences must not re-route it.
+    if (props.disabled || props.lockedProvider !== null) return;
+    // Provider snapshots arrive asynchronously — retry once they land.
+    if (props.instanceEntries.length === 0) return;
+    restoreAttemptedRef.current = true;
+    const storage = getProviderModelPickerStorage();
+    if (!storage) return;
+    const persisted = readPersistedProviderModelSelection(storage);
+    // Empty storage means the default behavior stays untouched.
+    if (!persisted) return;
+    const resolved = resolveRestoredProviderModelSelection({
+      persisted,
+      instanceEntries: props.instanceEntries,
+      modelOptionsByInstance: props.modelOptionsByInstance,
+      lockedProvider: props.lockedProvider,
+      lockedContinuationGroupKey,
+    });
+    if (!resolved) return;
+    if (resolved.instanceId === activeInstanceId && resolved.model === props.model) return;
+    onInstanceModelChange(resolved.instanceId, resolved.model);
+  }, [
+    activeInstanceId,
+    lockedContinuationGroupKey,
+    onInstanceModelChange,
+    persistSelection,
+    props.disabled,
+    props.instanceEntries,
+    props.lockedProvider,
+    props.model,
+    props.modelOptionsByInstance,
+  ]);
+
+  // Cross-tab sync: apply a selection persisted by another tab. The
+  // `storage` event only fires in tabs that did not perform the write, so
+  // this never echoes our own selections back.
+  useEffect(() => {
+    if (!persistSelection) return;
+    const handleStorage = (event: StorageEvent) => {
+      if (!isProviderModelPickerStorageKey(event.key)) return;
+      if (props.disabled || props.lockedProvider !== null) return;
+      const storage = getProviderModelPickerStorage();
+      if (!storage) return;
+      const persisted = readPersistedProviderModelSelection(storage);
+      if (!persisted) return;
+      const resolved = resolveRestoredProviderModelSelection({
+        persisted,
+        instanceEntries: props.instanceEntries,
+        modelOptionsByInstance: props.modelOptionsByInstance,
+        lockedProvider: props.lockedProvider,
+        lockedContinuationGroupKey,
+      });
+      if (!resolved) return;
+      restoreAttemptedRef.current = true;
+      if (resolved.instanceId === activeInstanceId && resolved.model === props.model) return;
+      onInstanceModelChange(resolved.instanceId, resolved.model);
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [
+    activeInstanceId,
+    lockedContinuationGroupKey,
+    onInstanceModelChange,
+    persistSelection,
+    props.disabled,
+    props.instanceEntries,
+    props.lockedProvider,
+    props.model,
+    props.modelOptionsByInstance,
+  ]);
+
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
+    if (persistSelection) {
+      const storage = getProviderModelPickerStorage();
+      if (storage) {
+        writePersistedProviderModelSelection(storage, instanceId, model);
+      }
+    }
+    // The user picked something — a pending restore must not override it.
+    restoreAttemptedRef.current = true;
     props.onInstanceModelChange(instanceId, model);
+    setIsMenuOpen(false);
+  };
+
+  const handleResetToDefault = () => {
+    if (props.disabled || props.lockedProvider !== null) return;
+    const storage = getProviderModelPickerStorage();
+    if (storage) {
+      clearPersistedProviderModelSelection(storage);
+    }
+    restoreAttemptedRef.current = true;
+    const resolved = resolveRestoredProviderModelSelection({
+      persisted: null,
+      instanceEntries: props.instanceEntries,
+      modelOptionsByInstance: props.modelOptionsByInstance,
+      lockedProvider: props.lockedProvider,
+      lockedContinuationGroupKey,
+    });
+    if (resolved && (resolved.instanceId !== activeInstanceId || resolved.model !== props.model)) {
+      props.onInstanceModelChange(resolved.instanceId, resolved.model);
+    }
     setIsMenuOpen(false);
   };
 
@@ -178,6 +313,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           {...(props.keybindings ? { keybindings: props.keybindings } : {})}
           modelOptionsByInstance={props.modelOptionsByInstance}
           terminalOpen={props.terminalOpen ?? false}
+          onResetSelection={
+            persistSelection && props.lockedProvider === null ? handleResetToDefault : null
+          }
           onRequestClose={() => setIsMenuOpen(false)}
           onInstanceModelChange={handleInstanceModelChange}
         />

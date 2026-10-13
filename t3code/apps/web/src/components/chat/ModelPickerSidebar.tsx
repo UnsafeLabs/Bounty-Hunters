@@ -1,6 +1,6 @@
 import { type ProviderInstanceId } from "@t3tools/contracts";
 import { memo, useMemo } from "react";
-import { Clock3Icon, SparklesIcon, StarIcon } from "lucide-react";
+import { Clock3Icon, RotateCcwIcon, SparklesIcon, StarIcon } from "lucide-react";
 import { Gemini, GithubCopilotIcon } from "../Icons";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ScrollArea } from "../ui/scroll-area";
@@ -56,6 +56,12 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   showFavorites?: boolean;
   /** Render non-configured coming-soon provider entries. Hidden in scoped rails. */
   showComingSoon?: boolean;
+  /**
+   * Render the "Reset to default" rail action. The picker provides it only
+   * while selection persistence is active; `null`/`undefined` (the default)
+   * keeps the rail unchanged.
+   */
+  onResetSelection?: (() => void) | null;
   /**
    * Instance id values that should render the "new" sparkle badge. Callers
    * pass the subset of default built-in ids they want flagged (custom
@@ -256,6 +262,34 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               </TooltipPopup>
             </Tooltip>
           </>
+        ) : null}
+
+        {/* Reset persisted selection (only while persistence is active) */}
+        {props.onResetSelection ? (
+          <div className="mt-auto pt-1 border-t">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded transition-colors hover:bg-muted"
+                    onClick={props.onResetSelection}
+                    type="button"
+                    data-model-picker-reset="true"
+                    aria-label="Reset to default"
+                  >
+                    <RotateCcwIcon className="size-5 text-muted-foreground/85 shrink-0" aria-hidden />
+                  </button>
+                }
+              />
+              <TooltipPopup
+                side={PICKER_TOOLTIP_SIDE}
+                align="center"
+                className={PICKER_TOOLTIP_CLASS}
+              >
+                Reset to default
+              </TooltipPopup>
+            </Tooltip>
+          </div>
         ) : null}
       </div>
     </ScrollArea>

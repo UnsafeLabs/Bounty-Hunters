@@ -255,6 +255,7 @@ async function mountPicker(props: {
   providers?: ReadonlyArray<ServerProvider>;
   settings?: UnifiedSettings;
   triggerVariant?: "ghost" | "outline";
+  persistSelection?: boolean;
 }) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -277,6 +278,7 @@ async function mountPicker(props: {
       instanceEntries={instanceEntries}
       modelOptionsByInstance={modelOptionsByInstance}
       triggerVariant={props.triggerVariant}
+      {...(props.persistSelection !== undefined ? { persistSelection: props.persistSelection } : {})}
       onInstanceModelChange={onInstanceModelChange}
     />,
     { container: host },
@@ -1219,6 +1221,271 @@ describe("ProviderModelPicker", () => {
       }
       expect(button.className).toContain("border-input");
       expect(button.className).toContain("bg-popover");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+});
+
+describe("ProviderModelPicker selection persistence (#834)", () => {
+  const PROVIDER_KEY = "t3code.provider";
+  const MODEL_KEY = "t3code.model";
+
+  const clearPersistedPickerKeys = () => {
+    localStorage.removeItem(PROVIDER_KEY);
+    localStorage.removeItem(MODEL_KEY);
+  };
+
+  beforeEach(() => {
+    clearPersistedPickerKeys();
+  });
+
+  afterEach(() => {
+    clearPersistedPickerKeys();
+  });
+
+  // Mirrors mountPicker's option derivation so "first available" assertions
+  // track the exact slugs the component saw, not a hand-copied guess.
+  function modelOptionsForFixture(): ReadonlyMap<
+    ProviderInstanceId,
+    ReadonlyArray<ModelEsque>
+  > {
+    return getCustomModelOptionsByInstance(
+      DEFAULT_UNIFIED_SETTINGS,
+      TEST_PROVIDERS,
+      CODEX_INSTANCE_ID,
+      "gpt-5-codex",
+    );
+  }
+
+  function firstSelectableSelection(): { instanceId: string; model: string } {
+    const instanceEntries = sortProviderInstanceEntries(
+      deriveProviderInstanceEntries(TEST_PROVIDERS),
+    );
+    const modelOptionsByInstance = modelOptionsForFixture();
+    for (const entry of instanceEntries) {
+      if (!entry.enabled || entry.status !== "ready" || !entry.isAvailable) continue;
+      const first = modelOptionsByInstance.get(entry.instanceId)?.[0];
+      if (first) {
+        return { instanceId: entry.instanceId, model: first.slug };
+      }
+    }
+    throw new Error("No selectable provider/model in the test fixture.");
+  }
+
+  function firstOptionSlugForInstance(instanceId: ProviderInstanceId): string {
+    const first = modelOptionsForFixture().get(instanceId)?.[0];
+    if (!first) {
+      throw new Error(`No model options for instance ${instanceId} in the test fixture.`);
+    }
+    return first.slug;
+  }
+
+  it("persists the selected provider and model to namespaced localStorage keys", async () => {
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Claude Sonnet 4.6");
+      });
+      await page.getByText("Claude Sonnet 4.6").first().click();
+
+      await vi.waitFor(() => {
+        expect(localStorage.getItem(PROVIDER_KEY)).toBe("claudeAgent");
+        expect(localStorage.getItem(MODEL_KEY)).toBe("claude-sonnet-4-6");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("restores the persisted selection on mount", async () => {
+    localStorage.setItem(PROVIDER_KEY, "claudeAgent");
+    localStorage.setItem(MODEL_KEY, "claude-sonnet-4-6");
+
+    const mounted = await mountPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith(
+          "claudeAgent",
+          "claude-sonnet-4-6",
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("falls back to the first available provider when the persisted provider is unavailable", async () => {
+    localStorage.setItem(PROVIDER_KEY, "nonexistent_provider");
+    localStorage.setItem(MODEL_KEY, "whatever-model");
+
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    const expected = firstSelectableSelection();
+    try {
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith(
+          expected.instanceId,
+          expected.model,
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("falls back to the persisted provider's first model when the saved slug is stale", async () => {
+    localStorage.setItem(PROVIDER_KEY, "claudeAgent");
+    localStorage.setItem(MODEL_KEY, "claude-4-obsolete");
+
+    const mounted = await mountPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith(
+          "claudeAgent",
+          firstOptionSlugForInstance(CLAUDE_INSTANCE_ID),
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("reset to default clears the persisted keys and returns the first available selection", async () => {
+    localStorage.setItem(PROVIDER_KEY, "claudeAgent");
+    localStorage.setItem(MODEL_KEY, "claude-sonnet-4-6");
+
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-sonnet-4-6",
+      lockedProvider: null,
+    });
+
+    const expected = firstSelectableSelection();
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-model-picker-reset="true"]')).not.toBeNull();
+      });
+      await page.getByRole("button", { name: "Reset to default" }).click();
+
+      await vi.waitFor(() => {
+        expect(localStorage.getItem(PROVIDER_KEY)).toBeNull();
+        expect(localStorage.getItem(MODEL_KEY)).toBeNull();
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith(
+          expected.instanceId,
+          expected.model,
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("syncs a selection made in another tab via the storage event", async () => {
+    const mounted = await mountPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).not.toHaveBeenCalled();
+      });
+
+      localStorage.setItem(PROVIDER_KEY, "claudeAgent");
+      localStorage.setItem(MODEL_KEY, "claude-haiku-4-5");
+      window.dispatchEvent(new StorageEvent("storage", { key: PROVIDER_KEY }));
+
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith(
+          "claudeAgent",
+          "claude-haiku-4-5",
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("leaves the default selection untouched when localStorage is empty", async () => {
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-provider-model-picker="true"]'),
+        ).not.toBeNull();
+      });
+      // Give the one-shot restore effect a settle window before asserting.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(mounted.onInstanceModelChange).not.toHaveBeenCalled();
+      expect(localStorage.getItem(PROVIDER_KEY)).toBeNull();
+      expect(localStorage.getItem(MODEL_KEY)).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not persist or restore when persistSelection is false", async () => {
+    localStorage.setItem(PROVIDER_KEY, "claudeAgent");
+    localStorage.setItem(MODEL_KEY, "claude-sonnet-4-6");
+
+    const mounted = await mountPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      persistSelection: false,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-provider-model-picker="true"]'),
+        ).not.toBeNull();
+      });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(mounted.onInstanceModelChange).not.toHaveBeenCalled();
+
+      await page.getByRole("button").click();
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("GPT-5.3 Codex");
+      });
+      await page.getByText("GPT-5.3 Codex").first().click();
+
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith("codex", "gpt-5.3-codex");
+      });
+      expect(localStorage.getItem(PROVIDER_KEY)).toBe("claudeAgent");
+      expect(localStorage.getItem(MODEL_KEY)).toBe("claude-sonnet-4-6");
     } finally {
       await mounted.cleanup();
     }

@@ -80,6 +80,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
    */
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   terminalOpen: boolean;
+  /**
+   * When provided, renders the "Reset to default" rail action. The picker
+   * passes it only while selection persistence is active and unlocked;
+   * `null` (the default) keeps the rail as it was.
+   */
+  onResetSelection?: (() => void) | null;
   onRequestClose?: () => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
@@ -539,6 +545,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             instanceEntries={sidebarInstanceEntries}
             showFavorites={!isLocked}
             showComingSoon={!isLocked}
+            onResetSelection={isLocked ? null : (props.onResetSelection ?? null)}
           />
         )}
 
