@@ -87,16 +87,56 @@ export function writePersistedProviderModelSelection(
   provider: string,
   model: string,
 ): void {
-  storage.setItem(PROVIDER_MODEL_PICKER_PROVIDER_STORAGE_KEY, provider);
-  storage.setItem(PROVIDER_MODEL_PICKER_MODEL_STORAGE_KEY, model);
+  try {
+    storage.setItem(PROVIDER_MODEL_PICKER_PROVIDER_STORAGE_KEY, provider);
+    storage.setItem(PROVIDER_MODEL_PICKER_MODEL_STORAGE_KEY, model);
+  } catch {
+    // Quota exhaustion / locked-down storage must never break the pick
+    // itself — persistence is best-effort by design.
+  }
 }
 
 /** Clear both persisted keys; the picker returns to its default selection. */
 export function clearPersistedProviderModelSelection(
   storage: ProviderModelPickerStorage,
 ): void {
-  storage.removeItem(PROVIDER_MODEL_PICKER_PROVIDER_STORAGE_KEY);
-  storage.removeItem(PROVIDER_MODEL_PICKER_MODEL_STORAGE_KEY);
+  try {
+    storage.removeItem(PROVIDER_MODEL_PICKER_PROVIDER_STORAGE_KEY);
+    storage.removeItem(PROVIDER_MODEL_PICKER_MODEL_STORAGE_KEY);
+  } catch {
+    // See writePersistedProviderModelSelection: best-effort only.
+  }
+}
+
+/** What a `storage` event observer can conclude about the persisted pair. */
+export type ProviderModelPickerStorageChange =
+  | { readonly kind: "selection"; readonly persisted: PersistedProviderModelSelection }
+  | { readonly kind: "cleared" };
+
+/**
+ * Interpret the current key state after a `storage` event fired for one of
+ * the picker's keys. Both keys present → a selection to apply; both absent
+ * → another tab reset to default; exactly one present → the transient
+ * half-state between the two `setItem`/`removeItem` calls, which the second
+ * event resolves — ignore it.
+ */
+export function readProviderModelPickerStorageChange(
+  storage: ProviderModelPickerStorage,
+): ProviderModelPickerStorageChange | null {
+  const provider = storage.getItem(PROVIDER_MODEL_PICKER_PROVIDER_STORAGE_KEY);
+  const model = storage.getItem(PROVIDER_MODEL_PICKER_MODEL_STORAGE_KEY);
+  if (provider === null && model === null) {
+    return { kind: "cleared" };
+  }
+  if (
+    typeof provider === "string" &&
+    provider.length > 0 &&
+    typeof model === "string" &&
+    model.length > 0
+  ) {
+    return { kind: "selection", persisted: { provider, model } };
+  }
+  return null;
 }
 
 /**

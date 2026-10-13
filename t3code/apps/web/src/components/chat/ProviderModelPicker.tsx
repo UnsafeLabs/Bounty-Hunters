@@ -23,6 +23,7 @@ import {
   clearPersistedProviderModelSelection,
   getProviderModelPickerStorage,
   isProviderModelPickerStorageKey,
+  readProviderModelPickerStorageChange,
   readPersistedProviderModelSelection,
   resolveRestoredProviderModelSelection,
   writePersistedProviderModelSelection,
@@ -109,8 +110,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   // The component stays controlled: restoring simply pushes the persisted
   // pick back up through `onInstanceModelChange`, and only user selections
   // (or a cross-tab `storage` event) write to localStorage. Restore is a
-  // one-shot — it waits for provider data, then yields permanently to
-  // whatever the owner (or the user) selected afterwards.
+  // one-shot — it waits for provider data, then yields permanently to any
+  // selection made through the picker afterwards.
 
   const restoreAttemptedRef = useRef(false);
   const lockedContinuationGroupKey = props.lockedContinuationGroupKey ?? null;
@@ -125,12 +126,17 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     if (props.disabled || props.lockedProvider !== null) return;
     // Provider snapshots arrive asynchronously — retry once they land.
     if (props.instanceEntries.length === 0) return;
-    restoreAttemptedRef.current = true;
     const storage = getProviderModelPickerStorage();
-    if (!storage) return;
+    if (!storage) {
+      restoreAttemptedRef.current = true;
+      return;
+    }
     const persisted = readPersistedProviderModelSelection(storage);
     // Empty storage means the default behavior stays untouched.
-    if (!persisted) return;
+    if (!persisted) {
+      restoreAttemptedRef.current = true;
+      return;
+    }
     const resolved = resolveRestoredProviderModelSelection({
       persisted,
       instanceEntries: props.instanceEntries,
@@ -138,7 +144,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       lockedProvider: props.lockedProvider,
       lockedContinuationGroupKey,
     });
-    if (!resolved) return;
+    if (!resolved) {
+      // Nothing selectable yet — retry once model options arrive.
+      return;
+    }
+    restoreAttemptedRef.current = true;
     if (resolved.instanceId === activeInstanceId && resolved.model === props.model) return;
     onInstanceModelChange(resolved.instanceId, resolved.model);
   }, [
@@ -153,9 +163,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     props.modelOptionsByInstance,
   ]);
 
-  // Cross-tab sync: apply a selection persisted by another tab. The
-  // `storage` event only fires in tabs that did not perform the write, so
-  // this never echoes our own selections back.
+  // Cross-tab sync: apply selections — and resets — persisted by another
+  // tab. The `storage` event only fires in tabs that did not perform the
+  // write, so this never echoes our own selections back.
   useEffect(() => {
     if (!persistSelection) return;
     const handleStorage = (event: StorageEvent) => {
@@ -163,10 +173,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       if (props.disabled || props.lockedProvider !== null) return;
       const storage = getProviderModelPickerStorage();
       if (!storage) return;
-      const persisted = readPersistedProviderModelSelection(storage);
-      if (!persisted) return;
+      const change = readProviderModelPickerStorageChange(storage);
+      if (!change) return;
       const resolved = resolveRestoredProviderModelSelection({
-        persisted,
+        persisted: change.kind === "selection" ? change.persisted : null,
         instanceEntries: props.instanceEntries,
         modelOptionsByInstance: props.modelOptionsByInstance,
         lockedProvider: props.lockedProvider,

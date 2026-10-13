@@ -5,8 +5,10 @@ import {
   PROVIDER_MODEL_PICKER_MODEL_STORAGE_KEY,
   PROVIDER_MODEL_PICKER_PROVIDER_STORAGE_KEY,
   clearPersistedProviderModelSelection,
+  getProviderModelPickerStorage,
   isProviderModelPickerStorageKey,
   readPersistedProviderModelSelection,
+  readProviderModelPickerStorageChange,
   resolveRestoredProviderModelSelection,
   writePersistedProviderModelSelection,
   type ProviderModelPickerStorage,
@@ -26,6 +28,19 @@ function createMemoryStorage(): ProviderModelPickerStorage & {
       store.delete(key);
     },
     dump: () => store,
+  };
+}
+
+/** Storage stub whose mutations always fail (quota/security errors). */
+function createThrowingStorage(): ProviderModelPickerStorage {
+  return {
+    getItem: () => null,
+    setItem: () => {
+      throw new Error("QuotaExceededError");
+    },
+    removeItem: () => {
+      throw new Error("SecurityError");
+    },
   };
 }
 
@@ -75,6 +90,8 @@ describe("readPersistedProviderModelSelection", () => {
 
   it("returns null when either value is an empty string", () => {
     const storage = createMemoryStorage();
+    // Writes are deliberately unvalidated: an empty component of the pair
+    // reads back as "nothing saved" rather than being rejected on write.
     writePersistedProviderModelSelection(storage, "", "gpt-5-codex");
     expect(readPersistedProviderModelSelection(storage)).toBeNull();
 
@@ -90,6 +107,51 @@ describe("readPersistedProviderModelSelection", () => {
       provider: "claudeAgent",
       model: "claude-opus-4-6",
     });
+  });
+
+  it("swallows storage failures on write and clear instead of throwing", () => {
+    expect(() =>
+      writePersistedProviderModelSelection(createThrowingStorage(), "codex", "gpt-5-codex"),
+    ).not.toThrow();
+    expect(() => clearPersistedProviderModelSelection(createThrowingStorage())).not.toThrow();
+  });
+});
+
+describe("getProviderModelPickerStorage", () => {
+  it("returns null outside a browser environment", () => {
+    // Unit tests run in the node environment where `window` is undefined.
+    expect(typeof window).toBe("undefined");
+    expect(getProviderModelPickerStorage()).toBeNull();
+  });
+});
+
+describe("readProviderModelPickerStorageChange", () => {
+  it("reports a selection when both keys hold values", () => {
+    const storage = createMemoryStorage();
+    writePersistedProviderModelSelection(storage, "codex", "gpt-5-codex");
+    expect(readProviderModelPickerStorageChange(storage)).toEqual({
+      kind: "selection",
+      persisted: { provider: "codex", model: "gpt-5-codex" },
+    });
+  });
+
+  it("reports cleared when both keys are absent", () => {
+    const storage = createMemoryStorage();
+    expect(readProviderModelPickerStorageChange(storage)).toEqual({ kind: "cleared" });
+
+    writePersistedProviderModelSelection(storage, "codex", "gpt-5-codex");
+    clearPersistedProviderModelSelection(storage);
+    expect(readProviderModelPickerStorageChange(storage)).toEqual({ kind: "cleared" });
+  });
+
+  it("ignores the transient half-written state between the two keys", () => {
+    const providerOnly = createMemoryStorage();
+    providerOnly.setItem(PROVIDER_MODEL_PICKER_PROVIDER_STORAGE_KEY, "codex");
+    expect(readProviderModelPickerStorageChange(providerOnly)).toBeNull();
+
+    const modelOnly = createMemoryStorage();
+    modelOnly.setItem(PROVIDER_MODEL_PICKER_MODEL_STORAGE_KEY, "gpt-5-codex");
+    expect(readProviderModelPickerStorageChange(modelOnly)).toBeNull();
   });
 });
 

@@ -214,6 +214,17 @@ const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
 const CLAUDE_INSTANCE_ID = ProviderInstanceId.make("claudeAgent");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
 
+// Namespaced persistence keys (UnsafeLabs/Bounty-Hunters#834). Tests that
+// click through the picker write them, so every describe clears them in its
+// hooks to keep mounts independent.
+const PERSISTED_PROVIDER_KEY = "t3code.provider";
+const PERSISTED_MODEL_KEY = "t3code.model";
+
+function clearPersistedPickerSelectionKeys(): void {
+  localStorage.removeItem(PERSISTED_PROVIDER_KEY);
+  localStorage.removeItem(PERSISTED_MODEL_KEY);
+}
+
 function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
   return {
     driver: ProviderDriverKind.make("codex"),
@@ -323,11 +334,13 @@ function getSidebarProviderOrder() {
 describe("ProviderModelPicker", () => {
   beforeEach(async () => {
     // Reset test environment before each test
+    clearPersistedPickerSelectionKeys();
     await __resetLocalApiForTests();
   });
 
   afterEach(async () => {
     document.body.innerHTML = "";
+    clearPersistedPickerSelectionKeys();
     await __resetLocalApiForTests();
   });
 
@@ -1228,13 +1241,10 @@ describe("ProviderModelPicker", () => {
 });
 
 describe("ProviderModelPicker selection persistence (#834)", () => {
-  const PROVIDER_KEY = "t3code.provider";
-  const MODEL_KEY = "t3code.model";
+  const PROVIDER_KEY = PERSISTED_PROVIDER_KEY;
+  const MODEL_KEY = PERSISTED_MODEL_KEY;
 
-  const clearPersistedPickerKeys = () => {
-    localStorage.removeItem(PROVIDER_KEY);
-    localStorage.removeItem(MODEL_KEY);
-  };
+  const clearPersistedPickerKeys = clearPersistedPickerSelectionKeys;
 
   beforeEach(() => {
     clearPersistedPickerKeys();
@@ -1412,9 +1422,15 @@ describe("ProviderModelPicker selection persistence (#834)", () => {
     });
 
     try {
+      // Wait for the trigger (and thus the storage listener) to attach
+      // before dispatching, and let the one-shot restore settle.
       await vi.waitFor(() => {
-        expect(mounted.onInstanceModelChange).not.toHaveBeenCalled();
+        expect(
+          document.querySelector('[data-chat-provider-model-picker="true"]'),
+        ).not.toBeNull();
       });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(mounted.onInstanceModelChange).not.toHaveBeenCalled();
 
       localStorage.setItem(PROVIDER_KEY, "claudeAgent");
       localStorage.setItem(MODEL_KEY, "claude-haiku-4-5");
@@ -1426,6 +1442,105 @@ describe("ProviderModelPicker selection persistence (#834)", () => {
           "claude-haiku-4-5",
         );
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("returns to the default selection when another tab resets the persisted keys", async () => {
+    localStorage.setItem(PROVIDER_KEY, "claudeAgent");
+    localStorage.setItem(MODEL_KEY, "claude-sonnet-4-6");
+
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-sonnet-4-6",
+      lockedProvider: null,
+    });
+
+    const expected = firstSelectableSelection();
+    try {
+      // Restore on mount matches the props, so no callback fires yet.
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-provider-model-picker="true"]'),
+        ).not.toBeNull();
+      });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(mounted.onInstanceModelChange).not.toHaveBeenCalled();
+
+      // Another tab clears the keys; each removeItem fires its own event,
+      // and only the second one sees the fully cleared pair.
+      localStorage.removeItem(PROVIDER_KEY);
+      window.dispatchEvent(new StorageEvent("storage", { key: PROVIDER_KEY }));
+      localStorage.removeItem(MODEL_KEY);
+      window.dispatchEvent(new StorageEvent("storage", { key: MODEL_KEY }));
+
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith(
+          expected.instanceId,
+          expected.model,
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("ignores the transient half-written state between the two storage keys", async () => {
+    const mounted = await mountPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-provider-model-picker="true"]'),
+        ).not.toBeNull();
+      });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      // Only the provider key is written so far — the observer must wait
+      // for the model key instead of applying a half-written pair.
+      localStorage.setItem(PROVIDER_KEY, "claudeAgent");
+      window.dispatchEvent(new StorageEvent("storage", { key: PROVIDER_KEY }));
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(mounted.onInstanceModelChange).not.toHaveBeenCalled();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("reset to default does not dispatch a change when already at the default selection", async () => {
+    const expected = firstSelectableSelection();
+
+    const mounted = await mountPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-model-picker-reset="true"]')).not.toBeNull();
+      });
+      await page.getByRole("button", { name: "Reset to default" }).click();
+
+      await vi.waitFor(() => {
+        expect(localStorage.getItem(PROVIDER_KEY)).toBeNull();
+        expect(localStorage.getItem(MODEL_KEY)).toBeNull();
+      });
+      // Give a would-be callback a settle window before asserting absence.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(mounted.onInstanceModelChange).not.toHaveBeenCalledWith(
+        expected.instanceId,
+        expected.model,
+      );
+      expect(mounted.onInstanceModelChange).not.toHaveBeenCalled();
     } finally {
       await mounted.cleanup();
     }
