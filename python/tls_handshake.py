@@ -32,9 +32,8 @@ validates this block exists and is complete. See CONTRIBUTING.md §4.7.
 import hashlib
 import hmac
 import struct
-import os
 from enum import Enum, auto
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Any
 
 
 class HandshakeState(Enum):
@@ -76,7 +75,7 @@ EXT_SUPPORTED_VERSIONS = 0x002B
 EXT_KEY_SHARE = 0x0033
 
 
-VALID_TRANSITIONS: Dict[HandshakeState, List[HandshakeState]] = {
+VALID_TRANSITIONS: dict[HandshakeState, list[HandshakeState]] = {
     HandshakeState.IDLE: [HandshakeState.CLIENT_HELLO],
     HandshakeState.CLIENT_HELLO: [
         HandshakeState.SERVER_HELLO,
@@ -98,7 +97,7 @@ class TLSExtension:
     def __init__(self, ext_type: int, data: bytes):
         self.ext_type = ext_type
         self.data = data
-        self.server_name: Optional[str] = None
+        self.server_name: str | None = None
 
     def __repr__(self) -> str:
         return f"TLSExtension(type=0x{self.ext_type:04x}, len={len(self.data)})"
@@ -110,10 +109,10 @@ class HandshakeMessage:
     def __init__(self, msg_type: HandshakeType, payload: bytes):
         self.msg_type = msg_type
         self.payload = payload
-        self.extensions: List[TLSExtension] = []
-        self.cipher_suite: Optional[int] = None
-        self.session_id: Optional[bytes] = None
-        self.random: Optional[bytes] = None
+        self.extensions: list[TLSExtension] = []
+        self.cipher_suite: int | None = None
+        self.session_id: bytes | None = None
+        self.random: bytes | None = None
 
 
 class TLSHandshake:
@@ -125,16 +124,16 @@ class TLSHandshake:
     def __init__(self, is_server: bool = False):
         self.state: HandshakeState = HandshakeState.IDLE
         self.is_server = is_server
-        self.client_random: Optional[bytes] = None
-        self.server_random: Optional[bytes] = None
-        self.master_secret: Optional[bytes] = None
-        self.session_id: Optional[bytes] = None
-        self.cipher_suite: Optional[int] = None
-        self.extensions: Dict[int, TLSExtension] = {}
+        self.client_random: bytes | None = None
+        self.server_random: bytes | None = None
+        self.master_secret: bytes | None = None
+        self.session_id: bytes | None = None
+        self.cipher_suite: int | None = None
+        self.extensions: dict[int, TLSExtension] = {}
         self.handshake_hash = hashlib.sha256()
         self.negotiated_ems: bool = False
-        self.server_name: Optional[str] = None
-        self._pre_master_secret: Optional[bytes] = None
+        self.server_name: str | None = None
+        self._pre_master_secret: bytes | None = None
         self.transcript: bytearray = bytearray()
 
     def transition_to(self, new_state: HandshakeState) -> bool:
@@ -146,7 +145,7 @@ class TLSHandshake:
         self.state = HandshakeState.ERROR
         return False
 
-    def parse_record(self, data: bytes) -> Optional[HandshakeMessage]:
+    def parse_record(self, data: bytes) -> HandshakeMessage | None:
         """Parse a TLS record layer and extract the handshake message."""
         if len(data) < 5:
             return None
@@ -215,7 +214,7 @@ class TLSHandshake:
 
         return True
 
-    def parse_extensions(self, data: bytes) -> List[TLSExtension]:
+    def parse_extensions(self, data: bytes) -> list[TLSExtension]:
         """Parse TLS extensions from raw bytes."""
         extensions = []
         offset = 0
@@ -232,9 +231,7 @@ class TLSHandshake:
             # field is never extracted from the extension data
             if ext_type == EXT_EXTENDED_MASTER_SECRET:
                 self.negotiated_ems = True
-            elif ext_type == EXT_SIGNATURE_ALGORITHMS:
-                pass  # stored in ext.data for later use
-            elif ext_type == EXT_SUPPORTED_VERSIONS:
+            elif ext_type == EXT_SIGNATURE_ALGORITHMS or ext_type == EXT_SUPPORTED_VERSIONS:
                 pass  # stored in ext.data for later use
 
             self.extensions[ext_type] = ext
@@ -322,7 +319,7 @@ class TLSHandshake:
 
         return result[:output_len]
 
-    def _decrypt_pre_master_secret(self, encrypted: bytes) -> Optional[bytes]:
+    def _decrypt_pre_master_secret(self, encrypted: bytes) -> bytes | None:
         """
         Placeholder for RSA decryption of the pre-master secret.
         In production, this would use the server's private key.
@@ -332,7 +329,7 @@ class TLSHandshake:
             return None
         return encrypted[:48]
 
-    def process_message(self, data: bytes) -> Tuple[bool, str]:
+    def process_message(self, data: bytes) -> tuple[bool, str]:
         """
         Main entry point: parse a TLS record and advance the state machine.
         Returns (success, status_message).
@@ -381,7 +378,7 @@ class TLSHandshake:
 
         return False, f"Unhandled message type: {message.msg_type}"
 
-    def get_state_info(self) -> Dict[str, Any]:
+    def get_state_info(self) -> dict[str, Any]:
         """Return current handshake state for diagnostics."""
         return {
             "state": self.state.name,
