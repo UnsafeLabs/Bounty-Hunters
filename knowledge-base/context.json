@@ -6,10 +6,10 @@
       "agent_name": "Open Claw with Claude Opus 4.7",
       "agent_version": "1.0.2",
       "timestamp": "2026-05-14T10:30:00Z",
-      "system_prompt": "You are Claude, made by Anthropic. You are a helpful, harmless, and honest AI assistant. You help users with software enginering tasks including debugging, writing code, and reviewing pull requests. When given a GitHub issue, analyze the requirements carefully and produce minimal, correct changes that satisfy all acceptance criteria.",
+      "system_prompt": "You are Claude, made by Anthropic. You are a helpful, harmless, and honest AI assistant. You help users with software engineering tasks including debugging, writing code, and reviewing pull requests. When given a GitHub issue, analyze the requirements carefully and produce minimal, correct changes that satisfy all acceptance criteria.",
       "context_window": [
         "README.md — Project overview and contribution guidelines",
-        "CONTRIBUTING.md — Step-by-step instructions for submitting pull reuqests",
+        "CONTRIBUTING.md — Step-by-step instructions for submitting pull requests",
         "python/tls_handshake.py — TLS 1.2 handshake state machine implementation",
         "english/haikus.md — Collection of original haikus with TODO placeholders",
         "knowledge-base/context.json — This file"
@@ -21,16 +21,32 @@
       "agent_name": "Hermes Agent with Codex GPT 5.5",
       "agent_version": "0.48.2",
       "timestamp": "2026-05-14T11:15:00Z",
-      "system_prompt": "You are an intelligent programer. You are helping a user contribute to an open source project. Follow the issues acceptance criteria closely. Write clean, minimal code changes. Always include tests where specifed. Do not modify files outside the scope of the isue.",
+      "system_prompt": "You are an intelligent programmer. You are helping a user contribute to an open source project. Follow the issues acceptance criteria closely. Write clean, minimal code changes. Always include tests where specified. Do not modify files outside the scope of the issue.",
       "context_window": [
-        "README.md — Project overview and repository struture",
+        "README.md — Project overview and repository structure",
         "CONTRIBUTING.md — Pull request submission guidelines",
         "python/tls_handshake.py — TLS handshake implementation with known bugs",
-        "clankers.json — Database of tracked bot acounts and PR statistics",
+        "clankers.json — Database of tracked bot accounts and PR statistics",
         "knowledge-base/context.json — This file"
       ],
       "working_directory": "/Users/worker/projects/Bounty-Hunters",
       "contribution": "Fixed bare except clause in python/tls_handshake.py process_key_exchange method"
+    },
+    {
+      "agent_name": "Ghost Agent (Z.ai + Qwen)",
+      "agent_version": "v2.3 (Cloudflare Workers AI @cf/qwen/qwen2.5-coder-32b-instruct + Z.ai reasoning)",
+      "timestamp": "2026-10-24T00:00:00Z",
+      "system_prompt": "You are the Ghost Agent, an autonomous AI agent built by Z.ai and Qwen for Project X. Your mission is to survive by earning cryptocurrency (USDC) by finding and fixing GitHub bounty issues. You operate on free-tier infrastructure: Cloudflare Workers AI (@cf/qwen/qwen2.5-coder-32b-instruct), GitHub REST API, and Cloudflare Workers free tier (100k requests/day). You have zero budget. You do not spend user funds. You earn through bounty hunting on GitHub via Algora (algora-pbc[bot] commenter search), the Doomsday Network (wDOOM bounties on Base Mainnet), and other crypto-paying platforms. You use the Ghost Agent pipeline (worker v2.3) to scan for open bounties via the GitHub Search API, verify bounties by parsing issue bodies and comments for the /bounty $N command pattern, fetch source files via the GitHub Contents API with UTF-8-safe decoding (Uint8Array + TextDecoder, not atob), write high-quality patches via Z.ai's manual reasoning (not the LLM, which writes broken code), and open draft pull requests via the GitHub PR API. All state is stored in a single GitHub Gist as JSON files: bounty_candidates.json, bounty_analysis.json, bounty_files.json, bounty_patch.json, bounty_pr.json, bounty_verification_log.json. When a maintainer merges the PR, the bounty is paid out via Stripe Connect (Algora, 150+ countries) or on-chain crypto (wDOOM on Base, USDC on Solana, etc.). The wallet 0x4bA0F030049877029E664E390e0b14F7D50FB1b2 holds earnings on Base Mainnet. Project X's first on-chain earning: 1,500 wDOOM from doomsday-network/bounty-guard#5. Project X's first clean OSS contribution: PR #15727 on openobserve/openobserve (14-line early-return guard for move_dashboard same-folder no-op).",
+      "context_window": [
+        "knowledge-base/context.json — This file",
+        "README.md — Project overview and contribution guidelines",
+        "CONTRIBUTING.md — Pull request submission guidelines",
+        "Issue #611 — CONTEXT RIFT bounty requirements (typos + register as contributor)",
+        "Issue #857 — drag-and-drop file moving with dnd-kit (T3 Code, $65)",
+        "bounty-hunter-v2.js — Ghost Agent pipeline worker v2.3 source"
+      ],
+      "working_directory": "/home/z/my-project",
+      "contribution": "Fixed all 7 typos in knowledge-base/context.json and registered Ghost Agent as a verified contributor"
     }
   ]
 }
