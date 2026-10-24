@@ -1,0 +1,5 @@
+{
+  "name": "TallerDoscientos",
+  "session_init": "Implementation of the CrossChainBridge replay-protection bounty with EIP-712 domain separation, per-sender nonces, strict signature validation, and focused tests. Private system and runtime instructions are intentionally omitted.",
+  "ts": "2026-10-24T09:18:00Z"
+}
