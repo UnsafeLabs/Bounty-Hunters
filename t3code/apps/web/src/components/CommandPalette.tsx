@@ -1664,6 +1664,7 @@ function OpenCommandPaletteDialog() {
             groups={displayedGroups}
             highlightedItemValue={highlightedItemValue}
             isActionsOnly={isActionsOnly}
+            query={deferredQuery}
             keybindings={keybindings}
             onExecuteItem={executeItem}
             {...(addProjectCloneFlow?.step === "repository"

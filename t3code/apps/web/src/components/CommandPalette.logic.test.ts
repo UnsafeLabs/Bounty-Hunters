@@ -4,6 +4,7 @@ import type { Thread } from "../types";
 import {
   buildThreadActionItems,
   filterCommandPaletteGroups,
+  fuzzyMatch,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
 
@@ -162,5 +163,41 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+  });
+});
+
+describe("fuzzyMatch", () => {
+  it("matches characters across word boundaries", () => {
+    const match = fuzzyMatch("open file", "ofl");
+    expect(match).not.toBeNull();
+    expect(match?.indices).toEqual([0, 5, 7]);
+  });
+
+  it("returns null when a character is missing", () => {
+    expect(fuzzyMatch("open file", "ofz")).toBeNull();
+  });
+
+  it("scores consecutive matches above scattered ones", () => {
+    const contiguous = fuzzyMatch("open file", "file");
+    const scattered = fuzzyMatch("find the last line", "file");
+    expect(contiguous).not.toBeNull();
+    expect(scattered).not.toBeNull();
+    expect(contiguous!.score).toBeGreaterThan(scattered!.score);
+  });
+
+  it("scores word-boundary matches above mid-word matches", () => {
+    const boundary = fuzzyMatch("open file", "of");
+    const midWord = fuzzyMatch("proof", "of");
+    expect(boundary!.score).toBeGreaterThan(midWord!.score);
+  });
+
+  it("prefers shorter haystacks on otherwise equal matches", () => {
+    const short = fuzzyMatch("save", "save");
+    const long = fuzzyMatch("save the current document to disk", "save");
+    expect(short!.score).toBeGreaterThan(long!.score);
+  });
+
+  it("matches an empty query with a zero score", () => {
+    expect(fuzzyMatch("anything", "")).toEqual({ score: 0, indices: [] });
   });
 });

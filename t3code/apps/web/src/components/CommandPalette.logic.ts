@@ -208,6 +208,52 @@ function rankCommandPaletteItemMatch(
   return 0;
 }
 
+export type FuzzyMatch = {
+  score: number;
+  indices: ReadonlyArray<number>;
+};
+
+/**
+ * Character-by-character fuzzy match over an already-normalized haystack.
+ * Consecutive characters and word-boundary starts score higher; shorter haystacks win ties.
+ */
+export function fuzzyMatch(haystack: string, normalizedQuery: string): FuzzyMatch | null {
+  if (normalizedQuery.length === 0) {
+    return { score: 0, indices: [] };
+  }
+
+  const indices: number[] = [];
+  let score = 0;
+  let cursor = 0;
+  let previousIndex = -2;
+
+  for (const char of normalizedQuery) {
+    const foundIndex = haystack.indexOf(char, cursor);
+    if (foundIndex === -1) {
+      return null;
+    }
+
+    const preceding = foundIndex === 0 ? "" : haystack.charAt(foundIndex - 1);
+    const isWordBoundary = foundIndex === 0 || !/[a-z0-9]/.test(preceding);
+
+    score += 1;
+    if (foundIndex === previousIndex + 1) {
+      score += 3;
+    }
+    if (isWordBoundary) {
+      score += 4;
+    }
+
+    indices.push(foundIndex);
+    previousIndex = foundIndex;
+    cursor = foundIndex + 1;
+  }
+
+  score += Math.max(0, 8 - Math.floor(haystack.length / 12));
+
+  return { score, indices };
+}
+
 export function filterCommandPaletteGroups(input: {
   activeGroups: ReadonlyArray<CommandPaletteGroup>;
   query: string;
@@ -255,14 +301,15 @@ export function filterCommandPaletteGroups(input: {
     const items = group.items
       .map((item, index) => {
         const haystack = normalizeSearchText(item.searchTerms.join(" "));
-        if (!haystack.includes(normalizedQuery)) {
+        const match = fuzzyMatch(haystack, normalizedQuery);
+        if (match === null) {
           return null;
         }
 
         return {
           item,
           index,
-          rank: rankCommandPaletteItemMatch(item, normalizedQuery),
+          rank: match.score + rankCommandPaletteItemMatch(item, normalizedQuery),
         };
       })
       .filter(

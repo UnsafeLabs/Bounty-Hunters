@@ -5,6 +5,7 @@ import {
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
   type CommandPaletteSubmenuItem,
+  fuzzyMatch,
 } from "./CommandPalette.logic";
 import {
   CommandCollection,
@@ -21,6 +22,7 @@ interface CommandPaletteResultsProps {
   groups: ReadonlyArray<CommandPaletteGroup>;
   highlightedItemValue?: string | null;
   isActionsOnly: boolean;
+  query?: string;
   keybindings: ResolvedKeybindingsConfig;
   onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
 }
@@ -50,6 +52,7 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
                 <CommandPaletteResultRow
                   item={item}
                   key={item.value}
+                  query={props.query}
                   keybindings={props.keybindings}
                   isActive={props.highlightedItemValue === item.value}
                   onExecuteItem={props.onExecuteItem}
@@ -73,7 +76,7 @@ function DisabledCommandPaletteResultRow(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <span className="truncate">{highlightTitle(props.item.title, props.query)}</span>
           </span>
           <span className="truncate text-muted-foreground/70 text-xs">
             {props.item.description}
@@ -82,7 +85,7 @@ function DisabledCommandPaletteResultRow(props: {
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <span className="truncate">{highlightTitle(props.item.title, props.query)}</span>
         </span>
       )}
       {props.item.titleTrailingContent}
@@ -93,6 +96,7 @@ function DisabledCommandPaletteResultRow(props: {
 function CommandPaletteResultRow(props: {
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
   isActive: boolean;
+  query?: string;
   keybindings: ResolvedKeybindingsConfig;
   onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
 }) {
@@ -119,7 +123,7 @@ function CommandPaletteResultRow(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <span className="truncate">{highlightTitle(props.item.title, props.query)}</span>
           </span>
           <span className="truncate text-muted-foreground/70 text-xs">
             {props.item.description}
@@ -128,7 +132,7 @@ function CommandPaletteResultRow(props: {
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <span className="truncate">{highlightTitle(props.item.title, props.query)}</span>
         </span>
       )}
       {props.item.titleTrailingContent}
@@ -142,5 +146,32 @@ function CommandPaletteResultRow(props: {
         <ChevronRightIcon className="ml-auto size-4 shrink-0 text-muted-foreground/50" />
       ) : null}
     </CommandItem>
+  );
+}
+
+/**
+ * Highlights the characters a fuzzy query matched in a command title.
+ * Falls back to plain text when the query is empty or does not match the title.
+ */
+function highlightTitle(title: string, query?: string) {
+  const normalizedQuery = query ? query.replace(/^>/, "").trim().toLowerCase() : "";
+  if (normalizedQuery.length === 0) {
+    return title;
+  }
+
+  const match = fuzzyMatch(title.toLowerCase(), normalizedQuery);
+  if (match === null || match.indices.length === 0) {
+    return title;
+  }
+
+  const matched = new Set(match.indices);
+  return Array.from(title).map((character, index) =>
+    matched.has(index) ? (
+      <span key={`${character}-${index}`} className="font-medium text-primary">
+        {character}
+      </span>
+    ) : (
+      <span key={`${character}-${index}`}>{character}</span>
+    ),
   );
 }
