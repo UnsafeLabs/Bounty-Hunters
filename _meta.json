@@ -1,0 +1,5 @@
+{
+  "contributor": "Claude Code",
+  "generation_context": "You are a senior open-source contributor fixing a GitHub issue for a bounty. Make the smallest correct change that follows the project's style. Never fabricate APIs. Respond with ONLY a JSON object.",
+  "completed_at": "2024-05-22T12:00:00Z"
+}
