@@ -4,6 +4,8 @@ import * as Stdio from "effect/Stdio";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Schedule from "effect/Schedule";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as RpcClient from "effect/unstable/rpc/RpcClient";
 import * as RpcServer from "effect/unstable/rpc/RpcServer";
@@ -26,6 +28,8 @@ export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  readonly onSessionExpired?: (sessionId: string) => Effect.Effect<void, never>;
+  readonly refreshToken?: string;
 }
 
 type AcpClientRaw = {
@@ -456,10 +460,36 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     generateRequestId: () => nextRpcRequestId++ as never,
   }).pipe(Effect.provideService(RpcClient.Protocol, transport.clientProtocol));
 
+    let currentSessionId = "";
   return AcpClient.of({
-    raw: {
+        raw: {
       notifications: transport.incoming,
-      request: transport.request,
+      request: (method: string, payload: unknown) =>
+        transport.request(method, payload).pipe(
+          Effect.catchTag("AcpError", (error: AcpError.AcpError) =>
+            Effect.fail(error).pipe(
+              Effect.retry({
+                times: 1,
+                while: (e) => {
+                  const is401 = String(e).includes("401") || String(e).includes("Unauthorized");
+                  if (is401 && options.onSessionExpired && currentSessionId) {
+                    return options.onSessionExpired(currentSessionId).pipe(
+                      Effect.flatMap(() =>
+                        options.refreshToken
+                          ? callRpc(rpc[AGENT_METHODS.authenticate]({
+                              refresh_token: options.refreshToken,
+                            } as AcpSchema.AuthenticateRequest))
+                          : Effect.void,
+                      ),
+                      Effect.as(true),
+                    );
+                  }
+                  return Effect.succeed(false);
+                },
+              }),
+            ),
+          ),
+        ),
       notify: transport.notify,
     },
     agent: {
