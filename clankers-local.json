@@ -1998,6 +1998,12 @@
     "last_pr": "2026-10-15T13:33:22.180Z"
   },
   {
+    "username": "lombardoprado",
+    "total_prs": 2,
+    "first_pr": "2026-11-01T23:40:42.024Z",
+    "last_pr": "2026-11-01T23:40:52.526Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2806,11 +2812,5 @@
     "total_prs": 1,
     "first_pr": "2026-11-01T02:27:11.464Z",
     "last_pr": "2026-11-01T02:27:11.464Z"
-  },
-  {
-    "username": "lombardoprado",
-    "total_prs": 1,
-    "first_pr": "2026-11-01T23:40:42.024Z",
-    "last_pr": "2026-11-01T23:40:42.024Z"
   }
 ]
