@@ -564,6 +564,12 @@
     "last_pr": "2026-07-20T01:04:43.809Z"
   },
   {
+    "username": "okhafcoco13",
+    "total_prs": 15,
+    "first_pr": "2026-10-22T12:59:49.351Z",
+    "last_pr": "2026-11-01T14:57:31.967Z"
+  },
+  {
     "username": "callmekidz",
     "total_prs": 14,
     "first_pr": "2026-05-13T19:54:10Z",
@@ -610,12 +616,6 @@
     "total_prs": 14,
     "first_pr": "2026-05-28T10:45:54.231Z",
     "last_pr": "2026-05-28T18:46:14.559Z"
-  },
-  {
-    "username": "okhafcoco13",
-    "total_prs": 14,
-    "first_pr": "2026-10-22T12:59:49.351Z",
-    "last_pr": "2026-11-01T06:35:08.082Z"
   },
   {
     "username": "MNgaminhhh",
@@ -3460,5 +3460,11 @@
     "total_prs": 1,
     "first_pr": "2026-10-01T15:01:57.650Z",
     "last_pr": "2026-10-01T15:01:57.650Z"
+  },
+  {
+    "username": "ajithnair1808-max",
+    "total_prs": 1,
+    "first_pr": "2026-11-01T09:17:04.517Z",
+    "last_pr": "2026-11-01T09:17:04.517Z"
   }
 ]
