@@ -1224,6 +1224,12 @@
     "last_pr": "2026-09-22T04:51:17.193Z"
   },
   {
+    "username": "lombardoprado",
+    "total_prs": 5,
+    "first_pr": "2026-11-01T23:40:42.024Z",
+    "last_pr": "2026-11-01T23:41:23.385Z"
+  },
+  {
     "username": "spqrcode",
     "total_prs": 4,
     "first_pr": "2026-05-14T12:12:04.319Z",
@@ -1396,12 +1402,6 @@
     "total_prs": 4,
     "first_pr": "2026-10-24T06:29:21.914Z",
     "last_pr": "2026-10-26T16:14:21.254Z"
-  },
-  {
-    "username": "lombardoprado",
-    "total_prs": 4,
-    "first_pr": "2026-11-01T23:40:42.024Z",
-    "last_pr": "2026-11-01T23:41:12.066Z"
   },
   {
     "username": "AidenPeerce",
