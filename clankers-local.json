@@ -1050,6 +1050,12 @@
     "last_pr": "2026-10-08T01:32:40.031Z"
   },
   {
+    "username": "lombardoprado",
+    "total_prs": 6,
+    "first_pr": "2026-11-01T23:40:42.024Z",
+    "last_pr": "2026-11-02T00:20:51.922Z"
+  },
+  {
     "username": "FJ-CX",
     "total_prs": 5,
     "first_pr": "2026-05-13T15:11:20Z",
@@ -1222,12 +1228,6 @@
     "total_prs": 5,
     "first_pr": "2026-09-22T04:28:26.480Z",
     "last_pr": "2026-09-22T04:51:17.193Z"
-  },
-  {
-    "username": "lombardoprado",
-    "total_prs": 5,
-    "first_pr": "2026-11-01T23:40:42.024Z",
-    "last_pr": "2026-11-01T23:41:23.385Z"
   },
   {
     "username": "spqrcode",
