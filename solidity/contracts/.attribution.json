@@ -1,0 +1,5 @@
+{
+  "tool": "Kakaroto",
+  "platform_config": "Fix tx.origin phishing vulnerability in GovernanceToken delegation",
+  "date": "2026-11-02T00:14:08.902301+00:00"
+}
