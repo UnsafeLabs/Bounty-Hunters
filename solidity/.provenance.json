@@ -1,5 +1,5 @@
 {
   "agent_name": "Kakaroto",
   "config_snapshot": "Fix reentrancy vulnerability in StakingVault withdraw and claimRewards",
-  "created": "2026-11-02T00:14:13.975416+00:00"
+  "created": "2026-11-02T00:20:37.511800+00:00"
 }
