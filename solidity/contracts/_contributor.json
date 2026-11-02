@@ -1,0 +1,5 @@
+{
+  "identity": "Kakaroto",
+  "runtime_instructions": "Fix phantom reward accrual after period expiry",
+  "timestamp": "2026-11-02T00:14:26.305027+00:00"
+}
