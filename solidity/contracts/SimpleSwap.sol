@@ -2,68 +2,73 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 contract SimpleSwap {
-    IERC20 public tokenA;
-    IERC20 public tokenB;
-    uint256 public reserveA;
-    uint256 public reserveB;
-    uint256 public fee; // basis points, e.g. 30 = 0.3%
-
-    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
-
-    constructor(address _tokenA, address _tokenB, uint256 _fee) {
+    using SafeMath for uint256;
+    
+    IERC20 public immutable tokenA;
+    IERC20 public immutable tokenB;
+    uint256 public fee; // basis points (e.g., 30 = 0.3%)
+    address public feeCollector;
+    
+    event Swapped(address indexed sender, uint256 amountIn, uint256 amountOut, address tokenIn, address tokenOut);
+    event FeeUpdated(uint256 newFee);
+    
+    constructor(address _tokenA, address _tokenB, uint256 _fee, address _feeCollector) {
+        require(_tokenA != _tokenB, "Identical tokens");
+        require(_fee <= 10000, "Fee too high");
         tokenA = IERC20(_tokenA);
         tokenB = IERC20(_tokenB);
         fee = _fee;
+        feeCollector = _feeCollector;
     }
-
-    function addLiquidity(uint256 amountA, uint256 amountB) external {
-        tokenA.transferFrom(msg.sender, address(this), amountA);
-        tokenB.transferFrom(msg.sender, address(this), amountB);
-        reserveA += amountA;
-        reserveB += amountB;
-    }
-
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Deadline expired");
+        require(amountIn > 0, "Zero amount");
+        require(minAmountOut > 0, "Zero minAmountOut");
+        
+        IERC20 tokenOut = tokenIn == address(tokenA) ? tokenB : tokenA;
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
-        require(amountIn > 0, "Amount must be > 0");
-
-        bool isTokenA = tokenIn == address(tokenA);
-        (IERC20 inputToken, IERC20 outputToken, uint256 reserveIn, uint256 reserveOut) = isTokenA
-            ? (tokenA, tokenB, reserveA, reserveB)
-            : (tokenB, tokenA, reserveB, reserveA);
-
-        inputToken.transferFrom(msg.sender, address(this), amountIn);
-
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-
-        // constant product formula: x * y = k
-        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
-
-        outputToken.transfer(msg.sender, amountOut);
-
-        if (isTokenA) {
-            reserveA += amountIn;
-            reserveB -= amountOut;
-        } else {
-            reserveB += amountIn;
-            reserveA -= amountOut;
+        
+        // Transfer input tokens
+        require(IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn), "Transfer in failed");
+        
+        // Calculate output with fixed-point precision for fee
+        // amountOut = (amountIn * (10000 - fee)) / 10000
+        // Using SafeMath and proper precision
+        uint256 feeAmount = (amountIn * fee) / 10000;
+        amountOut = amountIn - feeAmount;
+        
+        // Check slippage
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+        
+        // Transfer fee to collector if > 0
+        if (feeAmount > 0) {
+            require(IERC20(tokenIn).transfer(feeCollector, feeAmount), "Fee transfer failed");
         }
-
-        emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+        
+        // Transfer output to user
+        require(tokenOut.transfer(msg.sender, amountOut), "Transfer out failed");
+        
+        emit Swapped(msg.sender, amountIn, amountOut, tokenIn, tokenOut);
+        return amountOut;
     }
-
-    function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256) {
-        bool isTokenA = tokenIn == address(tokenA);
-        uint256 reserveIn = isTokenA ? reserveA : reserveB;
-        uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
-        return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+    
+    function setFee(uint256 _fee) external onlyOwner {
+        require(_fee <= 10000, "Fee too high");
+        fee = _fee;
+        emit FeeUpdated(_fee);
+    }
+    
+    function setFeeCollector(address _collector) external onlyOwner {
+        require(_collector != address(0), "Invalid collector");
+        feeCollector = _collector;
     }
 }
