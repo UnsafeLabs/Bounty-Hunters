@@ -1,0 +1,8 @@
+[profile.default]
+src = "contracts"
+test = "test"
+out = "out"
+allow_paths = [".."]
+remappings = [
+    "@openzeppelin/=../node_modules/@openzeppelin/"
+]
