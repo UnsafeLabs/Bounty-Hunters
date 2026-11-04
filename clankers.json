@@ -798,6 +798,12 @@
     "last_pr": "2026-05-27T03:13:50.439Z"
   },
   {
+    "username": "KonstantinPythonLab",
+    "total_prs": 11,
+    "first_pr": "2026-09-28T04:31:14.324Z",
+    "last_pr": "2026-11-04T05:25:16.949Z"
+  },
+  {
     "username": "vietlinhh02",
     "total_prs": 11,
     "first_pr": "2026-05-28T17:53:27.011Z",
@@ -874,12 +880,6 @@
     "total_prs": 10,
     "first_pr": "2026-05-21T11:17:38.892Z",
     "last_pr": "2026-07-06T15:19:16.556Z"
-  },
-  {
-    "username": "KonstantinPythonLab",
-    "total_prs": 10,
-    "first_pr": "2026-09-28T04:31:14.324Z",
-    "last_pr": "2026-11-02T09:53:25.527Z"
   },
   {
     "username": "duongynhi000005-oss",
@@ -1600,6 +1600,12 @@
     "total_prs": 5,
     "first_pr": "2026-07-06T22:55:46.893Z",
     "last_pr": "2026-07-07T09:30:06.914Z"
+  },
+  {
+    "username": "Plugv3",
+    "total_prs": 5,
+    "first_pr": "2026-11-04T07:52:30.594Z",
+    "last_pr": "2026-11-04T08:16:41.776Z"
   },
   {
     "username": "spqrcode",
@@ -3280,6 +3286,12 @@
     "total_prs": 1,
     "first_pr": "2026-11-03T05:42:35.795Z",
     "last_pr": "2026-11-03T05:42:35.795Z"
+  },
+  {
+    "username": "Irc-7",
+    "total_prs": 1,
+    "first_pr": "2026-11-04T06:08:47.471Z",
+    "last_pr": "2026-11-04T06:08:47.471Z"
   },
   {
     "username": "MichisGitIsKing",
