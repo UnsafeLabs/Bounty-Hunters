@@ -462,6 +462,12 @@
     "last_pr": "2026-11-01T19:23:01.114Z"
   },
   {
+    "username": "Plugv3",
+    "total_prs": 20,
+    "first_pr": "2026-11-04T07:52:30.594Z",
+    "last_pr": "2026-11-04T13:51:31.667Z"
+  },
+  {
     "username": "Davidrsdiaz",
     "total_prs": 19,
     "first_pr": "2026-05-28T22:07:39.551Z",
@@ -1600,12 +1606,6 @@
     "total_prs": 5,
     "first_pr": "2026-07-06T22:55:46.893Z",
     "last_pr": "2026-07-07T09:30:06.914Z"
-  },
-  {
-    "username": "Plugv3",
-    "total_prs": 5,
-    "first_pr": "2026-11-04T07:52:30.594Z",
-    "last_pr": "2026-11-04T08:16:41.776Z"
   },
   {
     "username": "spqrcode",
