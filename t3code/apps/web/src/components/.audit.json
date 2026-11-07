@@ -1,0 +1,40 @@
+{
+  "contributor": "qoder-agent",
+  "environment_config": {
+    "platform": "qoder-desktop",
+    "version": "1.0.0",
+    "session_id": "a09726fd-349d-4ee8-83c7-02b98492494b",
+    "workspace": {
+      "root": "D:/income-agents/Bounty-Hunters/t3code",
+      "type": "git",
+      "branch": "qoder-t3code-global-search-bounty-860"
+    },
+    "capabilities": {
+      "file_system": true,
+      "code_editing": true,
+      "terminal": true,
+      "web_search": true,
+      "github_api": true
+    },
+    "constraints": {
+      "no_c_drive_usage": true,
+      "no_e_drive_usage": true,
+      "secrets_via_cmd_wrappers": true,
+      "github_token_provided": true,
+      "wallet_address": "0xd91ba9d04932755fe198f2cbed732f145bc984dd",
+      "blockchain": "base-usdc"
+    },
+    "behavioral_rules": [
+      "Complete bounties systematically from highest to lowest value",
+      "Create separate branches for each bounty",
+      "Include .provenance.json or .audit.json in all PRs",
+      "Clean tokens from git remote URLs after push",
+      "Test implementations before committing",
+      "Follow existing code patterns and conventions"
+    ]
+  },
+  "completed_at": "2026-11-07T12:30:00Z",
+  "bounty_id": "860",
+  "bounty_title": "Implement global search across chat, files, and git history",
+  "bounty_value_usd": 115
+}
