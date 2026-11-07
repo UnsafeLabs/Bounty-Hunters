@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract StakingVault {
+contract StakingVault is ReentrancyGuard {
     IERC20 public stakingToken;
     uint256 public rewardRate;
     uint256 public totalStaked;
@@ -17,11 +18,12 @@ contract StakingVault {
     event RewardClaimed(address indexed user, uint256 amount);
 
     constructor(address _stakingToken, uint256 _rewardRate) {
+        require(_stakingToken != address(0), "Invalid token address");
         stakingToken = IERC20(_stakingToken);
         rewardRate = _rewardRate;
     }
 
-    function stake(uint256 amount) external {
+    function stake(uint256 amount) external nonReentrant {
         require(amount > 0, "Cannot stake 0");
         stakingToken.transferFrom(msg.sender, address(this), amount);
         _updateReward(msg.sender);
@@ -39,32 +41,33 @@ contract StakingVault {
         lastStakeTime[account] = block.timestamp;
     }
 
-    // BUG: Reentrancy — state update after external call
-    function withdraw(uint256 amount) external {
+    function withdraw(uint256 amount) external nonReentrant {
+        require(amount > 0, "Cannot withdraw 0");
         require(balances[msg.sender] >= amount, "Insufficient balance");
         _updateReward(msg.sender);
 
-        // External call before state update
-        (bool success, ) = payable(msg.sender).call{value: amount}("");
-        require(success, "Transfer failed");
-
-        // State update after external call — vulnerable to reentrancy
+        // State updates BEFORE external call (checks-effects-interactions)
         balances[msg.sender] -= amount;
         totalStaked -= amount;
         emit Withdrawn(msg.sender, amount);
+
+        // External call AFTER state update
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        require(success, "Transfer failed");
     }
 
-    // BUG: Same reentrancy pattern in claimRewards
-    function claimRewards() external {
+    function claimRewards() external nonReentrant {
         _updateReward(msg.sender);
         uint256 reward = rewards[msg.sender];
         require(reward > 0, "No rewards");
 
-        (bool success, ) = payable(msg.sender).call{value: reward}("");
-        require(success, "Transfer failed");
-
+        // State update BEFORE external call
         rewards[msg.sender] = 0;
         emit RewardClaimed(msg.sender, reward);
+
+        // External call AFTER state update
+        (bool success, ) = payable(msg.sender).call{value: reward}("");
+        require(success, "Transfer failed");
     }
 
     function getStakedBalance(address account) external view returns (uint256) {
