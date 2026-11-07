@@ -3498,6 +3498,22 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      {/* Skip links for keyboard navigation */}
+      <div className="sr-only focus-within:not-sr-only">
+        <a
+          href="#chat-messages"
+          className="focus:ring-2 focus:ring-ring absolute left-2 top-2 z-50 rounded bg-background px-3 py-2 text-sm shadow-md outline-none"
+        >
+          Skip to chat messages
+        </a>
+        <a
+          href="#composer-input"
+          className="focus:ring-2 focus:ring-ring absolute left-2 top-12 z-50 rounded bg-background px-3 py-2 text-sm shadow-md outline-none"
+        >
+          Skip to message input
+        </a>
+      </div>
+
       {/* Top bar */}
       <header
         className={cn(
@@ -3551,7 +3567,7 @@ export default function ChatView(props: ChatViewProps) {
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div id="chat-messages" className="relative flex min-h-0 flex-1 flex-col">
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}
@@ -3596,6 +3612,7 @@ export default function ChatView(props: ChatViewProps) {
 
           {/* Input bar */}
           <div
+            id="composer-input"
             className={cn(
               "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
               isGitRepo

@@ -208,6 +208,36 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [listRef, onIsAtEndChange, rows.length]);
 
+  // Keyboard navigation: Arrow Up/Down between messages, Enter to expand, Escape to collapse
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('[role="log"]')) return;
+
+      const listItems = Array.from(document.querySelectorAll('[role="listitem"]'));
+      if (listItems.length === 0) return;
+
+      const currentIndex = listItems.findIndex((item) => item.contains(target));
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        const nextIndex = currentIndex < listItems.length - 1 ? currentIndex + 1 : currentIndex;
+        (listItems[nextIndex] as HTMLElement).focus();
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        const prevIndex = currentIndex > 0 ? currentIndex - 1 : currentIndex;
+        (listItems[prevIndex] as HTMLElement).focus();
+      } else if (event.key === "Enter" && target.getAttribute("aria-expanded") === "false") {
+        target.setAttribute("aria-expanded", "true");
+      } else if (event.key === "Escape" && target.getAttribute("aria-expanded") === "true") {
+        target.setAttribute("aria-expanded", "false");
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       timestampFormat,
@@ -280,6 +310,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
+          role="log"
+          aria-live="polite"
+          aria-label="Chat messages"
         />
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
@@ -302,8 +335,10 @@ type TimelineRow = MessagesTimelineRow;
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
+      role="listitem"
+      tabIndex={-1}
       className={cn(
-        "pb-4",
+        "pb-4 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
       data-timeline-row-id={row.id}

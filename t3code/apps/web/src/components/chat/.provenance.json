@@ -1,0 +1,55 @@
+{
+  "bounty_id": "852",
+  "bounty_title": "Add ARIA attributes and keyboard navigation to ChatView",
+  "bounty_value_usd": 50,
+  "completed_by": "qoder-agent",
+  "completed_at": "2026-11-07T00:00:00Z",
+  "changes": [
+    {
+      "file": "MessagesTimeline.tsx",
+      "description": "Added role='log' and aria-live='polite' to LegendList container for screen reader announcements",
+      "lines_modified": "269-286"
+    },
+    {
+      "file": "MessagesTimeline.tsx",
+      "description": "Added role='listitem' and tabIndex to TimelineRowContent for keyboard navigation",
+      "lines_modified": "302-313"
+    },
+    {
+      "file": "MessagesTimeline.tsx",
+      "description": "Added keyboard navigation hook: Arrow Up/Down between messages, Enter to expand, Escape to collapse",
+      "lines_modified": "210-240"
+    },
+    {
+      "file": "ChatView.tsx",
+      "description": "Added skip links for keyboard navigation to jump directly to chat messages or composer input",
+      "lines_modified": "3500-3515"
+    },
+    {
+      "file": "ChatView.tsx",
+      "description": "Added id='chat-messages' to messages wrapper for skip link target",
+      "lines_modified": "3554"
+    },
+    {
+      "file": "ChatView.tsx",
+      "description": "Added id='composer-input' to input bar wrapper for skip link target",
+      "lines_modified": "3614"
+    }
+  ],
+  "accessibility_features": [
+    "ARIA role='log' on messages container",
+    "aria-live='polite' for dynamic content updates",
+    "role='listitem' on each message",
+    "Keyboard navigation: Arrow Up/Down between messages",
+    "Keyboard shortcuts: Enter to expand, Escape to collapse",
+    "Skip links for jumping to major sections",
+    "Focus indicators with focus-visible ring",
+    "All interactive buttons have aria-labels"
+  ],
+  "testing_notes": [
+    "Tab through the interface to verify skip links appear and work",
+    "Use Arrow Up/Down keys to navigate between messages",
+    "Verify focus indicators are visible",
+    "Test with screen reader to confirm ARIA announcements"
+  ]
+}
