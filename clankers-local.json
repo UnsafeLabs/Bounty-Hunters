@@ -2010,6 +2010,12 @@
     "last_pr": "2026-10-15T13:33:22.180Z"
   },
   {
+    "username": "mahmoodbatterycenter-byte",
+    "total_prs": 2,
+    "first_pr": "2026-11-07T11:13:46.675Z",
+    "last_pr": "2026-11-07T11:22:05.125Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2836,11 +2842,5 @@
     "total_prs": 1,
     "first_pr": "2026-11-04T06:08:47.471Z",
     "last_pr": "2026-11-04T06:08:47.471Z"
-  },
-  {
-    "username": "mahmoodbatterycenter-byte",
-    "total_prs": 1,
-    "first_pr": "2026-11-07T11:13:46.675Z",
-    "last_pr": "2026-11-07T11:13:46.675Z"
   }
 ]
