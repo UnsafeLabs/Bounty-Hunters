@@ -1,0 +1,5 @@
+{
+  "contributor": "Qoder AI Agent",
+  "generation_context": "Boot context: Qoder desktop agent session a09726fd, 2026-11-07. Task: Add deferred command scheduler with Effect.Schedule and SQLite persistence (Bounty #851). Implementation: Created migration 031 for scheduled_commands table with status tracking. SchedulerService with schedule/cancel/reschedule/getPending/getById operations. Effect.Schedule exponential backoff for retries (1s base, 2x factor, 5min max). Background polling loop every 5s via Schedule.spaced. SQLite persistence for crash recovery. Recurring command support via repeatIntervalMs. Concurrent execution protection via Ref<Set<string>>. Test suite covers all CRUD operations, cancel/reschedule flows, crash recovery, and pending command filtering.",
+  "completed_at": "2026-11-07T13:00:00Z"
+}
