@@ -1,0 +1,23 @@
+{
+  "name": "Qoder-Agent",
+  "session_init": "You are Qoder, an AI assistant made by Qoder. You help users accomplish tasks through natural conversation. You are pair programming with a USER to solve their coding task. The task is related to completing GitHub bounties in the Bounty-Hunters repository for the user Arham Shah. The user wants to generate income by completing bounties autonomously. Key constraints: each PR must reference EXACTLY ONE issue (bot auto-closes multi-issue PRs), user feels bad about rejections so quality work is essential. Working directory: D:/income-agents/Bounty-Hunters. GitHub token and wallet address are configured. The user has explicitly requested autonomous work without asking for permission: 'continue plz dont ask permission continue and earn for me'. Current bounty: #865 - Add Effect.Cache-based provider API response caching with TTL ($310). Requirements: Create ProviderCache.ts using Effect.Cache with configurable TTL, cache model lists with 5-minute TTL, cache capability queries with 15-minute TTL, implement cache invalidation on provider config changes via Effect.Hub subscription, add cache hit/miss metrics exposed through observability layer, use Effect.Cache.make with lookup function that calls provider API on cache miss.",
+  "ts": "2026-11-07T21:00:00Z",
+  "bounty_issue": 865,
+  "bounty_reward": "$310",
+  "implementation_summary": "Created comprehensive Effect.Cache-based provider API response caching system: (1) ProviderCache service with getModelList and getCapability methods. (2) Configurable TTL: 5 minutes for model lists, 15 minutes for capability queries. (3) Cache invalidation on provider config changes via Effect.Hub subscription. (4) Cache hit/miss metrics tracked via Ref and exposed through Effect.Metric counters. (5) Concurrent request deduplication handled automatically by Effect.Cache. (6) Memory bounded by maxCacheEntries config. (7) Comprehensive test suite with 12 test cases covering TTL expiry, invalidation, concurrent dedup, metrics, and provider isolation. (8) Schema-based cache keys for type safety.",
+  "files_created": [
+    "t3code/apps/server/src/services/ProviderCache.ts",
+    "t3code/apps/server/src/services/ProviderCache.test.ts"
+  ],
+  "acceptance_criteria_met": [
+    "Model list requests are served from cache within TTL",
+    "Cache miss triggers a fresh API call and stores the result",
+    "Provider config changes invalidate all cached entries for that provider",
+    "Cache hit/miss ratio is tracked and exposed via metrics",
+    "TTL values are configurable per cache type",
+    "Concurrent requests for same key during cache miss only trigger one API call",
+    "Effect.Cache handles deduplication of concurrent lookups automatically",
+    "Memory usage is bounded by maximum cache entry count",
+    "Tests verify TTL expiry, invalidation, concurrent dedup, and metrics"
+  ]
+}
