@@ -22,22 +22,38 @@ contract YieldVault {
     event Deposited(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
+    event RewardNotified(uint256 reward, uint256 duration);
+
+    modifier onlyDistributor() {
+        require(msg.sender == rewardDistributor, "Not authorized");
+        _;
+    }
 
     constructor(address _stakingToken, address _rewardToken) {
+        require(_stakingToken != address(0) && _rewardToken != address(0), "Invalid addresses");
         stakingToken = IERC20(_stakingToken);
         rewardToken = IERC20(_rewardToken);
         rewardDistributor = msg.sender;
     }
 
-    // BUG: Does not cap at periodFinish — accrues phantom rewards after period ends
     function rewardPerToken() public view returns (uint256) {
-        if (totalSupply == 0) return rewardPerTokenStored;
+        if (totalSupply == 0) {
+            return rewardPerTokenStored;
+        }
+        
+        // Cap calculation at periodFinish to prevent phantom rewards
+        uint256 endTime = block.timestamp > periodFinish ? periodFinish : block.timestamp;
+        
+        // Prevent underflow if lastUpdateTime > endTime (edge case)
+        if (endTime <= lastUpdateTime) {
+            return rewardPerTokenStored;
+        }
+        
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / totalSupply
+            (endTime - lastUpdateTime) * rewardRate * 1e18 / totalSupply
         );
     }
 
-    // BUG: Uses uncapped rewardPerToken
     function earned(address account) public view returns (uint256) {
         return balanceOf[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / 1e18 + rewards[account];
     }
@@ -62,6 +78,7 @@ contract YieldVault {
 
     function withdraw(uint256 amount) external updateReward(msg.sender) {
         require(amount > 0, "Cannot withdraw 0");
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         totalSupply -= amount;
         balanceOf[msg.sender] -= amount;
         stakingToken.transfer(msg.sender, amount);
@@ -77,11 +94,20 @@ contract YieldVault {
         }
     }
 
-    // BUG: No access control — anyone can call
-    // BUG: Precision loss in rewardRate calculation
-    function notifyRewardAmount(uint256 reward, uint256 duration) external updateReward(address(0)) {
-        rewardRate = reward / duration;
+    function notifyRewardAmount(uint256 reward, uint256 duration) external onlyDistributor updateReward(address(0)) {
+        require(duration > 0, "Duration must be > 0");
+        require(reward > 0, "Reward must be > 0");
+        
+        // Use higher precision: rewardRate is in reward per second * 1e18
+        rewardRate = reward * 1e18 / duration;
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + duration;
+        
+        emit RewardNotified(reward, duration);
+    }
+
+    function setRewardDistributor(address _newDistributor) external onlyDistributor {
+        require(_newDistributor != address(0), "Invalid address");
+        rewardDistributor = _newDistributor;
     }
 }
