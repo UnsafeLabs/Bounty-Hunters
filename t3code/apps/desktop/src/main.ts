@@ -19,6 +19,8 @@ import * as ElectronApp from "./electron/ElectronApp.ts";
 import * as ElectronDialog from "./electron/ElectronDialog.ts";
 import * as ElectronMenu from "./electron/ElectronMenu.ts";
 import * as ElectronProtocol from "./electron/ElectronProtocol.ts";
+import * as DeepLinkService from "./electron/DeepLinkService.ts";
+import * as SystemTrayService from "./electron/SystemTrayService.ts";
 import * as DesktopSecretStorage from "./electron/ElectronSafeStorage.ts";
 import * as ElectronShell from "./electron/ElectronShell.ts";
 import * as ElectronTheme from "./electron/ElectronTheme.ts";
@@ -98,6 +100,8 @@ const electronLayer = Layer.mergeAll(
   ElectronDialog.layer,
   ElectronMenu.layer,
   ElectronProtocol.layer,
+  DeepLinkService.DeepLinkServiceLive,
+  SystemTrayService.SystemTrayServiceLive,
   DesktopSecretStorage.layer,
   ElectronShell.layer,
   ElectronTheme.layer,
