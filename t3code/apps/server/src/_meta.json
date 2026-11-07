@@ -1,0 +1,5 @@
+{
+  "contributor": "Qoder AI Agent",
+  "generation_context": "Boot context: Qoder desktop agent session a09726fd, 2026-11-07. Task: Standardize server error types with Effect.Data.TaggedEnum (Bounty #861). Created centralized errors module at apps/server/src/errors.ts with 6 typed error classes (AuthError, DatabaseError, NetworkError, GitError, ConfigError, ValidationError) using effect/Data.TaggedError. Includes errorToResponse() for HTTP status mapping via effect/Match, errorToLog() for structured logging, factory functions, and isServerError() type guard. Migrated 3 existing modules: (1) bootstrap.ts - replaced local BootstrapError with ConfigError (4 call sites), (2) cli/project.ts - replaced local ProjectCommandError with ValidationError (6 call sites), (3) auth/Services/ServerAuth.ts - replaced local AuthError with centralized re-export, preserving status field compatibility (20+ call sites). Comprehensive test suite at errors.test.ts covers all error types, factories, status mapping, logging, type guards, pattern matching, and cause chain preservation.",
+  "completed_at": "2026-11-07T12:00:00Z"
+}
