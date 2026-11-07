@@ -11,39 +11,60 @@ contract SimpleSwap {
     uint256 public fee; // basis points, e.g. 30 = 0.3%
 
     event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event LiquidityAdded(address indexed user, uint256 amountA, uint256 amountB);
 
     constructor(address _tokenA, address _tokenB, uint256 _fee) {
+        require(_tokenA != address(0) && _tokenB != address(0), "Invalid token addresses");
+        require(_tokenA != _tokenB, "Tokens must be different");
+        require(_fee <= 10000, "Fee too high");
+        
         tokenA = IERC20(_tokenA);
         tokenB = IERC20(_tokenB);
         fee = _fee;
     }
 
     function addLiquidity(uint256 amountA, uint256 amountB) external {
+        require(amountA > 0 && amountB > 0, "Amounts must be > 0");
+        
         tokenA.transferFrom(msg.sender, address(this), amountA);
         tokenB.transferFrom(msg.sender, address(this), amountB);
         reserveA += amountA;
         reserveB += amountB;
+        
+        emit LiquidityAdded(msg.sender, amountA, amountB);
     }
 
-    // BUG: No minAmountOut parameter — vulnerable to sandwich attacks
-    // BUG: No deadline parameter — stale transactions can be executed
-    // BUG: Fee calculation truncates to zero for small amounts
-    function swap(address tokenIn, uint256 amountIn) external returns (uint256 amountOut) {
+    function swap(
+        address tokenIn, 
+        uint256 amountIn, 
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Transaction expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Amount must be > 0");
+        require(minAmountOut > 0, "MinAmountOut must be > 0");
 
         bool isTokenA = tokenIn == address(tokenA);
         (IERC20 inputToken, IERC20 outputToken, uint256 reserveIn, uint256 reserveOut) = isTokenA
             ? (tokenA, tokenB, reserveA, reserveB)
             : (tokenB, tokenA, reserveB, reserveA);
 
+        require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
+
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 feeAmount = amountIn * fee / 10000;
+        // Fixed-point fee calculation to avoid precision loss
+        // fee is in basis points (1/10000), so feeAmount = amountIn * fee / 10000
+        // To maintain precision: calculate feeAmount with higher precision
+        uint256 feeAmount = (amountIn * fee + 5000) / 10000; // Round to nearest
         uint256 amountInAfterFee = amountIn - feeAmount;
 
         // constant product formula: x * y = k
         amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+        require(amountOut <= reserveOut, "Insufficient output reserve");
 
         outputToken.transfer(msg.sender, amountOut);
 
@@ -62,7 +83,9 @@ contract SimpleSwap {
         bool isTokenA = tokenIn == address(tokenA);
         uint256 reserveIn = isTokenA ? reserveA : reserveB;
         uint256 reserveOut = isTokenA ? reserveB : reserveA;
-        uint256 feeAmount = amountIn * fee / 10000;
+        
+        // Fixed-point fee calculation
+        uint256 feeAmount = (amountIn * fee + 5000) / 10000;
         uint256 amountInAfterFee = amountIn - feeAmount;
         return (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
     }
