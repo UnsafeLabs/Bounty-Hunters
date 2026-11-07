@@ -186,6 +186,12 @@
     "last_pr": "2026-07-05T20:53:12.110Z"
   },
   {
+    "username": "mahmoodbatterycenter-byte",
+    "total_prs": 37,
+    "first_pr": "2026-11-07T11:13:46.675Z",
+    "last_pr": "2026-11-07T15:51:32.055Z"
+  },
+  {
     "username": "cerredz",
     "total_prs": 36,
     "first_pr": "2026-05-16T00:58:51.932Z",
@@ -202,12 +208,6 @@
     "total_prs": 36,
     "first_pr": "2026-06-27T06:09:44.885Z",
     "last_pr": "2026-06-29T13:31:59.818Z"
-  },
-  {
-    "username": "mahmoodbatterycenter-byte",
-    "total_prs": 36,
-    "first_pr": "2026-11-07T11:13:46.675Z",
-    "last_pr": "2026-11-07T15:49:01.939Z"
   },
   {
     "username": "gtx20060124-bot",
