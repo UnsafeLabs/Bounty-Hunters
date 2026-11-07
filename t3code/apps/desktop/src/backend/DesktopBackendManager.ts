@@ -36,6 +36,9 @@ const DEFAULT_BACKEND_READINESS_INTERVAL = Duration.millis(100);
 const DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT = Duration.seconds(1);
 const DEFAULT_BACKEND_TERMINATE_GRACE = Duration.seconds(2);
 const BACKEND_READINESS_PATH = "/.well-known/t3/environment";
+const HEALTH_CHECK_INTERVAL = Duration.seconds(15);
+const HEALTH_CHECK_MAX_FAILURES = 3;
+const HEALTH_CHECK_TIMEOUT = Duration.seconds(5);
 
 type BackendProcessLayerServices = ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient;
 
@@ -104,6 +107,8 @@ export interface DesktopBackendSnapshot {
   readonly activePid: Option.Option<number>;
   readonly restartAttempt: number;
   readonly restartScheduled: boolean;
+  readonly consecutiveHealthFailures: number;
+  readonly healthMonitoringActive: boolean;
 }
 
 export interface DesktopBackendManagerShape {
@@ -118,8 +123,11 @@ export class DesktopBackendManager extends Context.Service<
   DesktopBackendManagerShape
 >()("t3/desktop/BackendManager") {}
 
-const { logWarning: logBackendManagerWarning, logError: logBackendManagerError } =
-  DesktopObservability.makeComponentLogger("desktop-backend-manager");
+const {
+  logInfo: logBackendManagerInfo,
+  logWarning: logBackendManagerWarning,
+  logError: logBackendManagerError,
+} = DesktopObservability.makeComponentLogger("desktop-backend-manager");
 
 interface ActiveBackendRun {
   readonly id: number;
@@ -136,6 +144,8 @@ interface BackendManagerState {
   readonly restartAttempt: number;
   readonly restartFiber: Option.Option<Fiber.Fiber<void, never>>;
   readonly nextRunId: number;
+  readonly consecutiveHealthFailures: number;
+  readonly healthCheckFiber: Option.Option<Fiber.Fiber<void, never>>;
 }
 
 const initialState: BackendManagerState = {
@@ -146,6 +156,8 @@ const initialState: BackendManagerState = {
   restartAttempt: 0,
   restartFiber: Option.none(),
   nextRunId: 1,
+  consecutiveHealthFailures: 0,
+  healthCheckFiber: Option.none(),
 };
 
 const activePid = (active: Option.Option<ActiveBackendRun>): Option.Option<number> =>
@@ -191,6 +203,22 @@ const waitForHttpReady = Effect.fn("desktop.backendManager.waitForHttpReady")(fu
     Effect.asVoid,
     Effect.timeout(timeout),
     Effect.mapError(() => new BackendTimeoutError({ url: readinessUrl })),
+  );
+});
+
+const performHealthCheck = Effect.fn("desktop.backendManager.performHealthCheck")(function* (
+  baseUrl: URL,
+): Effect.fn.Return<boolean, never, HttpClient.HttpClient> {
+  const healthUrl = new URL(BACKEND_READINESS_PATH, baseUrl);
+  const client = (yield* HttpClient.HttpClient).pipe(
+    HttpClient.filterStatusOk,
+    HttpClient.transformResponse(Effect.timeout(HEALTH_CHECK_TIMEOUT)),
+  );
+
+  return yield* client.get(healthUrl).pipe(
+    Effect.as(true),
+    Effect.timeout(HEALTH_CHECK_TIMEOUT),
+    Effect.catchAll(() => Effect.succeed(false)),
   );
 });
 
@@ -300,6 +328,8 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
         activePid: activePid(current.active),
         restartAttempt: current.restartAttempt,
         restartScheduled: Option.isSome(current.restartFiber),
+        consecutiveHealthFailures: current.consecutiveHealthFailures,
+        healthMonitoringActive: Option.isSome(current.healthCheckFiber),
       }),
     ),
   );
@@ -319,6 +349,92 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
       onSome: (fiber) => Fiber.interrupt(fiber).pipe(Effect.asVoid),
     });
   });
+
+  const cancelHealthCheck = Effect.gen(function* () {
+    const healthCheckFiber = yield* Ref.modify(state, (current) => [
+      current.healthCheckFiber,
+      {
+        ...current,
+        healthCheckFiber: Option.none(),
+      },
+    ]);
+
+    yield* Option.match(healthCheckFiber, {
+      onNone: () => Effect.void,
+      onSome: (fiber) => Fiber.interrupt(fiber).pipe(Effect.asVoid),
+    });
+  });
+
+  const startHealthMonitoring = (baseUrl: URL, runId: number) =>
+    Effect.gen(function* () {
+      yield* cancelHealthCheck;
+
+      const healthCheckProgram = Effect.forever(
+        Effect.gen(function* () {
+          yield* Effect.sleep(HEALTH_CHECK_INTERVAL);
+
+          const currentState = yield* Ref.get(state);
+          const activeRun = Option.getOrUndefined(currentState.active);
+          if (!activeRun || activeRun.id !== runId || !currentState.ready) {
+            return;
+          }
+
+          const isHealthy = yield* performHealthCheck(baseUrl).pipe(
+            Effect.provideService(HttpClient.HttpClient, httpClient),
+          );
+
+          if (isHealthy) {
+            yield* Ref.update(state, (current) => ({
+              ...current,
+              consecutiveHealthFailures: 0,
+            }));
+            yield* logBackendManagerInfo("backend health check passed");
+          } else {
+            const failures = yield* Ref.modify(state, (current) => [
+              current.consecutiveHealthFailures + 1,
+              {
+                ...current,
+                consecutiveHealthFailures: current.consecutiveHealthFailures + 1,
+              },
+            ]);
+
+            yield* logBackendManagerWarning("backend health check failed", {
+              consecutiveFailures: failures,
+              maxFailures: HEALTH_CHECK_MAX_FAILURES,
+            });
+
+            if (failures >= HEALTH_CHECK_MAX_FAILURES) {
+              yield* logBackendManagerError(
+                "backend health check failed max times, triggering restart",
+                {
+                  consecutiveFailures: failures,
+                },
+              );
+
+              yield* Ref.update(state, (current) => ({
+                ...current,
+                consecutiveHealthFailures: 0,
+              }));
+
+              yield* cancelHealthCheck;
+
+              const currentRun = yield* Ref.get(state);
+              if (Option.isSome(currentRun.active) && currentRun.active.value.id === runId) {
+                yield* closeRun(currentRun.active.value);
+              }
+            }
+          }
+        }).pipe(Effect.catchCause((cause) =>
+          logBackendManagerError("health monitoring error", { cause: Cause.pretty(cause) }),
+        )),
+      );
+
+      const healthCheckFiber = yield* Effect.forkIn(healthCheckProgram, parentScope);
+      yield* Ref.update(state, (current) => ({
+        ...current,
+        healthCheckFiber: Option.some(healthCheckFiber),
+      }));
+    });
 
   const start: Effect.Effect<void> = Effect.suspend(() =>
     mutex.withPermits(1)(
@@ -414,6 +530,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                     details: `pid=${pid.value} ${reason}`,
                   });
                 }
+                yield* cancelHealthCheck;
                 yield* Ref.set(desktopState.backendReady, false);
               }
 
@@ -448,6 +565,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                 {
                   ...latest,
                   restartAttempt: 0,
+                  consecutiveHealthFailures: 0,
                   ready: true,
                 },
               ] as const;
@@ -457,6 +575,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             }
 
             yield* Ref.set(desktopState.backendReady, true);
+            yield* startHealthMonitoring(config.httpBaseUrl, runId);
             yield* desktopWindow.handleBackendReady.pipe(
               Effect.catch((error) =>
                 logBackendManagerError("failed to open main window after backend readiness", {
@@ -553,12 +672,13 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
   const stop = Effect.fn("desktop.backendManager.stop")(function* (options?: {
     readonly timeout?: Duration.Duration;
   }) {
-    const { active, restartFiber } = yield* mutex.withPermits(1)(
+    const { active, restartFiber, healthCheckFiber } = yield* mutex.withPermits(1)(
       Effect.gen(function* () {
         const result = yield* Ref.modify(state, (latest) => [
           {
             active: latest.active,
             restartFiber: latest.restartFiber,
+            healthCheckFiber: latest.healthCheckFiber,
           },
           {
             ...latest,
@@ -566,6 +686,8 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             ready: false,
             active: Option.none<ActiveBackendRun>(),
             restartFiber: Option.none<Fiber.Fiber<void, never>>(),
+            healthCheckFiber: Option.none<Fiber.Fiber<void, never>>(),
+            consecutiveHealthFailures: 0,
           },
         ]);
         yield* Ref.set(desktopState.backendReady, false);
@@ -573,6 +695,10 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
       }),
     );
 
+    yield* Option.match(healthCheckFiber, {
+      onNone: () => Effect.void,
+      onSome: (fiber) => Fiber.interrupt(fiber).pipe(Effect.asVoid),
+    });
     yield* Option.match(restartFiber, {
       onNone: () => Effect.void,
       onSome: (fiber) => Fiber.interrupt(fiber).pipe(Effect.asVoid),

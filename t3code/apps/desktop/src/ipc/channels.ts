@@ -33,3 +33,6 @@ export const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mod
 export const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 export const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
 export const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "ssh-password-prompt-cancelled";
+export const BACKEND_HEALTH_STATUS_CHANNEL = "desktop:backend-health-status";
+export const BACKEND_RESTARTING_CHANNEL = "desktop:backend-restarting";
+export const BACKEND_RESTART_FAILED_CHANNEL = "desktop:backend-restart-failed";
