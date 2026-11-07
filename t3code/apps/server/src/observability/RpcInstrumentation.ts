@@ -9,6 +9,7 @@ import * as Stream from "effect/Stream";
 
 import { outcomeFromExit } from "./Attributes.ts";
 import { metricAttributes, rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
+import { MetricsAggregator } from "./Services/MetricsAggregator.ts";
 
 const RPC_SPAN_PREFIX = "ws.rpc";
 const DEFAULT_RPC_SPAN_ATTRIBUTES = {
@@ -101,7 +102,27 @@ export const observeRpcEffect = <A, E, R>(
     }),
   );
 
-  return withRpcEffectTracing(method, instrumented, traceAttributes);
+  const withAggregation = Effect.gen(function* () {
+    const startedAt = yield* Clock.currentTimeNanos;
+    const exit = yield* Effect.exit(instrumented);
+    const endedAt = yield* Clock.currentTimeNanos;
+    const elapsedNanos = endedAt > startedAt ? endedAt - startedAt : 0n;
+    const isError = Exit.isFailure(exit);
+
+    const aggregatorOption = yield* Effect.serviceOption(MetricsAggregator);
+    if (aggregatorOption._tag === "Some") {
+      yield* aggregatorOption.value.record(method, Number(elapsedNanos), isError).pipe(
+        Effect.catch(() => Effect.void),
+      );
+    }
+
+    if (Exit.isSuccess(exit)) {
+      return exit.value;
+    }
+    return yield* Effect.failCause(exit.cause);
+  });
+
+  return withRpcEffectTracing(method, withAggregation, traceAttributes);
 };
 
 export const observeRpcStream = <A, E, R>(
