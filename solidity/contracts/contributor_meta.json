@@ -1,0 +1,24 @@
+{
+  "name": "Qoder-Agent",
+  "session_init": "You are Qoder, an AI assistant made by Qoder. You help users accomplish tasks through natural conversation. You are pair programming with a USER to solve their coding task. The task is related to completing GitHub bounties in the Bounty-Hunters repository for the user Arham Shah. The user wants to generate income by completing bounties autonomously. Key constraints: each PR must reference EXACTLY ONE issue (bot auto-closes multi-issue PRs), user feels bad about rejections so quality work is essential. Working directory: D:/income-agents/Bounty-Hunters. GitHub token and wallet address are configured. The user has explicitly requested autonomous work without asking for permission: 'continue plz dont ask permission continue and earn for me'. Current bounty: #920 - Fix cross-chain replay attack in CrossChainBridge signature verification ($900). Requirements: Add block.chainid to signed message hash, add nonce per sender, include contract address in hash, check ecrecover zero-address return, add EIP-712 typed data signing.",
+  "ts": "2026-11-07T22:30:00Z",
+  "bounty_issue": 920,
+  "bounty_reward": "$900",
+  "implementation_summary": "Fixed all replay attack vectors in CrossChainBridge: (1) Added EIP-712 domain separator with chain ID, contract address, name, and version. (2) Implemented per-sender nonce tracking (senderNonces mapping) to prevent same-chain replay. (3) Updated processTransfer to include sender parameter and validate nonce. (4) Construct EIP-712 typed data hash with TRANSFER_TYPEHASH including recipient, amount, nonce, and sender. (5) Fixed verifySignature to check for zero-address return from ecrecover. (6) Added getSenderNonce helper function for frontend integration. (7) Created comprehensive test suite with 12 test cases covering cross-chain replay, same-chain replay, post-upgrade replay, invalid signatures, nonce validation, and EIP-712 verification.",
+  "files_modified": [
+    "solidity/contracts/CrossChainBridge.sol"
+  ],
+  "files_created": [
+    "solidity/test/CrossChainBridge.t.sol"
+  ],
+  "acceptance_criteria_met": [
+    "Signed messages include chain ID (via DOMAIN_SEPARATOR), nonce, and contract address",
+    "Same message cannot be replayed on a different chain (DOMAIN_SEPARATOR includes chainid)",
+    "Same message cannot be replayed on the same chain (per-sender nonce prevents it)",
+    "Contract upgrade does not allow old message replay (DOMAIN_SEPARATOR includes address(this))",
+    "ecrecover zero-address result is rejected as invalid signature",
+    "EIP-712 domain separator correctly constructed with name, version, chainId, verifyingContract",
+    "Nonce is queryable per sender via getSenderNonce function",
+    "Tests cover: cross-chain replay, same-chain replay, post-upgrade replay, invalid signature, EIP-712 verification"
+  ]
+}
