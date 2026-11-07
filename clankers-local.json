@@ -606,6 +606,12 @@
     "last_pr": "2026-09-21T16:43:55.938Z"
   },
   {
+    "username": "mahmoodbatterycenter-byte",
+    "total_prs": 11,
+    "first_pr": "2026-11-07T11:13:46.675Z",
+    "last_pr": "2026-11-07T12:03:25.488Z"
+  },
+  {
     "username": "CHIFFONPIZZA",
     "total_prs": 10,
     "first_pr": "2026-05-14T05:21:59Z",
@@ -664,12 +670,6 @@
     "total_prs": 10,
     "first_pr": "2026-07-13T07:48:14.889Z",
     "last_pr": "2026-07-20T18:15:23.126Z"
-  },
-  {
-    "username": "mahmoodbatterycenter-byte",
-    "total_prs": 10,
-    "first_pr": "2026-11-07T11:13:46.675Z",
-    "last_pr": "2026-11-07T11:59:23.491Z"
   },
   {
     "username": "digzrow-coder",
