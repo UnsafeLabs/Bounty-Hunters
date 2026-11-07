@@ -25,6 +25,7 @@ export const AuthSessionRecord = Schema.Struct({
   issuedAt: Schema.DateTimeUtcFromString,
   expiresAt: Schema.DateTimeUtcFromString,
   lastConnectedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+  lastActiveAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   revokedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
 });
 export type AuthSessionRecord = typeof AuthSessionRecord.Type;
@@ -68,6 +69,12 @@ export const SetAuthSessionLastConnectedAtInput = Schema.Struct({
 });
 export type SetAuthSessionLastConnectedAtInput = typeof SetAuthSessionLastConnectedAtInput.Type;
 
+export const SetAuthSessionLastActiveAtInput = Schema.Struct({
+  sessionId: AuthSessionId,
+  lastActiveAt: Schema.DateTimeUtcFromString,
+});
+export type SetAuthSessionLastActiveAtInput = typeof SetAuthSessionLastActiveAtInput.Type;
+
 export interface AuthSessionRepositoryShape {
   readonly create: (
     input: CreateAuthSessionInput,
@@ -86,6 +93,9 @@ export interface AuthSessionRepositoryShape {
   ) => Effect.Effect<ReadonlyArray<AuthSessionId>, AuthSessionRepositoryError>;
   readonly setLastConnectedAt: (
     input: SetAuthSessionLastConnectedAtInput,
+  ) => Effect.Effect<void, AuthSessionRepositoryError>;
+  readonly setLastActiveAt: (
+    input: SetAuthSessionLastActiveAtInput,
   ) => Effect.Effect<void, AuthSessionRepositoryError>;
 }
 

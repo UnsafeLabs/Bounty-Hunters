@@ -95,11 +95,14 @@ export const makeSessionCredentialService = Effect.gen(function* () {
   const authSessions = yield* AuthSessionRepository;
   const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
   const connectedSessionsRef = yield* Ref.make(new Map<string, number>());
+  const lastActivityUpdateRef = yield* Ref.make(new Map<string, number>());
   const changesPubSub = yield* PubSub.unbounded<SessionCredentialChange>();
   const cookieName = resolveSessionCookieName({
     mode: serverConfig.mode,
     port: serverConfig.port,
   });
+
+  const ACTIVITY_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes
 
   const toSessionCredentialError = (message: string) => (cause: unknown) =>
     new SessionCredentialError({
@@ -319,6 +322,9 @@ export const makeSessionCredentialService = Effect.gen(function* () {
         });
       }
 
+      // Track activity (debounced to every 5 minutes)
+      yield* trackActivity(claims.sid);
+
       return {
         sessionId: claims.sid,
         token,
@@ -419,6 +425,9 @@ export const makeSessionCredentialService = Effect.gen(function* () {
         });
       }
 
+      // Track activity (debounced to every 5 minutes)
+      yield* trackActivity(row.value.sessionId);
+
       return {
         sessionId: row.value.sessionId,
         token,
@@ -505,6 +514,35 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       return revokedSessionIds.length;
     }).pipe(Effect.mapError(toSessionCredentialError("Failed to revoke other sessions.")));
 
+  const trackActivity: SessionCredentialServiceShape["trackActivity"] = (sessionId) =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const lastUpdates = yield* Ref.get(lastActivityUpdateRef);
+      const lastUpdate = lastUpdates.get(sessionId) ?? 0;
+
+      if (now - lastUpdate >= ACTIVITY_DEBOUNCE_MS) {
+        const activityTime = yield* DateTime.now;
+        yield* authSessions.setLastActiveAt({
+          sessionId,
+          lastActiveAt: activityTime,
+        });
+        yield* Ref.update(lastActivityUpdateRef, (current) => {
+          const next = new Map(current);
+          next.set(sessionId, now);
+          return next;
+        });
+      }
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError("Failed to track session activity.").pipe(
+          Effect.annotateLogs({
+            sessionId,
+            cause,
+          }),
+        ),
+      ),
+    );
+
   return {
     cookieName,
     issue,
@@ -519,6 +557,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     revokeAllExcept,
     markConnected,
     markDisconnected,
+    trackActivity,
   } satisfies SessionCredentialServiceShape;
 });
 
