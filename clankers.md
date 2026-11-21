@@ -102,6 +102,7 @@ Automated tracking of all Clankers PR contributors.
 | book051193-hash | 16 | 2026-09-22T02:24:54.836Z | 2026-10-04T15:50:57.526Z |
 | ahmedabdelkarim504-commits | 16 | 2026-07-17T11:35:35.081Z | 2026-07-21T15:58:56.383Z |
 | singularitycurse26-svg | 15 | 2026-07-19T19:27:11.473Z | 2026-07-20T01:04:43.809Z |
+| KonstantinPythonLab | 15 | 2026-09-28T04:31:14.324Z | 2026-11-21T09:53:25.789Z |
 | callmekidz | 14 | 2026-05-13T19:54:10Z | 2026-05-13T20:01:36Z |
 | darshan-Jahagirdar | 14 | 2026-05-13T14:06:18Z | 2026-05-13T14:26:56Z |
 | coolcam2 | 14 | 2026-05-19T08:45:15.968Z | 2026-05-19T14:31:26.380Z |
@@ -109,7 +110,6 @@ Automated tracking of all Clankers PR contributors.
 | Lucas-FManager | 14 | 2026-05-26T12:53:57.576Z | 2026-05-26T15:14:02.854Z |
 | Floofy6 | 14 | 2026-05-31T07:30:47.020Z | 2026-05-31T09:39:34.582Z |
 | mircats98gpt | 14 | 2026-06-26T15:51:20.540Z | 2026-07-06T13:47:27.610Z |
-| KonstantinPythonLab | 14 | 2026-09-28T04:31:14.324Z | 2026-11-12T08:06:14.215Z |
 | liyanzong | 14 | 2026-05-28T10:45:54.231Z | 2026-05-28T18:46:14.559Z |
 | MNgaminhhh | 13 | 2026-05-13T10:46:58Z | 2026-05-13T16:53:51Z |
 | SimplyRayYZL | 13 | 2026-05-13T13:24:36Z | 2026-05-13T21:36:02Z |
