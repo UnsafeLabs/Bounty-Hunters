@@ -13,6 +13,7 @@ import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
+import { GlobalSearch } from "../components/GlobalSearch";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
 import {
@@ -123,6 +124,7 @@ function RootRouteView() {
 
   const appShell = (
     <CommandPalette>
+      <GlobalSearch />
       <AppSidebarLayout>
         <Outlet />
       </AppSidebarLayout>

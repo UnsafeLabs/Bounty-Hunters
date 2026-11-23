@@ -1,0 +1,170 @@
+[
+  {
+    "key": "mod+shift+f",
+    "command": "globalSearch.toggle"
+  },
+  {
+    "key": "mod+k",
+    "command": "commandPalette.toggle"
+  },
+  {
+    "key": "mod+shift+p",
+    "command": "commandPalette.toggle"
+  },
+  {
+    "key": "mod+t",
+    "command": "terminal.toggle"
+  },
+  {
+    "key": "mod+shift+t",
+    "command": "terminal.new"
+  },
+  {
+    "key": "mod+w",
+    "command": "terminal.close",
+    "when": "terminalFocus"
+  },
+  {
+    "key": "mod+shift+w",
+    "command": "terminal.split"
+  },
+  {
+    "key": "mod+1",
+    "command": "thread.jump.1",
+    "when": "isDesktop"
+  },
+  {
+    "key": "mod+2",
+    "command": "thread.jump.2",
+    "when": "isDesktop"
+  },
+  {
+    "key": "mod+3",
+    "command": "thread.jump.3",
+    "when": "isDesktop"
+  },
+  {
+    "key": "mod+4",
+    "command": "thread.jump.4",
+    "when": "isDesktop"
+  },
+  {
+    "key": "mod+5",
+    "command": "thread.jump.5",
+    "when": "isDesktop"
+  },
+  {
+    "key": "mod+6",
+    "command": "thread.jump.6",
+    "when": "isDesktop"
+  },
+  {
+    "key": "mod+7",
+    "command": "thread.jump.7",
+    "when": "isDesktop"
+  },
+  {
+    "key": "mod+8",
+    "command": "thread.jump.8",
+    "when": "isDesktop"
+  },
+  {
+    "key": "mod+9",
+    "command": "thread.jump.9",
+    "when": "isDesktop"
+  },
+  {
+    "key": "mod+f",
+    "command": "chat.find",
+    "when": "!terminalFocus && !previewFocus"
+  },
+  {
+    "key": "mod+f",
+    "command": "preview.find",
+    "when": "previewFocus"
+  },
+  {
+    "key": "mod+z",
+    "command": "thread.undo"
+  },
+  {
+    "key": "mod+[",
+    "command": "navigation.back"
+  },
+  {
+    "key": "mod+]",
+    "command": "navigation.forward"
+  },
+  {
+    "key": "mod+shift+c",
+    "command": "pullRequest.copyNumber"
+  },
+  {
+    "key": "mod+shift+k",
+    "command": "pullRequest.copyLink"
+  },
+  {
+    "key": "mod+b",
+    "command": "sidebar.toggle"
+  },
+  {
+    "key": "mod+shift+e",
+    "command": "composer.effort"
+  },
+  {
+    "key": "mod+shift+a",
+    "command": "composer.mode"
+  },
+  {
+    "key": "mod+shift+x",
+    "command": "composer.workspace"
+  },
+  {
+    "key": "mod+shift+g",
+    "command": "composer.branch"
+  },
+  {
+    "key": "mod+shift+l",
+    "command": "composer.previousWorktree"
+  },
+  {
+    "key": "mod+shift+h",
+    "command": "composer.host"
+  },
+  {
+    "key": "mod+shift+m",
+    "command": "modelPicker.toggle"
+  },
+  {
+    "key": "mod+shift+d",
+    "command": "composer.dictation"
+  },
+  {
+    "key": "mod+enter",
+    "command": "composer.sendAlternate"
+  },
+  {
+    "key": "mod+alt+enter",
+    "command": "composer.sendAndNewThread"
+  },
+  {
+    "key": "mod+shift+enter",
+    "command": "thread.steerQueuedMessage"
+  },
+  {
+    "key": "mod+n",
+    "command": "chat.new"
+  },
+  {
+    "key": "mod+alt+n",
+    "command": "chat.newWithoutProject"
+  },
+  {
+    "key": "mod+shift+r",
+    "command": "theme.select"
+  },
+  {
+    "key": "mod+shift+u",
+    "command": "usage.open"
+  }
+]
