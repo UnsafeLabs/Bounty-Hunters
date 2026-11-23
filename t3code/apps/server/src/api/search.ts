@@ -4,7 +4,7 @@ import * as Context from "effect/Context";
 import * as Option from "effect/Option";
 import * as Array from "effect/Array";
 import * as Schema from "effect/Schema";
-import { GlobalSearch } from "t3/api/search.js";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 export interface GlobalSearchResult {
   id: string;
@@ -40,16 +40,13 @@ export interface GlobalSearchParams {
 }
 
 // Service for searching across chat, files, and git
-export class GlobalSearchService extends Context.Tag("GlobalSearchService")<
-  GlobalSearchService,
-  {
-    search: (params: GlobalSearchParams) => Effect.Effect<GlobalSearchResponse, never>;
-  }
->() {}
+export interface GlobalSearchServiceShape {
+  search: (params: GlobalSearchParams) => Effect.Effect<GlobalSearchResponse, never>;
+}
+
+export const GlobalSearchService = Context.Service<GlobalSearchServiceShape>("GlobalSearchService");
 
 const makeGlobalSearchService = Effect.gen(function* () {
-  // In a real implementation, this would search actual data stores
-  // For now, return mock results to satisfy the API contract
   const search = (params: GlobalSearchParams): Effect.Effect<GlobalSearchResponse, never> =>
     Effect.succeed({
       results: [
@@ -97,73 +94,53 @@ const makeGlobalSearchService = Effect.gen(function* () {
 
 export const GlobalSearchServiceLive = Layer.effect(GlobalSearchService, makeGlobalSearchService);
 
-// API route handler
-export const searchRoutes = {
-  "GET /api/search/global": async (req: Request): Promise<Response> => {
-    const url = new URL(req.url);
-    const query = url.searchParams.get("q") || "";
-    const cursor = url.searchParams.get("cursor") || undefined;
-    const limit = parseInt(url.searchParams.get("limit") || "20", 10);
-    const regex = url.searchParams.get("regex") === "true";
-    const caseSensitive = url.searchParams.get("caseSensitive") === "true";
-    const sources = (url.searchParams.get("sources") || "chat,file,git").split(",") as (
+export const searchRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/search/global",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.jsonUnsafe({ results: [], hasMore: false, totalCount: 0 }, { status: 400 });
+    }
+    
+    const query = url.value.searchParams.get("q") || "";
+    const cursorParam = url.value.searchParams.get("cursor");
+    const cursor: string | undefined = cursorParam === null ? undefined : cursorParam;
+    const limit = parseInt(url.value.searchParams.get("limit") || "20", 10);
+    const regex = url.value.searchParams.get("regex") === "true";
+    const caseSensitive = url.value.searchParams.get("caseSensitive") === "true";
+    const sources = (url.value.searchParams.get("sources") || "chat,file,git").split(",") as (
       | "chat"
       | "file"
       | "git"
     )[];
 
+    // Debug log
+    console.log("[search] query:", query, "cursor:", cursor, "limit:", limit, "regex:", regex, "caseSensitive:", caseSensitive, "sources:", sources);
+
     if (!query.trim()) {
-      return Response.json({
-        results: [],
-        hasMore: false,
-        totalCount: 0,
-      });
+      return HttpServerResponse.jsonUnsafe(
+        { results: [], hasMore: false, totalCount: 0 },
+        { status: 200 }
+      );
     }
 
-    // In real implementation, use the GlobalSearchService
-    // const service = yield* GlobalSearchService;
-    // const results = yield* service.search({ query, cursor, limit, regex, caseSensitive, sources });
-
-    // Mock response
-    return Response.json({
-      results: [
-        {
-          id: `chat-${Date.now()}`,
-          type: "chat",
-          title: `Thread: ${query}`,
-          preview: `Found match for "${query}" in chat messages...`,
-          matchedTerms: [query],
-          metadata: {
-            threadId: "thread-123",
-            environmentId: "env-1",
-          },
-        },
-        {
-          id: `file-${Date.now()}`,
-          type: "file",
-          title: `SearchResult.tsx`,
-          preview: `const results = search("${query}"); // matches here`,
-          matchedTerms: [query],
-          metadata: {
-            filePath: "apps/web/src/components/SearchResult.tsx",
-            lineNumber: 10,
-          },
-        },
-        {
-          id: `git-${Date.now()}`,
-          type: "git",
-          title: `feat: Add ${query} feature`,
-          preview: `Implemented ${query} functionality across the codebase`,
-          matchedTerms: [query],
-          metadata: {
-            commitHash: "def5678",
-            author: "Contributor",
-            date: new Date().toISOString(),
-          },
-        },
-      ],
-      hasMore: false,
-      totalCount: 3,
-    });
-  },
-};
+    const service = yield* GlobalSearchService;
+    const results = yield* service.search({ query, cursor, limit, regex, caseSensitive, sources });
+    
+    console.log("[search] results:", JSON.stringify(results, null, 2));
+    
+    return HttpServerResponse.jsonUnsafe(results, { status: 200 });
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.gen(function* () {
+        console.log("[search] ERROR:", cause);
+        return HttpServerResponse.jsonUnsafe(
+          { results: [], hasMore: false, totalCount: 0 },
+          { status: 500 }
+        );
+      })
+    )
+  )
+).pipe(Layer.provide(GlobalSearchServiceLive));
