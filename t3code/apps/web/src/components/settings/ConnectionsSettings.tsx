@@ -803,11 +803,10 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                 )}
               </>
             ) : (
-              <DialogTrigger render={<Button size="xs" variant="outline" />}>
+              <Button size="xs" variant="outline" onClick={() => setIsRevealDialogOpen(true)}>
                 {shareablePairingUrl ? "Show link" : "Show code"}
-              </DialogTrigger>
-            )}
-            <DialogPopup className="max-w-md">
+              </Button>
+            )}\n            <DialogPopup className="max-w-md">
               <DialogHeader>
                 <DialogTitle>
                   {shareablePairingUrl
