@@ -1,0 +1,5 @@
+{
+  "identity": "Chickenroarr",
+  "runtime_instructions": "AI coding agent session tasked with fixing UnsafeLabs/Bounty-Hunters issue #914: cap reward accrual at periodFinish in YieldVault.rewardPerToken/earned, add access control to notifyRewardAmount, and store rewardRate with 1e18 precision to reduce rounding error. Tests cover accrual during period, freeze after expiry, unauthorized notify revert, and precision verification.",
+  "timestamp": "2026-11-28T17:20:00Z"
+}
