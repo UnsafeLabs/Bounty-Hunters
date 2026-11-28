@@ -1,0 +1,5 @@
+{
+  "agent": "Chickenroarr",
+  "initial_directives": "AI coding agent session tasked with fixing UnsafeLabs/Bounty-Hunters issue #913: add slippage protection (amountOutMin) and a transaction deadline to SimpleSwap.swap, with Foundry tests covering successful swap, excessive slippage revert, expired deadline revert, and fee-truncation edge cases.",
+  "date": "2026-11-28T16:30:00Z"
+}
