@@ -15,7 +15,10 @@ contract MultiSigWallet {
 
     mapping(uint256 => Transaction) public transactions;
     mapping(uint256 => mapping(address => bool)) public confirmations;
+    mapping(uint256 => mapping(address => uint256)) public confirmationBlock;
     mapping(address => bool) public isOwner;
+
+    bool private _executing;
 
     event Submitted(uint256 indexed txId);
     event Confirmed(uint256 indexed txId, address indexed owner);
@@ -24,6 +27,11 @@ contract MultiSigWallet {
 
     modifier onlyOwner() {
         require(isOwner[msg.sender], "Not owner");
+        _;
+    }
+
+    modifier nonExecuting() {
+        require(!_executing, "Execution in progress");
         _;
     }
 
@@ -37,8 +45,13 @@ contract MultiSigWallet {
         required = _required;
     }
 
-    // BUG: No zero-address validation on `to`
+    /// @notice Rejects zero-address targets and contract targets without code
+    ///         when a call payload is provided.
     function submitTransaction(address to, uint256 value, bytes calldata data) external onlyOwner returns (uint256) {
+        require(to != address(0), "Invalid to address");
+        if (data.length > 0) {
+            require(to.code.length > 0, "Target has no code");
+        }
         uint256 txId = transactionCount++;
         transactions[txId] = Transaction({
             to: to,
@@ -50,18 +63,26 @@ contract MultiSigWallet {
         return txId;
     }
 
-    function confirmTransaction(uint256 txId) external onlyOwner {
+    function confirmTransaction(uint256 txId) external onlyOwner nonExecuting {
         require(!transactions[txId].executed, "Already executed");
         require(!confirmations[txId][msg.sender], "Already confirmed");
         confirmations[txId][msg.sender] = true;
+        confirmationBlock[txId][msg.sender] = block.number;
         emit Confirmed(txId, msg.sender);
     }
 
-    function revokeConfirmation(uint256 txId) external onlyOwner {
+    function revokeConfirmation(uint256 txId) external onlyOwner nonExecuting {
         require(!transactions[txId].executed, "Already executed");
         require(confirmations[txId][msg.sender], "Not confirmed");
         confirmations[txId][msg.sender] = false;
+        delete confirmationBlock[txId][msg.sender];
         emit Revoked(txId, msg.sender);
+    }
+
+    /// @notice True if owner has a confirmation for txId recorded at or before
+    ///         blockNumber (still valid as of that block).
+    function isConfirmedAtBlock(uint256 txId, address owner, uint256 blockNumber) public view returns (bool) {
+        return confirmations[txId][owner] && confirmationBlock[txId][owner] <= blockNumber;
     }
 
     function getConfirmationCount(uint256 txId) public view returns (uint256 count) {
@@ -70,16 +91,16 @@ contract MultiSigWallet {
         }
     }
 
-    // BUG: No reentrancy protection — confirmation can be revoked during callback
-    // BUG: No block-level confirmation snapshot
     function executeTransaction(uint256 txId) external onlyOwner {
         require(!transactions[txId].executed, "Already executed");
         require(getConfirmationCount(txId) >= required, "Not enough confirmations");
 
         Transaction storage txn = transactions[txId];
         txn.executed = true;
+        _executing = true;
 
         (bool success, ) = txn.to.call{value: txn.value}(txn.data);
+        _executing = false;
         require(success, "Execution failed");
 
         emit Executed(txId);
