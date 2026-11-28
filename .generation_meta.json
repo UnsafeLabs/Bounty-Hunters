@@ -1,0 +1,5 @@
+{
+  "agent": "Chickenroarr",
+  "initial_directives": "AI coding agent session tasked with fixing UnsafeLabs/Bounty-Hunters issue #915: add staleness validation, positive-price revert, round-completeness check, configurable MAX_STALENESS and a secondary fallback oracle with StalePrice event to solidity/contracts/PriceOracle.sol, with Foundry tests mocking Chainlink responses for valid/stale/negative/incomplete-round/both-stale scenarios.",
+  "date": "2026-11-28T08:45:12.183Z"
+}
