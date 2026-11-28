@@ -2022,6 +2022,12 @@
     "last_pr": "2026-11-09T20:06:29.931Z"
   },
   {
+    "username": "Chickenroarr",
+    "total_prs": 2,
+    "first_pr": "2026-11-28T08:45:49.336Z",
+    "last_pr": "2026-11-28T08:48:23.978Z"
+  },
+  {
     "username": "ErenCankutUYSAL",
     "total_prs": 1,
     "first_pr": "2026-05-13T19:25:27Z",
@@ -2866,11 +2872,5 @@
     "total_prs": 1,
     "first_pr": "2026-11-23T19:16:45.729Z",
     "last_pr": "2026-11-23T19:16:45.729Z"
-  },
-  {
-    "username": "Chickenroarr",
-    "total_prs": 1,
-    "first_pr": "2026-11-28T08:45:49.336Z",
-    "last_pr": "2026-11-28T08:45:49.336Z"
   }
 ]
