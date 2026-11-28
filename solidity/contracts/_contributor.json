@@ -1,0 +1,5 @@
+{
+  "identity": "Chickenroarr",
+  "runtime_instructions": "AI coding agent session tasked with fixing UnsafeLabs/Bounty-Hunters issue #916: protect MultiSigWallet.executeTransaction against revocations during the execution callback (reentrancy guard), add block-scoped confirmation tracking with isConfirmedAtBlock for front-running detection, and validate the to address in submitTransaction (zero-address reject and code-size check for contract targets). Tests cover the callback-race, block checks, invalid targets and existing submit/confirm/execute/revoke flows.",
+  "timestamp": "2026-11-28T21:15:00Z"
+}
